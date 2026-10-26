@@ -1,0 +1,7 @@
+{
+  "version": 6,
+  "configurePresets": [
+    { "name": "base", "hidden": true, "generator": "Ninja", "environment": { "LIFECYCLE_ENV": "inherited" } },
+    { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } }
+  ]
+}

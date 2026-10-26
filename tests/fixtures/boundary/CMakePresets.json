@@ -1,0 +1,12 @@
+{
+  "version": 6,
+  "configurePresets": [
+    { "name": "base", "hidden": true, "generator": "Ninja", "environment": { "PRESET_ENV": "from-cmake-preset" } },
+    { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "FAIL_CONFIGURE": "OFF", "SLOW_CONFIGURE": "OFF" } },
+    { "name": "same-cache", "inherits": "debug" },
+    { "name": "release", "inherits": "debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "failure", "inherits": "debug", "cacheVariables": { "FAIL_CONFIGURE": "ON" } },
+    { "name": "slow", "inherits": "debug", "cacheVariables": { "SLOW_CONFIGURE": "ON" } },
+    { "name": "multi", "inherits": "debug", "generator": "Ninja Multi-Config" }
+  ]
+}

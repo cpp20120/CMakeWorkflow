@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "hello": {
+      "sourceDirectory": ".",
+      "buildDirectory": "../../out/hello",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed",
+      "provenancePolicy": "strict"
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "hello" },
+    { "id": "build", "kind": "build", "context": "hello", "target": "hello", "dependsOn": ["configure"] },
+    { "id": "run", "kind": "run", "from": "build" },
+    { "id": "test", "kind": "ctest", "context": "hello", "labelRegex": "smoke", "dependsOn": ["build"] }
+  ]
+}
