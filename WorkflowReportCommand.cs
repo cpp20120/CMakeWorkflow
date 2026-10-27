@@ -4,7 +4,8 @@ namespace CMakeWorkflow;
 
 public static class WorkflowReportCommand
 {
-    public static async Task<int> ExecuteAsync(string runDirectory, CancellationToken ct)
+    public static async Task<int> ExecuteAsync(string runDirectory, CancellationToken ct,
+        bool json = false)
     {
         try
         {
@@ -18,7 +19,8 @@ public static class WorkflowReportCommand
                 || report.Nodes.Any(node => node is null || string.IsNullOrWhiteSpace(node.Id)
                     || string.IsNullOrWhiteSpace(node.Status)))
                 throw new InvalidDataException("run.json is missing workflow identity, status or valid node entries.");
-            Write(report, directory);
+            if (json) Console.Out.WriteLine(JsonSerializer.Serialize(report, WorkflowJson.Default.WorkflowReport));
+            else Write(report, directory);
             return 0;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException

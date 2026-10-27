@@ -28,19 +28,25 @@ public static class HistoryCommand
             }
             var allowed = new HashSet<string>(StringComparer.Ordinal)
                 { "--db", "--limit", "--status", "--since", "--until", "--workflow",
-                  "--variant", "--metric", "--scenario", "--run" };
+                  "--variant", "--metric", "--scenario", "--run", "--direction",
+                  "--min-percent", "--alpha" };
             if (options.Keys.Any(x => !allowed.Contains(x)))
                 throw new ArgumentException($"Unknown history option: {options.Keys.First(x => !allowed.Contains(x))}");
-            var dbPath = options.GetValueOrDefault("--db")
-                ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "CMakeWorkflow", "history.sqlite");
+            var dbPath = options.GetValueOrDefault("--db") ?? HistoryStore.DefaultDatabasePath;
             using var db = new HistoryStore(dbPath);
             var json = flags.Contains("--json");
             switch (command)
             {
                 case "import" when positional.Count == 1:
-                    Console.WriteLine(db.Import(positional[0], flags.Contains("--recursive")));
+                {
+                    HistoryImportResult? result = null;
+                    var summary = db.Import(positional[0], flags.Contains("--recursive"),
+                        value => result = value);
+                    Console.WriteLine(json
+                        ? JsonSerializer.Serialize(result!, HistoryJson.Default.HistoryImportResult)
+                        : summary);
                     break;
+                }
                 case "runs" when positional.Count == 0:
                 {
                     var limit = int.TryParse(options.GetValueOrDefault("--limit") ?? "50", out var value)
@@ -62,6 +68,14 @@ public static class HistoryCommand
                     {
                         Console.WriteLine($"{detail.Run.Id} {detail.Run.Status} {detail.Run.Workflow ?? detail.Run.Format}");
                         Console.WriteLine($"Source: {detail.Run.Directory} ({(detail.Run.SourceAvailable ? "available" : "missing")})");
+                        if (detail.Run.Environment is { } environment)
+                            Console.WriteLine($"Host: {detail.Run.HostId ?? "unknown"}; CPU: {environment.CpuModel ?? "unknown"}; " +
+                                $"architecture: {environment.Architecture ?? "unknown"}; logical CPUs: {environment.LogicalProcessors?.ToString() ?? "unknown"}; " +
+                                $"kernel: {environment.KernelVersion ?? "unknown"}; affinity: {environment.Affinity ?? "unknown"}");
+                        foreach (var build in detail.Run.BuildEnvironments ?? [])
+                            Console.WriteLine($"Build: {build.Directory}; config: {build.Configuration ?? "unknown"}; " +
+                                $"compiler: {build.CompilerId ?? "unknown"} {build.CompilerVersion ?? ""}; " +
+                                $"flags: {build.Flags ?? "unknown"}");
                         foreach (var n in detail.Nodes)
                             Console.WriteLine($"  {n.Id} {n.Kind} {n.Status} {n.DurationSeconds?.ToString("G") ?? "unknown"}s");
                         Console.WriteLine($"Measurements: {detail.Measurements.Count}; artifacts: {detail.Artifacts.Count}");
@@ -96,6 +110,36 @@ public static class HistoryCommand
                             $"Δ={row.AbsoluteChange?.ToString("G") ?? "-"} ({row.PercentChange?.ToString("G") ?? "-"}%); {row.Reason}");
                     break;
                 }
+                case "detect" when positional.Count == 2:
+                {
+                    var metric = options.GetValueOrDefault("--metric")
+                        ?? throw new ArgumentException("history detect requires --metric NAME.");
+                    var direction = options.GetValueOrDefault("--direction")
+                        ?? throw new ArgumentException("history detect requires --direction higher-worse|lower-worse.");
+                    if (!double.TryParse(options.GetValueOrDefault("--min-percent"),
+                        NumberStyles.Float, CultureInfo.InvariantCulture, out var minimum))
+                        throw new ArgumentException("history detect requires --min-percent N.");
+                    if (!double.TryParse(options.GetValueOrDefault("--alpha", "0.05"),
+                        NumberStyles.Float, CultureInfo.InvariantCulture, out var alpha))
+                        throw new ArgumentException("--alpha must be a number between zero and one.");
+                    var report = HistoryDetector.Detect(db.Show(positional[0]), db.Show(positional[1]),
+                        metric, options.GetValueOrDefault("--variant"),
+                        options.GetValueOrDefault("--scenario"), direction, minimum, alpha, ct);
+                    if (json)
+                        Console.WriteLine(JsonSerializer.Serialize(report,
+                            HistoryJson.Default.HistoryDetectionReport));
+                    else
+                        foreach (var row in report.Results)
+                            Console.WriteLine($"{row.Metric} [{row.Unit}, {row.Method}, {row.Variant ?? "unknown"}, "
+                                + $"{row.Scenario ?? "unknown"}]: {row.Status}; "
+                                + $"n={row.Baseline?.Count.ToString() ?? "-"}/{row.Candidate?.Count.ToString() ?? "-"}; "
+                                + $"median={row.Baseline?.Median.ToString("G") ?? "-"} -> "
+                                + $"{row.Candidate?.Median.ToString("G") ?? "-"}; "
+                                + $"Δ={row.PercentChange?.ToString("G") ?? "-"}%; "
+                                + $"p={row.PValue?.ToString("G") ?? "-"}; "
+                                + $"Holm p={row.AdjustedPValue?.ToString("G") ?? "-"}; {row.Reason}");
+                    break;
+                }
                 default: throw new ArgumentException(Usage);
             }
             return Task.FromResult(0);
@@ -115,6 +159,7 @@ public static class HistoryCommand
         history metrics --run RUN_ID [--metric NAME] [--variant NAME] [--scenario NAME] [--json]
         history query --metric NAME [--run RUN_ID] [--variant NAME] [--json]
         history compare BASELINE_RUN CANDIDATE_RUN [--json]
+        history detect BASELINE_RUN CANDIDATE_RUN --metric NAME --direction higher-worse|lower-worse --min-percent N [--variant NAME] [--scenario NAME] [--alpha N] [--json]
         """;
     private static string? DateOption(string? value, string option)
     {
@@ -134,7 +179,7 @@ public static class HistoryCommand
         return new(sorted.Length, median, sorted[0], sorted[^1], mean,
             Math.Sqrt(sorted.Sum(x => (x - mean) * (x - mean)) / sorted.Length));
     }
-    private static List<HistoryDifference> Compare(HistoryDetail baseline, HistoryDetail candidate)
+    internal static List<HistoryDifference> Compare(HistoryDetail baseline, HistoryDetail candidate)
     {
         static string Key(HistoryMeasurement m) => string.Join("\u001f", m.Metric, m.Variant, m.Scenario);
         var a = baseline.Measurements.GroupBy(Key).ToDictionary(x => x.Key, x => x.ToList());
@@ -157,10 +202,26 @@ public static class HistoryCommand
             { status = "incompatible"; reason = "Units or measurement methods differ."; }
             else if (left[0].Workload != right[0].Workload)
             { status = "incompatible"; reason = "Recorded workload arguments differ."; }
+            else if (baseline.Run.HostId is null || candidate.Run.HostId is null)
+            { status = "unverified"; reason = "Stable local host identity is not recorded."; }
+            else if (baseline.Run.HostId != candidate.Run.HostId)
+            { status = "incompatible"; reason = "Runs were recorded on different local hosts."; }
+            else if (baseline.Run.EnvironmentFingerprint is null || candidate.Run.EnvironmentFingerprint is null)
+            { status = "unverified"; reason = "Host environment characteristics are missing or changed during a run."; }
+            else if (baseline.Run.Environment is not { CpuModel: not null, Architecture: not null,
+                LogicalProcessors: > 0, OperatingSystem: not null, KernelVersion: not null }
+                || candidate.Run.Environment is not { CpuModel: not null, Architecture: not null,
+                    LogicalProcessors: > 0, OperatingSystem: not null, KernelVersion: not null })
+            { status = "unverified"; reason = "Essential host characteristics are missing."; }
+            else if (baseline.Run.EnvironmentFingerprint != candidate.Run.EnvironmentFingerprint)
+            { status = "incompatible"; reason = "Recorded host environment characteristics differ."; }
+            else if (baseline.Run.Environment with { HostId = null, Fingerprint = null }
+                != candidate.Run.Environment with { HostId = null, Fingerprint = null })
+            { status = "incompatible"; reason = "Recorded host environment characteristics differ despite matching fingerprints."; }
             else if (left[0].Environment is null || right[0].Environment is null)
-            { status = "unverified"; reason = "Hardware/environment identity is not recorded."; }
+            { status = "unverified"; reason = "Build configuration or toolchain identity is not recorded."; }
             else if (left[0].Environment != right[0].Environment)
-            { status = "incompatible"; reason = "Hardware/environment identity differs."; }
+            { status = "incompatible"; reason = "Recorded build or environment characteristics differ."; }
             if (status is "compatible" or "unverified")
             {
                 if (baseline.Run.ManifestHash is not null && candidate.Run.ManifestHash is not null)
@@ -173,7 +234,9 @@ public static class HistoryCommand
             }
             var ls = left is null ? null : Stats(left.Select(x => x.Value).ToList());
             var rs = right is null ? null : Stats(right.Select(x => x.Value).ToList());
-            var change = status is "compatible" or "unverified" ? rs!.Median - ls!.Median : (double?)null;
+            if (status == "compatible")
+                reason = "Recorded characteristics match; frequencies and background load are not attested. Descriptive comparison only.";
+            var change = status == "compatible" ? rs!.Median - ls!.Median : (double?)null;
             rows.Add(new(representative.Metric, unit, representative.Variant,
                 representative.Scenario, method, status, reason, ls, rs, change,
                 change is not null && ls!.Median != 0 ? change / ls.Median * 100 : null));

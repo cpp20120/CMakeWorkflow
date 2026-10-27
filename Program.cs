@@ -2,6 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.Campaigns;
 using CMakeWorkflow.Profiling;
 using CMakeWorkflow.History;
+using CMakeWorkflow.Tooling;
 
 namespace CMakeWorkflow;
 
@@ -15,26 +16,40 @@ public static class Program
         {
             if (args.Length > 0 && args[0] == "history")
                 return await HistoryCommand.ExecuteAsync(args[1..], cts.Token);
+            if (args.Length > 0 && args[0] == "tooling")
+                return await ToolingCommand.ExecuteAsync(args[1..], cts.Token);
+            if (args.Length > 0 && args[0] == "setup")
+                return await ToolingCommand.ExecuteAsync(["setup", .. args[1..]], cts.Token);
             if (args.Length > 1 && args[0] == "dagflow" && args[1] == "profile")
-                return await ProfileCommand.ExecuteAsync(args[2..], cts.Token);
+                return await ExecuteProfileAsync(args[2..], cts.Token);
             if (args.Length > 0 && args[0] == "profile")
-                return await ProfileCommand.ExecuteAsync(args[1..], cts.Token);
+                return await ExecuteProfileAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "dagflow")
                 return await CampaignCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] is ("mutation" or "weak-memory" or "fuzz"))
                 return await CampaignCommand.ExecuteAsync(args, cts.Token);
-            if (args.Length == 3 && args[0] == "context" && args[1] == "inspect")
+            if (args.Length is 3 or 4 && args[0] == "context" && args[1] == "inspect"
+                && (args.Length == 3 || args[3] == "--json"))
             {
                 var observed = await CMakeInspection.InspectAsync(BuildTreeOwnership.CanonicalPath(args[2]), cts.Token);
                 Console.WriteLine(JsonSerializer.Serialize(observed, WorkflowJson.Default.ObservedBuildContext));
                 return 0;
             }
             if (args.Length >= 2 && args[0] == "workflow" && args[1] is "plan" or "run")
-                return await WorkflowCommand.ExecuteAsync(args[1], args[2..], cts.Token,
-                    new ProfileWorkflowExecutor());
+            {
+                if (args[1] == "plan")
+                    return await WorkflowCommand.ExecuteAsync("plan", args[2..], cts.Token,
+                        new ProfileWorkflowExecutor());
+                var history = HistoryOptions(args[2..]);
+                return await RunAndIndexAsync(onRun => WorkflowCommand.ExecuteAsync("run",
+                    history.Args, cts.Token, new ProfileWorkflowExecutor(), onRun),
+                    history.Database, history.Disabled);
+            }
 
-            if (args.Length == 3 && args[0] == "workflow" && args[1] == "report")
-                return await WorkflowReportCommand.ExecuteAsync(args[2], cts.Token);
+            if (args.Length is 3 or 4 && args[0] == "workflow" && args[1] == "report"
+                && (args.Length == 3 || args[3] == "--json"))
+                return await WorkflowReportCommand.ExecuteAsync(args[2], cts.Token,
+                    args.Length == 4);
 
             if (args.Length >= 2 && args[0] == "workflow" && args[1] == "sequence")
                 return await TwoTargetWorkflow.ExecuteAsync(args[2..], cts.Token);
@@ -47,7 +62,7 @@ public static class Program
 
             var command = args[1];
             string? buildDir = null, targetName = null, config = null, controller = null;
-            var prepared = false;
+            bool prepared = false, json = false;
             var runArgs = new List<string>();
             for (var i = 2; i < args.Length; i++)
             {
@@ -58,6 +73,7 @@ public static class Program
                     case "--config" when i + 1 < args.Length: config = args[++i]; break;
                     case "--controller-build-dir" when i + 1 < args.Length: controller = args[++i]; break;
                     case "--prepared": prepared = true; break;
+                    case "--json" when command == "resolve": json = true; break;
                     case "--" when command == "run":
                         runArgs.AddRange(args[(i + 1)..]);
                         i = args.Length;
@@ -96,6 +112,9 @@ public static class Program
                 ? await CMakeFileApi.ResolveExecutableAsync(target, cts.Token)
                 : await context.EnsureBuiltAsync(target, cts.Token);
             Console.Error.WriteLine($"[CMakeWorkflow] {target.Target} ({target.Configuration ?? "default"}) => {artifact.ExecutablePath}");
+            if (json) Console.Out.WriteLine(JsonSerializer.Serialize(new TargetResolutionView(1,
+                target.BuildDirectory, target.Target, target.Configuration, artifact.ExecutablePath),
+                WorkflowProtocolJson.Default.TargetResolutionView));
 
             if (command == "run")
             {
@@ -117,8 +136,68 @@ public static class Program
         }
     }
 
+    private static async Task<int> ExecuteProfileAsync(string[] args, CancellationToken ct)
+    {
+        if (args.Length == 0 || args[0] != "run")
+            return await ProfileCommand.ExecuteAsync(args, ct);
+        var history = HistoryOptions(args);
+        return await RunAndIndexAsync(onRun => ProfileCommand.ExecuteAsync(history.Args, ct,
+            onRun), history.Database, history.Disabled);
+    }
+
+    private static (string[] Args, string? Database, bool Disabled) HistoryOptions(string[] args)
+    {
+        var clean = new List<string>(args.Length);
+        string? database = null;
+        var disabled = false;
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--") { clean.AddRange(args[i..]); break; }
+            if (args[i] == "--no-history") { disabled = true; continue; }
+            if (args[i] == "--history-db")
+            {
+                if (database is not null || i + 1 >= args.Length
+                    || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    throw new ArgumentException("--history-db requires one database path.");
+                database = args[++i];
+                continue;
+            }
+            clean.Add(args[i]);
+        }
+        if (disabled && database is not null)
+            throw new ArgumentException("--no-history and --history-db cannot be combined.");
+        return (clean.ToArray(), database, disabled);
+    }
+
+    private static async Task<int> RunAndIndexAsync(Func<Action<string>, Task<int>> run,
+        string? database, bool disabled)
+    {
+        string? directory = null;
+        var result = 1;
+        try { result = await run(path => directory = path); }
+        finally
+        {
+            if (!disabled && directory is not null && File.Exists(Path.Combine(directory, "run.json")))
+            {
+                try
+                {
+                    var path = database ?? HistoryStore.DefaultDatabasePath;
+                    using var store = new HistoryStore(path);
+                    var summary = store.Import(directory, recursive: false);
+                    Console.Error.WriteLine($"[CMakeWorkflow] History: {summary} Database: {Path.GetFullPath(path)}");
+                }
+                catch (Exception error)
+                {
+                    Console.Error.WriteLine($"[CMakeWorkflow] History indexing failed: {error.Message}");
+                }
+            }
+        }
+        return result;
+    }
+
     private static void Usage() => Console.Error.WriteLine(
-        "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare> ...\n" +
+        "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare|detect> ...\n" +
+        "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz seed --layer NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz run --build-dir DIR --layer NAME [--duration SECONDS] [--corpus DIR] [--replay-only]\n" +
@@ -127,8 +206,8 @@ public static class Program
         "       CMakeWorkflow dagflow profile run --build-dir DIR --target NAME [--repeats N] [--backend auto|perf|etw|instruments] [--mode cpu|scheduler|counters|allocations]\n" +
         "       CMakeWorkflow dagflow profile run --variant NAME=DIR --variant NAME=DIR --target NAME [--repeats N]\n" +
         "       CMakeWorkflow dagflow profile analyze RUN_DIRECTORY\n" +
-        "Usage: CMakeWorkflow context inspect BUILD_DIR\n" +
-        "       CMakeWorkflow target <build|invoke|run|resolve> --build-dir DIR --target NAME [--config CONFIG] [--prepared] [-- executable-args...]\n" +
+        "Usage: CMakeWorkflow context inspect BUILD_DIR [--json]\n" +
+        "       CMakeWorkflow target <build|invoke|run|resolve> --build-dir DIR --target NAME [--config CONFIG] [--prepared] [--json for resolve] [-- executable-args...]\n" +
         "  build: request a known native executable/library target through CMake\n" +
         "  run:   build (or verify prepared target), then execute the binary\n" +
         "  resolve: only inspect the CMake File API codemodel; never build\n" +
@@ -138,8 +217,8 @@ public static class Program
         "         [--config CONFIG] [--first-arg ARG]... [--second-arg ARG]...\n" +
         "         [--controller-build-dir DIR] (only when invoked by a CMake build target)\n" +
         "  workflow sequence: build first, execute first, build second, execute second\n" +
-        "       CMakeWorkflow workflow <plan|run> FILE [--only NODE]... [--jobs N]\n" +
-        "       CMakeWorkflow workflow report RUN_DIRECTORY\n" +
+        "       CMakeWorkflow workflow <plan|run> FILE [--only NODE]... [--jobs N] [--json] [--history-db PATH] [--no-history]\n" +
+        "       CMakeWorkflow workflow report RUN_DIRECTORY [--json]\n" +
         "         [--results-dir DIR] [--controller-build-dir DIR]\n" +
         "  plan: validate and show the selected DAG without building or running\n" +
         "  run: execute dependencies, retain logs and write run.json");

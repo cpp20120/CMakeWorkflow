@@ -16,4 +16,6 @@
   <Project Path="CMakeWorkflow.csproj" />
   <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj" />
   <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />
+  <Project Path="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj" />
+  <Project Path="CMakeWorkflow.Tooling.Tests/CMakeWorkflow.Tooling.Tests.csproj" />
 </Solution>

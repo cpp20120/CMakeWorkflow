@@ -19,15 +19,15 @@ try
     { if (!condition) throw new Exception(name); }
     static void Write(string dir, string file, string text) =>
         File.WriteAllText(Path.Combine(dir, file), text);
-    static string Workflow(string status, double first, double second, string unit = "s") => $$"""
+    static string Workflow(string status, double first, double second, string workers = "1") => $$"""
         {"schemaVersion":1,"workflow":"bench.json","manifestHash":"abc",
          "startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:01:00Z",
          "status":"{{status}}","nodes":[
            {"id":"build","kind":"build","status":"succeeded","dependencies":[],"buildDirectory":"/build"},
            {"id":"timing_main_1","kind":"run","status":"succeeded","dependencies":["build"],
-            "arguments":["--scenario","idle"],"processDurationSeconds":{{first}}},
+            "arguments":["--scenario","idle","--workers","{{workers}}"],"processDurationSeconds":{{first}}},
            {"id":"timing_main_2","kind":"run","status":"succeeded","dependencies":["build"],
-            "arguments":["--scenario","idle"],"processDurationSeconds":{{second}}}]}
+            "arguments":["--scenario","idle","--workers","{{workers}}"],"processDurationSeconds":{{second}}}]}
         """;
     Write(success, "run.json", Workflow("succeeded", 2, 4));
     Write(failure, "run.json", Workflow("failed", 4, 6));
@@ -45,6 +45,15 @@ try
         Check(store.Import(resultRoot, true).Contains("unchanged 2"), "idempotent import");
         Check(store.Import(Path.Combine(success, "run.json"), false).Contains("unchanged 1"),
             "report file path");
+        var importOutput = new StringWriter(); var originalOutput = Console.Out;
+        Console.SetOut(importOutput);
+        try { Check(await HistoryCommand.ExecuteAsync(["import", success, "--db", dbPath,
+            "--json"], default) == 0, "JSON import exit"); }
+        finally { Console.SetOut(originalOutput); }
+        using (var imported = JsonDocument.Parse(importOutput.ToString()))
+            Check(imported.RootElement.GetProperty("schemaVersion").GetInt32() == 1
+                && imported.RootElement.GetProperty("unchanged").GetInt32() == 1,
+                "JSON import response");
         var row = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == success);
         var measurements = store.Metrics(row.Id, "process_wall_time", "main", null);
         Check(measurements.Count == 2 && measurements.Select(x => x.Value).SequenceEqual([2, 4])
@@ -54,6 +63,18 @@ try
         Check(store.Import(success, false).Contains("Imported 1"), "changed report refresh");
         Check(store.Metrics(row.Id, null, null, null).Count == 2
             && store.Metrics(row.Id, null, null, null)[0].Value == 3, "no duplicate samples");
+        Write(success, "run.json", """
+            {"schemaVersion":1,"workflow":"bench.json","manifestHash":"abc",
+             "startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:01:00Z",
+             "status":"succeeded","nodes":[
+               {"id":"timing_main_1","kind":"run","status":"succeeded",
+                "arguments":["--scenario","idle","--workers","1"],
+                "processDurationSeconds":7}]}
+            """);
+        Check(store.Import(success, false).Contains("Imported 1"), "sample removal refresh");
+        var refreshed = store.Metrics(row.Id, null, null, null);
+        Check(refreshed.Count == 1 && refreshed.Single().Value == 7,
+            "removed source sample survived re-import");
     }
     using (var reopened = new HistoryStore(dbPath))
     {
@@ -72,9 +93,10 @@ try
         using var json = JsonDocument.Parse(output.ToString());
         var comparison = json.RootElement[0];
         Check(comparison.GetProperty("status").GetString() == "unverified"
-            && comparison.GetProperty("baseline").GetProperty("median").GetDouble() == 4
+            && comparison.GetProperty("baseline").GetProperty("median").GetDouble() == 7
             && comparison.GetProperty("candidate").GetProperty("median").GetDouble() == 5
-            && comparison.GetProperty("percentChange").GetDouble() == 25, "descriptive comparison");
+            && comparison.GetProperty("percentChange").ValueKind == JsonValueKind.Null,
+            "unverified comparison must not emit a percentage");
         output.GetStringBuilder().Clear();
         Console.SetOut(output);
         try
@@ -127,6 +149,23 @@ try
             && store.Metrics(capture.Id, "targetCpuSamples", null, null).Single().Value == 5
             && store.Show(capture.Id).Artifacts.Any(x => x.Type == "trace" && !x.Available),
             "ETW summary and missing trace link");
+    }
+    var commandRun = Path.Combine(root, "command-run");
+    Directory.CreateDirectory(commandRun);
+    Write(commandRun, "run.json", """
+        {"schemaVersion":1,"workflow":"hello.json",
+         "startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:00:01Z",
+         "status":"succeeded","nodes":[
+           {"id":"configure","kind":"configure","status":"succeeded","executable":"cmake"},
+           {"id":"test","kind":"ctest","status":"succeeded","executable":"ctest"}]}
+        """);
+    using (var store = new HistoryStore(dbPath))
+    {
+        store.Import(commandRun, false);
+        var id = store.Runs(50, null, null, null, null, null)
+            .Single(x => x.Directory == commandRun).Id;
+        Check(store.Show(id).Artifacts.All(x => x.Type != "executable"),
+            "tool commands must not be indexed as file artifacts");
     }
     var fuzz = Path.Combine(root, "fuzz");
     Directory.CreateDirectory(fuzz);
@@ -243,6 +282,238 @@ try
         using var parsed = JsonDocument.Parse(output.ToString());
         Check(parsed.RootElement[0].GetProperty("status").GetString() == "unverified",
             "equivalent generated manifests must not be rejected by path");
+        Check(parsed.RootElement[0].GetProperty("absoluteChange").ValueKind == JsonValueKind.Null,
+            "unverified generated manifests must not emit a delta");
+    }
+    var workers1 = Path.Combine(root, "workers-1");
+    var workers16 = Path.Combine(root, "workers-16");
+    Directory.CreateDirectory(workers1);
+    Directory.CreateDirectory(workers16);
+    static string ProfileReport(string workers) => $$"""
+        {"schemaVersion":1,"workflow":"profile.json","manifestHash":"profile-hash",
+         "startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:01:00Z",
+         "status":"succeeded",
+         "environment":{"hostId":"b813a502b7a447b587f0bf8d24addd27","cpuModel":"Fixture CPU",
+           "architecture":"X64","logicalProcessors":16,"availableProcessors":16,
+           "physicalPackages":1,"physicalCores":8,"operatingSystem":"Linux",
+           "kernelVersion":"6.1","affinity":"0-15","governor":"performance",
+           "fingerprint":"host-fingerprint"},
+         "buildEnvironments":[{"directory":"/build","configuration":null,
+           "generator":"Ninja","compiler":"/usr/bin/clang++","compilerId":"Clang",
+           "compilerVersion":"20.0","flags":"-O3","fingerprint":"build-fingerprint"}],
+         "nodes":[
+           {"id":"timing_main_1","kind":"run","status":"succeeded","buildDirectory":"/build",
+            "environmentOverrideHash":"override-base",
+            "arguments":["--scenario","idle-burst","--workers","{{workers}}"],
+            "processDurationSeconds":2},
+           {"id":"capture_main","kind":"profile","status":"succeeded","buildDirectory":"/build",
+            "environmentOverrideHash":"override-base",
+            "arguments":["--scenario","idle-burst","--workers","{{workers}}"]}]}
+        """;
+    const string analysisCounters = """
+        [{"captureId":"capture_main","backend":"perf","mode":"counters",
+          "counters":{"cycles:u":{"value":1234,"unit":""}}}]
+        """;
+    Write(workers1, "run.json", ProfileReport("1"));
+    Write(workers16, "run.json", ProfileReport("16"));
+    Write(workers1, "analysis.json", analysisCounters);
+    Write(workers16, "analysis.json", analysisCounters);
+    using (var store = new HistoryStore(dbPath))
+    {
+        store.Import(workers1, false);
+        store.Import(workers16, false);
+        var a = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == workers1);
+        var b = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == workers16);
+        Check(store.Metrics(a.Id, "cycles:u", "main", "idle-burst").Single().Workload
+            != store.Metrics(b.Id, "cycles:u", "main", "idle-burst").Single().Workload,
+            "profile workload arguments indexed");
+        var output = new StringWriter(); var old = Console.Out; Console.SetOut(output);
+        try { await HistoryCommand.ExecuteAsync(["compare", a.Id, b.Id, "--db", dbPath, "--json"], default); }
+        finally { Console.SetOut(old); }
+        using var parsed = JsonDocument.Parse(output.ToString());
+        Check(parsed.RootElement.EnumerateArray().All(x =>
+            x.GetProperty("status").GetString() == "incompatible"
+            && x.GetProperty("percentChange").ValueKind == JsonValueKind.Null),
+            "workers 1 and 16 must never yield percentage changes");
+    }
+    var workersSame = Path.Combine(root, "workers-same");
+    var changedKernel = Path.Combine(root, "changed-kernel");
+    var changedHost = Path.Combine(root, "changed-host");
+    var changedOverrides = Path.Combine(root, "changed-overrides");
+    var drifted = Path.Combine(root, "drifted");
+    foreach (var dir in new[] { workersSame, changedKernel, changedHost,
+        changedOverrides, drifted }) Directory.CreateDirectory(dir);
+    Write(workersSame, "run.json", ProfileReport("1").Replace("processDurationSeconds\":2",
+        "processDurationSeconds\":3", StringComparison.Ordinal));
+    Write(changedKernel, "run.json", ProfileReport("1").Replace("host-fingerprint",
+        "different-kernel-fingerprint", StringComparison.Ordinal));
+    Write(changedHost, "run.json", ProfileReport("1").Replace("b813a502b7a447b587f0bf8d24addd27",
+        "f1a438fe4d3742a0931d4e26dc103dab", StringComparison.Ordinal));
+    Write(changedOverrides, "run.json", ProfileReport("1").Replace("override-base",
+        "override-changed", StringComparison.Ordinal));
+    Write(drifted, "run.json", ProfileReport("1").Replace("\"buildEnvironments\"",
+        "\"environmentAtEnd\":{\"hostId\":\"b813a502b7a447b587f0bf8d24addd27\",\"fingerprint\":\"drifted\"},\"buildEnvironments\"",
+        StringComparison.Ordinal));
+    foreach (var dir in new[] { workersSame, changedKernel, changedHost,
+        changedOverrides, drifted })
+        Write(dir, "analysis.json", analysisCounters);
+    using (var store = new HistoryStore(dbPath))
+    {
+        foreach (var dir in new[] { workersSame, changedKernel, changedHost,
+            changedOverrides, drifted }) store.Import(dir, false);
+        var runs = store.Runs(50, null, null, null, null, null);
+        var baseline = runs.Single(x => x.Directory == workers1);
+        Check(baseline.HostId is not null && baseline.EnvironmentFingerprint == "host-fingerprint",
+            "host provenance persisted");
+        Check(baseline.BuildEnvironments is [{ CompilerId: "Clang", Configuration: null }],
+            "build toolchain provenance persisted");
+        async Task<JsonDocument> CompareJson(string candidate)
+        {
+            var output = new StringWriter(); var old = Console.Out; Console.SetOut(output);
+            try { await HistoryCommand.ExecuteAsync(["compare", baseline.Id,
+                runs.Single(x => x.Directory == candidate).Id, "--db", dbPath, "--json"], default); }
+            finally { Console.SetOut(old); }
+            return JsonDocument.Parse(output.ToString());
+        }
+        using (var same = await CompareJson(workersSame))
+            Check(same.RootElement.EnumerateArray().All(x => x.GetProperty("status").GetString() == "compatible"
+                && x.GetProperty("reason").GetString()!.Contains("Descriptive", StringComparison.Ordinal)),
+                "matching recorded environment supports descriptive comparison");
+        using (var kernel = await CompareJson(changedKernel))
+            Check(kernel.RootElement.EnumerateArray().All(x => x.GetProperty("status").GetString() == "incompatible"
+                && x.GetProperty("percentChange").ValueKind == JsonValueKind.Null),
+                "changed environment rejects comparison");
+        using (var host = await CompareJson(changedHost))
+            Check(host.RootElement.EnumerateArray().All(x => x.GetProperty("status").GetString() == "incompatible"),
+                "different local hosts reject comparison");
+        using (var overrides = await CompareJson(changedOverrides))
+            Check(overrides.RootElement.EnumerateArray().All(x => x.GetProperty("status").GetString() == "incompatible"),
+                "changed environment overrides reject comparison");
+        using (var drift = await CompareJson(drifted))
+            Check(drift.RootElement.EnumerateArray().All(x => x.GetProperty("status").GetString() == "unverified"
+                && x.GetProperty("absoluteChange").ValueKind == JsonValueKind.Null),
+                "environment drift suppresses delta");
+    }
+    static string StatisticalReport(double[] main, string workers = "1", double[]? control = null)
+    {
+        var samples = new[] { (Name: "main", Values: main),
+            (Name: "control", Values: control ?? []) };
+        var nodes = samples.SelectMany(group => group.Values.Select((value, index) => new
+        {
+            id = $"timing_{group.Name}_{index + 1}", kind = "run", status = "succeeded",
+            buildDirectory = "/build", environmentOverrideHash = "override-base",
+            arguments = new[] { "--scenario", "idle-burst", "--workers", workers },
+            processDurationSeconds = value
+        })).ToArray();
+        return JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1, workflow = "statistical-profile.json", manifestHash = "same-hash",
+            startedAt = "2026-01-01T00:00:00Z", finishedAt = "2026-01-01T00:01:00Z",
+            status = "succeeded",
+            environment = new
+            {
+                hostId = "b813a502b7a447b587f0bf8d24addd27", cpuModel = "Fixture CPU",
+                architecture = "X64", logicalProcessors = 16, availableProcessors = 16,
+                physicalPackages = 1, physicalCores = 8, operatingSystem = "Linux",
+                kernelVersion = "6.1", affinity = "0-15", governor = "performance",
+                fingerprint = "host-fingerprint"
+            },
+            buildEnvironments = new[] { new
+            {
+                directory = "/build", configuration = (string?)null, generator = "Ninja",
+                compiler = "/usr/bin/clang++", compilerId = "Clang",
+                compilerVersion = "20.0", flags = "-O3", fingerprint = "build-fingerprint"
+            } },
+            nodes
+        });
+    }
+    var statisticalBase = Path.Combine(root, "statistical-base");
+    var statisticalSlow = Path.Combine(root, "statistical-slow");
+    var statisticalEqual = Path.Combine(root, "statistical-equal");
+    var statisticalWorkers = Path.Combine(root, "statistical-workers");
+    var statisticalShort = Path.Combine(root, "statistical-short");
+    var statisticalLarge = Path.Combine(root, "statistical-large");
+    foreach (var dir in new[] { statisticalBase, statisticalSlow, statisticalEqual,
+        statisticalWorkers, statisticalShort, statisticalLarge }) Directory.CreateDirectory(dir);
+    var baseSamples = Enumerable.Range(0, 10).Select(i => 100.0 + i % 5).ToArray();
+    var slowSamples = Enumerable.Range(0, 10).Select(i => 130.0 + i % 5).ToArray();
+    Write(statisticalBase, "run.json", StatisticalReport(baseSamples, control: baseSamples));
+    Write(statisticalSlow, "run.json", StatisticalReport(slowSamples, control: baseSamples));
+    Write(statisticalEqual, "run.json", StatisticalReport(baseSamples, control: baseSamples));
+    Write(statisticalWorkers, "run.json", StatisticalReport(slowSamples, "16", baseSamples));
+    Write(statisticalShort, "run.json", StatisticalReport([130, 131], control: [100, 101]));
+    Write(statisticalLarge, "run.json", StatisticalReport(
+        Enumerable.Range(0, 11).Select(i => 130.0 + i % 5).ToArray()));
+    using (var store = new HistoryStore(dbPath))
+    {
+        foreach (var dir in new[] { statisticalBase, statisticalSlow, statisticalEqual,
+            statisticalWorkers, statisticalShort, statisticalLarge }) store.Import(dir, false);
+        string IdOf(string dir) => store.Runs(50, null, null, null, null, null)
+            .Single(x => x.Directory == dir).Id;
+        async Task<JsonDocument> DetectJson(string baseline, string candidate,
+            params string[] extra)
+        {
+            var output = new StringWriter(); var previous = Console.Out;
+            Console.SetOut(output);
+            try
+            {
+                Check(await HistoryCommand.ExecuteAsync(["detect", IdOf(baseline),
+                    IdOf(candidate), "--db", dbPath, "--metric", "process_wall_time",
+                    "--direction", "higher-worse", "--min-percent", "10", "--json",
+                    .. extra], default) == 0, "detector command");
+            }
+            finally { Console.SetOut(previous); }
+            return JsonDocument.Parse(output.ToString());
+        }
+        using (var detected = await DetectJson(statisticalBase, statisticalSlow))
+        {
+            Check(detected.RootElement.GetProperty("schemaVersion").GetInt32() == 1,
+                "detector JSON version");
+            var rows = detected.RootElement.GetProperty("results").EnumerateArray().ToArray();
+            var main = rows.Single(x => x.GetProperty("variant").GetString() == "main");
+            Check(main.GetProperty("status").GetString() == "regression"
+                && main.GetProperty("exact").GetBoolean()
+                && main.GetProperty("permutations").GetInt32() == 184756
+                && main.GetProperty("adjustedPValue").GetDouble()
+                    >= main.GetProperty("pValue").GetDouble(),
+                "exact permutation detector and Holm correction");
+            Check(rows.Single(x => x.GetProperty("variant").GetString() == "control")
+                .GetProperty("status").GetString() == "inconclusive",
+                "unchanged control must not be a regression");
+        }
+        using (var equal = await DetectJson(statisticalBase, statisticalEqual,
+            "--variant", "main"))
+            Check(equal.RootElement.GetProperty("results")[0].GetProperty("status").GetString()
+                == "inconclusive", "equal samples detector");
+        using (var incompatible = await DetectJson(statisticalBase, statisticalWorkers))
+            Check(incompatible.RootElement.GetProperty("results").EnumerateArray().All(x =>
+                x.GetProperty("status").GetString() == "incompatible"
+                && x.GetProperty("pValue").ValueKind == JsonValueKind.Null),
+                "detector rejected different workload arguments");
+        using (var shortRun = await DetectJson(statisticalShort, statisticalSlow,
+            "--variant", "main"))
+            Check(shortRun.RootElement.GetProperty("results")[0].GetProperty("status").GetString()
+                == "insufficient", "detector rejected two samples");
+        using (var large = await DetectJson(statisticalBase, statisticalLarge,
+            "--variant", "main"))
+            Check(large.RootElement.GetProperty("results")[0].GetProperty("exact").GetBoolean()
+                == false && large.RootElement.GetProperty("results")[0]
+                    .GetProperty("permutations").GetInt32() == 9999,
+                "deterministic Monte Carlo path");
+        var output = new StringWriter(); var previous = Console.Out;
+        Console.SetOut(output);
+        try
+        {
+            Check(await HistoryCommand.ExecuteAsync(["detect", IdOf(statisticalBase),
+                IdOf(statisticalSlow), "--db", dbPath, "--metric", "process_wall_time",
+                "--direction", "lower-worse", "--min-percent", "10", "--json"], default) == 0,
+                "reversed direction command");
+        }
+        finally { Console.SetOut(previous); }
+        using (var reversed = JsonDocument.Parse(output.ToString()))
+            Check(reversed.RootElement.GetProperty("results").EnumerateArray().All(x =>
+                x.GetProperty("status").GetString() != "regression"),
+                "regression direction must be explicit");
     }
     using (var rebuilt = new HistoryStore(Path.Combine(root, "history-rebuilt.sqlite")))
     {
@@ -258,6 +529,10 @@ try
         old.Open();
         using var command = old.CreateCommand();
         command.CommandText = """
+            ALTER TABLE runs DROP COLUMN build_environment_json;
+            ALTER TABLE runs DROP COLUMN host_id;
+            ALTER TABLE runs DROP COLUMN environment_fingerprint;
+            ALTER TABLE runs DROP COLUMN environment_json;
             ALTER TABLE runs DROP COLUMN indexer_version;
             PRAGMA user_version=1;
             """;
@@ -268,9 +543,31 @@ try
     using (var upgraded = new HistoryStore(oldPath))
     {
         Check(upgraded.Import(success, false).Contains("Imported 1"), "v1 migration");
-        Check(upgraded.Import(success, false).Contains("unchanged 1"), "v2 indexer version");
+        Check(upgraded.Import(success, false).Contains("unchanged 1"), "v4 indexer version");
         Check(upgraded.Runs(50, null, null, null, null, null).Count == 1,
             "v1 migration preserved stable run identity");
+    }
+    var v2Path = Path.Combine(root, "history-v2.sqlite");
+    using (var initial = new HistoryStore(v2Path)) initial.Import(success, false);
+    using (var old = new SqliteConnection($"Data Source={v2Path}"))
+    {
+        old.Open();
+        using var command = old.CreateCommand();
+        command.CommandText = """
+            ALTER TABLE runs DROP COLUMN build_environment_json;
+            ALTER TABLE runs DROP COLUMN host_id;
+            ALTER TABLE runs DROP COLUMN environment_fingerprint;
+            ALTER TABLE runs DROP COLUMN environment_json;
+            UPDATE runs SET indexer_version=2;
+            PRAGMA user_version=2;
+            """;
+        command.ExecuteNonQuery();
+    }
+    using (var upgraded = new HistoryStore(v2Path))
+    {
+        Check(upgraded.Import(success, false).Contains("Imported 1"), "v2 migration");
+        Check(upgraded.Runs(50, null, null, null, null, null).Count == 1,
+            "v2 migration preserved run");
     }
     Console.WriteLine("History checks passed.");
 }

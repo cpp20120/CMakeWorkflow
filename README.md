@@ -93,6 +93,8 @@ adapter; CMake File API data is its normal target source.
 - `CMakeWorkflow.Campaigns/` provides optional project-specific campaigns.
 - `CMakeWorkflow.History/` indexes completed run artifacts in local SQLite
   for later queries and descriptive comparisons.
+- `CMakeWorkflow.Tooling/` provides optional tool discovery, preflight plans
+  and explicit installation. It is not used by the workflow scheduler.
 - `tests/`, `CMakeWorkflow.Profiling.Tests/` and
   `CMakeWorkflow.Campaigns.Tests/` contain executable checks.
 
@@ -107,11 +109,97 @@ dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -c Release -- b
 Unix SIGINT cases run on Unix hosts. Windows cancellation behavior requires
 execution on a Windows runner.
 
+## Tool provisioning
+
+Tool setup is an explicit operation. Workflow execution never installs tools,
+and the standalone CMake toolkit keeps working without this .NET CLI.
+
+```sh
+CMakeWorkflow tooling list --json
+CMakeWorkflow tooling doctor --profile native --json
+CMakeWorkflow tooling plan --profile native --json
+CMakeWorkflow tooling setup --profile native --dry-run --json
+CMakeWorkflow tooling setup --profile native --yes
+```
+
+A complete local run uses the existing command names:
+
+```sh
+CMakeWorkflow tooling doctor --profile native
+CMakeWorkflow tooling plan --profile native
+CMakeWorkflow context inspect out/build/release
+CMakeWorkflow workflow run workflow.json --results-dir out/results
+CMakeWorkflow history runs
+```
+
+Completed workflow runs are indexed automatically. Use
+`tooling setup --profile native --yes` if doctor reports missing tools.
+
+Profiles are `native`, `cmake`, `ninja`, `profiling`, `fuzz`, `development` and
+`all`. `native` checks CMake, CTest, a C++ compiler and Ninja. Profiles can be
+passed by position or with repeatable `--profile`.
+Profiling selects `perf`, WPR or `xctrace` according to the host OS. Doctor and
+plan are read-only. Setup re-probes tools, attempts a mapped package through
+apt, pacman, dnf, Homebrew or winget, then verifies that the command and its
+required version are available. `--no-fallback` disables standalone releases;
+`--pm none` disables package installation. Mutating setup requires `--yes`.
+`--install-dir` selects a user bin directory; add it to `PATH` for future
+sessions. Missing tools without a supported installer receive a manual
+diagnostic. Tool availability does not imply profiling permissions or a
+compatible kernel tracing configuration. On Linux, package setup uses
+non-interactive `sudo`; arrange authorization first or run setup as root.
+
+On Linux x64/arm64, missing CMake or CTest can fall back to an official Kitware
+release only when its GitHub asset publishes a SHA-256 digest. The archive is
+verified before extraction. Other unverified installer scripts are not run.
+Set `CMAKEWORKFLOW_TOOL_STORE` to choose the local release store. Setup supports
+no automatic Windows ADK or macOS Xcode installation; those OS backends are
+diagnosed with manual guidance.
+
+## Machine-readable CLI
+
+Use `--json` for structured discovery, plans, saved reports and history:
+
+```sh
+CMakeWorkflow context inspect out/hello --json
+CMakeWorkflow target resolve --build-dir out/hello --target hello --json
+CMakeWorkflow workflow plan examples/hello/workflow.json --json
+CMakeWorkflow workflow report RUN_DIRECTORY --json
+CMakeWorkflow history import out/results --recursive --db out/history.sqlite --json
+CMakeWorkflow history compare BASELINE_RUN CANDIDATE_RUN --db out/history.sqlite --json
+CMakeWorkflow history detect BASELINE_RUN CANDIDATE_RUN --metric process_wall_time --direction higher-worse --min-percent 5 --db out/history.sqlite --json
+```
+
+`workflow run FILE --json` writes one compact JSON object per line to stdout.
+Each event has `schemaVersion: 1`, a run-local `sequence`, timestamp, type,
+run directory, optional node identity/status/exit code/error and available
+artifact paths. Events include `workflow_started`, `node_started`,
+`node_finished` and `workflow_finished`. A node's terminal status distinguishes
+success, failure, cancellation and blocked dependencies. Diagnostics remain on
+stderr. Without `--json`, the workflow still writes the event journal but does
+not mirror it to stdout.
+
+The same lines are flushed to `events.jsonl` in the run directory before they
+are printed. A reconnecting client can read this journal and then `run.json`.
+`run.json` is the authoritative workflow state; events are live notifications
+and may be missing from a truncated stream after a process or connection
+failure. Closing stdout does not cancel the workflow; the journal continues to
+record events. The journal is created per run and never used to resume execution.
+
 ## Local history
 
-History is optional. Workflow execution never writes to the catalog. The
-original result directories remain authoritative; the SQLite file is a
-disposable index and can be rebuilt by importing the same roots again.
+The CLI indexes a completed workflow after execution, including failed and
+canceled runs. Profile runs are indexed after analysis so their derived reports
+are available. The scheduler itself does not depend on SQLite. The original
+result directories remain authoritative; the SQLite file is a disposable
+index and can be rebuilt by importing result roots again.
+
+Use `workflow run FILE --history-db PATH` to select a catalog, or set
+`CMAKEWORKFLOW_HISTORY_DB` for both runs and history queries. `--no-history`
+disables automatic indexing for a run. If indexing fails, `run.json` remains
+intact, the workflow exit status is preserved, and the CLI reports the database
+error on stderr. `history import`
+remains available for old, moved or external result directories.
 
 ```sh
 CMakeWorkflow history import out/results --recursive --db out/history.sqlite
@@ -121,6 +209,7 @@ CMakeWorkflow history show RUN_ID --db out/history.sqlite
 CMakeWorkflow history metrics --run RUN_ID --db out/history.sqlite --json
 CMakeWorkflow history query --metric process_wall_time --variant main --db out/history.sqlite
 CMakeWorkflow history compare BASELINE_RUN CANDIDATE_RUN --db out/history.sqlite
+CMakeWorkflow history detect BASELINE_RUN CANDIDATE_RUN --metric process_wall_time --direction higher-worse --min-percent 5 --db out/history.sqlite
 ```
 
 Without `--db`, the catalog lives under the host's local application data
@@ -128,6 +217,17 @@ directory at `CMakeWorkflow/history.sqlite`. Queries use the index without
 rescanning report files. `history show` checks whether linked artifact paths
 still exist, and `history runs` marks missing source directories. A moved
 directory can be imported at its new path; it receives a new local run ID.
+
+Completed workflow reports record CPU model, architecture, logical CPU count,
+available CPU count, physical topology where the OS exposes it, OS and kernel,
+the runner's allowed CPU affinity, and the CPU governor where available. They also record
+the CMake generator, configuration, C++ compiler ID/version and cache flags for
+each build tree. Node reports retain workload arguments and a hash of explicit
+environment overrides; profiling methods identify the backend. The random
+local host ID is stored at `CMakeWorkflow/host-id` under local application data.
+Set `CMAKEWORKFLOW_STATE_DIR` to use a different local directory. No hostname
+or OS machine ID is read to create it. Reports store the host ID, but do not
+publish anything automatically.
 
 The importer reads completed `run.json` schema 1, completed fuzz `report.json`
 schema 1, standalone `*.results.json` profile captures and campaign reports
@@ -141,18 +241,40 @@ or read for indexing. Active reports are skipped. Older mutation and weak-memory
 reports without a completion marker cannot be distinguished from partial
 reports, so they are skipped.
 
-Database schema version 2 uses `PRAGMA user_version`; opening a fresh database
-applies migrations 0→1→2 transactionally, and an existing version 1 catalog is
+Database schema version 4 uses `PRAGMA user_version`; opening a fresh database
+applies migrations 0→1→2→3→4 transactionally, and an existing version 1–3 catalog is
 upgraded in place. Each run records its indexer version so a newer importer
 can refresh derived measurements even if source files are unchanged. Imports
 are transactional and idempotent. Unsupported report schema versions fail
 with the path and expected version.
 
 Comparison retains individual timing samples and reports count, median,
-minimum, maximum, mean and population standard deviation, plus absolute and
-percentage median changes. It checks metric, unit, method, variant, scenario
-and recorded workload arguments. Missing hardware or environment identity is
-reported as unverified; perf counters and ETW summaries keep distinct methods.
-No automatic regression verdict is emitted. A later statistical detector would
-need controlled repeated measurements, recorded machine and workload identity,
-and a stated noise and multiple-comparison policy.
+minimum, maximum, mean and population standard deviation. It checks metric,
+unit, method, variant, scenario and recorded workload arguments, including
+profile capture arguments. Absolute and percentage median changes are emitted
+only when recorded characteristics match. Different workloads, local hosts,
+toolchains or recorded environments are incompatible; missing information or
+an environment that changes during a run is unverified and yields no delta.
+Matching fingerprints confirm the recorded characteristics only. CPU frequency,
+temperature and background load are not fully attested. Two timing samples per
+variant support descriptive comparison, not a reliable regression verdict.
+Perf counters and ETW summaries keep distinct methods. `history compare`
+remains descriptive. The separate `history detect` command performs a one-sided
+permutation test on the difference in sample medians. It requires an explicit
+metric, direction (`higher-worse` or `lower-worse`) and practical effect threshold
+(`--min-percent`). Both runs must have succeeded, their source directories must
+exist, their recorded measurement conditions must be compatible, and each
+variant/scenario needs at least 10 distinct individual samples per run. Missing
+or incompatible data produce diagnostics without a p-value or regression verdict.
+
+`history detect` uses exact permutations for small sample sets and 9,999
+deterministic Monte Carlo permutations for larger sets. It applies Holm's
+correction across all tested variant/scenario rows selected by the command;
+`--variant` and `--scenario` can narrow that family. `--alpha` defaults to 0.05.
+A `regression` result requires both adjusted p-value ≤ alpha and a median change
+in the declared worse direction of at least `--min-percent`. `inconclusive` does
+not establish equivalence or absence of a regression. The test assumes
+exchangeable, sufficiently independent samples under its null hypothesis;
+sequential runs may still have thermal drift, frequency changes or background
+load that the recorded fingerprint does not capture. Use controlled repetitions
+and inspect the raw samples before acting on the verdict.

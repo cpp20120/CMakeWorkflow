@@ -7,7 +7,8 @@ namespace CMakeWorkflow.Profiling;
 
 public static class ProfileCommand
 {
-    public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
+    public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct,
+        Action<string>? onRunDirectory = null)
     {
         if (args.Length == 0) throw new ArgumentException("Usage: profile <run|analyze> ...");
         if (args[0] == "analyze")
@@ -155,7 +156,8 @@ public static class ProfileCommand
             JsonSerializer.Serialize(document, WorkflowJson.Default.WorkflowDocument) + "\n", ct);
         string? runDirectory = null;
         var result = await WorkflowCommand.ExecuteAsync("run", [manifest, "--results-dir", output], ct,
-            new ProfileWorkflowExecutor(), directory => runDirectory = directory);
+            new ProfileWorkflowExecutor(), directory =>
+            { runDirectory = directory; onRunDirectory?.Invoke(directory); });
         if (result != 0 || runDirectory is null) return result;
         return await ProfileAnalyzer.AnalyzeAsync(runDirectory, ct);
     }

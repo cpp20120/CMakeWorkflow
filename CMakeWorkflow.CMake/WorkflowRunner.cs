@@ -14,6 +14,9 @@ public sealed class WorkflowReport
     public string Status { get; set; } = "running";
     public List<NodeResult> Nodes { get; set; } = [];
     public string? Error { get; set; }
+    public HostEnvironment? Environment { get; set; }
+    public HostEnvironment? EnvironmentAtEnd { get; set; }
+    public List<BuildEnvironment> BuildEnvironments { get; set; } = [];
 }
 
 public sealed record NativeBuildResult(CMakeTargetRef Target, string Verification,
@@ -38,6 +41,7 @@ public sealed class NodeResult
     public string? Executable { get; set; }
     public string? ExecutableSha256 { get; set; }
     public List<string> Arguments { get; set; } = [];
+    public string? EnvironmentOverrideHash { get; set; }
     public string WorkingDirectory { get; set; } = "";
     public string? Stdout { get; set; }
     public string? Stderr { get; set; }
@@ -64,8 +68,10 @@ public static class WorkflowCommand
         var only = new List<string>();
         var jobs = 1;
         string? results = null, controller = null;
+        var json = false;
         for (var i = 1; i < args.Length; ++i)
         {
+            if (args[i] == "--json") { json = true; continue; }
             if (i + 1 >= args.Length) throw new ArgumentException($"Missing value for {args[i]}.");
             switch (args[i])
             {
@@ -80,7 +86,18 @@ public static class WorkflowCommand
             }
         }
         var plan = await WorkflowPlanner.LoadAsync(args[0], only, controller, ct);
-        foreach (var node in plan.Nodes)
+        if (json && command == "plan")
+        {
+            var view = new WorkflowPlanView(1, plan.File, plan.ManifestHash,
+                !plan.Nodes.Any(n => n.Diagnostics.Any(d => d.Severity == "Error")),
+                plan.Nodes.Select(n => new WorkflowPlanNodeView(n.Definition.Id,
+                    n.Definition.Kind, n.Target.Target, n.Target.BuildDirectory,
+                    n.Target.Configuration, n.Dependencies.ToList(), n.Observed.State,
+                    n.Diagnostics.ToList(), n.Definition.Resources.ToList(),
+                    n.Definition.Exclusive)).ToList());
+            Console.Out.WriteLine(JsonSerializer.Serialize(view, WorkflowProtocolJson.Default.WorkflowPlanView));
+        }
+        else foreach (var node in plan.Nodes)
         {
             Console.Error.WriteLine($"{node.Definition.Id}: {node.Definition.Kind} {node.Target.Target} " +
                 $"[{node.Target.BuildDirectory}] requested-config={node.Requested.Configuration ?? "<unspecified>"} " +
@@ -91,7 +108,8 @@ public static class WorkflowCommand
             foreach (var diagnostic in node.Diagnostics)
                 Console.Error.WriteLine($"  {diagnostic.Severity}: {diagnostic.Message}");
         }
-        Console.Error.WriteLine("Scheduling: operations sharing a physical build tree or named resource conflict; exclusive nodes conflict with all nodes. Plain IDE/Ninja builds do not participate in tool locks.");
+        if (!json || command == "run")
+            Console.Error.WriteLine("Scheduling: operations sharing a physical build tree or named resource conflict; exclusive nodes conflict with all nodes. Plain IDE/Ninja builds do not participate in tool locks.");
         // Both plan and run must reject a known-invalid selected graph *before*
         // creating result files, acquiring leases or launching independent branches.
         // A configure predecessor can defer checks to runtime (Severity=Runtime).
@@ -110,14 +128,14 @@ public static class WorkflowCommand
         Directory.CreateDirectory(output);
         onRunDirectory?.Invoke(output);
         Console.Error.WriteLine($"[CMakeWorkflow] Results: {output}");
-        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension);
+        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension, json);
     }
 }
 
 public static class WorkflowRunner
 {
     public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
-        IWorkflowOperationExecutor? extension = null)
+        IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false)
     {
         var report = new WorkflowReport
         {
@@ -131,6 +149,9 @@ public static class WorkflowRunner
                 WorkingDirectory = n.WorkingDirectory, RequestedContext = n.Requested
             }).ToList()
         };
+        try { report.Environment = EnvironmentProvenance.CaptureHost(); }
+        catch (IOException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
+        catch (UnauthorizedAccessException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
         var states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
         var sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
             .ToDictionary(p => p, _ => new BuildContextSession(), WorkflowPlanner.PathComparer);
@@ -138,7 +159,8 @@ public static class WorkflowRunner
         var active = new Dictionary<string, (PlannedNode Node, Task<NodeResult> Task)>(StringComparer.Ordinal);
         BuildTreeOwnership? ownership = null;
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        await SaveAsync(report, output);
+        using var events = new WorkflowEventJournal(output, eventsToStdout);
+        await SaveAsync(report, output, events);
         try
         {
             var mutationTrees = plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory).ToArray();
@@ -186,7 +208,7 @@ public static class WorkflowRunner
                     active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
                         snapshot, sessions[node.Target.BuildDirectory], output, stop.Token, extension)));
                 }
-                await SaveAsync(report, output);
+                await SaveAsync(report, output, events);
                 if (active.Count == 0)
                 {
                     if (remaining.Count > 0)
@@ -203,6 +225,7 @@ public static class WorkflowRunner
                     Console.Error.WriteLine($"[CMakeWorkflow] {result.Status.ToUpperInvariant()} {pair.Key}" +
                         (result.Error is null ? "" : $": {result.Error}"));
                 }
+                await SaveAsync(report, output, events);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -233,7 +256,17 @@ public static class WorkflowRunner
         report.FinishedAt = DateTimeOffset.UtcNow;
         report.Status = ct.IsCancellationRequested ? "canceled"
             : report.Error is null && report.Nodes.All(n => n.Status == "succeeded") ? "succeeded" : "failed";
-        await SaveAsync(report, output);
+        try
+        {
+            report.EnvironmentAtEnd = EnvironmentProvenance.CaptureHost();
+            report.BuildEnvironments = report.Nodes.Select(n => (n.BuildDirectory, n.Configuration))
+                .Where(x => !string.IsNullOrWhiteSpace(x.BuildDirectory)).Distinct()
+                .Select(x => EnvironmentProvenance.CaptureBuild(x.BuildDirectory, x.Configuration))
+                .OfType<BuildEnvironment>().ToList();
+        }
+        catch (IOException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
+        catch (UnauthorizedAccessException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
+        await SaveAsync(report, output, events);
         return report.Status == "canceled" ? 130 : report.Status == "succeeded" ? 0 : 1;
     }
 
@@ -252,6 +285,7 @@ public static class WorkflowRunner
             Id = definition.Id, Kind = definition.Kind, Dependencies = node.Dependencies.ToList(),
             BuildDirectory = node.Target.BuildDirectory, Configuration = node.Target.Configuration,
             Target = node.Target.Target, WorkingDirectory = node.WorkingDirectory, RequestedContext = node.Requested,
+            EnvironmentOverrideHash = EnvironmentProvenance.FingerprintOverrides(definition.Environment),
             StartedAt = DateTimeOffset.UtcNow, Status = "running",
             Stdout = definition.Id + ".stdout.log", Stderr = definition.Id + ".stderr.log"
         };
@@ -511,12 +545,13 @@ public static class WorkflowRunner
         }
     }
 
-    private static async Task SaveAsync(WorkflowReport report, string output)
+    private static async Task SaveAsync(WorkflowReport report, string output, WorkflowEventJournal events)
     {
         var path = Path.Combine(output, "run.json");
         var temporary = path + ".tmp";
         await using (var stream = File.Create(temporary))
             await JsonSerializer.SerializeAsync(stream, report, WorkflowJson.Default.WorkflowReport);
         File.Move(temporary, path, overwrite: true);
+        events.Publish(report);
     }
 }

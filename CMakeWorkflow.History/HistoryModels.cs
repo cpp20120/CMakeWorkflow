@@ -8,7 +8,17 @@ namespace CMakeWorkflow.History;
 
 public sealed record HistoryRun(string Id, string Directory, string Format, string? Workflow,
     string? ManifestHash, string? StartedAt, string? FinishedAt, string Status,
-    string? Revision, string SourceHash, bool SourceAvailable = true);
+    string? Revision, string SourceHash, bool SourceAvailable = true,
+    string? HostId = null, string? EnvironmentFingerprint = null,
+    HistoryHostEnvironment? Environment = null,
+    List<HistoryBuildEnvironment>? BuildEnvironments = null);
+public sealed record HistoryHostEnvironment(string? HostId, string? CpuModel, string? Architecture,
+    int? LogicalProcessors, int? AvailableProcessors, int? PhysicalPackages, int? PhysicalCores,
+    string? OperatingSystem, string? KernelVersion, string? Affinity, string? Governor,
+    string? Fingerprint);
+public sealed record HistoryBuildEnvironment(string Directory, string? Configuration,
+    string? Generator, string? Compiler, string? CompilerId, string? CompilerVersion,
+    string? Flags, string Fingerprint);
 public sealed record HistoryNode(string RunId, string Id, string Kind, string Status,
     double? DurationSeconds, string? Dependencies, string? BuildDirectory,
     string? Configuration, string? Target);
@@ -25,12 +35,25 @@ public sealed record HistoryDifference(string Metric, string Unit, string? Varia
     string? Scenario, string Method, string Status, string? Reason,
     HistoryStats? Baseline, HistoryStats? Candidate, double? AbsoluteChange,
     double? PercentChange);
+public sealed record HistoryImportResult(int SchemaVersion, int Imported, int Unchanged, int Skipped);
+public sealed record HistoryDetectionReport(int SchemaVersion, string BaselineRun,
+    string CandidateRun, string Metric, string Direction, double MinimumEffectPercent,
+    double Alpha, string Test, List<HistoryDetection> Results);
+public sealed record HistoryDetection(string Metric, string Unit, string? Variant,
+    string? Scenario, string Method, string Status, string Reason,
+    HistoryStats? Baseline, HistoryStats? Candidate, double? AbsoluteChange,
+    double? PercentChange, double? PValue, double? AdjustedPValue,
+    int? Permutations, bool? Exact);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(List<HistoryRun>))]
 [JsonSerializable(typeof(HistoryDetail))]
 [JsonSerializable(typeof(List<HistoryMeasurement>))]
 [JsonSerializable(typeof(List<HistoryDifference>))]
+[JsonSerializable(typeof(HistoryHostEnvironment))]
+[JsonSerializable(typeof(List<HistoryBuildEnvironment>))]
+[JsonSerializable(typeof(HistoryImportResult))]
+[JsonSerializable(typeof(HistoryDetectionReport))]
 internal partial class HistoryJson : JsonSerializerContext;
 
 internal sealed class ParsedRun
@@ -39,6 +62,7 @@ internal sealed class ParsedRun
     public List<HistoryNode> Nodes { get; } = [];
     public List<HistoryMeasurement> Measurements { get; } = [];
     public List<HistoryArtifact> Artifacts { get; } = [];
+    public Dictionary<string, (string? Workload, string? Scenario)> ProfileInputs { get; } = [];
 }
 
 internal static class HistoryReports
@@ -119,13 +143,41 @@ internal static class HistoryReports
             Str(root, "manifestHash"), Time(root, "startedAt"), Time(root, "finishedAt"),
             status, null, Hash(bytes)) };
         if (run.Run.FinishedAt is null) return null;
+        var environment = Obj(root, "environment");
+        if (environment is { } host)
+        {
+            var details = JsonSerializer.Deserialize(host, HistoryJson.Default.HistoryHostEnvironment);
+            var end = Obj(root, "environmentAtEnd") is { } endHost
+                ? JsonSerializer.Deserialize(endHost, HistoryJson.Default.HistoryHostEnvironment) : null;
+            run.Run = run.Run with { HostId = details?.HostId,
+                EnvironmentFingerprint = end is not null &&
+                    (end.HostId != details?.HostId || end.Fingerprint != details?.Fingerprint)
+                    ? null : details?.Fingerprint, Environment = details };
+        }
+        var builds = new Dictionary<string, string>(StringComparer.Ordinal);
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (root.TryGetProperty("buildEnvironments", out var buildArray)
+            && buildArray.ValueKind == JsonValueKind.Array)
+        {
+            run.Run = run.Run with { BuildEnvironments = JsonSerializer.Deserialize(buildArray,
+                HistoryJson.Default.ListHistoryBuildEnvironment) };
+            foreach (var build in buildArray.EnumerateArray())
+                if (Str(build, "directory") is { } buildPath && Str(build, "fingerprint") is { } hash)
+                    builds[buildPath + "\u001f" + Str(build, "configuration")] = hash;
+        }
         AddArtifact(run, null, "workflow-report", path, run.Run.SourceHash);
+        var eventJournal = Path.Combine(directory, "events.jsonl");
+        if (File.Exists(eventJournal)) AddArtifact(run, null, "event-journal", eventJournal);
         foreach (var node in nodes.EnumerateArray())
         {
             if (node.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(Str(node, "id"))
                 || string.IsNullOrWhiteSpace(Str(node, "status")))
                 throw new InvalidDataException($"{path}: invalid node entry.");
             var id = Str(node, "id")!;
+            if (Str(node, "environmentOverrideHash") is { } overrideHash)
+                overrides[id] = overrideHash;
+            if (Str(node, "kind") == "profile")
+                run.ProfileInputs[id] = (Json(node, "arguments"), Scenario(node));
             run.Nodes.Add(new(run.Run.Id, id, Str(node, "kind") ?? "unknown",
                 Str(node, "status")!, Num(node, "durationSeconds"), Json(node, "dependencies"),
                 Str(node, "buildDirectory"), Str(node, "configuration"), Str(node, "target")));
@@ -143,10 +195,27 @@ internal static class HistoryReports
             var artifact = Obj(node, "artifact");
             if (artifact is { } a)
                 AddArtifact(run, id, "executable", Str(a, "executable"), Str(a, "sha256"));
-            else AddArtifact(run, id, "executable", Str(node, "executable"),
-                Str(node, "executableSha256"));
+            else if (Str(node, "kind") is "run" or "profile"
+                && Str(node, "executable") is { } executable
+                && Path.IsPathFullyQualified(executable))
+                AddArtifact(run, id, "executable", executable, Str(node, "executableSha256"));
         }
         ImportProfile(directory, run);
+        for (var i = 0; i < run.Measurements.Count; i++)
+        {
+            var measurement = run.Measurements[i];
+            var node = measurement.NodeId is null
+                ? run.Nodes.FirstOrDefault(n => n.Id == "counters_" + measurement.Variant
+                    || n.Id == "capture_" + measurement.Variant)
+                : run.Nodes.FirstOrDefault(n => n.Id == measurement.NodeId);
+            if (node is null || node.BuildDirectory is null || run.Run.EnvironmentFingerprint is null)
+                continue;
+            var key = node.BuildDirectory + "\u001f" + node.Configuration;
+            if (!builds.TryGetValue(key, out var buildHash)) continue;
+            run.Measurements[i] = measurement with { Environment = Hash(Encoding.UTF8.GetBytes(
+                run.Run.EnvironmentFingerprint + "\n" + buildHash + "\n"
+                + overrides.GetValueOrDefault(node.Id))) };
+        }
         FinalizeHash(run);
         return run;
     }
@@ -305,7 +374,10 @@ internal static class HistoryReports
                             if (Num(ev.Value, "value") is { } value)
                                 run.Measurements.Add(new(run.Run.Id, null, ev.Name,
                                     Str(ev.Value, "unit") ?? "", value, Str(variant, "name"),
-                                    null, "counter-comparison.json", backend, 0, null, null));
+                                    run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Scenario,
+                                    "counter-comparison.json", backend, 0,
+                                    run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Workload,
+                                    null));
         }
         var analysisPath = Path.Combine(directory, "analysis.json");
         if (File.Exists(analysisPath))
@@ -330,8 +402,10 @@ internal static class HistoryReports
                     if (run.Measurements.Any(m => m.Metric == counter.Name && m.Variant == variant
                         && m.Method == "perf stat")) continue;
                     run.Measurements.Add(new(run.Run.Id, captureId, counter.Name,
-                        Str(counter.Value, "unit") ?? "", value, variant, null,
-                        "analysis.json", "perf stat", 0, null, null));
+                        Str(counter.Value, "unit") ?? "", value, variant,
+                        captureId is null ? null : run.ProfileInputs.GetValueOrDefault(captureId).Scenario,
+                        "analysis.json", "perf stat", 0,
+                        captureId is null ? null : run.ProfileInputs.GetValueOrDefault(captureId).Workload, null));
                 }
             }
         }
@@ -354,9 +428,10 @@ internal static class HistoryReports
                     ("scheduledRunningMilliseconds", "ms") })
                     if (Num(root, field) is { } value)
                         run.Measurements.Add(new(run.Run.Id, capture, field, unit, value,
-                            null, null, "traces/normalized/" + Path.GetFileName(path),
+                            null, run.ProfileInputs.GetValueOrDefault(capture).Scenario,
+                            "traces/normalized/" + Path.GetFileName(path),
                             "ETW tracerpt target PID/time window " + (Str(root, "attribution") ?? "unknown"),
-                            0, null, null));
+                            0, run.ProfileInputs.GetValueOrDefault(capture).Workload, null));
             }
     }
 }

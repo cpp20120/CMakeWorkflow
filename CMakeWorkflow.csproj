@@ -16,5 +16,6 @@
     <ProjectReference Include="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj" />
     <ProjectReference Include="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />
     <ProjectReference Include="CMakeWorkflow.History/CMakeWorkflow.History.csproj" />
+    <ProjectReference Include="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj" />
   </ItemGroup>
 </Project>

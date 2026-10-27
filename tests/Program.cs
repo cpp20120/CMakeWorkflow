@@ -14,9 +14,14 @@ internal static class Program
         while (!File.Exists(Path.Combine(directory, "CMakeWorkflow.csproj")))
             directory = Directory.GetParent(directory)?.FullName ?? throw new Exception("Run tests inside the standalone project tree.");
         TestHarness.Root = directory;
+        var previousHistory = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB");
+        var historyDatabase = Path.Combine(Path.GetTempPath(),
+            "cmake-workflow-integration-history-" + Guid.NewGuid().ToString("N") + ".sqlite");
+        Environment.SetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB", historyDatabase);
         try
         {
             ReportTests.Run();
+            ProtocolTests.Run();
             WorkflowTests.Run();
             BoundaryTests.Run();
             LifecycleTests.Run();
@@ -27,6 +32,11 @@ internal static class Program
         {
             Console.Error.WriteLine(error);
             return 1;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB", previousHistory);
+            if (File.Exists(historyDatabase)) File.Delete(historyDatabase);
         }
     }
 }
