@@ -194,8 +194,8 @@ internal static class LifecycleTests
             File.WriteAllText(rules, originalRules);
             var external = Copy(repeated);
             external["contexts"]!["w"]!["provenancePolicy"] = policy;
-            external["nodes"]![2]!["arguments"] = new JsonArray("external",
-                $"cmake --preset debug -S \"{source}\" -B \"{build}\"");
+            external["nodes"]![2]!["arguments"] = new JsonArray(
+                "external", "cmake", "--preset", "debug", "-S", source, "-B", build);
             (report, output) = Workflow(root, external, expected: policy == "strict" ? 1 : 0, name: "external-" + policy);
             Check(S(Item(report, "build2")["sessionBefore"]?["generationChange"]) == "ExternalOrUnknown", "External configure was attributed to own build");
             if (policy == "strict") Check(!File.Exists(Path.Combine(output, "build2.stdout.log")), "Strict continued after external configure");

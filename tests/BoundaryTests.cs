@@ -157,8 +157,12 @@ internal static class BoundaryTests
         nested["nodes"]![0]!["target"] = "prepared_nested";
         nested["nodes"]![0]!["timeoutSeconds"] = 10;
         (report, output) = Workflow(root, nested, expected: 1, name: "prepared-nested");
-        Check((Log(report, output, "campaign") + Log(report, output, "campaign", "stderr")).Contains("Unsafe nested build")
-            && !S(Item(report, "campaign")["error"]).Contains("Timed out"), "Prepared nested CLI deadlocked");
+        var preparedOutput = Log(report, output, "campaign") + Log(report, output, "campaign", "stderr");
+        var preparedError = S(Item(report, "campaign")["error"]);
+        Check(preparedOutput.Contains("Unsafe nested build", StringComparison.Ordinal)
+            && !preparedError.Contains("Timed out", StringComparison.Ordinal),
+            $"Prepared nested CLI ownership guard failed: status={Status(report, "campaign")}, "
+            + $"error={preparedError}, output={preparedOutput}");
         Pass("nested CLI ownership guard");
     }
 }
