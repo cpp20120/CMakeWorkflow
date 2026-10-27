@@ -108,12 +108,26 @@ internal static class LifecycleTests
         repeated["nodes"]!.AsArray().Add(J("""{"id":"build2","kind":"build","context":"w","target":"worker","dependsOn":["run"]}"""));
         repeated["nodes"]!.AsArray().Add(J("""{"id":"run2","kind":"run","from":"build2"}"""));
         (report, var output) = Workflow(root, repeated, name: "managed-repeated"); AllSucceeded(report);
-        Check(File.ReadAllText(Path.Combine(build, "configured")) == configured + "configure\n"
-            && File.ReadAllText(Path.Combine(build, "environment")) == "inherited"
-            && S(Item(report, "configure")["sessionAfter"]?["generationChange"]) == "ExplicitConfigure"
-            && Item(report, "configure")["configure"]?["arguments"]?.ToJsonString() ==
-                System.Text.Json.JsonSerializer.Serialize(new[] { "--preset", "debug", "-S", source, "-B", build })
-            && Log(report, output, "build2").Contains("no work to do"), "Managed context configured too often");
+        var configuredAfter = File.ReadAllText(Path.Combine(build, "configured"));
+        Check(configuredAfter == configured + "configure\n",
+            $"Managed context configured too often: before={configured.Length}, after={configuredAfter.Length}, " +
+            $"expected={configured.Length + "configure\n".Length} characters");
+        Check(File.ReadAllText(Path.Combine(build, "environment")) == "inherited",
+            "Managed configure did not inherit preset environment");
+        Check(S(Item(report, "configure")["sessionAfter"]?["generationChange"]) == "ExplicitConfigure",
+            "Managed configure session did not record ExplicitConfigure");
+        // On macOS the temporary directory may be under /var, while canonical
+        // source/build paths resolve that symlink to /private/var.
+        var expectedArguments = System.Text.Json.JsonSerializer.Serialize(new[]
+        {
+            "--preset", "debug", "-S", BuildTreeOwnership.CanonicalPath(source),
+            "-B", BuildTreeOwnership.CanonicalPath(build)
+        });
+        var actualArguments = Item(report, "configure")["configure"]?["arguments"]?.ToJsonString();
+        Check(actualArguments == expectedArguments,
+            $"Managed configure arguments differ: expected={expectedArguments}, actual={actualArguments}");
+        Check(Log(report, output, "build2").Contains("no work to do"),
+            "Repeated native build did not remain a no-op");
         Pass("managed configure invocation and repeated native build requests");
 
         foreach (var policy in new[] { "strict", "allowUnverified" })

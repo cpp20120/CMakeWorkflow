@@ -172,7 +172,11 @@ internal static class ProtocolTests
         var directory = Directory.GetDirectories(results).Single();
         var events = Parse(response.Stdout);
         var persisted = File.ReadAllLines(Path.Combine(directory, "events.jsonl"));
-        Check(response.Stdout.TrimEnd().Split('\n').SequenceEqual(persisted),
+        // Console.Out.WriteLine uses CRLF on Windows; persisted JSONL is read as
+        // logical lines. Compare line contents, not platform line terminators.
+        var streamed = response.Stdout.TrimEnd('\r', '\n').Split('\n')
+            .Select(line => line.TrimEnd('\r'));
+        Check(streamed.SequenceEqual(persisted),
             "stdout and persisted event stream differ");
         var report = JsonNode.Parse(File.ReadAllText(Path.Combine(directory, "run.json")))!;
         Check(S(events[^1]["status"]) == S(report["status"]), "event and journal status differ");
