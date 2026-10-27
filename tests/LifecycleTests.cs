@@ -109,9 +109,13 @@ internal static class LifecycleTests
         repeated["nodes"]!.AsArray().Add(J("""{"id":"run2","kind":"run","from":"build2"}"""));
         (report, var output) = Workflow(root, repeated, name: "managed-repeated"); AllSucceeded(report);
         var configuredAfter = File.ReadAllText(Path.Combine(build, "configured"));
-        Check(configuredAfter == configured + "configure\n",
-            $"Managed context configured too often: before={configured.Length}, after={configuredAfter.Length}, " +
-            $"expected={configured.Length + "configure\n".Length} characters");
+        // CMake may write LF on Unix and CRLF on Windows. Compare complete
+        // configure markers rather than appending a platform-specific literal.
+        Check(configured is "configure\n" or "configure\r\n",
+            $"Expected one initial configure marker, got: {configured.Length} characters");
+        Check(configuredAfter == configured + configured,
+            $"Managed context configured unexpected number of times: before={configured.Length}, " +
+            $"after={configuredAfter.Length}, expected={configured.Length * 2} characters");
         Check(File.ReadAllText(Path.Combine(build, "environment")) == "inherited",
             "Managed configure did not inherit preset environment");
         Check(S(Item(report, "configure")["sessionAfter"]?["generationChange"]) == "ExplicitConfigure",
