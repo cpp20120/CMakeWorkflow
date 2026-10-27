@@ -116,12 +116,21 @@ internal static class LifecycleTests
             "Managed configure did not inherit preset environment");
         Check(S(Item(report, "configure")["sessionAfter"]?["generationChange"]) == "ExplicitConfigure",
             "Managed configure session did not record ExplicitConfigure");
-        // On macOS the temporary directory may be under /var, while canonical
-        // source/build paths resolve that symlink to /private/var.
+        // Compare against the CLI's resolved context without introducing a
+        // project reference to CMakeWorkflow.CMake into the black-box test.
+        // On macOS, /var may resolve to the physically equivalent /private/var.
+        var requested = Item(report, "configure")["requestedContext"]!;
+        var resolvedSource = S(requested["sourceDirectory"]);
+        var resolvedBuild = S(requested["buildDirectory"]);
+        Check(File.Exists(Path.Combine(resolvedSource, "CMakePresets.json"))
+              && File.ReadAllText(Path.Combine(resolvedSource, "CMakeLists.txt"))
+                 == File.ReadAllText(Path.Combine(source, "CMakeLists.txt"))
+              && File.ReadAllText(Path.Combine(resolvedBuild, "configured")) == configuredAfter,
+            "Managed configure resolved unexpected source/build directories");
         var expectedArguments = System.Text.Json.JsonSerializer.Serialize(new[]
         {
-            "--preset", "debug", "-S", BuildTreeOwnership.CanonicalPath(source),
-            "-B", BuildTreeOwnership.CanonicalPath(build)
+            "--preset", "debug", "-S", resolvedSource,
+            "-B", resolvedBuild
         });
         var actualArguments = Item(report, "configure")["configure"]?["arguments"]?.ToJsonString();
         Check(actualArguments == expectedArguments,
