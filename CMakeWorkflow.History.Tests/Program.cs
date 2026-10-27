@@ -524,7 +524,8 @@ try
     var oldPath = Path.Combine(root, "history-v1.sqlite");
     using (var initial = new HistoryStore(oldPath))
         initial.Import(success, false);
-    using (var old = new SqliteConnection($"Data Source={oldPath}"))
+    using (var old = new SqliteConnection(new SqliteConnectionStringBuilder
+    { DataSource = oldPath, Pooling = false }.ToString()))
     {
         old.Open();
         using var command = old.CreateCommand();
@@ -549,7 +550,8 @@ try
     }
     var v2Path = Path.Combine(root, "history-v2.sqlite");
     using (var initial = new HistoryStore(v2Path)) initial.Import(success, false);
-    using (var old = new SqliteConnection($"Data Source={v2Path}"))
+    using (var old = new SqliteConnection(new SqliteConnectionStringBuilder
+    { DataSource = v2Path, Pooling = false }.ToString()))
     {
         old.Open();
         using var command = old.CreateCommand();
