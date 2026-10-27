@@ -30,9 +30,10 @@ internal static class WorkflowTests
           {"id":"action","kind":"invoke","context":"worker","target":"existing_action","dependsOn":["check"]}
         ]}
         """);
+        var firstExecutable = Path.Combine(build, OperatingSystem.IsWindows() ? "first worker.exe" : "first worker");
         var before = Fingerprint(build);
         Check(Plan(root, doc, 0, "--only", "run-one").Contains("Runtime"), "Plan omitted runtime validations");
-        Check(Fingerprint(build) == before && !File.Exists(Path.Combine(build, "first worker")), "Plan mutated build tree");
+        Check(Fingerprint(build) == before && !File.Exists(firstExecutable), "Plan mutated build tree");
         Pass("read-only dependency closure planning");
 
         var (report, output) = Workflow(root, doc, name: "interleaved", options: ["--jobs", "4"]);
@@ -43,11 +44,12 @@ internal static class WorkflowTests
         Check(report["nodes"]!.AsArray().Where(n => S(n?["kind"]) == "run").All(n => S(n?["executableSha256"]).Length == 64), "Executable identity missing");
         Pass("interleaved generated inputs, repeated build/run, CTest and explicit invoke");
 
-        var first = File.GetLastWriteTimeUtc(Path.Combine(build, "first worker"));
+        Check(File.Exists(firstExecutable), "Initial native executable missing");
+        var first = File.GetLastWriteTimeUtc(firstExecutable);
         var only = Copy(doc); only["nodes"] = new JsonArray(doc["nodes"]![0]!.DeepClone());
         (report, output) = Workflow(root, only, name: "incremental", options: ["--only", "build-first"]);
         AllSucceeded(report);
-        Check(File.GetLastWriteTimeUtc(Path.Combine(build, "first worker")) == first
+        Check(File.Exists(firstExecutable) && File.GetLastWriteTimeUtc(firstExecutable) == first
             && Log(report, output, "build-first").Contains("no work to do"), "Native no-op was not delegated to Ninja");
 
         var simple = Copy(only);
@@ -100,7 +102,8 @@ internal static class WorkflowTests
         Check(Plan(root, multiDoc, 1).Contains("Multi-config build"), "Ambiguous multi-config accepted");
         multiDoc["contexts"]!["worker"]!["configuration"] = "Release";
         (report, _) = Workflow(root, multiDoc, name: "multi"); AllSucceeded(report);
-        Check(File.Exists(Path.Combine(multi, "Release", "first worker")), "Multi-config artifact missing");
+        Check(File.Exists(Path.Combine(multi, "Release", Path.GetFileName(firstExecutable))),
+            "Multi-config artifact missing");
 
         var bridge = Path.Combine(root, "bridge");
         Configure(Path.Combine(Root, "tests", "fixture"), bridge, bridge: true);

@@ -13,6 +13,7 @@ internal static class BoundaryTests
         var cmakeList = Path.Combine(source, "CMakeLists.txt");
         File.WriteAllText(cmakeList, "set(TEST_CLI \"" + Cli.Replace('\\', '/') + "\")\n" + File.ReadAllText(cmakeList));
         var build = Path.Combine(root, "managed");
+        var workerExecutableName = OperatingSystem.IsWindows() ? "worker.exe" : "worker";
         var doc = J("""
         {"schemaVersion":2,"contexts":{"worker":{"buildDirectory":"managed","sourceDirectory":"source","configurePreset":"debug","configuration":"Debug"}},"nodes":[
           {"id":"configure","kind":"configure","context":"worker"},
@@ -83,7 +84,7 @@ internal static class BoundaryTests
         var limited = Path.Combine(root, "limited");
         Command("cmake", ["--preset", "debug", "-S", source, "-B", limited]);
         var limitedDoc = Copy(adopted); limitedDoc["contexts"]!["worker"] = J("""{"buildDirectory":"limited","configuration":"Debug","mode":"adopt"}""");
-        Check(Plan(root, limitedDoc, 1).Contains("Unknown") && !File.Exists(Path.Combine(limited, "worker")), "Missing File API metadata caused build");
+        Check(Plan(root, limitedDoc, 1).Contains("Unknown") && !File.Exists(Path.Combine(limited, workerExecutableName)), "Missing File API metadata caused build");
         Check(S(Inspect(limited)["state"]) == "ObservedLimited", "Limited observation misclassified");
         limitedDoc["contexts"]!["worker"]!["mode"] = "managed";
         limitedDoc["contexts"]!["worker"]!["sourceDirectory"] = "source";
@@ -100,7 +101,7 @@ internal static class BoundaryTests
         Check(Inspect(bridge)["targets"]!.AsArray().Any(t => S(t?["evidence"]) == "BridgeManifest"), "Bridge fallback was lost");
         var stale = Path.Combine(build, "cmake-workflow", "targets", "Debug", "fuzz_campaign.json");
         Write(stale, "{\"schemaVersion\":1,\"target\":\"fuzz_campaign\",\"configuration\":\"Debug\",\"executable\":\""
-            + Path.Combine(build, "worker").Replace("\\", "\\\\") + "\"}");
+            + Path.Combine(build, workerExecutableName).Replace("\\", "\\\\") + "\"}");
         Check(RunCli(1, "target", "run", "--build-dir", build, "--target", "fuzz_campaign").Contains("UTILITY"),
             "Stale bridge manifest overrode current codemodel");
         Pass("bridge fallback and current codemodel priority");
@@ -118,7 +119,7 @@ internal static class BoundaryTests
         multi["contexts"]!["worker"]!["configurePreset"] = "multi";
         multi["contexts"]!["worker"]!["configuration"] = "Release";
         (report, _) = Workflow(root, multi, name: "multi"); AllSucceeded(report);
-        Check(File.Exists(Path.Combine(root, "multi", "Release", "worker")), "Multi-config executable missing");
+        Check(File.Exists(Path.Combine(root, "multi", "Release", workerExecutableName)), "Multi-config executable missing");
         Pass("configure failure/recovery and multi-config target resolution");
 
         var regen = Copy(doc); regen["contexts"]!["worker"]!["buildDirectory"] = "regen";
