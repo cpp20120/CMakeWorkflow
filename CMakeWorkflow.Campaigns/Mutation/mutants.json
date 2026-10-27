@@ -1,0 +1,137 @@
+{
+  "runtime": [
+    "thread_pool",
+    "scheduler",
+    "parking_lot",
+    "idle_accounting",
+    "task_graph",
+    "task_scope",
+    "runtime_memory",
+    "runtime_diagnostics"
+  ],
+  "models": {
+    "graph": "reference_graph_model_property_tests.cpp",
+    "completion": "completion_property_tests.cpp",
+    "failure": "completion_failure_reference_property_tests.cpp",
+    "schedule_scheduler": "scheduler_schedule_exploration_tests.cpp",
+    "schedule_completion": "completion_schedule_exploration_tests.cpp",
+    "schedule_parking": "parking_schedule_exploration_tests.cpp",
+    "schedule_complex": "complex_schedule_exploration_tests.cpp"
+  },
+  "mutants": {
+    "graph-drop-last-token": {
+      "unit": "task_graph",
+      "model": "graph",
+      "before": "if (token >= node.tokens) break;",
+      "after": "if (token + 1 >= node.tokens) break;"
+    },
+    "graph-ignore-predecessor-join": {
+      "unit": "task_graph",
+      "model": "graph",
+      "before": "state.runtime[j].predecessors.fetch_sub(\n                1, std::memory_order_acq_rel) != 1",
+      "after": "state.runtime[j].predecessors.fetch_sub(\n                1, std::memory_order_acq_rel) != 2"
+    },
+    "graph-duplicate-token": {
+      "unit": "task_graph",
+      "model": "graph",
+      "before": "node.work(token);",
+      "after": "node.work(token); node.work(token);"
+    },
+    "completion-drop-payload-destruction": {
+      "unit": "thread_pool",
+      "model": "completion",
+      "before": "      destroy(payload);",
+      "after": "      (void)destroy; (void)payload;"
+    },
+    "completion-drop-dependent-error": {
+      "unit": "thread_pool",
+      "model": "failure",
+      "before": "      if (failure) dependent->set_error(failure);",
+      "after": "      if (false) dependent->set_error(failure);"
+    },
+    "completion-ignore-first-error": {
+      "unit": "thread_pool",
+      "model": "failure",
+      "before": "  if (!error) {\n    error = std::move(failure);",
+      "after": "  if (false) {\n    error = std::move(failure);"
+    },
+    "graph-ignore-cancel": {
+      "unit": "task_graph",
+      "model": "schedule_completion",
+      "before": "      if (!state.cancel.load(std::memory_order_acquire)) {",
+      "after": "      if (true) {"
+    },
+    "scheduler-drop-stolen-sibling": {
+      "unit": "scheduler",
+      "model": "schedule_scheduler",
+      "before": "if (!destination.try_push(tasks[i])) std::terminate();",
+      "after": "(void)tasks[i];"
+    },
+    "scheduler-duplicate-stolen-sibling": {
+      "unit": "scheduler",
+      "model": "schedule_scheduler",
+      "before": "return tasks[0];",
+      "after": "return taken > 1 ? tasks[1] : tasks[0];"
+    },
+    "completion-ready-before-cleanup": {
+      "unit": "thread_pool",
+      "model": "schedule_completion",
+      "before": "    if (current->destroy_payload) {",
+      "after": "    current->ready.store(true, std::memory_order_release);\n    if (current->destroy_payload) {"
+    },
+    "completion-drop-fork-credit": {
+      "unit": "thread_pool",
+      "model": "schedule_completion",
+      "before": "  state_->credits.fetch_add(1, std::memory_order_relaxed);",
+      "after": "  (void)state_->credits;"
+    },
+    "pool-ready-before-packet-destroy": {
+      "unit": "thread_pool",
+      "model": "schedule_completion",
+      "before": "  ops->destroy(task);\n  DAGFLOW_FUZZ_POINT(task_after_destroy);\n  done.finish();",
+      "after": "  done.finish();\n  ops->destroy(task);\n  DAGFLOW_FUZZ_POINT(task_after_destroy);"
+    },
+    "scope-ignore-cancellation": {
+      "unit": "include/dagflow/task_scope.hpp",
+      "model": "schedule_completion",
+      "before": "    if (cancelled) return;",
+      "after": "    if (false && cancelled) return;"
+    },
+    "parking-drop-epoch": {
+      "unit": "parking_lot",
+      "model": "schedule_parking",
+      "before": "  waiter.epoch.fetch_add(1, std::memory_order_seq_cst);",
+      "after": "  (void)waiter.epoch;"
+    },
+    "parking-drop-notify": {
+      "unit": "parking_lot",
+      "model": "schedule_parking",
+      "before": "  waiter.cv.notify_one();",
+      "after": "  (void)waiter.cv;"
+    },
+    "graph-premature-lane-join": {
+      "unit": "task_graph",
+      "model": "schedule_complex",
+      "before": "runtime.lanes.fetch_sub(1, std::memory_order_acq_rel) == 1;",
+      "after": "runtime.lanes.fetch_sub(1, std::memory_order_acq_rel) >= 1;"
+    },
+    "graph-bypass-fanin": {
+      "unit": "task_graph",
+      "model": "schedule_complex",
+      "before": "if (state.nodes[j].predecessor_count > 1 &&",
+      "after": "if (false &&"
+    },
+    "shutdown-stop-before-drain": {
+      "unit": "thread_pool",
+      "model": "schedule_complex",
+      "before": "  DAGFLOW_FUZZ_POINT(shutdown_before_drain);\n  accounting_->wait();\n  stop_.store(true, std::memory_order_release);",
+      "after": "  stop_.store(true, std::memory_order_release);\n  DAGFLOW_FUZZ_POINT(shutdown_before_drain);\n  accounting_->wait();"
+    },
+    "deque-relax-publication": {
+      "unit": "include/dagflow/detail/chase_lev_deque.hpp",
+      "model": "schedule_scheduler",
+      "before": "    DAGFLOW_FUZZ_POINT(deque_before_publish);\n    bottom_.store(b + 1, std::memory_order_release);",
+      "after": "    DAGFLOW_FUZZ_POINT(deque_before_publish);\n    bottom_.store(b + 1, std::memory_order_relaxed);"
+    }
+  }
+}

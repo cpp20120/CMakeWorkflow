@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            executable: CMakeWorkflow
+          - os: macos-26
+            executable: CMakeWorkflow
+          - os: windows-latest
+            executable: CMakeWorkflow.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev
+      - name: Install Ninja on macOS
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Install Ninja on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ninja -y
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build solution
+        run: dotnet build CMakeWorkflow.slnx -c Release
+      - name: Campaign checks
+        run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
+      - name: Generic CMake integration
+        run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll bin/Release/net10.0/${{ matrix.executable }}
+      - name: Publish NativeAOT on Linux
+        if: runner.os == 'Linux'
+        run: dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -o out/native
+      - name: NativeAOT smoke
+        if: runner.os == 'Linux'
+        run: out/native/CMakeWorkflow workflow plan examples/hello/workflow.json

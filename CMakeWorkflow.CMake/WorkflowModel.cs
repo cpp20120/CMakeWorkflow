@@ -34,6 +34,7 @@ public sealed class WorkflowNode
     public List<string> Arguments { get; set; } = [];
     public string? WorkingDirectory { get; set; }
     public Dictionary<string, string> Environment { get; set; } = [];
+    public Dictionary<string, string> Options { get; set; } = [];
     public string? TestRegex { get; set; }
     public string? LabelRegex { get; set; }
     public List<string> Resources { get; set; } = [];
@@ -52,7 +53,7 @@ public sealed record WorkflowPlan(string File, string ManifestHash,
 
 public static class WorkflowPlanner
 {
-    internal static StringComparer PathComparer => OperatingSystem.IsWindows()
+    public static StringComparer PathComparer => OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     public static async Task<WorkflowPlan> LoadAsync(string file, IReadOnlyList<string> only,
@@ -79,7 +80,7 @@ public static class WorkflowPlanner
         foreach (var node in document.Nodes)
         {
             var deps = node.DependsOn.ToList();
-            if (node.Kind == "run")
+            if (node.Kind is "run" or "profile")
             {
                 if (node.From is null || !nodes.TryGetValue(node.From, out var source) || source.Kind != "build")
                     throw new ArgumentException($"{node.Id}: from must refer to a build node.");
@@ -124,7 +125,7 @@ public static class WorkflowPlanner
         var plan = new List<PlannedNode>();
         foreach (var node in ordered.Where(n => selected.Contains(n.Id)))
         {
-            var owner = node.Kind == "run" ? nodes[node.From!] : node;
+            var owner = node.Kind is "run" or "profile" ? nodes[node.From!] : node;
             var contextName = owner.Context!;
             if (!contexts.TryGetValue(contextName, out var context))
             {
@@ -191,9 +192,9 @@ public static class WorkflowPlanner
                 {
                     BuildContextSession.ValidateAdmission(context.Request, context.Observed);
                     target = CMakeInspection.Resolve(BuildContextSession.ResolutionRequest(context.Request), context.Observed, target.Target);
-                    if (node.Kind is "build" or "run")
+                    if (node.Kind is "build" or "run" or "profile")
                     {
-                        var observedTarget = CMakeInspection.RequireTarget(context.Observed, target, node.Kind == "run");
+                        var observedTarget = CMakeInspection.RequireTarget(context.Observed, target, node.Kind is "run" or "profile");
                         diagnostics.Add(new("Observed", $"Target type: {observedTarget.Type} ({observedTarget.Evidence}); native dependencies/custom commands remain CMake-owned."));
                     }
                 }
@@ -249,11 +250,12 @@ public static class WorkflowPlanner
 
     private static void ValidateNode(WorkflowNode n)
     {
-        if (n.Kind is not ("inspect" or "configure" or "build" or "invoke" or "run" or "ctest"))
-            throw new ArgumentException($"{n.Id}: kind must be inspect, configure, build, invoke, run or ctest.");
-        if (n.DependsOn is null || n.Arguments is null || n.Environment is null || n.Resources is null
+        if (n.Kind is not ("inspect" or "configure" or "build" or "invoke" or "run" or "profile" or "ctest"))
+            throw new ArgumentException($"{n.Id}: unknown workflow node kind.");
+        if (n.DependsOn is null || n.Arguments is null || n.Environment is null || n.Resources is null || n.Options is null
             || n.DependsOn.Any(string.IsNullOrWhiteSpace) || n.Arguments.Any(a => a is null || a.Contains('\0'))
             || n.Resources.Any(string.IsNullOrWhiteSpace)
+            || n.Options.Any(e => string.IsNullOrWhiteSpace(e.Key) || e.Value is null || e.Value.Contains('\0'))
             || n.Environment.Any(e => string.IsNullOrEmpty(e.Key) || e.Key.Contains('=') || e.Key.Contains('\0')
                 || e.Value is null || e.Value.Contains('\0')))
             throw new ArgumentException($"{n.Id}: invalid dependencies, arguments, environment or resources.");
@@ -266,8 +268,10 @@ public static class WorkflowPlanner
         if (n.Kind is "inspect" or "configure" && (n.Target is not null || n.From is not null || n.Arguments.Count > 0
                 || n.WorkingDirectory is not null || n.Environment.Count > 0))
             throw new ArgumentException($"{n.Id}: inspect/configure uses context only; no execution recipe or configure flags are inferred.");
-        if (n.Kind == "run" && (n.Context is not null || n.Target is not null))
-            throw new ArgumentException($"{n.Id}: run inherits target and context through from.");
+        if (n.Kind is "run" or "profile" && (n.Context is not null || n.Target is not null))
+            throw new ArgumentException($"{n.Id}: {n.Kind} inherits target and context through from.");
+        if (n.Kind != "profile" && n.Options.Count > 0)
+            throw new ArgumentException($"{n.Id}: options are only valid for profile.");
         if (n.Kind == "ctest" && (n.Target is not null || n.From is not null || n.Arguments.Count > 0))
             throw new ArgumentException($"{n.Id}: ctest uses context, testRegex and labelRegex, not target/from/arguments.");
         if (n.Kind != "ctest" && (n.TestRegex is not null || n.LabelRegex is not null))
@@ -282,4 +286,4 @@ public static class WorkflowPlanner
 [JsonSerializable(typeof(ObservedBuildContext))]
 [JsonSerializable(typeof(ConfigureProvenance))]
 [JsonSerializable(typeof(List<string>))]
-internal partial class WorkflowJson : JsonSerializerContext;
+public partial class WorkflowJson : JsonSerializerContext;

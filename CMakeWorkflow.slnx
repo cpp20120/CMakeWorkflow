@@ -1,0 +1,17 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/tests/">
+    <Project Path="tests/CMakeWorkflow.IntegrationTests.csproj" />
+  </Folder>
+  <Project Path="CMakeWorkflow.Campaigns.Tests/CMakeWorkflow.Campaigns.Tests.csproj" />
+  <Project Path="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj" />
+  <Project Path="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj" />
+  <Project Path="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj" />
+  <Project Path="CMakeWorkflow.csproj" />
+  <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj" />
+  <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />
+</Solution>

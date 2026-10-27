@@ -33,6 +33,7 @@ public sealed class NodeResult
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public double? DurationSeconds { get; set; }
+    public double? ProcessDurationSeconds { get; set; }
     public int? ExitCode { get; set; }
     public string? Executable { get; set; }
     public string? ExecutableSha256 { get; set; }
@@ -50,11 +51,13 @@ public sealed class NodeResult
     public BuildContextSessionState? SessionBefore { get; set; }
     public BuildContextSessionState? SessionAfter { get; set; }
     public string ExperimentResult { get; set; } = "NotRun";
+    public Dictionary<string, string> Outputs { get; set; } = [];
 }
 
 public static class WorkflowCommand
 {
-    public static async Task<int> ExecuteAsync(string command, string[] args, CancellationToken ct)
+    public static async Task<int> ExecuteAsync(string command, string[] args, CancellationToken ct,
+        IWorkflowOperationExecutor? extension = null, Action<string>? onRunDirectory = null)
     {
         if (args.Length == 0 || args[0].StartsWith('-'))
             throw new ArgumentException("workflow plan/run requires a JSON file.");
@@ -105,14 +108,16 @@ public static class WorkflowCommand
         var output = Path.Combine(Path.GetFullPath(results),
             $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(output);
+        onRunDirectory?.Invoke(output);
         Console.Error.WriteLine($"[CMakeWorkflow] Results: {output}");
-        return await WorkflowRunner.RunAsync(plan, jobs, output, ct);
+        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension);
     }
 }
 
 public static class WorkflowRunner
 {
-    public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct)
+    public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
+        IWorkflowOperationExecutor? extension = null)
     {
         var report = new WorkflowReport
         {
@@ -177,9 +182,9 @@ public static class WorkflowRunner
                     // Snapshot bytes only for builds that have a selected dependent run.
                     // Build-only workflows need not hash potentially large binaries.
                     var snapshot = node.Definition.Kind == "build" && plan.Nodes.Any(p =>
-                        p.Definition.Kind == "run" && p.Definition.From == node.Definition.Id);
+                        p.Definition.Kind is "run" or "profile" && p.Definition.From == node.Definition.Id);
                     active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
-                        snapshot, sessions[node.Target.BuildDirectory], output, stop.Token)));
+                        snapshot, sessions[node.Target.BuildDirectory], output, stop.Token, extension)));
                 }
                 await SaveAsync(report, output);
                 if (active.Count == 0)
@@ -238,7 +243,8 @@ public static class WorkflowRunner
         || left.Definition.Resources.Intersect(right.Definition.Resources, StringComparer.Ordinal).Any();
 
     private static async Task<NodeResult> ExecuteAsync(PlannedNode node, NodeResult? prerequisite,
-        bool snapshotExecutable, BuildContextSession session, string output, CancellationToken ct)
+        bool snapshotExecutable, BuildContextSession session, string output, CancellationToken ct,
+        IWorkflowOperationExecutor? extension)
     {
         var definition = node.Definition;
         var result = new NodeResult
@@ -285,6 +291,7 @@ public static class WorkflowRunner
                         result.Arguments = command.Arguments.ToList();
                         break;
                     case "run":
+                    case "profile":
                         if (prerequisite?.BuildVerification is not { Verification: "BackendSucceeded" } verified
                             || verified.Target != target)
                             throw new InvalidOperationException("Run requires a successful native build verification for this exact target/configuration.");
@@ -314,9 +321,21 @@ public static class WorkflowRunner
                         if (definition.LabelRegex is not null) result.Arguments.AddRange(["-L", definition.LabelRegex]);
                         break;
                 }
-                result.ExitCode = await RunProcessAsync(result, definition.Environment, output, deadline.Token);
+                if (definition.Kind == "profile")
+                {
+                    if (extension is null || !extension.Supports("profile"))
+                        throw new InvalidOperationException("Profile operation is unavailable in this CLI.");
+                    var operation = await extension.ExecuteAsync(new WorkflowOperationRequest(
+                        "profile", result.Executable!, result.Arguments, node.WorkingDirectory,
+                        definition.Environment, definition.Options, output, definition.Id), deadline.Token);
+                    result.ExitCode = operation.ExitCode;
+                    result.Outputs = new Dictionary<string, string>(operation.Outputs);
+                    result.ExperimentResult = operation.Status;
+                    if (operation.Message is not null) result.Error = operation.Message;
+                }
+                else result.ExitCode = await RunProcessAsync(result, definition.Environment, output, deadline.Token);
                 result.Status = result.ExitCode == 0 ? "succeeded" : "failed";
-                if (result.ExitCode != 0) result.Error = $"Process exited with code {result.ExitCode}.";
+                if (result.ExitCode != 0) result.Error ??= $"Process exited with code {result.ExitCode}.";
                 // The command's result remains factual even if subsequent context
                 // validation rejects the node and blocks dependent execution.
                 if (definition.Kind is "run" or "ctest" or "invoke") result.ExperimentResult = result.Status;
@@ -365,7 +384,7 @@ public static class WorkflowRunner
         {
             result.Status = ct.IsCancellationRequested ? "canceled" : "failed";
             result.Error = ct.IsCancellationRequested ? "Canceled." : $"Timed out after {definition.TimeoutSeconds} seconds.";
-            if (definition.Kind is "run" or "ctest" or "invoke" && result.Executable is not null)
+            if (definition.Kind is "run" or "profile" or "ctest" or "invoke" && result.Executable is not null)
                 result.ExperimentResult = ct.IsCancellationRequested ? "canceled" : "timedOut";
         }
         catch (Exception error)
@@ -459,6 +478,7 @@ public static class WorkflowRunner
         await using var stdout = File.Create(Path.Combine(output, result.Stdout!));
         await using var stderr = File.Create(Path.Combine(output, result.Stderr!));
         ct.ThrowIfCancellationRequested();
+        var processTimer = Stopwatch.StartNew();
         using var process = Process.Start(info) ?? throw new IOException($"Could not start {result.Executable}.");
         process.StandardInput.Close();
         var copies = Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(stdout),
@@ -471,6 +491,8 @@ public static class WorkflowRunner
         }
         finally
         {
+            processTimer.Stop();
+            result.ProcessDurationSeconds = processTimer.Elapsed.TotalSeconds;
             if (!process.HasExited)
             {
                 try { process.Kill(entireProcessTree: true); }

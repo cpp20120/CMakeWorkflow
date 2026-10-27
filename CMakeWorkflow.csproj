@@ -9,6 +9,11 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="src/*.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="WorkflowReportCommand.cs" />
+    <ProjectReference Include="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj" />
+    <ProjectReference Include="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj" />
+    <ProjectReference Include="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj" />
+    <ProjectReference Include="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />
   </ItemGroup>
 </Project>
