@@ -41,9 +41,17 @@ jobs:
         run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
       - name: Generic CMake integration
         run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll bin/Release/net10.0/${{ matrix.executable }}
+      - name: History checks
+        run: dotnet CMakeWorkflow.History.Tests/bin/Release/net10.0/CMakeWorkflow.History.Tests.dll
       - name: Publish NativeAOT on Linux
         if: runner.os == 'Linux'
         run: dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -o out/native
       - name: NativeAOT smoke
         if: runner.os == 'Linux'
-        run: out/native/CMakeWorkflow workflow plan examples/hello/workflow.json
+        shell: bash
+        run: |
+          out/native/CMakeWorkflow workflow plan examples/hello/workflow.json
+          mkdir -p out/history-smoke/run
+          printf '%s\n' '{"schemaVersion":1,"workflow":"smoke","manifestHash":"test","startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:00:01Z","status":"succeeded","nodes":[]}' > out/history-smoke/run/run.json
+          out/native/CMakeWorkflow history import out/history-smoke/run --db out/history-smoke/history.sqlite
+          out/native/CMakeWorkflow history runs --db out/history-smoke/history.sqlite --json

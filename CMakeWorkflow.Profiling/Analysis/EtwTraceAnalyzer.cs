@@ -194,7 +194,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             readyLatencyCount += counts.ReadyLatencyCount;
             readyLatencyMilliseconds += counts.ReadyLatencyMilliseconds;
             runningMilliseconds += counts.RunningMilliseconds;
-            threadRows.Add(new JsonObject
+            threadRows.Add((JsonNode?)new JsonObject
             {
                 ["threadId"] = tid,
                 ["cpuSamples"] = counts.Samples,

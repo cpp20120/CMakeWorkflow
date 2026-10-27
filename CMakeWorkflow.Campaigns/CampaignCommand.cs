@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace CMakeWorkflow.Campaigns;
 
 public static class CampaignCommand
@@ -33,18 +37,25 @@ public static class CampaignCommand
         switch (args[0], args[1])
         {
             case ("mutation", "run"):
+            {
+                var report = Option(args, "--report") ?? Path.Combine(source,
+                    Option(args, "--suite") == "queue" ? "out/queue-mutations/report.json"
+                        : "out/protocol-mutations/report.json");
                 if (Option(args, "--suite") == "queue")
-                    return await QueueMutationCampaign.RunAsync(source,
+                    return await RunWithCompletionAsync(report, "mutation", () =>
+                        QueueMutationCampaign.RunAsync(source,
                         Option(args, "--cxx") ?? "c++", Option(args, "--seed") ?? "496833221358",
                         Integer(args, "--cases", 32), Integer(args, "--steps", 36),
                         Integer(args, "--timeout", 20),
-                        Option(args, "--report") ?? Path.Combine(source, "out/queue-mutations/report.json"), ct);
-                return await MutationCampaign.RunAsync(source,
+                        report, ct));
+                return await RunWithCompletionAsync(report, "mutation", () =>
+                    MutationCampaign.RunAsync(source,
                     Option(args, "--suite") ?? "all", Option(args, "--cxx") ?? "c++",
                     Option(args, "--seed") ?? "496833221358",
                     Integer(args, "--cases", 48), Integer(args, "--steps", 48),
                     Integer(args, "--timeout", 30),
-                    Option(args, "--report") ?? Path.Combine(source, "out/protocol-mutations/report.json"), ct);
+                    report, ct));
+            }
             case ("fuzz", "seed"):
                 return await FuzzSeedCampaign.RunAsync(
                     Option(args, "--layer") ?? throw new ArgumentException("--layer is required."),
@@ -66,13 +77,53 @@ public static class CampaignCommand
                     Option(args, "--run-dir") ?? throw new ArgumentException("--run-dir is required."),
                     Option(args, "--output"), args.Contains("--coverage"), ct);
             case ("weak-memory", "run"):
-                return await WeakMemoryCampaign.RunAsync(source,
+            {
+                var report = Option(args, "--report") ?? Path.Combine(source, "out/weak-memory/report.json");
+                return await RunWithCompletionAsync(report, "weak-memory", () =>
+                    WeakMemoryCampaign.RunAsync(source,
                     Option(args, "--protocol") ?? "all",
                     Option(args, "--relacy") ?? throw new ArgumentException("--relacy is required."),
                     Option(args, "--cxx") ?? "c++", Integer(args, "--timeout", 60),
-                    Option(args, "--report") ?? Path.Combine(source, "out/weak-memory/report.json"), ct);
+                    report, ct));
+            }
             default:
                 throw new ArgumentException($"Unknown DagFlow campaign: {args[0]} {args[1]}");
+        }
+    }
+
+    private static async Task<int> RunWithCompletionAsync(string reportPath, string campaign,
+        Func<Task<int>> execute)
+    {
+        reportPath = Path.GetFullPath(reportPath);
+        var started = DateTimeOffset.UtcNow;
+        var status = "failed";
+        var marker = Path.Combine(Path.GetDirectoryName(reportPath)!, "campaign-completion.json");
+        if (File.Exists(marker)) File.Delete(marker);
+        try
+        {
+            var code = await execute();
+            status = code == 0 ? "succeeded" : "failed";
+            return code;
+        }
+        catch (OperationCanceledException)
+        {
+            status = "canceled";
+            throw;
+        }
+        finally
+        {
+            if (File.Exists(reportPath)
+                && File.GetLastWriteTimeUtc(reportPath) >= started.UtcDateTime)
+            {
+                var value = new CampaignCompletion(1, campaign, Path.GetFileName(reportPath),
+                    Convert.ToHexString(SHA256.HashData(
+                        await File.ReadAllBytesAsync(reportPath))).ToLowerInvariant(),
+                    started, DateTimeOffset.UtcNow, status);
+                var temporary = marker + ".tmp";
+                await File.WriteAllTextAsync(temporary,
+                    JsonSerializer.Serialize(value, CampaignCompletionJson.Default.CampaignCompletion) + "\n");
+                File.Move(temporary, marker, overwrite: true);
+            }
         }
     }
 
@@ -93,3 +144,10 @@ public static class CampaignCommand
         return result;
     }
 }
+
+internal sealed record CampaignCompletion(int SchemaVersion, string Campaign, string Report,
+    string ReportSha256, DateTimeOffset StartedAt, DateTimeOffset FinishedAt, string Status);
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(CampaignCompletion))]
+internal partial class CampaignCompletionJson : JsonSerializerContext;

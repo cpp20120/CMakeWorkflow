@@ -91,6 +91,8 @@ adapter; CMake File API data is its normal target source.
   ownership and the workflow graph.
 - `CMakeWorkflow.Profiling/` provides platform capture and analysis operations.
 - `CMakeWorkflow.Campaigns/` provides optional project-specific campaigns.
+- `CMakeWorkflow.History/` indexes completed run artifacts in local SQLite
+  for later queries and descriptive comparisons.
 - `tests/`, `CMakeWorkflow.Profiling.Tests/` and
   `CMakeWorkflow.Campaigns.Tests/` contain executable checks.
 
@@ -104,3 +106,53 @@ dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -c Release -- b
 
 Unix SIGINT cases run on Unix hosts. Windows cancellation behavior requires
 execution on a Windows runner.
+
+## Local history
+
+History is optional. Workflow execution never writes to the catalog. The
+original result directories remain authoritative; the SQLite file is a
+disposable index and can be rebuilt by importing the same roots again.
+
+```sh
+CMakeWorkflow history import out/results --recursive --db out/history.sqlite
+CMakeWorkflow history runs --db out/history.sqlite --limit 50
+CMakeWorkflow history runs --db out/history.sqlite --status failed --json
+CMakeWorkflow history show RUN_ID --db out/history.sqlite
+CMakeWorkflow history metrics --run RUN_ID --db out/history.sqlite --json
+CMakeWorkflow history query --metric process_wall_time --variant main --db out/history.sqlite
+CMakeWorkflow history compare BASELINE_RUN CANDIDATE_RUN --db out/history.sqlite
+```
+
+Without `--db`, the catalog lives under the host's local application data
+directory at `CMakeWorkflow/history.sqlite`. Queries use the index without
+rescanning report files. `history show` checks whether linked artifact paths
+still exist, and `history runs` marks missing source directories. A moved
+directory can be imported at its new path; it receives a new local run ID.
+
+The importer reads completed `run.json` schema 1, completed fuzz `report.json`
+schema 1, standalone `*.results.json` profile captures and campaign reports
+with a `campaign-completion.json` marker. Mutation and weak-memory commands
+write that marker after finishing, with the report's SHA-256. It also indexes
+available `counter-comparison.json` schema 1, single-run perf counters in
+`analysis.json`, and ETW normalized summaries. `comparison.json`,
+`runs.jsonl` and capture manifests are linked as
+artifacts. Raw traces, executables, logs and corpora are never stored in SQLite
+or read for indexing. Active reports are skipped. Older mutation and weak-memory
+reports without a completion marker cannot be distinguished from partial
+reports, so they are skipped.
+
+Database schema version 2 uses `PRAGMA user_version`; opening a fresh database
+applies migrations 0→1→2 transactionally, and an existing version 1 catalog is
+upgraded in place. Each run records its indexer version so a newer importer
+can refresh derived measurements even if source files are unchanged. Imports
+are transactional and idempotent. Unsupported report schema versions fail
+with the path and expected version.
+
+Comparison retains individual timing samples and reports count, median,
+minimum, maximum, mean and population standard deviation, plus absolute and
+percentage median changes. It checks metric, unit, method, variant, scenario
+and recorded workload arguments. Missing hardware or environment identity is
+reported as unverified; perf counters and ETW summaries keep distinct methods.
+No automatic regression verdict is emitted. A later statistical detector would
+need controlled repeated measurements, recorded machine and workload identity,
+and a stated noise and multiple-comparison policy.

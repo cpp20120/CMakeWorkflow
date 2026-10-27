@@ -241,7 +241,7 @@ public static class FuzzRunCampaign
                 System.Text.Encoding.UTF8.GetBytes(artifact))).ToLowerInvariant()[..16] + ".log";
             var logPath = Path.Combine(logDirectory, logName);
             await File.WriteAllTextAsync(logPath, result.Output, ct);
-            findings.Add(new System.Text.Json.Nodes.JsonObject
+            findings.Add((System.Text.Json.Nodes.JsonNode?)new System.Text.Json.Nodes.JsonObject
             {
                 ["artifact"] = artifact,
                 ["sha256"] = await CommandExecution.Sha256Async(path, ct),

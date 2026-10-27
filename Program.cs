@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CMakeWorkflow.Campaigns;
 using CMakeWorkflow.Profiling;
+using CMakeWorkflow.History;
 
 namespace CMakeWorkflow;
 
@@ -12,6 +13,8 @@ public static class Program
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
         try
         {
+            if (args.Length > 0 && args[0] == "history")
+                return await HistoryCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 1 && args[0] == "dagflow" && args[1] == "profile")
                 return await ProfileCommand.ExecuteAsync(args[2..], cts.Token);
             if (args.Length > 0 && args[0] == "profile")
@@ -115,6 +118,7 @@ public static class Program
     }
 
     private static void Usage() => Console.Error.WriteLine(
+        "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare> ...\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz seed --layer NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz run --build-dir DIR --layer NAME [--duration SECONDS] [--corpus DIR] [--replay-only]\n" +

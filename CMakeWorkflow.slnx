@@ -11,6 +11,8 @@
   <Project Path="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj" />
   <Project Path="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj" />
   <Project Path="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj" />
+  <Project Path="CMakeWorkflow.History/CMakeWorkflow.History.csproj" />
+  <Project Path="CMakeWorkflow.History.Tests/CMakeWorkflow.History.Tests.csproj" />
   <Project Path="CMakeWorkflow.csproj" />
   <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj" />
   <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />

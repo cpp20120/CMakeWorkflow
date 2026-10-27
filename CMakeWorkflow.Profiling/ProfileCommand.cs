@@ -267,7 +267,7 @@ public static class ProfileAnalyzer
                 item["analysisStatus"] = "ETL conversion requires Windows";
             }
             else item["report"] = null;
-            items.Add(item);
+            items.Add((JsonNode?)item);
         }
         var resultFile = Path.Combine(directory, "analysis.json");
         await File.WriteAllTextAsync(resultFile,
@@ -312,8 +312,8 @@ public static class ProfileAnalyzer
         {
             var seconds = new JsonArray();
             foreach (var value in group.Value)
-                seconds.Add(JsonValue.Create(value, ProfileJson.Default.Double));
-            variants.Add(new JsonObject
+                seconds.Add((JsonNode?)JsonValue.Create(value, ProfileJson.Default.Double));
+            variants.Add((JsonNode?)new JsonObject
             {
                 ["name"] = group.Key, ["count"] = group.Value.Count,
                 ["seconds"] = seconds,
@@ -392,7 +392,7 @@ public static class ProfileAnalyzer
                         ? JsonValue.Create(counter.Value / reference!.Value, ProfileJson.Default.Double) : null
                 };
             }
-            rows.Add(new JsonObject { ["name"] = name, ["events"] = events });
+            rows.Add((JsonNode?)new JsonObject { ["name"] = name, ["events"] = events });
         }
         var report = new JsonObject
         {
