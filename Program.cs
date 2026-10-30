@@ -18,6 +18,8 @@ public static class Program
                 return await Host.HostCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "history")
                 return await HistoryCommand.ExecuteAsync(args[1..], cts.Token);
+            if (args.Length > 0 && args[0] == "env")
+                return await EnvironmentCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "tooling")
                 return await ToolingCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "setup")
@@ -234,6 +236,7 @@ public static class Program
     private static void Usage() => Console.Error.WriteLine(
         "Usage: CMakeWorkflow host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--json]; fix: [--yes|--dry-run] [--pm NAME] [--no-fallback]\n" +
         "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare|detect> ...\n" +
+        "Usage: CMakeWorkflow env <doctor|plan|setup> REQUIREMENTS.json [--json] [--yes --plan-sha SHA256] [--allow-system-changes]\n" +
         "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz seed --layer NAME [--source-dir DIR]\n" +

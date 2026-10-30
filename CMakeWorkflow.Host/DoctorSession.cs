@@ -30,7 +30,7 @@ public sealed partial class DoctorSession(Func<string, ToolingService> createToo
         if (previous is not null && previous != directory)
             throw new InvalidOperationException("Reconnect to select a different workspace.");
         return Task.FromResult(new HostInfo(1, Environment.ProcessId, directory,
-            ["tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress", "request-cancellation"],
+            ["tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress", "environment/plan", "environment/apply", "request-cancellation"],
             ToolCatalog.AllProfiles.Select(p => new ToolingProfileView(p.Id, p.Description, p.Tools)).ToList()));
     }
 

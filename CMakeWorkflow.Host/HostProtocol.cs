@@ -19,6 +19,8 @@ public sealed record FixPlan(int SchemaVersion, string PlanId, DateTimeOffset Ex
     string? RunDirectory = null, string? RunSnapshot = null);
 public sealed record ApplyFixRequest(string OperationId, string PlanId);
 public sealed record FixProgress(string OperationId, int Sequence, string Stage, string? Tool, string? Message);
+public sealed record EnvironmentPlanRequest(string RequirementsPath);
+public sealed record EnvironmentApplyRequest(string RequirementsPath, string ApprovalSha256, bool AllowSystemChanges);
 public sealed record FixResult(int SchemaVersion, string Status, ToolingResult? Installation,
     ToolingPlan? Verification, string[] Diagnostics, bool ReadyToResume = false);
 
@@ -31,6 +33,10 @@ public partial interface IHostRpc
     Task<ToolingPlan> DoctorAsync(DoctorRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("tooling/planFix")]
     Task<FixPlan> PlanFixAsync(PlanFixRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("environment/plan")]
+    Task<HostPreparationPlan> EnvironmentPlanAsync(EnvironmentPlanRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("environment/apply")]
+    Task<HostPreparationResult> EnvironmentApplyAsync(EnvironmentApplyRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("tooling/applyFix")]
     Task<FixResult> ApplyFixAsync(ApplyFixRequest request, CancellationToken cancellationToken);
 }
@@ -57,5 +63,9 @@ public partial interface IHostNotifications
 [JsonSerializable(typeof(ApplyFixRequest))]
 [JsonSerializable(typeof(FixProgress))]
 [JsonSerializable(typeof(FixResult))]
+[JsonSerializable(typeof(EnvironmentPlanRequest))]
+[JsonSerializable(typeof(EnvironmentApplyRequest))]
+[JsonSerializable(typeof(HostPreparationPlan))]
+[JsonSerializable(typeof(HostPreparationResult))]
 [JsonSerializable(typeof(StreamJsonRpc.Protocol.CommonErrorData))]
 public partial class HostJson : JsonSerializerContext;

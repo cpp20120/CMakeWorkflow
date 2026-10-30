@@ -14,6 +14,107 @@ var root = Path.Combine(Path.GetTempPath(), "cmake-workflow-tooling-" + Guid.New
 Directory.CreateDirectory(root);
 try
 {
+    var settingBackend = new FakeHostSettings();
+    settingBackend.Values["/proc/sys/kernel/perf_event_paranoid"] = "3";
+    settingBackend.Values["/sys/devices/system/cpu/cpufreq/policy0/scaling_governor"] = "powersave";
+    var hostRequirements = new HostRequirements(1, ["native"], 1, "performance");
+    var hostChanges = HostSettingsProvisioner.Plan(hostRequirements, settingBackend,
+        ["/sys/devices/system/cpu/cpufreq/policy0/scaling_governor"]);
+    Check(hostChanges.Count == 2 && settingBackend.Writes == 0, "host provisioner dry-run");
+    settingBackend.Values["/proc/sys/kernel/perf_event_paranoid"] = "2";
+    try { HostSettingsProvisioner.Apply(hostChanges, settingBackend, default); throw new Exception("host drift accepted"); }
+    catch (InvalidOperationException) { }
+    Check(settingBackend.Writes == 0, "preflight must reject stale plan without writes");
+    settingBackend.Values["/proc/sys/kernel/perf_event_paranoid"] = "3";
+    HostSettingsProvisioner.Apply(hostChanges, settingBackend, default);
+    Check(settingBackend.Writes == 2 && settingBackend.Values["/proc/sys/kernel/perf_event_paranoid"] == "1",
+        "typed host changes and recheck");
+    try { HostSettingsProvisioner.Plan(hostRequirements, settingBackend, ["/tmp/evil/cpufreq/scaling_governor"]); throw new Exception("arbitrary path accepted"); }
+    catch (InvalidDataException) { }
+    // Two logical CPUs can share one cpufreq policy; provision only once.
+    var shared = new FakeHostSettings();
+    const string policy0 = "/sys/devices/system/cpu/cpufreq/policy0/scaling_governor";
+    const string policy4 = "/sys/devices/system/cpu/cpufreq/policy4/scaling_governor";
+    shared.Values[policy0] = "powersave";
+    shared.Values[policy4] = "powersave";
+    var sharedPlan = HostSettingsProvisioner.Plan(new HostRequirements(1, ["native"], CpuGovernor: "performance"),
+        shared, [policy0, policy4]);
+    Check(sharedPlan.Count == 2, "one write per cpufreq policy");
+    HostSettingsProvisioner.Apply(sharedPlan, shared, default);
+    Check(shared.Writes == 2 && shared.Values[policy0] == "performance" && shared.Values[policy4] == "performance",
+        "shared policies applied exactly once");
+    shared.Values["/proc/sys/kernel/perf_event_paranoid"] = "1";
+    try { HostSettingsProvisioner.Plan(hostRequirements, shared,
+        ["/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"]); throw new Exception("CPU alias accepted"); }
+    catch (InvalidDataException) { }
+    // A write failure after the first setting must remain observable as partial mutation.
+    var partial = new FakeHostSettings();
+    partial.Values["/proc/sys/kernel/perf_event_paranoid"] = "3";
+    partial.Values[policy0] = "powersave";
+    var partialPlan = HostSettingsProvisioner.Plan(hostRequirements, partial, [policy0]);
+    partial.FailOnWrite = policy0;
+    try { HostSettingsProvisioner.Apply(partialPlan, partial, default); throw new Exception("partial failure accepted"); }
+    catch (IOException) { }
+    Check(partial.Writes == 1 && partial.Values["/proc/sys/kernel/perf_event_paranoid"] == "1" &&
+        partial.Values[policy0] == "powersave", "partial host change is not rolled back or hidden");
+    // End-to-end environment acceptance through the injectable sysfs backend.
+    var acceptancePath = Path.Combine(root, "environment-acceptance.json");
+    File.WriteAllText(acceptancePath,
+        """{"schemaVersion":1,"toolProfiles":["native"],"maxPerfEventParanoid":1,"cpuGovernor":"performance"}""");
+    var acceptanceRuntime = new FakeRuntime();
+    acceptanceRuntime.Add("cmake", "cmake version 4.4.4");
+    acceptanceRuntime.Add("ctest", "ctest version 4.4.4");
+    acceptanceRuntime.Add("c++", "g++ version 16.2.1");
+    acceptanceRuntime.Add("ninja", "1.13.2");
+    var acceptanceService = new ToolingService(acceptanceRuntime, new FakeInstaller(acceptanceRuntime));
+    var acceptanceBackend = new FakeHostSettings();
+    acceptanceBackend.Values["/proc/sys/kernel/perf_event_paranoid"] = "2";
+    acceptanceBackend.Values[policy0] = "powersave";
+    var acceptancePaths = new[] { policy0 };
+    var accepted = await HostPreparation.InspectAsync(acceptancePath, acceptanceService,
+        PackageManagerKind.None, null, default, acceptanceBackend, acceptancePaths);
+    Check(!accepted.Ready && accepted.Tools.Ready && accepted.SystemChanges?.Count == 2,
+        "acceptance plan reports sysfs drift with ready tools");
+    Check(acceptanceBackend.Writes == 0, "environment plan must be read-only");
+    var denied = false;
+    try { await HostPreparation.ApplyAsync(accepted, acceptanceService, PackageManagerKind.None,
+        null, default, backend: acceptanceBackend, cpuPaths: acceptancePaths); }
+    catch (InvalidOperationException) { denied = true; }
+    Check(denied && acceptanceBackend.Writes == 0, "system write without approval accepted");
+    acceptanceBackend.Values[policy0] = "schedutil";
+    denied = false;
+    try { await HostPreparation.ApplyAsync(accepted, acceptanceService, PackageManagerKind.None,
+        null, default, allowSystemChanges: true, backend: acceptanceBackend, cpuPaths: acceptancePaths); }
+    catch (InvalidOperationException) { denied = true; }
+    Check(denied && acceptanceBackend.Writes == 0, "stale approval changed system state");
+    acceptanceBackend.Values[policy0] = "powersave";
+    var acceptanceAudit = Path.Combine(root, "acceptance-audit");
+    var applied = await HostPreparation.ApplyAsync(accepted, acceptanceService, PackageManagerKind.None,
+        null, default, allowSystemChanges: true, backend: acceptanceBackend,
+        cpuPaths: acceptancePaths, auditDirectory: acceptanceAudit);
+    Check(applied.Ready && applied.Checked.Findings.All(f => f.Status == "ready") &&
+        acceptanceBackend.Writes == 2, "Apply did not recheck backend state");
+    var auditLines = File.ReadAllLines(applied.AuditPath!);
+    Check(auditLines.Length == 3 && auditLines[0].Contains("applying") &&
+        auditLines[1].Contains("applied") && auditLines[2].Contains("verified"),
+        "successful environment audit stages missing");
+    // Independent partial-apply scenario must retain the first write and record failure.
+    acceptanceBackend.Values["/proc/sys/kernel/perf_event_paranoid"] = "2";
+    acceptanceBackend.Values[policy0] = "powersave";
+    acceptanceBackend.FailOnWrite = policy0;
+    var partialAccepted = await HostPreparation.InspectAsync(acceptancePath, acceptanceService,
+        PackageManagerKind.None, null, default, acceptanceBackend, acceptancePaths);
+    var partialFailed = false;
+    try { await HostPreparation.ApplyAsync(partialAccepted, acceptanceService, PackageManagerKind.None,
+        null, default, allowSystemChanges: true, backend: acceptanceBackend,
+        cpuPaths: acceptancePaths, auditDirectory: acceptanceAudit); }
+    catch (IOException) { partialFailed = true; }
+    Check(partialFailed && acceptanceBackend.Values["/proc/sys/kernel/perf_event_paranoid"] == "1" &&
+        acceptanceBackend.Values[policy0] == "powersave" &&
+        File.ReadAllLines(applied.AuditPath!).Last().Contains("partial_or_failed"),
+        "partial Apply was not preserved and audited");
+    acceptanceBackend.FailOnWrite = null;
+    Console.WriteLine("Environment acceptance checks passed: approval, drift, audit and recheck.");
     Check(ToolCatalog.ResolveProfiles(["profiling"], ToolPlatform.Linux)
         .Any(x => x.Id == "perf"), "Linux profile backend");
     Check(ToolCatalog.ResolveProfiles(["profiling"], ToolPlatform.Windows)
@@ -183,4 +284,13 @@ sealed class ReleaseHandler(byte[] archive, string digest, string architecture) 
         else response.Content = new ByteArrayContent(archive);
         return Task.FromResult(response);
     }
+}
+
+sealed class FakeHostSettings : IHostSettingsBackend
+{
+    public Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal);
+    public int Writes { get; private set; }
+    public string? Read(string path) => Values.GetValueOrDefault(path);
+    public string? FailOnWrite;
+    public void Write(string path, string value) { if (path == FailOnWrite) throw new IOException("Simulated sysfs write failure"); Writes++; Values[path] = value; }
 }
