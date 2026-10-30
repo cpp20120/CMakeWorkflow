@@ -11,8 +11,16 @@ static async Task Reject<T>(Func<Task> action, string name) where T : Exception
 
 var root = Path.Combine(Path.GetTempPath(), "cmwf-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
+// Keep Unix socket endpoints short even when the CI workspace/temp path is long.
+var socketDirectory = OperatingSystem.IsWindows() ? null
+    : Path.Combine("/tmp", "cw-" + Guid.NewGuid().ToString("N")[..12]);
 try
 {
+    if (socketDirectory is not null)
+    {
+        Directory.CreateDirectory(socketDirectory);
+        File.SetUnixFileMode(socketDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
     await FixTests.RunAsync(root);
     using var fixes = new FixCoordinator(Path.Combine(root, "locks"));
     var runtime = new FakeRuntime();
@@ -61,14 +69,14 @@ try
     await Reject<ArgumentException>(() => Task.FromResult(LocalTransport.PipeName(@"\\remote\pipe\test")), "remote pipes forbidden");
     if (!OperatingSystem.IsWindows())
     {
-        File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        LocalTransport.ValidateUnixEndpoint(Path.Combine(root, "rpc.sock"));
-        File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.OtherExecute);
-        await Reject<ArgumentException>(() => Task.Run(() => LocalTransport.ValidateUnixEndpoint(Path.Combine(root, "rpc.sock"))), "public socket directory forbidden");
-        File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        File.SetUnixFileMode(socketDirectory!, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        LocalTransport.ValidateUnixEndpoint(Path.Combine(socketDirectory!, "rpc.sock"));
+        File.SetUnixFileMode(socketDirectory!, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.OtherExecute);
+        await Reject<ArgumentException>(() => Task.Run(() => LocalTransport.ValidateUnixEndpoint(Path.Combine(socketDirectory!, "rpc.sock"))), "public socket directory forbidden");
+        File.SetUnixFileMode(socketDirectory!, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
     var endpoint = OperatingSystem.IsWindows() ? @"\\.\pipe\cmakeworkflow-" + Guid.NewGuid().ToString("N")
-        : Path.Combine(root, "rpc.sock");
+        : Path.Combine(socketDirectory!, "rpc.sock");
     using (var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
     {
         var server = HostServer.RunAsync(endpoint, lifetime.Token);
@@ -89,7 +97,15 @@ try
     if (!OperatingSystem.IsWindows()) Check(!File.Exists(endpoint), "socket removed after shutdown");
     Console.WriteLine("Host contract, session isolation, progress, cancellation and transport validation passed.");
 }
-finally { Directory.Delete(root, recursive: true); }
+finally
+{
+    if (socketDirectory is not null && Directory.Exists(socketDirectory))
+    {
+        File.SetUnixFileMode(socketDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Directory.Delete(socketDirectory, recursive: true);
+    }
+    Directory.Delete(root, recursive: true);
+}
 
 sealed class NoInstaller : ICMakeInstaller
 {

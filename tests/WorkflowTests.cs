@@ -47,7 +47,7 @@ internal static class WorkflowTests
         // Adapted from outcome-unknown-tests: observe the real invoke target's
         // append-only output, not an unrelated marker that a replay cannot touch.
         var actionMarker = Path.Combine(build, "action-invocations.txt");
-        Check(File.ReadAllText(actionMarker) == "invoked\n", "Invoke marker is not connected to the fixture target");
+        Check(File.ReadAllText(actionMarker).ReplaceLineEndings("\n") == "invoked\n", "Invoke marker is not connected to the fixture target");
         var interruptedManifest = Path.Combine(root, "interleaved.json");
         var savedBuildFingerprint = Fingerprint(build);
         foreach (var scenario in new[] { "running", "needs_attention", "phase-only", "admission-only" })
@@ -78,7 +78,7 @@ internal static class WorkflowTests
             RunCli(1, "workflow", "resume", interrupted);
             RunCli(1, "workflow", "run", interruptedManifest, "--resume-dir", interrupted);
             Check(File.ReadAllText(file) == checkpoint && !File.Exists(file + ".tmp"), "Repeated resume changed quarantined checkpoint");
-            Check(File.ReadAllText(actionMarker) == "invoked\n" && Fingerprint(build) == savedBuildFingerprint,
+            Check(File.ReadAllText(actionMarker).ReplaceLineEndings("\n") == "invoked\n" && Fingerprint(build) == savedBuildFingerprint,
                 "Unknown-outcome resume changed external state");
             var rendered = RunCli("workflow", "report", interrupted, "--json");
             Check(S(J(rendered)["status"]) == "outcome_unknown", "Unknown-outcome report is not readable");
