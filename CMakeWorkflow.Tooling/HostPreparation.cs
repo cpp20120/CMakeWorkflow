@@ -9,7 +9,8 @@ namespace CMakeWorkflow.Tooling;
 // A plan never modifies global kernel or CPU settings.
 public sealed record HostRequirements(int SchemaVersion, string[] ToolProfiles,
     int? MaxPerfEventParanoid = null, string? CpuGovernor = null,
-    string? WindowsPowerScheme = null);
+    string? WindowsPowerScheme = null,
+    bool RequireWindowsMsvc = false, bool RequireWindowsSdk = false, bool RequireWindowsWpr = false);
 public sealed record HostFinding(string Id, string Status, string? Observed, string Expected,
     string? Diagnostic);
 public sealed record HostPreparationPlan(int SchemaVersion, string RequirementsSha256,
@@ -40,7 +41,8 @@ public static class HostPreparation
 
     public static async Task<HostPreparationPlan> InspectAsync(string path, ToolingService service,
         PackageManagerKind packageManager, string? installDirectory, CancellationToken ct,
-        IHostSettingsBackend? backend = null, IReadOnlyList<string>? cpuPaths = null)
+        IHostSettingsBackend? backend = null, IReadOnlyList<string>? cpuPaths = null,
+        IWindowsDevelopmentProbe? windowsProbe = null)
     {
         var fullPath = Path.GetFullPath(path);
         var content = await File.ReadAllBytesAsync(fullPath, ct);
@@ -48,6 +50,13 @@ public static class HostPreparation
         var toolPlan = await service.PlanAsync(requirements.ToolProfiles, packageManager,
             allowFallback: true, installDirectory, ct);
         var findings = InspectMachine(requirements, backend, cpuPaths).ToList();
+        if (requirements.RequireWindowsMsvc || requirements.RequireWindowsSdk || requirements.RequireWindowsWpr)
+        {
+            if (!OperatingSystem.IsWindows() && windowsProbe is null)
+                throw new PlatformNotSupportedException("Windows development requirements require Windows.");
+            findings.AddRange(WindowsDevelopmentDoctor.Inspect(requirements,
+                windowsProbe ?? new SystemWindowsDevelopmentProbe()));
+        }
         if (requirements.WindowsPowerScheme is not null && !OperatingSystem.IsWindows() && backend is null)
             throw new PlatformNotSupportedException("Windows power scheme provisioning requires Windows.");
         if (!OperatingSystem.IsLinux() && backend is null &&
@@ -121,10 +130,11 @@ public static class HostPreparation
     public static async Task<HostPreparationResult> ApplyAsync(HostPreparationPlan approved,
         ToolingService service, PackageManagerKind packageManager, string? installDirectory,
         CancellationToken ct, bool allowSystemChanges = false, IHostSettingsBackend? backend = null,
-        IReadOnlyList<string>? cpuPaths = null, string? auditDirectory = null)
+        IReadOnlyList<string>? cpuPaths = null, string? auditDirectory = null,
+        IWindowsDevelopmentProbe? windowsProbe = null)
     {
         // Recompute before any mutation; neither requirements nor planned commands may drift.
-        var current = await InspectAsync(approved.Source, service, packageManager, installDirectory, ct, backend, cpuPaths);
+        var current = await InspectAsync(approved.Source, service, packageManager, installDirectory, ct, backend, cpuPaths, windowsProbe);
         if (current.ApprovalSha256 != approved.ApprovalSha256 ||
             current.RequirementsSha256 != approved.RequirementsSha256 ||
             JsonSerializer.Serialize(current.Tools, ToolingJson.Default.ToolingPlan) !=
@@ -158,7 +168,7 @@ public static class HostPreparation
                 throw;
             }
         }
-        var checkedPlan = await InspectAsync(approved.Source, service, packageManager, installDirectory, ct, backend, cpuPaths);
+        var checkedPlan = await InspectAsync(approved.Source, service, packageManager, installDirectory, ct, backend, cpuPaths, windowsProbe);
         if (systemChanges.Count > 0)
             WriteAudit(auditDirectory ?? Path.GetDirectoryName(approved.Source)!, approved,
                 checkedPlan.Ready ? "verified" : "verification_drift", null);

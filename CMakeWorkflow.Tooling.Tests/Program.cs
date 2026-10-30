@@ -76,6 +76,38 @@ try
     catch (IOException) { }
     Check(partial.Writes == 1 && partial.Values["/proc/sys/kernel/perf_event_paranoid"] == "1" &&
         partial.Values[policy0] == "powersave", "partial host change is not rolled back or hidden");
+    // Windows development capabilities: toolchain and SDK are explicitly required, ETW access is not inferred from WPR.
+    var fakeWindowsTools = new FakeWindowsDevelopmentProbe { Msvc = @"C:\vs\cl.exe", Sdk = @"C:\kits\10", Wpr = @"C:\wpr.exe" };
+    var windowsToolRequirements = new HostRequirements(1, ["native"], RequireWindowsMsvc: true,
+        RequireWindowsSdk: true, RequireWindowsWpr: true);
+    var windowsToolFindings = WindowsDevelopmentDoctor.Inspect(windowsToolRequirements, fakeWindowsTools);
+    Check(windowsToolFindings.Count == 4 && windowsToolFindings.Count(x => x.Status == "ready") == 3 &&
+        windowsToolFindings.Single(x => x.Id == "windows_etw_permissions").Status == "unverified",
+        "WPR discovery must not assert ETW permissions");
+    fakeWindowsTools.Sdk = null;
+    Check(WindowsDevelopmentDoctor.Inspect(windowsToolRequirements, fakeWindowsTools)
+        .Single(x => x.Id == "windows_sdk").Status == "missing", "missing Windows SDK not reported");
+    fakeWindowsTools.Sdk = @"C:\kits\10";
+    // Fake Windows-only capability assessment is valid on Linux too.
+    var winToolReqFile = Path.Combine(root, "windows-dev-requirements.json");
+    File.WriteAllText(winToolReqFile,
+        """{"schemaVersion":1,"toolProfiles":["native"],"requireWindowsMsvc":true,"requireWindowsSdk":true,"requireWindowsWpr":true}""");
+    var winToolRuntime = new FakeRuntime();
+    winToolRuntime.Add("cmake", "cmake version 4.4.4");
+    winToolRuntime.Add("ctest", "ctest version 4.4.4");
+    winToolRuntime.Add("c++", "g++ version 16.2.1");
+    winToolRuntime.Add("ninja", "1.13.2");
+    var winToolService = new ToolingService(winToolRuntime, new FakeInstaller(winToolRuntime));
+    var winToolPlan = await HostPreparation.InspectAsync(winToolReqFile, winToolService,
+        PackageManagerKind.None, null, default, windowsProbe: fakeWindowsTools);
+    Check(!winToolPlan.Ready && winToolPlan.Findings.Any(x => x.Id == "windows_etw_permissions" && x.Status == "unverified"),
+        "ETW must not be silently marked ready by a WPR executable");
+    fakeWindowsTools.Msvc = null;
+    var winToolStale = await HostPreparation.InspectAsync(winToolReqFile, winToolService,
+        PackageManagerKind.None, null, default, windowsProbe: fakeWindowsTools);
+    Check(winToolStale.ApprovalSha256 != winToolPlan.ApprovalSha256 &&
+        winToolStale.Findings.Any(x => x.Id == "windows_msvc" && x.Status == "missing"),
+        "Windows development capability drift must invalidate fingerprint");
     // Windows power scheme: validate the exact GUID, stale fingerprint, approval, audit and recheck.
     const string balanced = "381b4222-f694-41f0-9685-ff5bb260df2e";
     const string highPerformance = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
