@@ -7,6 +7,19 @@ namespace CMakeWorkflow.IntegrationTests;
 
 internal static class RecoveryTests
 {
+    private static bool TryReadPid(string path, out int pid)
+    {
+        pid = 0;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return int.TryParse(reader.ReadToEnd().Trim(), out pid) && pid > 0;
+        }
+        catch (IOException) { return false; } // Writer is still publishing the marker.
+    }
+
     internal static void Run()
     {
         using var temp = new TempTree();
@@ -68,8 +81,11 @@ internal static class RecoveryTests
                 {
                     if (point == "during-process")
                     {
-                        if (File.Exists(ready) && int.TryParse(File.ReadAllText(ready), out var pid))
-                        { child = Process.GetProcessById(pid); break; }
+                        if (TryReadPid(ready, out var pid))
+                        {
+                            try { child = Process.GetProcessById(pid); break; }
+                            catch (ArgumentException) { /* Worker exited before opening its process handle. */ }
+                        }
                     }
                     else if (File.Exists(marker)) break;
                     Check(!process.HasExited && deadline.Elapsed < TimeSpan.FromSeconds(30),
