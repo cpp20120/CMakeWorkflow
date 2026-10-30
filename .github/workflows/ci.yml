@@ -41,13 +41,36 @@ jobs:
         run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
       - name: Generic CMake integration
         run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll bin/Release/net10.0/${{ matrix.executable }}
+      - name: Build isolated recovery fault-injection CLI
+        run: dotnet publish CMakeWorkflow.csproj -c Release -p:PublishAot=false -p:RecoveryFaultInjection=true --artifacts-path out/recovery-artifacts -o out/recovery-cli
+      - name: Recovery faults and manual reconciliation
+        run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll out/recovery-cli/${{ matrix.executable }} --recovery
       - name: History checks
         run: dotnet CMakeWorkflow.History.Tests/bin/Release/net10.0/CMakeWorkflow.History.Tests.dll
       - name: Tool provisioning checks
         run: dotnet CMakeWorkflow.Tooling.Tests/bin/Release/net10.0/CMakeWorkflow.Tooling.Tests.dll
+      - name: Host IPC and session checks
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll
       - name: Publish NativeAOT on Linux
         if: runner.os == 'Linux'
-        run: dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -o out/native
+        run: dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -o out/native -p:TreatWarningsAsErrors=true
+      - name: NativeAOT Host IPC smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          host_dir=$(mktemp -d /tmp/cmwf.XXXXXX)
+          out/native/CMakeWorkflow host serve --endpoint "$host_dir/rpc.sock" >"$host_dir/stdout" 2>"$host_dir/stderr" &
+          host_pid=$!
+          trap 'kill "$host_pid" 2>/dev/null || true; wait "$host_pid" 2>/dev/null || true; rm -rf "$host_dir"' EXIT
+          for attempt in {1..100}; do
+            if [ -S "$host_dir/rpc.sock" ]; then break; fi
+            if ! kill -0 "$host_pid" 2>/dev/null; then cat "$host_dir/stderr"; exit 1; fi
+            sleep 0.1
+          done
+          test -S "$host_dir/rpc.sock"
+          out/native/CMakeWorkflow host doctor --endpoint "$host_dir/rpc.sock" --workspace "$PWD" --profile cmake --json
+          out/native/CMakeWorkflow host fix --endpoint "$host_dir/rpc.sock" --workspace "$PWD" --profile cmake --pm none --no-fallback --dry-run --json
+          out/native/CMakeWorkflow host fix --endpoint "$host_dir/rpc.sock" --workspace "$PWD" --profile cmake --pm none --no-fallback --yes --json
       - name: NativeAOT smoke
         if: runner.os == 'Linux'
         shell: bash

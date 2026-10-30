@@ -11,6 +11,20 @@ flags, incremental builds, presets and test registration. CMakeWorkflow owns the
 workflow graph, process lifecycle, build-tree coordination, provenance checks
 and run artifacts.
 
+## Documentation
+
+The [documentation index](docs/README.md) describes the current implementation:
+architecture, workflow manifests, CLI commands, result protocols, History,
+profiling, provisioning and IDE integration. Documentation is currently in Russian.
+The proposed MSBuild execution backend is discussed separately in
+[ADR-0001](docs/adr/0001-msbuild-execution-backend.md); it is not implemented.
+
+The [local Host IPC preview](docs/host-ipc.md) exposes the existing Doctor and explicit Fix services
+to CLI and VS Code clients over Unix sockets / Windows named pipes, with
+NativeAOT-compatible JSON-RPC contracts. See [ADR-0002](docs/adr/0002-local-host-ipc.md)
+for scope and migration boundaries. Fix reuses the existing installer; workflow
+execution continues to use its existing CLI commands.
+
 ## Build and try it
 
 Requirements: .NET 10 SDK and CMake 3.26 or newer. The included example and
@@ -155,6 +169,41 @@ verified before extraction. Other unverified installer scripts are not run.
 Set `CMAKEWORKFLOW_TOOL_STORE` to choose the local release store. Setup supports
 no automatic Windows ADK or macOS Xcode installation; those OS backends are
 diagnosed with manual guidance.
+
+
+### Explicit DagFlow harness ingestion (opt-in)
+
+An `invoke` node may declare `harnessDirectory`, **relative to that context's build tree**:
+
+```json
+{
+  "id": "api-workloads",
+  "kind": "invoke",
+  "context": "runtime",
+  "target": "run_dagflow_api_campaign",
+  "harnessDirectory": "harness-results/Release/my-unique-api-campaign"
+}
+```
+
+The native target must be configured to emit `manifest.json`, `summary.json` and
+`runs.jsonl` to that exact directory. The directory must be empty or absent
+**before** the invoke starts. Configure a unique harness results directory for
+each experiment; fixed/reused native output directories cannot establish
+run-to-output ownership and are rejected instead of silently attributing stale
+measurements to the new run. CMakeWorkflow does not guess or scan output paths.
+
+After a successful invoke, the CLI snapshots the three files under the workflow
+run's `harness/<node-id>/` directory. `run.json` and the JSONL event stream
+reference these immutable-per-run copies. The History importer verifies the
+manifest SHA-256 when present, raw record identity and sample counts, and indexes
+successful non-warmup metric samples by node, case and metric. Existing workflows
+without this optional field are unaffected.
+
+Raw samples are indexed in their original executable metric units (summary
+fixed-point `scale` applies to summary statistics, not to raw `output` numbers).
+These measurements have method `dagflow-harness`; interpret comparisons as
+statistical verdicts only when the CLI's comparability/detection diagnostics
+permit it. Instrumented diagnostic builds must not be compared as timing baselines.
 
 ## Machine-readable CLI
 

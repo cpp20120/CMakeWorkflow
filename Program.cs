@@ -14,6 +14,8 @@ public static class Program
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
         try
         {
+            if (args.Length > 0 && args[0] == "host")
+                return await Host.HostCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "history")
                 return await HistoryCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "tooling")
@@ -35,15 +37,42 @@ public static class Program
                 Console.WriteLine(JsonSerializer.Serialize(observed, WorkflowJson.Default.ObservedBuildContext));
                 return 0;
             }
-            if (args.Length >= 2 && args[0] == "workflow" && args[1] is "plan" or "run")
+            if (args.Length >= 2 && args[0] == "workflow" && args[1] == "reconcile")
+                return await WorkflowReconcileCommand.ExecuteAsync(args[2..], cts.Token);
+            if (args.Length >= 2 && args[0] == "workflow" && args[1] is "plan" or "run" or "resume")
             {
                 if (args[1] == "plan")
                     return await WorkflowCommand.ExecuteAsync("plan", args[2..], cts.Token,
                         new ProfileWorkflowExecutor());
+                if (args[1] == "resume")
+                {
+                    if (args.Length != 3) throw new ArgumentException("Usage: workflow resume <run-directory>");
+                    var directory = Path.GetFullPath(args[2]);
+                    var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(
+                        Path.Combine(directory, "run.json"), cts.Token), WorkflowJson.Default.WorkflowReport)
+                        ?? throw new InvalidDataException("Invalid run report.");
+                    return await WorkflowCommand.ExecuteAsync("run",
+                        [saved.Workflow, "--resume-dir", directory], cts.Token, new ProfileWorkflowExecutor());
+                }
                 var history = HistoryOptions(args[2..]);
-                return await RunAndIndexAsync(onRun => WorkflowCommand.ExecuteAsync("run",
-                    history.Args, cts.Token, new ProfileWorkflowExecutor(), onRun),
-                    history.Database, history.Disabled);
+                return await RunAndIndexAsync(async onRun =>
+                {
+                    string? runDirectory = null;
+                    var code = await WorkflowCommand.ExecuteAsync("run", history.Args, cts.Token,
+                        new ProfileWorkflowExecutor(), directory =>
+                        { runDirectory = directory; onRun(directory); });
+                    // Explicit profile nodes are captured as independent passes. Analyze
+                    // their saved artifacts before History import; ordinary workflows do
+                    // not invoke perf, WPR or the analyzer.
+                    if (code == 0 && runDirectory is not null
+                        && Directory.EnumerateFiles(runDirectory, "*.results.json").Any())
+                    {
+                        code = await ProfileAnalyzer.AnalyzeAsync(runDirectory, cts.Token,
+                            emitResultPath: false);
+                        Console.Error.WriteLine($"[CMakeWorkflow] Profile analysis: {Path.Combine(runDirectory, "analysis.json")}");
+                    }
+                    return code;
+                }, history.Database, history.Disabled);
             }
 
             if (args.Length is 3 or 4 && args[0] == "workflow" && args[1] == "report"
@@ -138,6 +167,12 @@ public static class Program
 
     private static async Task<int> ExecuteProfileAsync(string[] args, CancellationToken ct)
     {
+        if (args.Length > 0 && args[0] == "replay")
+        {
+            var replayHistory = HistoryOptions(args);
+            return await RunAndIndexAsync(onRun => ProfileReplayCommand.ExecuteAsync(replayHistory.Args, ct,
+                onRun), replayHistory.Database, replayHistory.Disabled);
+        }
         if (args.Length == 0 || args[0] != "run")
             return await ProfileCommand.ExecuteAsync(args, ct);
         var history = HistoryOptions(args);
@@ -177,7 +212,8 @@ public static class Program
         try { result = await run(path => directory = path); }
         finally
         {
-            if (!disabled && directory is not null && File.Exists(Path.Combine(directory, "run.json")))
+            if (!disabled && directory is not null && (File.Exists(Path.Combine(directory, "run.json"))
+                || Directory.EnumerateFiles(directory, "*.results.json").Any()))
             {
                 try
                 {
@@ -196,6 +232,7 @@ public static class Program
     }
 
     private static void Usage() => Console.Error.WriteLine(
+        "Usage: CMakeWorkflow host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--json]; fix: [--yes|--dry-run] [--pm NAME] [--no-fallback]\n" +
         "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare|detect> ...\n" +
         "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
@@ -206,6 +243,7 @@ public static class Program
         "       CMakeWorkflow dagflow profile run --build-dir DIR --target NAME [--repeats N] [--backend auto|perf|etw|instruments] [--mode cpu|scheduler|counters|allocations]\n" +
         "       CMakeWorkflow dagflow profile run --variant NAME=DIR --variant NAME=DIR --target NAME [--repeats N]\n" +
         "       CMakeWorkflow dagflow profile analyze RUN_DIRECTORY\n" +
+        "       CMakeWorkflow profile replay BASELINE_DIR CANDIDATE_DIR --node ID [--case NAME] [--harness INDEX] [--backend auto|perf|etw] [--results-dir DIR]\n" +
         "Usage: CMakeWorkflow context inspect BUILD_DIR [--json]\n" +
         "       CMakeWorkflow target <build|invoke|run|resolve> --build-dir DIR --target NAME [--config CONFIG] [--prepared] [--json for resolve] [-- executable-args...]\n" +
         "  build: request a known native executable/library target through CMake\n" +
@@ -219,6 +257,9 @@ public static class Program
         "  workflow sequence: build first, execute first, build second, execute second\n" +
         "       CMakeWorkflow workflow <plan|run> FILE [--only NODE]... [--jobs N] [--json] [--history-db PATH] [--no-history]\n" +
         "       CMakeWorkflow workflow report RUN_DIRECTORY [--json]\n" +
+        "       CMakeWorkflow workflow resume RUN_DIRECTORY\n" +
+        "       CMakeWorkflow workflow reconcile RUN_DIRECTORY [--node ID] --decision succeeded|retry\n" +
+        "         --reason TEXT --expected-checkpoint SHA256 --confirm-stopped [--json]\n" +
         "         [--results-dir DIR] [--controller-build-dir DIR]\n" +
         "  plan: validate and show the selected DAG without building or running\n" +
         "  run: execute dependencies, retain logs and write run.json");

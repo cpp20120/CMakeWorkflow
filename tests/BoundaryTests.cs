@@ -12,6 +12,11 @@ internal static class BoundaryTests
         var source = Path.Combine(root, "source"); CopyFixture("boundary", source);
         var cmakeList = Path.Combine(source, "CMakeLists.txt");
         File.WriteAllText(cmakeList, "set(TEST_CLI \"" + Cli.Replace('\\', '/') + "\")\n" + File.ReadAllText(cmakeList));
+        File.AppendAllText(cmakeList, """
+            add_custom_target(harness_probe
+              COMMAND "${CMAKE_COMMAND}" "-DOUTPUT=${CMAKE_BINARY_DIR}/harness-results"
+                      -P "${CMAKE_CURRENT_SOURCE_DIR}/fake_harness.cmake" VERBATIM)
+            """);
         var build = Path.Combine(root, "managed");
         var workerExecutableName = OperatingSystem.IsWindows() ? "worker.exe" : "worker";
         var doc = J("""
@@ -164,5 +169,29 @@ internal static class BoundaryTests
             $"Prepared nested CLI ownership guard failed: status={Status(report, "campaign")}, "
             + $"error={preparedError}, output={preparedOutput}");
         Pass("nested CLI ownership guard");
+        // Exercise the real CLI boundary: CMake emits two harness result markers,
+        // CMakeWorkflow snapshots their files and History imports raw samples.
+        var harnessBuild = Path.Combine(root, "harness-native");
+        Configure(source, harnessBuild);
+        var harnessDoc = J("""
+            {"schemaVersion":2,"contexts":{"w":{"buildDirectory":"harness-native","mode":"adopt","provenancePolicy":"allowUnverified"}},
+              "nodes":[{"id":"probe","kind":"invoke","context":"w","target":"harness_probe"}]}
+            """);
+        (report, output) = Workflow(root, harnessDoc, name: "auto-harness");
+        AllSucceeded(report);
+        var harnessOutputs = Item(report, "probe")["outputs"]!.AsObject();
+        Check(harnessOutputs.ContainsKey("dagflow-0-summary.json") && harnessOutputs.ContainsKey("dagflow-1-summary.json"),
+            "Harness markers did not produce two immutable snapshots");
+        var firstSaved = Path.Combine(output, S(harnessOutputs["dagflow-0-runs.jsonl"]));
+        Check(File.Exists(firstSaved), "Harness snapshot missing");
+        var catalog = Path.Combine(root, "auto-harness-history.sqlite");
+        Command(Cli, ["history", "import", output, "--db", catalog, "--json"]);
+        var indexed = JsonNode.Parse(RunCli("history", "runs", "--db", catalog, "--json"))!.AsArray();
+        Check(indexed.Count == 1, "Harness history import did not create one workflow run");
+        var detail = J(RunCli("history", "show", S(indexed[0]!["id"]), "--db", catalog, "--json"));
+        Check(detail["measurements"]!.AsArray().Count == 20
+            && detail["artifacts"]!.AsArray().Count(a => S(a?["type"]) == "dagflow-runs") == 2,
+            "Harness samples or snapshot artifacts missing from History");
+        Pass("automatic multi-harness snapshot and History measurement ingestion");
     }
 }

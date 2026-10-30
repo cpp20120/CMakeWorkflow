@@ -44,6 +44,47 @@ internal static class WorkflowTests
         Check(report["nodes"]!.AsArray().Where(n => S(n?["kind"]) == "run").All(n => S(n?["executableSha256"]).Length == 64), "Executable identity missing");
         Pass("interleaved generated inputs, repeated build/run, CTest and explicit invoke");
 
+        // Adapted from outcome-unknown-tests: observe the real invoke target's
+        // append-only output, not an unrelated marker that a replay cannot touch.
+        var actionMarker = Path.Combine(build, "action-invocations.txt");
+        Check(File.ReadAllText(actionMarker) == "invoked\n", "Invoke marker is not connected to the fixture target");
+        var interruptedManifest = Path.Combine(root, "interleaved.json");
+        var savedBuildFingerprint = Fingerprint(build);
+        foreach (var scenario in new[] { "running", "needs_attention", "phase-only", "admission-only" })
+        {
+            var interrupted = Path.Combine(root, "interrupted-" + scenario);
+            var interruptedReport = Copy(report);
+            interruptedReport["status"] = scenario is "running" or "admission-only" ? "running" : "needs_attention";
+            interruptedReport["recoveryPhase"] = scenario == "admission-only" ? null : "running";
+            interruptedReport["resumeCount"] = 7;
+            interruptedReport["finishedAt"] = null;
+            if (scenario != "phase-only")
+            {
+                var node = Item(interruptedReport, "action");
+                node["status"] = scenario == "admission-only" ? "pending" : "running";
+                node["finishedAt"] = null;
+            }
+            var file = Write(Path.Combine(interrupted, "run.json"), interruptedReport.ToJsonString());
+            RunCli(4, "workflow", "run", interruptedManifest, "--resume-dir", interrupted);
+            var checkpoint = File.ReadAllText(file);
+            var quarantined = J(checkpoint);
+            Check(S(quarantined["status"]) == "outcome_unknown"
+                && S(quarantined["recoveryPhase"]) == "interrupted"
+                && S(quarantined["resumeCount"]) == "7"
+                && S(quarantined["finishedAt"]) == "", "Interrupted run was replayed or given a fabricated completion");
+            Check(Status(quarantined, "action") == (scenario == "phase-only" ? "succeeded"
+                : scenario == "admission-only" ? "pending" : "outcome_unknown"), "Incorrect quarantine node state");
+            Check(Status(quarantined, "build-first") == "succeeded", "Quarantine changed successful nodes");
+            RunCli(1, "workflow", "resume", interrupted);
+            RunCli(1, "workflow", "run", interruptedManifest, "--resume-dir", interrupted);
+            Check(File.ReadAllText(file) == checkpoint && !File.Exists(file + ".tmp"), "Repeated resume changed quarantined checkpoint");
+            Check(File.ReadAllText(actionMarker) == "invoked\n" && Fingerprint(build) == savedBuildFingerprint,
+                "Unknown-outcome resume changed external state");
+            var rendered = RunCli("workflow", "report", interrupted, "--json");
+            Check(S(J(rendered)["status"]) == "outcome_unknown", "Unknown-outcome report is not readable");
+        }
+        Pass("interrupted admission/recovery quarantine, unchanged side effects and repeated resume rejection");
+
         Check(File.Exists(firstExecutable), "Initial native executable missing");
         var first = File.GetLastWriteTimeUtc(firstExecutable);
         var only = Copy(doc); only["nodes"] = new JsonArray(doc["nodes"]![0]!.DeepClone());
@@ -212,6 +253,66 @@ internal static class WorkflowTests
                     if (process != primary) process.Dispose();
                 }
                 _ = primaryOutput.Result + primaryError.Result + (contenderOutput?.Result ?? "") + (contenderError?.Result ?? "");
+            }
+
+            var crashResults = Path.Combine(root, "crash-results");
+            File.Delete(marker);
+            using var doomed = Start(["workflow", "run", manifest, "--results-dir", crashResults]);
+            var doomedOutput = doomed.StandardOutput.ReadToEndAsync();
+            var doomedError = doomed.StandardError.ReadToEndAsync();
+            Process? child = null;
+            try
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(15);
+                int childPid;
+                while (!File.Exists(marker) || !int.TryParse(File.ReadAllText(marker).Trim(), out childPid))
+                {
+                    Check(!doomed.HasExited && DateTime.UtcNow < deadline, "Crash-test child did not start");
+                    Thread.Sleep(30);
+                }
+                child = Process.GetProcessById(childPid);
+                var journal = Directory.EnumerateFiles(crashResults, "run.json", SearchOption.AllDirectories).Single();
+                var runDirectory = Path.GetDirectoryName(journal)!;
+                var admitted = File.ReadAllText(journal);
+                Check(Status(J(admitted), "run") == "running", "External operation has no write-ahead checkpoint");
+                // A live run cannot be mistaken for a crashed one by another runner.
+                RunCli(1, "workflow", "resume", runDirectory);
+                Check(File.ReadAllText(journal) == admitted, "Concurrent resume mutated a live checkpoint");
+
+                doomed.Kill(); // SIGKILL only the runner. This is not graceful cancellation.
+                Check(doomed.WaitForExit(10000), "Runner did not exit after SIGKILL");
+                // SIGKILL cannot promise process-tree cleanup. The test owns and
+                // explicitly stops the child before checking for unwanted replay.
+                if (!child.HasExited) child.Kill(entireProcessTree: true);
+                Check(child.WaitForExit(5000), "Crash-test child did not stop");
+                var invocations = File.ReadAllText(Path.Combine(build, "sleep-invocations.txt"));
+                var fingerprint = Fingerprint(build);
+                RunCli(4, "workflow", "resume", runDirectory);
+                var checkpoint = File.ReadAllText(journal);
+                var quarantined = J(checkpoint);
+                Check(S(quarantined["status"]) == "outcome_unknown"
+                    && Status(quarantined, "run") == "outcome_unknown"
+                    && Status(quarantined, "build-first") == "succeeded"
+                    && Status(quarantined, "after") == "pending"
+                    && S(Item(quarantined, "run")["finishedAt"]) == "",
+                    "SIGKILL quarantine fabricated completion or changed other nodes");
+                RunCli(1, "workflow", "run", manifest, "--resume-dir", runDirectory);
+                Check(File.ReadAllText(journal) == checkpoint && Fingerprint(build) == fingerprint
+                    && File.ReadAllText(Path.Combine(build, "sleep-invocations.txt")) == invocations,
+                    "Resume replayed an interrupted external operation");
+                Pass("SIGKILL quarantine, live-run lease and no replay of actual side effects");
+            }
+            finally
+            {
+                if (!doomed.HasExited) doomed.Kill(entireProcessTree: true);
+                Check(doomed.WaitForExit(10000), "Crash-test runner cleanup timed out");
+                if (child is not null)
+                {
+                    if (!child.HasExited) child.Kill(entireProcessTree: true);
+                    Check(child.WaitForExit(5000), "Crash-test child cleanup timed out");
+                    child.Dispose();
+                }
+                Check(Task.WaitAll([doomedOutput, doomedError], 5000), "Crash-test output pipes did not close");
             }
         }
     }

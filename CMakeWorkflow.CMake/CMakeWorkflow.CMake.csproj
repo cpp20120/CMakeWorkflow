@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants Condition="'$(RecoveryFaultInjection)' == 'true'">$(DefineConstants);RECOVERY_FAULT_INJECTION</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="*.cs" />

@@ -19,6 +19,7 @@ public sealed record ToolingPlan(int SchemaVersion, ToolPlatform Platform,
     bool Ready, List<ToolStatus> Tools, List<ToolingStep> Steps);
 public sealed record ToolingResult(int SchemaVersion, bool Success,
     string[] Ready, string[] Failed, string[] Diagnostics);
+public sealed record ToolingExecutionProgress(string Tool, string Stage, string? Message);
 public sealed record ToolingProfileView(string Id, string Description, string[] Tools);
 public sealed record ToolingProfileList(int SchemaVersion, List<ToolingProfileView> Profiles);
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 
 namespace CMakeWorkflow;
 
@@ -11,8 +12,8 @@ public static class WorkflowReportCommand
         {
             var directory = Path.GetFullPath(runDirectory);
             var path = Path.Combine(directory, "run.json");
-            await using var stream = File.OpenRead(path);
-            var report = await JsonSerializer.DeserializeAsync(stream, WorkflowJson.Default.WorkflowReport, ct)
+            var bytes = await File.ReadAllBytesAsync(path, ct);
+            var report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
                 ?? throw new InvalidDataException("run.json contains an empty report.");
             if (report.Nodes is null || string.IsNullOrWhiteSpace(report.Workflow)
                 || string.IsNullOrWhiteSpace(report.Status)
@@ -20,7 +21,11 @@ public static class WorkflowReportCommand
                     || string.IsNullOrWhiteSpace(node.Status)))
                 throw new InvalidDataException("run.json is missing workflow identity, status or valid node entries.");
             if (json) Console.Out.WriteLine(JsonSerializer.Serialize(report, WorkflowJson.Default.WorkflowReport));
-            else Write(report, directory);
+            else
+            {
+                Console.WriteLine($"Checkpoint SHA256: {Convert.ToHexString(SHA256.HashData(bytes))}");
+                Write(report, directory);
+            }
             return 0;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException
@@ -35,6 +40,9 @@ public static class WorkflowReportCommand
     {
         Console.WriteLine($"Workflow: {report.Workflow}");
         Console.WriteLine($"Status: {report.Status.ToUpperInvariant()}");
+        foreach (var decision in report.Reconciliations)
+            Console.WriteLine($"Reconciliation: {decision.Timestamp:O} {decision.Actor}@{decision.Host} " +
+                $"{decision.NodeId ?? "run"} -> {decision.Decision}; reason: {decision.Reason}; prior checkpoint: {decision.CheckpointSha256}");
         Console.WriteLine();
         Console.WriteLine("Nodes:");
         foreach (var node in report.Nodes)

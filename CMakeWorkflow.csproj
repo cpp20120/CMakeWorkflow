@@ -17,5 +17,6 @@
     <ProjectReference Include="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />
     <ProjectReference Include="CMakeWorkflow.History/CMakeWorkflow.History.csproj" />
     <ProjectReference Include="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj" />
+    <ProjectReference Include="CMakeWorkflow.Host/CMakeWorkflow.Host.csproj" />
   </ItemGroup>
 </Project>

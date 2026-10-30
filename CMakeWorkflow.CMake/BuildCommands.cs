@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -99,8 +100,12 @@ public static class ProcessRunner
             info.ArgumentList.Add(arg);
         BuildTreeOwnership.PropagateTo(info);
 
-        using var process = Process.Start(info)
-            ?? throw new InvalidOperationException($"Could not launch '{file}'.");
+        Process started;
+        try { started = Process.Start(info)
+            ?? throw new MissingWorkflowToolException(file, new IOException("Process.Start returned null.")); }
+        catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3)
+        { throw new MissingWorkflowToolException(file, error); }
+        using var process = started;
         try
         {
             await process.WaitForExitAsync(ct);

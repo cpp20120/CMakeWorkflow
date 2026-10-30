@@ -8,7 +8,7 @@ namespace CMakeWorkflow.Tooling;
 
 public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeInstaller
 {
-    private readonly HttpClient client = client ?? CreateClient();
+    private readonly HttpClient client = client ?? CreateDownloadClient();
 
     public async Task InstallAsync(string installDirectory, CancellationToken ct)
     {
@@ -127,7 +127,7 @@ public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeIn
             StringComparison.Ordinal) && !Path.IsPathFullyQualified(relative);
     }
 
-    private static HttpClient CreateClient()
+    public static HttpClient CreateDownloadClient()
     {
         var result = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         result.DefaultRequestHeaders.UserAgent.ParseAdd("CMakeWorkflow-Tooling/1.0");

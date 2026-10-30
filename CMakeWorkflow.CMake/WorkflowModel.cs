@@ -35,6 +35,8 @@ public sealed class WorkflowNode
     public string? WorkingDirectory { get; set; }
     public Dictionary<string, string> Environment { get; set; } = [];
     public Dictionary<string, string> Options { get; set; } = [];
+    // Explicit output directory relative to the native build tree (invoke only).
+    public string? HarnessDirectory { get; set; }
     public string? TestRegex { get; set; }
     public string? LabelRegex { get; set; }
     public List<string> Resources { get; set; } = [];
@@ -270,6 +272,13 @@ public static class WorkflowPlanner
             throw new ArgumentException($"{n.Id}: inspect/configure uses context only; no execution recipe or configure flags are inferred.");
         if (n.Kind is "run" or "profile" && (n.Context is not null || n.Target is not null))
             throw new ArgumentException($"{n.Id}: {n.Kind} inherits target and context through from.");
+        if (n.HarnessDirectory is not null)
+        {
+            if (n.Kind != "invoke" || string.IsNullOrWhiteSpace(n.HarnessDirectory)
+                || Path.IsPathRooted(n.HarnessDirectory) || n.HarnessDirectory.Contains('\0')
+                || n.HarnessDirectory.Split(['/', '\\']).Any(p => p is ".." or "." or ""))
+                throw new ArgumentException($"{n.Id}: harnessDirectory requires an invoke node and a relative directory without traversal.");
+        }
         if (n.Kind != "profile" && n.Options.Count > 0)
             throw new ArgumentException($"{n.Id}: options are only valid for profile.");
         if (n.Kind == "ctest" && (n.Target is not null || n.From is not null || n.Arguments.Count > 0))
@@ -283,6 +292,7 @@ public static class WorkflowPlanner
     WriteIndented = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(WorkflowDocument))]
 [JsonSerializable(typeof(WorkflowReport))]
+[JsonSerializable(typeof(NodeResult))]
 [JsonSerializable(typeof(ObservedBuildContext))]
 [JsonSerializable(typeof(ConfigureProvenance))]
 [JsonSerializable(typeof(List<string>))]

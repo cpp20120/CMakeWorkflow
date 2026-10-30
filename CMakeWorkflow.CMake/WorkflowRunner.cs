@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -14,13 +15,28 @@ public sealed class WorkflowReport
     public string Status { get; set; } = "running";
     public List<NodeResult> Nodes { get; set; } = [];
     public string? Error { get; set; }
+    public List<WorkflowFinding> Findings { get; set; } = [];
+    public int ResumeCount { get; set; }
+    public string? RecoveryPhase { get; set; }
+    public List<WorkflowReconciliation> Reconciliations { get; set; } = [];
     public HostEnvironment? Environment { get; set; }
     public HostEnvironment? EnvironmentAtEnd { get; set; }
     public List<BuildEnvironment> BuildEnvironments { get; set; } = [];
 }
 
+public sealed record WorkflowFinding(string Code, string Severity, string NodeId,
+    string Message, string[] SuggestedProfiles);
+
+// A missing executable is a recoverable pre-execution admission failure, not
+// proof that the workflow operation ran and failed.
+public sealed class MissingWorkflowToolException(string executable, Exception inner)
+    : IOException($"Required executable '{executable}' could not be started.", inner)
+{
+    public string Executable { get; } = executable;
+}
+
 public sealed record NativeBuildResult(CMakeTargetRef Target, string Verification,
-    int BackendExitCode, string? ObservationIndex, GenerationObservation? Generation = null);
+    int? BackendExitCode, string? ObservationIndex, GenerationObservation? Generation = null);
 public sealed record ArtifactReference(string BuildNode, CMakeTargetRef Target,
     string Executable, string Sha256, string Materialization);
 
@@ -69,6 +85,7 @@ public static class WorkflowCommand
         var jobs = 1;
         string? results = null, controller = null;
         var json = false;
+        string? resumeDirectory = null;
         for (var i = 1; i < args.Length; ++i)
         {
             if (args[i] == "--json") { json = true; continue; }
@@ -81,10 +98,13 @@ public static class WorkflowCommand
                         throw new ArgumentException("--jobs must be a positive integer.");
                     break;
                 case "--results-dir": results = args[++i]; break;
+                case "--resume-dir": resumeDirectory = args[++i]; break;
                 case "--controller-build-dir": controller = args[++i]; break;
                 default: throw new ArgumentException($"Invalid workflow option: {args[i]}");
             }
         }
+        if (resumeDirectory is not null && (command != "run" || only.Count != 0 || results is not null))
+            throw new ArgumentException("--resume-dir only supports workflow run without --only/--results-dir.");
         var plan = await WorkflowPlanner.LoadAsync(args[0], only, controller, ct);
         if (json && command == "plan")
         {
@@ -123,20 +143,30 @@ public static class WorkflowCommand
         if (command == "plan") return 0;
 
         results ??= Path.Combine(Path.GetDirectoryName(plan.File)!, "out", "workflow-runs");
-        var output = Path.Combine(Path.GetFullPath(results),
-            $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}");
+        var output = resumeDirectory is null
+            ? Path.Combine(Path.GetFullPath(results), $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}")
+            : Path.GetFullPath(resumeDirectory);
         Directory.CreateDirectory(output);
         onRunDirectory?.Invoke(output);
         Console.Error.WriteLine($"[CMakeWorkflow] Results: {output}");
-        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension, json);
+        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension, json, resumeDirectory is not null);
     }
 }
 
 public static class WorkflowRunner
 {
     public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
-        IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false)
+        IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false)
     {
+        // The run lease spans validation, the recovery checkpoint, execution and final persistence.
+        // No second runner may inspect/commit the same persisted run concurrently.
+        Directory.CreateDirectory(output);
+        await using var runLease = new FileStream(Path.Combine(output, ".workflow-run.lock"),
+            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        // Validate resume observations under the same ownership used for dispatch.
+        // Otherwise another cooperating runner can change the tree in between.
+        using var resumedOwnership = resume ? await BuildTreeOwnership.AcquireAsync(
+            plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory), ct) : null;
         var report = new WorkflowReport
         {
             Workflow = plan.File,
@@ -149,26 +179,120 @@ public static class WorkflowRunner
                 WorkingDirectory = n.WorkingDirectory, RequestedContext = n.Requested
             }).ToList()
         };
+        if (resume)
+        {
+            var file = Path.Combine(output, "run.json");
+            if (!File.Exists(file)) throw new InvalidDataException("Run report not found for resume.");
+            var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct), WorkflowJson.Default.WorkflowReport)
+                ?? throw new InvalidDataException("Invalid resume report.");
+            if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") || saved.ManifestHash != plan.ManifestHash ||
+                !WorkflowPlanner.PathComparer.Equals(Path.GetFullPath(saved.Workflow), Path.GetFullPath(plan.File)))
+                throw new InvalidDataException("Resume requires a needs_attention checkpoint with identical workflow and manifest; interrupted running checkpoints can only be quarantined.");
+            if (saved.Nodes.Count != report.Nodes.Count ||
+                saved.Nodes.Where((n, i) => n.Id != report.Nodes[i].Id || n.Kind != report.Nodes[i].Kind ||
+                    n.Target != report.Nodes[i].Target ||
+                    !WorkflowPlanner.PathComparer.Equals(n.BuildDirectory, report.Nodes[i].BuildDirectory) ||
+                    n.Configuration != report.Nodes[i].Configuration ||
+                    !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
+                throw new InvalidDataException("Resume graph differs from saved execution.");
+            // A write-ahead admission is not proof that a process started, nor
+            // that it did not produce side effects. Classify before validating
+            // old build/artifact observations: an interrupted operation may have
+            // legitimately changed those. Never restore sessions or dispatch here.
+            if (saved.Status == "running" || saved.Nodes.Any(n => n.Status is "running" or "outcome_unknown") ||
+                saved.RecoveryPhase is "resuming" or "running")
+            {
+                foreach (var node in saved.Nodes.Where(n => n.Status == "running"))
+                {
+                    node.Status = "outcome_unknown";
+                    node.Error = "Runner interrupted after dispatch admission; external side effects cannot be ruled out.";
+                }
+                saved.Status = "outcome_unknown";
+                saved.Error = "Interrupted execution requires manual reconciliation; automatic resume is prohibited.";
+                saved.RecoveryPhase = "interrupted";
+                await WorkflowCheckpoint.SaveAsync(saved, output, ct);
+                Console.Error.WriteLine($"[CMakeWorkflow] {saved.Error}");
+                return 4;
+            }
+            // Compare the latest successful observation for each physical tree;
+            // earlier configure/build nodes may legitimately observe older generations.
+            foreach (var tree in saved.Nodes.Where(n => n.Status == "succeeded" && n.Kind != "inspect")
+                         .GroupBy(n => n.BuildDirectory, WorkflowPlanner.PathComparer))
+            {
+                var last = tree.LastOrDefault(n => n.ObservationAfter is not null || n.ObservedContext is not null);
+                var expected = last?.ObservationAfter ?? last?.ObservedContext;
+                if (expected is null) throw new InvalidDataException($"Missing tree observation for '{tree.Key}'.");
+                var observed = await CMakeInspection.InspectAsync(tree.Key, ct);
+                if (GenerationObservation.From(expected) != GenerationObservation.From(observed) ||
+                    expected.SourceDirectory != observed.SourceDirectory ||
+                    expected.Generator != observed.Generator ||
+                    expected.MultiConfig != observed.MultiConfig ||
+                    !expected.Configurations.SequenceEqual(observed.Configurations))
+                    throw new InvalidDataException($"Build tree changed since node '{last!.Id}'; resume refused.");
+            }
+            foreach (var node in saved.Nodes.Where(n => n.Status == "succeeded"))
+            {
+                if (node.Artifact is { } artifact)
+                {
+                    if (!File.Exists(artifact.Executable) ||
+                        await HashExecutableAsync(artifact.Executable, ct) != artifact.Sha256)
+                        throw new InvalidDataException($"Artifact changed since node '{node.Id}'; resume refused.");
+                }
+            }
+            saved.ResumeCount++;
+            saved.RecoveryPhase = "resuming";
+            saved.Status = "running";
+            saved.FinishedAt = null;
+            saved.Error = null;
+            saved.Findings.Clear();
+            foreach (var node in saved.Nodes.Where(n => n.Status != "succeeded"))
+            {
+                // A run can only be resumed after a pre-execution admission failure.
+                // Downstream nodes were never launched.
+                if (node.Status is not ("needs_attention" or "pending" or "blocked"))
+                    throw new InvalidDataException($"Unexpected non-resumable node '{node.Id}': {node.Status}.");
+                node.Status = "pending";
+                node.Error = null;
+                node.StartedAt = null;
+                node.FinishedAt = null;
+            }
+            report = saved;
+        }
         try { report.Environment = EnvironmentProvenance.CaptureHost(); }
         catch (IOException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
         catch (UnauthorizedAccessException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
         var states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
         var sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
             .ToDictionary(p => p, _ => new BuildContextSession(), WorkflowPlanner.PathComparer);
-        var remaining = plan.Nodes.ToList();
+        var remaining = plan.Nodes.Where(n => states[n.Definition.Id].Status != "succeeded").ToList();
+        if (resume)
+        {
+            // Restore per-tree session admission state from the verified observations.
+            foreach (var node in plan.Nodes.Where(n => states[n.Definition.Id].Status == "succeeded"))
+            {
+                var saved = states[node.Definition.Id];
+                var observed = saved.ObservationAfter ?? saved.ObservedContext;
+                if (observed is null || node.Definition.Kind == "inspect") continue;
+                var session = sessions[node.Target.BuildDirectory];
+                if (node.Definition.Kind == "configure") session.Configured(node.Requested, observed);
+                else session.Observe(node.Requested, observed, "Resume");
+            }
+        }
         var active = new Dictionary<string, (PlannedNode Node, Task<NodeResult> Task)>(StringComparer.Ordinal);
         BuildTreeOwnership? ownership = null;
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        using var events = new WorkflowEventJournal(output, eventsToStdout);
+        using var events = new WorkflowEventJournal(output, eventsToStdout, resume ? report : null);
         await SaveAsync(report, output, events);
         try
         {
             var mutationTrees = plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory).ToArray();
-            if (mutationTrees.Length != 0)
+            if (mutationTrees.Length != 0 && !resume)
                 ownership = await BuildTreeOwnership.AcquireAsync(mutationTrees, stop.Token);
 
             while (remaining.Count > 0 || active.Count > 0)
             {
+                if (report.Nodes.Any(n => n.Status == "needs_attention") && active.Count == 0)
+                    break;
                 foreach (var node in remaining.ToArray())
                 {
                     var state = states[node.Definition.Id];
@@ -190,13 +314,22 @@ public static class WorkflowRunner
                 var exclusive = ready.FirstOrDefault(n => n.Definition.Exclusive);
                 // Once an exclusive node is ready, drain existing work before starting it.
                 var candidates = exclusive is not null ? new[] { exclusive } : ready;
+                // Reserve admission slots before launching anything. A persisted `running`
+                // state is the write-ahead intent: after a crash its outcome is unknown.
+                var dispatch = new List<(PlannedNode Node, bool Snapshot)>();
                 foreach (var node in candidates)
                 {
-                    if (ct.IsCancellationRequested || active.Count >= jobs) break;
-                    if (active.Values.Any(a => Conflicts(node, a.Node))) continue;
+                    if (ct.IsCancellationRequested || active.Count + dispatch.Count >= jobs ||
+                        report.Nodes.Any(n => n.Status == "needs_attention")) break;
+                    if (active.Values.Any(a => Conflicts(node, a.Node)) ||
+                        dispatch.Any(a => Conflicts(node, a.Node))) continue;
+                    await RecoveryFaults.HitAsync("before-dispatch", node.Definition.Id, ct);
                     var state = states[node.Definition.Id];
                     state.Status = "running";
                     state.StartedAt = DateTimeOffset.UtcNow;
+                    var logStem = LogStem(report, node.Definition.Id);
+                    state.Stdout = logStem + ".stdout.log";
+                    state.Stderr = logStem + ".stderr.log";
                     remaining.Remove(node);
                     Console.Error.WriteLine($"[CMakeWorkflow] START {node.Definition.Id}");
                     // Execution works on a separate record; report snapshots are written
@@ -205,12 +338,18 @@ public static class WorkflowRunner
                     // Build-only workflows need not hash potentially large binaries.
                     var snapshot = node.Definition.Kind == "build" && plan.Nodes.Any(p =>
                         p.Definition.Kind is "run" or "profile" && p.Definition.From == node.Definition.Id);
-                    active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
-                        snapshot, sessions[node.Target.BuildDirectory], output, stop.Token, extension)));
+                    dispatch.Add((node, snapshot));
                 }
                 await SaveAsync(report, output, events);
+                foreach (var (node, snapshot) in dispatch)
+                {
+                    await RecoveryFaults.HitAsync("after-checkpoint", node.Definition.Id, ct);
+                    active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
+                        snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id), stop.Token, extension)));
+                }
                 if (active.Count == 0)
                 {
+                    if (report.Nodes.Any(n => n.Status == "needs_attention")) break;
                     if (remaining.Count > 0)
                         throw new InvalidOperationException("No schedulable workflow node.");
                     break;
@@ -219,9 +358,18 @@ public static class WorkflowRunner
                 foreach (var pair in active.Where(p => p.Value.Task.IsCompleted).ToArray())
                 {
                     var result = await pair.Value.Task;
+                    await RecoveryFaults.HitAsync("after-execution", pair.Key, ct);
                     states[pair.Key] = result;
                     report.Nodes[report.Nodes.FindIndex(n => n.Id == pair.Key)] = result;
                     active.Remove(pair.Key);
+                    if (result.Status == "needs_attention")
+                    {
+                        report.Findings.Add(new WorkflowFinding("TOOL_EXECUTABLE_MISSING", "error", pair.Key,
+                            result.Error ?? "Required executable is unavailable.",
+                            result.Kind == "ctest" ? ["cmake"] : ["native"]));
+                        // Independent work already launched is allowed to complete; no
+                        // additional nodes start after this finding.
+                    }
                     Console.Error.WriteLine($"[CMakeWorkflow] {result.Status.ToUpperInvariant()} {pair.Key}" +
                         (result.Error is null ? "" : $": {result.Error}"));
                 }
@@ -236,6 +384,7 @@ public static class WorkflowRunner
         catch (Exception error)
         {
             report.Error = error.Message;
+            Console.Error.WriteLine($"[CMakeWorkflow] Workflow infrastructure failed: {error.Message}");
             foreach (var node in report.Nodes.Where(n => n.Status == "pending"))
             {
                 node.Status = "blocked";
@@ -254,7 +403,21 @@ public static class WorkflowRunner
             ownership?.Dispose();
         }
         report.FinishedAt = DateTimeOffset.UtcNow;
-        report.Status = ct.IsCancellationRequested ? "canceled"
+        report.RecoveryPhase = resume ? "finished" : report.RecoveryPhase;
+        // An admission whose persistence failed must never appear as safely
+        // replayable. No new worker starts before SaveAsync succeeds.
+        if (report.Nodes.Any(n => n.Status == "running"))
+        {
+            foreach (var node in report.Nodes.Where(n => n.Status == "running"))
+            {
+                node.Status = "outcome_unknown";
+                node.Error = "Admission did not commit reliably; manual reconciliation is required.";
+            }
+            report.RecoveryPhase = "interrupted";
+        }
+        report.Status = report.Nodes.Any(n => n.Status == "outcome_unknown") ? "outcome_unknown"
+            : ct.IsCancellationRequested ? "canceled"
+            : report.Nodes.Any(n => n.Status == "needs_attention") ? "needs_attention"
             : report.Error is null && report.Nodes.All(n => n.Status == "succeeded") ? "succeeded" : "failed";
         try
         {
@@ -267,7 +430,8 @@ public static class WorkflowRunner
         catch (IOException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
         catch (UnauthorizedAccessException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
         await SaveAsync(report, output, events);
-        return report.Status == "canceled" ? 130 : report.Status == "succeeded" ? 0 : 1;
+        return report.Status == "canceled" ? 130 : report.Status == "succeeded" ? 0
+            : report.Status == "needs_attention" ? 3 : report.Status == "outcome_unknown" ? 4 : 1;
     }
 
     private static bool Conflicts(PlannedNode left, PlannedNode right) =>
@@ -275,8 +439,14 @@ public static class WorkflowRunner
         || WorkflowPlanner.PathComparer.Equals(left.Target.BuildDirectory, right.Target.BuildDirectory)
         || left.Definition.Resources.Intersect(right.Definition.Resources, StringComparer.Ordinal).Any();
 
+    private static string LogStem(WorkflowReport report, string nodeId)
+    {
+        var retries = report.Reconciliations.Count(r => r.NodeId == nodeId && r.Decision == "retry");
+        return retries == 0 ? nodeId : $"{nodeId}.attempt-{retries + 1}";
+    }
+
     private static async Task<NodeResult> ExecuteAsync(PlannedNode node, NodeResult? prerequisite,
-        bool snapshotExecutable, BuildContextSession session, string output, CancellationToken ct,
+        bool snapshotExecutable, BuildContextSession session, string output, string logStem, CancellationToken ct,
         IWorkflowOperationExecutor? extension)
     {
         var definition = node.Definition;
@@ -287,7 +457,7 @@ public static class WorkflowRunner
             Target = node.Target.Target, WorkingDirectory = node.WorkingDirectory, RequestedContext = node.Requested,
             EnvironmentOverrideHash = EnvironmentProvenance.FingerprintOverrides(definition.Environment),
             StartedAt = DateTimeOffset.UtcNow, Status = "running",
-            Stdout = definition.Id + ".stdout.log", Stderr = definition.Id + ".stderr.log"
+            Stdout = logStem + ".stdout.log", Stderr = logStem + ".stderr.log"
         };
         var timer = Stopwatch.StartNew();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -326,7 +496,7 @@ public static class WorkflowRunner
                         break;
                     case "run":
                     case "profile":
-                        if (prerequisite?.BuildVerification is not { Verification: "BackendSucceeded" } verified
+                        if (prerequisite?.BuildVerification is not { Verification: "BackendSucceeded" or "ManuallyAccepted" } verified
                             || verified.Target != target)
                             throw new InvalidOperationException("Run requires a successful native build verification for this exact target/configuration.");
                         if (verified.Generation != GenerationObservation.From(result.ObservedContext))
@@ -367,7 +537,12 @@ public static class WorkflowRunner
                     result.ExperimentResult = operation.Status;
                     if (operation.Message is not null) result.Error = operation.Message;
                 }
-                else result.ExitCode = await RunProcessAsync(result, definition.Environment, output, deadline.Token);
+                else
+                {
+                    if (definition.Kind == "invoke" && definition.HarnessDirectory is not null)
+                        DagFlowHarnessSnapshot.RequireFresh(node.Target.BuildDirectory, definition.HarnessDirectory);
+                    result.ExitCode = await RunProcessAsync(result, definition.Environment, output, deadline.Token);
+                }
                 result.Status = result.ExitCode == 0 ? "succeeded" : "failed";
                 if (result.ExitCode != 0) result.Error ??= $"Process exited with code {result.ExitCode}.";
                 // The command's result remains factual even if subsequent context
@@ -411,8 +586,21 @@ public static class WorkflowRunner
                         { ProvenancePolicy = "allowUnverified" }, result.ObservationAfter, target.Target);
                     if (after != target) throw new InvalidOperationException("Invoke regenerated a different configuration; dependent execution is blocked.");
                     session.Validate(node.Requested, result.ObservationAfter);
+                    // Only attach measurements after the CLI's provenance checks pass.
+                    if (definition.HarnessDirectory is not null)
+                        result.Outputs = await DagFlowHarnessSnapshot.CaptureAsync(
+                            node.Target.BuildDirectory, definition.HarnessDirectory, output, definition.Id, deadline.Token);
+                    else if (result.Stdout is not null && result.StartedAt is { } invokedAt)
+                        result.Outputs = await DagFlowHarnessSnapshot.CaptureReportedAsync(
+                            node.Target.BuildDirectory, Path.Combine(output, result.Stdout),
+                            output, definition.Id, invokedAt, deadline.Token);
                 }
             }
+        }
+        catch (MissingWorkflowToolException error)
+        {
+            result.Status = "needs_attention";
+            result.Error = error.Message;
         }
         catch (OperationCanceledException)
         {
@@ -425,6 +613,11 @@ public static class WorkflowRunner
         {
             result.Status = "failed";
             result.Error = error.Message;
+            // Preserve the factual process result if later provenance or snapshot
+            // validation rejects the node after the command has completed.
+            if (definition.Kind is "run" or "profile" or "ctest" or "invoke"
+                && result.ExperimentResult == "NotRun")
+                result.ExperimentResult = "failed";
         }
         result.SessionAfter ??= session.State(node.Requested, result.ObservationAfter ?? result.ObservedContext ?? node.Observed);
         result.FinishedAt = DateTimeOffset.UtcNow;
@@ -513,7 +706,13 @@ public static class WorkflowRunner
         await using var stderr = File.Create(Path.Combine(output, result.Stderr!));
         ct.ThrowIfCancellationRequested();
         var processTimer = Stopwatch.StartNew();
-        using var process = Process.Start(info) ?? throw new IOException($"Could not start {result.Executable}.");
+        Process process;
+        try { process = Process.Start(info) ?? throw new MissingWorkflowToolException(result.Executable!,
+            new IOException("Process.Start returned null.")); }
+        catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3)
+        { throw new MissingWorkflowToolException(result.Executable!, error); }
+        using (process)
+        {
         process.StandardInput.Close();
         var copies = Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(stdout),
             process.StandardError.BaseStream.CopyToAsync(stderr));
@@ -543,15 +742,12 @@ public static class WorkflowRunner
             try { await copies; }
             catch (Exception error) when (ct.IsCancellationRequested && error is IOException or ObjectDisposedException) { }
         }
+        }
     }
 
     private static async Task SaveAsync(WorkflowReport report, string output, WorkflowEventJournal events)
     {
-        var path = Path.Combine(output, "run.json");
-        var temporary = path + ".tmp";
-        await using (var stream = File.Create(temporary))
-            await JsonSerializer.SerializeAsync(stream, report, WorkflowJson.Default.WorkflowReport);
-        File.Move(temporary, path, overwrite: true);
+        await WorkflowCheckpoint.SaveAsync(report, output, CancellationToken.None);
         events.Publish(report);
     }
 }

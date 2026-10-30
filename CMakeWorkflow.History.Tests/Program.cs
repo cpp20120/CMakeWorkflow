@@ -139,7 +139,7 @@ try
     Directory.CreateDirectory(Path.Combine(captureOnly, "traces", "normalized"));
     Write(Path.Combine(captureOnly, "traces", "normalized"), "cpu.etw.json", """
         {"schemaVersion":1,"backend":"etw","attribution":"target PID and time window",
-         "targetCpuSamples":5,"readyLatencySumMilliseconds":2.5}
+         "targetCpuSamples":5,"readyLatencySamples":2,"readyLatencySumMilliseconds":2.5}
         """);
     using (var store = new HistoryStore(dbPath))
     {
@@ -147,6 +147,7 @@ try
         var capture = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == captureOnly);
         Check(capture.Status == "succeeded"
             && store.Metrics(capture.Id, "targetCpuSamples", null, null).Single().Value == 5
+            && store.Metrics(capture.Id, "readyLatencyMeanMilliseconds", null, null).Single().Value == 1.25
             && store.Show(capture.Id).Artifacts.Any(x => x.Type == "trace" && !x.Available),
             "ETW summary and missing trace link");
     }
@@ -210,7 +211,8 @@ try
     Write(profile, "run.json", Workflow("succeeded", 1, 2));
     Write(profile, "counter-comparison.json", """
         {"schemaVersion":1,"backend":"perf stat","variants":[
-        {"name":"main","events":{"cycles":{"value":100,"unit":"count"}}}]}
+        {"name":"main","events":{"cycles":{"value":100,"unit":"count"}},
+         "derived":{"ipc":{"value":2.5,"unit":"instructions/cycle"}}}]}
         """);
     var profile2 = Path.Combine(root, "profile2");
     Directory.CreateDirectory(profile2);
@@ -226,6 +228,9 @@ try
         var first = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == profile);
         var second = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == profile2);
         Check(store.Metrics(first.Id, "cycles", null, null).Single().Value == 100, "counter import");
+        Check(store.Metrics(first.Id, "ipc", null, null).Single().Value == 2.5
+            && store.Metrics(first.Id, "ipc", null, null).Single().Method == "perf stat derived",
+            "PMU derived counter import must remain distinct from raw events");
         var output = new StringWriter(); var old = Console.Out; Console.SetOut(output);
         try { await HistoryCommand.ExecuteAsync(["compare", first.Id, second.Id, "--db", dbPath, "--json"], default); }
         finally { Console.SetOut(old); }
@@ -570,6 +575,55 @@ try
         Check(upgraded.Import(success, false).Contains("Imported 1"), "v2 migration");
         Check(upgraded.Runs(50, null, null, null, null, null).Count == 1,
             "v2 migration preserved run");
+    }
+    // A workflow imports only explicitly captured harness snapshots, not arbitrary
+    // mutable files from a CMake build tree.
+    var harnessRun = Path.Combine(root, "dagflow-harness-workflow");
+    var harnessArtifacts = Path.Combine(harnessRun, "harness", "api");
+    Directory.CreateDirectory(harnessArtifacts);
+    Write(harnessArtifacts, "manifest.json", "{\"schemaVersion\":1}");
+    var harnessHash = Convert.ToHexString(SHA256.HashData(
+        File.ReadAllBytes(Path.Combine(harnessArtifacts, "manifest.json")))).ToLowerInvariant();
+    Write(harnessArtifacts, "summary.json", """
+        {"status":"passed","manifest_sha256":"hash","cases":{
+          "chain-w2":{"metrics":{"run_p50_us":{"scale":1000000,"count":2,"median":1500000}}}}}
+        """.Replace("hash", harnessHash, StringComparison.Ordinal));
+    Write(harnessArtifacts, "runs.jsonl", string.Join("\n", new[] {
+        """{"case":"chain-w2","warmup":true,"result":"0","output":{"run_p50_us":999}}""",
+        """{"case":"chain-w2","warmup":false,"result":"0","manifest_sha256":"hash","output":{"run_p50_us":1}}""",
+        """{"case":"chain-w2","warmup":false,"result":"0","manifest_sha256":"hash","output":{"run_p50_us":2}}"""
+    }).Replace("hash", harnessHash, StringComparison.Ordinal));
+    Write(harnessRun, "run.json", """
+        {"schemaVersion":1,"workflow":"dagflow.json","manifestHash":"wf",
+         "status":"succeeded","startedAt":"2026-01-01T00:00:00Z",
+         "finishedAt":"2026-01-01T00:05:00Z","nodes":[
+         {"id":"api","kind":"invoke","status":"succeeded","dependencies":[],
+          "buildDirectory":"/build","configuration":"Release","target":"run_dagflow_api_campaign",
+          "outputs":{"dagflow-manifest.json":"harness/api/manifest.json",
+                     "dagflow-summary.json":"harness/api/summary.json",
+                     "dagflow-runs.jsonl":"harness/api/runs.jsonl"}}]}
+        """);
+    using (var store = new HistoryStore(dbPath))
+    {
+        Check(store.Import(harnessRun, false).Contains("Imported 1"), "harness import");
+        var runId = store.Runs(50, null, null, null, "dagflow", null).Single().Id;
+        var samples = store.Metrics(runId, "run_p50_us", null, "chain-w2");
+        Check(samples.Count == 2 && samples.Select(x => x.Value).SequenceEqual([1, 2])
+            && samples.All(x => x.Method == "dagflow-harness" && x.NodeId == "api"),
+            "harness samples indexed and attributed");
+        Check(store.Show(runId).Artifacts.Count(x => x.Type.StartsWith("dagflow-")) == 3,
+            "harness snapshot artifacts");
+        Check(store.Import(harnessRun, false).Contains("unchanged 1"), "harness idempotence");
+        // Legacy generic harness summaries omit manifest_sha256 entirely.
+        var summaryFile = Path.Combine(harnessArtifacts, "summary.json");
+        File.WriteAllText(summaryFile, File.ReadAllText(summaryFile).Replace(
+            "\"manifest_sha256\":\"" + harnessHash + "\",", "", StringComparison.Ordinal));
+        Check(store.Import(harnessRun, false).Contains("Imported 1"), "legacy harness summary import");
+        Check(store.Metrics(runId, "run_p50_us", null, "chain-w2").Count == 2,
+            "legacy harness samples survived reindex");
+        Write(harnessArtifacts, "runs.jsonl", "{}\n");
+        try { store.Import(harnessRun, false); throw new Exception("corrupt harness accepted"); }
+        catch (InvalidDataException) { /* Corruption must not be silently imported. */ }
     }
     Console.WriteLine("History checks passed.");
 }

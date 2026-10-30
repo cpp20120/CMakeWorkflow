@@ -82,6 +82,11 @@ internal static class HistoryReports
         e.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null
             ? value.GetRawText() : null;
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static string HashFile(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
     private static string? Time(JsonElement e, string name)
     {
         var value = Str(e, name);
@@ -190,6 +195,7 @@ internal static class HistoryReports
                     run.Measurements.Count(m => m.Metric == "process_wall_time"
                         && m.Variant == variant), Json(node, "arguments"), null));
             }
+            ImportDagFlowHarness(directory, run, node, id);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
             AddArtifact(run, id, "stderr", Str(node, "stderr"));
             var artifact = Obj(node, "artifact");
@@ -219,6 +225,105 @@ internal static class HistoryReports
         FinalizeHash(run);
         return run;
     }
+    // Only import snapshots explicitly recorded in run.json. No directory search,
+    // and no reading mutable artifacts from the native build tree.
+    private static void ImportDagFlowHarness(string directory, ParsedRun run, JsonElement node, string id)
+    {
+        if (Obj(node, "outputs") is not { } outputs) return;
+        if (outputs.TryGetProperty("dagflow-summary.json", out _))
+            ImportDagFlowHarnessEntry(directory, run, outputs, id, "dagflow-", null);
+        // Multiple harness results can originate from one native invoke.
+        for (var index = 0; outputs.TryGetProperty($"dagflow-{index}-summary.json", out _); index++)
+            ImportDagFlowHarnessEntry(directory, run, outputs, id, $"dagflow-{index}-", $"harness-{index}");
+    }
+    private static void ImportDagFlowHarnessEntry(string directory, ParsedRun run,
+        JsonElement outputs, string id, string prefix, string? variant)
+    {
+        string Saved(string name)
+        {
+            var relative = Str(outputs, prefix + name)
+                ?? throw new InvalidDataException($"{id}: incomplete DagFlow harness snapshot.");
+            if (Path.IsPathRooted(relative)) throw new InvalidDataException($"{id}: absolute harness snapshot path.");
+            var full = Path.GetFullPath(Path.Combine(directory, relative));
+            var inside = Path.GetRelativePath(directory, full);
+            if (inside == ".." || inside.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                || Path.IsPathRooted(inside) || !File.Exists(full))
+                throw new InvalidDataException($"{id}: missing or escaping DagFlow snapshot {name}.");
+            return full;
+        }
+        var manifestPath = Saved("manifest.json");
+        var summaryPath = Saved("summary.json");
+        var runsPath = Saved("runs.jsonl");
+        foreach (var (type, path) in new[] { ("dagflow-manifest", manifestPath),
+            ("dagflow-summary", summaryPath), ("dagflow-runs", runsPath) })
+            AddArtifact(run, id, type, path, HashFile(path));
+        if (Str(outputs, prefix + "replay-binary") is { } executable)
+        {
+            var original = Path.GetFullPath(Path.Combine(directory, executable));
+            if (!original.StartsWith(Path.GetFullPath(directory) + Path.DirectorySeparatorChar,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+                || !File.Exists(original))
+                throw new InvalidDataException($"{id}: invalid snapshotted replay binary.");
+            AddArtifact(run, id, "dagflow-replay-binary", original, HashFile(original));
+        }
+        using var summary = Read(summaryPath);
+        var root = summary.RootElement;
+        if (Str(root, "status") != "passed" || Obj(root, "cases") is not { } cases)
+            throw new InvalidDataException($"{summaryPath}: harness did not pass or has no cases.");
+        // Older DagFlow generic harnesses omit manifest_sha256; the explicit
+        // per-run copy is still immutable and independently hashed for history.
+        var hash = Str(root, "manifest_sha256");
+        if (hash is not null && !string.Equals(hash, Hash(File.ReadAllBytes(manifestPath)), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"{summaryPath}: manifest SHA-256 does not match the snapshot.");
+        using var manifest = Read(manifestPath);
+        var manifestCases = Obj(manifest.RootElement, "cases");
+        var expected = new Dictionary<(string Case, string Metric), (double Scale, int Count)>();
+        foreach (var item in cases.EnumerateObject())
+        {
+            if (Obj(item.Value, "metrics") is not { } metrics) continue;
+            foreach (var metric in metrics.EnumerateObject())
+            {
+                if (Num(metric.Value, "scale") is not { } scale || scale <= 0
+                    || Num(metric.Value, "count") is not { } n || n < 0 || n != Math.Truncate(n))
+                    throw new InvalidDataException($"{summaryPath}: invalid metric metadata.");
+                expected[(item.Name, metric.Name)] = (scale, checked((int)n));
+            }
+        }
+        var counts = new Dictionary<(string Case, string Metric), int>();
+        foreach (var line in File.ReadLines(runsPath))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            using var parsed = JsonDocument.Parse(line);
+            var row = parsed.RootElement;
+            if (hash is not null && Str(row, "manifest_sha256") is { } rowHash && rowHash != hash)
+                throw new InvalidDataException($"{runsPath}: manifest hash mismatch.");
+            if (!row.TryGetProperty("warmup", out var warmup) || warmup.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException($"{runsPath}: invalid warmup flag.");
+            if (warmup.GetBoolean() || Str(row, "result") != "0") continue;
+            if (Str(row, "case") is not { } caseName || Obj(row, "output") is not { } data)
+                throw new InvalidDataException($"{runsPath}: missing case or output.");
+            foreach (var value in data.EnumerateObject())
+            {
+                var key = (Case: caseName, Metric: value.Name);
+                if (!expected.ContainsKey(key)) continue;
+                if (value.Value.ValueKind != JsonValueKind.Number || !value.Value.TryGetDouble(out var number) || !double.IsFinite(number))
+                    throw new InvalidDataException($"{runsPath}: nonfinite metric {value.Name}.");
+                var index = counts.GetValueOrDefault(key);
+                counts[key] = index + 1;
+                // Compare workloads by explicit harness case recipe (never by
+                // binary SHA-256, which naturally changes across revisions).
+                var recipe = manifestCases is { } mc && mc.TryGetProperty(caseName, out var caseRecipe)
+                    ? caseRecipe.GetRawText() : null;
+                run.Measurements.Add(new(run.Run.Id, id, value.Name, "", number,
+                    variant, caseName, "dagflow-runs.jsonl", "dagflow-harness", index,
+                    recipe, null));
+            }
+        }
+        foreach (var (key, spec) in expected)
+            if (counts.GetValueOrDefault(key) != spec.Count)
+                throw new InvalidDataException($"{runsPath}: sample count does not match summary for {key.Case}/{key.Metric}.");
+    }
+
     private static string? TimingVariant(string id)
     {
         if (!id.StartsWith("timing_", StringComparison.Ordinal)) return null;
@@ -369,15 +474,16 @@ internal static class HistoryReports
             var backend = Str(root, "backend") ?? "unknown";
             if (root.TryGetProperty("variants", out var variants) && variants.ValueKind == JsonValueKind.Array)
                 foreach (var variant in variants.EnumerateArray())
-                    if (Obj(variant, "events") is { } events)
-                        foreach (var ev in events.EnumerateObject())
-                            if (Num(ev.Value, "value") is { } value)
-                                run.Measurements.Add(new(run.Run.Id, null, ev.Name,
-                                    Str(ev.Value, "unit") ?? "", value, Str(variant, "name"),
-                                    run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Scenario,
-                                    "counter-comparison.json", backend, 0,
-                                    run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Workload,
-                                    null));
+                    foreach (var collection in new[] { "events", "derived" })
+                        if (Obj(variant, collection) is { } events)
+                            foreach (var ev in events.EnumerateObject())
+                                if (Num(ev.Value, "value") is { } value)
+                                    run.Measurements.Add(new(run.Run.Id, null, ev.Name,
+                                        Str(ev.Value, "unit") ?? "", value, Str(variant, "name"),
+                                        run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Scenario,
+                                        "counter-comparison.json", collection == "derived" ? "perf stat derived" : backend, 0,
+                                        run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Workload,
+                                        null));
         }
         var analysisPath = Path.Combine(directory, "analysis.json");
         if (File.Exists(analysisPath))
@@ -411,6 +517,19 @@ internal static class HistoryReports
         }
         var normalized = Path.Combine(directory, "traces", "normalized");
         if (Directory.Exists(normalized))
+        {
+            foreach (var file in Directory.GetFiles(normalized, "*.stacks.json"))
+            {
+                using var parsed = Read(file);
+                Version(parsed.RootElement, file, 1);
+                AddArtifact(run, Path.GetFileName(file)[..^".stacks.json".Length],
+                    "cpu-stacks", file, HashFile(file));
+            }
+            foreach (var file in Directory.GetFiles(normalized, "*.timeline.jsonl"))
+                AddArtifact(run, Path.GetFileName(file)[..^".timeline.jsonl".Length],
+                    "scheduler-timeline", file, HashFile(file));
+        }
+        if (Directory.Exists(normalized))
             foreach (var path in Directory.GetFiles(normalized, "*.etw.json").Order(StringComparer.Ordinal))
             {
                 using var doc = Read(path);
@@ -419,6 +538,12 @@ internal static class HistoryReports
                 if (Str(root, "backend") != "etw")
                     throw new InvalidDataException($"{path}: expected an ETW summary.");
                 var capture = Path.GetFileName(path)[..^".etw.json".Length];
+                // CPU and scheduler captures are separate passes. Never pool their
+                // ETW samples as if they were repeated measurements of one mode.
+                var captureVariant = capture.StartsWith("scheduler_", StringComparison.Ordinal)
+                    ? capture["scheduler_".Length..] + ".scheduler"
+                    : capture.StartsWith("capture_", StringComparison.Ordinal)
+                        ? capture["capture_".Length..] + ".cpu" : capture;
                 AddArtifact(run, capture, "etw-summary", path, Hash(File.ReadAllBytes(path)));
                 foreach (var (field, unit) in new[] {
                     ("targetCpuSamples", "samples"), ("targetContextSwitchesIn", "events"),
@@ -428,10 +553,19 @@ internal static class HistoryReports
                     ("scheduledRunningMilliseconds", "ms") })
                     if (Num(root, field) is { } value)
                         run.Measurements.Add(new(run.Run.Id, capture, field, unit, value,
-                            null, run.ProfileInputs.GetValueOrDefault(capture).Scenario,
+                            captureVariant, run.ProfileInputs.GetValueOrDefault(capture).Scenario,
                             "traces/normalized/" + Path.GetFileName(path),
                             "ETW tracerpt target PID/time window " + (Str(root, "attribution") ?? "unknown"),
                             0, run.ProfileInputs.GetValueOrDefault(capture).Workload, null));
+                var latencyCount = Num(root, "readyLatencySamples");
+                var latencySum = Num(root, "readyLatencySumMilliseconds");
+                if (latencyCount is > 0 && latencySum is >= 0)
+                    run.Measurements.Add(new(run.Run.Id, capture, "readyLatencyMeanMilliseconds",
+                        "ms", latencySum.Value / latencyCount.Value, captureVariant,
+                        run.ProfileInputs.GetValueOrDefault(capture).Scenario,
+                        "traces/normalized/" + Path.GetFileName(path),
+                        "ETW derived ready-to-running latency; target PID/time window", 0,
+                        run.ProfileInputs.GetValueOrDefault(capture).Workload, null));
             }
     }
 }

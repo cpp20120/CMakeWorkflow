@@ -11,6 +11,34 @@ try
     var request = new ProfileRequest(executable, ["--workers", "1"], root,
         new Dictionary<string, string>(), root, "capture", "cpu", TimeSpan.FromSeconds(5));
 
+    using (var script = new StringReader("""
+        test 100 [001] 123.456: 1 cycles:u:
+                     7ff0 Work::execute (dagflow-runtime-bench)
+                     7ff1 Pool::worker (dagflow-runtime-bench)
+        test 100 [001] 123.457: 1 cycles:u:
+                     7ff0 Work::execute (dagflow-runtime-bench)
+                     7ff1 Pool::worker (dagflow-runtime-bench)
+        """))
+    {
+        var stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
+        Check(stacks["samples"]!.GetValue<int>() == 2
+            && stacks["symbolizedSamples"]!.GetValue<int>() == 2
+            && stacks["stacks"]!.AsArray()[0]!["count"]!.GetValue<int>() == 2,
+            "perf script folded stack parsing or normalization failed.");
+    }
+    using (var script = new StringReader("""
+        cmd 123 [003] 123.001234: sched:sched_wakeup: comm=worker pid=42 prio=120 target_cpu=003
+        cmd 123 [003] 123.002345: sched:sched_switch: prev_comm=worker prev_pid=42 prev_prio=120 prev_state=S ==> next_comm=other next_pid=43 next_prio=120
+        """))
+    using (var output = new StringWriter())
+    {
+        Check(PerfSchedulerAnalyzer.Parse(script, output, CancellationToken.None) == 3
+            && output.ToString().Contains("\"ready\"")
+            && output.ToString().Contains("\"offcpu\"")
+            && output.ToString().Contains("\"running\"")
+            && output.ToString().Contains("perf-relative"),
+            "perf scheduler tracepoint normalization failed.");
+    }
     var perf = new FakeProcess();
     var perfResult = await new LinuxPerfBackend(perf).CaptureAsync(request, CancellationToken.None);
     Check(perf.Calls.Count == 1 && perf.Calls[0].Executable == "perf"
@@ -23,6 +51,132 @@ try
     Check(perf.Calls[1].Args.Take(3).SequenceEqual(["stat", "-x", ","])
         && counterResult.RawTrace.EndsWith(".csv", StringComparison.Ordinal)
         && File.Exists(counterResult.RawTrace), "perf counter capture must remain separate from sampling");
+
+    // No profiler tool is invoked by replay when a stored executable is
+    // stale or both variants point to the same mutable build output.
+    var replayExe = Path.Combine(root, "replay-executable");
+    await File.WriteAllTextAsync(replayExe, "immutable-benchmark");
+    var replayHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+        await File.ReadAllBytesAsync(replayExe)));
+    var replayDir = Path.Combine(root, "replay-fixture");
+    Directory.CreateDirectory(replayDir);
+    var report = new System.Text.Json.Nodes.JsonObject
+    {
+        ["status"] = "succeeded",
+        ["nodes"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+        {
+            ["id"] = "sample", ["kind"] = "run", ["status"] = "succeeded",
+            ["artifact"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["executable"] = replayExe, ["sha256"] = replayHash
+            },
+            ["environmentOverrideHash"] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ["arguments"] = new System.Text.Json.Nodes.JsonArray(
+                System.Text.Json.Nodes.JsonValue.Create("--scenario"),
+                System.Text.Json.Nodes.JsonValue.Create("chain")),
+            ["workingDirectory"] = root
+        })
+    };
+    await File.WriteAllTextAsync(Path.Combine(replayDir, "run.json"), report.ToJsonString());
+    try
+    {
+        await ProfileReplayCommand.ExecuteAsync(["replay", replayDir, replayDir, "--node", "sample"], CancellationToken.None);
+        throw new Exception("Expected same-binary replay rejection");
+    }
+    catch (InvalidOperationException e) when (e.Message.Contains("same mutable executable", StringComparison.Ordinal)) { }
+    await File.WriteAllTextAsync(replayExe, "changed-binary");
+    try
+    {
+        await ProfileReplayCommand.ExecuteAsync(["replay", replayDir, replayDir, "--node", "sample"], CancellationToken.None);
+        throw new Exception("Expected stale SHA rejection");
+    }
+    catch (InvalidOperationException e) when (e.Message.Contains("changed since its original run", StringComparison.Ordinal)) { }
+
+    // Native harness case replay must use snapshotted executable bytes, not
+    // mutable CMake target paths; unsupported/ambiguous provenance fails closed.
+    var nativeA = Path.Combine(root, "harness-before");
+    var nativeB = Path.Combine(root, "harness-after");
+    foreach (var dir in new[] { nativeA, nativeB })
+    {
+        var artifacts = Path.Combine(dir, "harness", "api-workloads");
+        Directory.CreateDirectory(artifacts);
+        var preserved = Path.Combine(artifacts, OperatingSystem.IsWindows() ? "replay-binary.exe" : "replay-binary");
+        await File.WriteAllTextAsync(preserved, dir);
+        var binarySha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            await File.ReadAllBytesAsync(preserved)));
+        var manifest = new System.Text.Json.Nodes.JsonObject
+        {
+            ["binary"] = Path.Combine(dir, "mutable-old-binary"),
+            ["binary_sha256"] = binarySha,
+            ["cases"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["chain-4"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["args"] = new System.Text.Json.Nodes.JsonArray(
+                        System.Text.Json.Nodes.JsonValue.Create("--scenario"),
+                        System.Text.Json.Nodes.JsonValue.Create("chain")),
+                    ["metadata"] = new System.Text.Json.Nodes.JsonObject()
+                }
+            },
+            ["replayCases"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["chain-4"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["schemaVersion"] = 1, ["replayable"] = true,
+                    ["arguments"] = new System.Text.Json.Nodes.JsonArray(
+                        System.Text.Json.Nodes.JsonValue.Create("--scenario"),
+                        System.Text.Json.Nodes.JsonValue.Create("chain")),
+                    ["workingDirectory"] = root, ["cpuSet"] = ""
+                }
+            }
+        };
+        await File.WriteAllTextAsync(Path.Combine(artifacts, "manifest.json"), manifest.ToJsonString());
+        var fileName = Path.GetFileName(preserved);
+        var reportHarness = new System.Text.Json.Nodes.JsonObject
+        {
+            ["status"] = "succeeded",
+            ["nodes"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+            {
+                ["id"] = "api-workloads", ["kind"] = "invoke", ["status"] = "succeeded",
+                ["outputs"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["dagflow-manifest.json"] = "harness/api-workloads/manifest.json",
+                    ["dagflow-replay-binary"] = "harness/api-workloads/" + fileName
+                }
+            })
+        };
+        await File.WriteAllTextAsync(Path.Combine(dir, "run.json"), reportHarness.ToJsonString());
+    }
+    var harnessArgs = new[] { "replay", nativeA, nativeB, "--node", "api-workloads", "--case", "chain-4" };
+    // These rejection tests execute before any profiler is launched.
+    try
+    {
+        await ProfileReplayCommand.ExecuteAsync(["replay", nativeA, nativeB, "--node", "api-workloads", "--case", "missing"], CancellationToken.None);
+        throw new Exception("Expected missing native case rejection");
+    }
+    catch (InvalidDataException e) when (e.Message.Contains("no native replay descriptor", StringComparison.Ordinal)) { }
+    var tampered = Path.Combine(nativeA, "harness", "api-workloads",
+        OperatingSystem.IsWindows() ? "replay-binary.exe" : "replay-binary");
+    await File.AppendAllTextAsync(tampered, "tamper");
+    try
+    {
+        await ProfileReplayCommand.ExecuteAsync(harnessArgs, CancellationToken.None);
+        throw new Exception("Expected preserved-binary SHA rejection");
+    }
+    catch (InvalidOperationException e) when (e.Message.Contains("Snapshotted benchmark binary changed", StringComparison.Ordinal)) { }
+    // Keep baseline bytes valid, but reject a non-replayable case explicitly.
+    await File.WriteAllTextAsync(tampered, nativeA);
+    var candidateManifest = Path.Combine(nativeB, "harness", "api-workloads", "manifest.json");
+    var candidateObject = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(candidateManifest))!.AsObject();
+    candidateObject["replayCases"]!["chain-4"]!["replayable"] = false;
+    candidateObject["replayCases"]!["chain-4"]!["reason"] = "environment overrides";
+    await File.WriteAllTextAsync(candidateManifest, candidateObject.ToJsonString());
+    try
+    {
+        await ProfileReplayCommand.ExecuteAsync(harnessArgs, CancellationToken.None);
+        throw new Exception("Expected unsupported native harness case rejection");
+    }
+    catch (InvalidDataException e) when (e.Message.Contains("environment overrides", StringComparison.Ordinal)) { }
 
     var instruments = new FakeProcess();
     var macResult = await new MacInstrumentsBackend(instruments).CaptureAsync(request, CancellationToken.None);
@@ -64,6 +218,11 @@ try
         DateTimeOffset.Parse("2026-10-26T10:00:05Z"), CancellationToken.None);
     Check(etw.CpuSamples == 1 && etw.ContextSwitchesIn == 1 && etw.ReadyEvents == 1,
         "ETW parser did not isolate the target PID and its threads.");
+    var timeline = await File.ReadAllTextAsync(Path.Combine(root, "traces", "normalized", "etw.timeline.jsonl"));
+    var stacksJson = await File.ReadAllTextAsync(Path.Combine(root, "traces", "normalized", "etw.stacks.json"));
+    Check(timeline.Contains("\"ready\"") && timeline.Contains("\"running\"")
+        && timeline.Contains("\"offcpu\"") && stacksJson.Contains("\"samples\":1"),
+        "ETW scheduler timeline/CPU stack evidence missing.");
     Check((await File.ReadAllLinesAsync(etw.Samples)).Length == 1
         && (await File.ReadAllTextAsync(etw.Samples)).Contains("0x1234")
         && (await File.ReadAllTextAsync(etw.Summary)).Contains("0x1234") == false,
@@ -97,8 +256,10 @@ try
 
     var analysis = Path.Combine(root, "analysis");
     Directory.CreateDirectory(Path.Combine(analysis, "traces", "raw"));
-    await File.WriteAllTextAsync(Path.Combine(analysis, "traces", "raw", "counters.csv"), "1,,cycles\n");
-    await File.WriteAllTextAsync(Path.Combine(analysis, "traces", "raw", "lto.csv"), "2,,cycles\n");
+    await File.WriteAllTextAsync(Path.Combine(analysis, "traces", "raw", "counters.csv"),
+        "100,,cycles\n250,,instructions\n5,,cache-misses\n2,,branch-misses\n");
+    await File.WriteAllTextAsync(Path.Combine(analysis, "traces", "raw", "lto.csv"),
+        "200,,cycles\n300,,instructions\n6,,cache-misses\n3,,branch-misses\n");
     await File.WriteAllTextAsync(Path.Combine(analysis, "counters_o3.results.json"),
         """{"captureId":"counters_o3","backend":"perf","mode":"counters","rawTrace":"traces/raw/counters.csv","eventSource":"Linux PMU counters"}""");
     await File.WriteAllTextAsync(Path.Combine(analysis, "counters_lto.results.json"),
@@ -121,6 +282,12 @@ try
     {
         Check(counters.RootElement.GetProperty("baseline").GetString() == "o3",
             "Counter comparison baseline followed directory enumeration order.");
+        var variants = counters.RootElement.GetProperty("variants");
+        Check(variants[0].GetProperty("derived").GetProperty("ipc").GetProperty("value").GetDouble() == 2.5
+            && variants[0].GetProperty("derived").GetProperty("cache_mpki").GetProperty("value").GetDouble() == 20,
+            "Derived perf metrics must use the same capture and correct denominators.");
+        Check(variants[1].GetProperty("derived").GetProperty("ipc").GetProperty("ratioToBaseline").GetDouble() == 0.6,
+            "Derived ratio baseline mismatch.");
     }
     using (var comparison = System.Text.Json.JsonDocument.Parse(
         await File.ReadAllTextAsync(Path.Combine(analysis, "comparison.json"))))

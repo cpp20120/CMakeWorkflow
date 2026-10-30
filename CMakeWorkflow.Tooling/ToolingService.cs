@@ -7,7 +7,7 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
 
     public async Task<ToolingPlan> PlanAsync(IReadOnlyList<string> requestedProfiles,
         PackageManagerKind requestedManager, bool allowFallback,
-        string? installDirectory, CancellationToken ct)
+        string? installDirectory, CancellationToken ct, Func<ToolStatus, Task>? onTool = null)
     {
         var profiles = requestedProfiles.Count == 0 ? new[] { "cmake" }
             : requestedProfiles.Select(x => x.Trim().ToLowerInvariant()).Distinct(StringComparer.Ordinal).ToArray();
@@ -22,6 +22,7 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         {
             var status = await ProbeAsync(tool, directory, ct);
             statuses.Add(status);
+            if (onTool is not null) await onTool(status);
             if (status.Installed) continue;
             if (tool.Packages.TryGetValue(manager, out var packages))
             {
@@ -44,8 +45,11 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
             statuses.All(x => x.Installed), statuses, steps);
     }
 
-    public async Task<ToolingResult> ExecuteAsync(ToolingPlan plan, CancellationToken ct)
+    public async Task<ToolingResult> ExecuteAsync(ToolingPlan plan, CancellationToken ct,
+        Func<ToolingExecutionProgress, Task>? onProgress = null)
     {
+        Task Progress(string tool, string stage, string? message = null) =>
+            onProgress?.Invoke(new(tool, stage, message)) ?? Task.CompletedTask;
         var ready = new List<string>(); var failed = new List<string>(); var diagnostics = new List<string>();
         var aptUpdated = false;
         foreach (var status in plan.Tools)
@@ -53,7 +57,7 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
             ct.ThrowIfCancellationRequested();
             var definition = ToolCatalog.GetTool(status.Id);
             if ((await ProbeAsync(definition, plan.InstallDirectory, ct)).Installed)
-            { ready.Add(status.Id); continue; }
+            { ready.Add(status.Id); await Progress(status.Id, "tool_ready"); continue; }
             var packageStep = plan.Steps.FirstOrDefault(x => x.Tool == status.Id && x.Method == "package");
             if (packageStep is not null)
             {
@@ -62,15 +66,17 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                     if (plan.PackageManager == PackageManagerKind.Apt && !aptUpdated)
                     {
                         aptUpdated = true;
+                        await Progress(status.Id, "package_index", "Updating package index");
                         var update = await RunPackageAsync("apt-get", ["update"], plan.InstallDirectory, ct);
                         if (update.ExitCode != 0) throw new InvalidOperationException(
                             $"apt-get update failed: {update.Error.Trim()}");
                     }
+                    await Progress(status.Id, "package_install", "Installing through " + packageStep.Executable);
                     var install = await RunPackageAsync(packageStep.Executable!, packageStep.Arguments,
                         plan.InstallDirectory, ct);
                     if (install.ExitCode != 0) diagnostics.Add($"{status.Id}: package installation exited {install.ExitCode}: {install.Error.Trim()}");
                     else if ((await ProbeAsync(definition, plan.InstallDirectory, ct)).Installed)
-                    { ready.Add(status.Id); continue; }
+                    { ready.Add(status.Id); await Progress(status.Id, "tool_ready"); continue; }
                     else diagnostics.Add($"{status.Id}: package command succeeded but the required tool/version is still unavailable.");
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
@@ -80,15 +86,17 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
             {
                 try
                 {
+                    await Progress(status.Id, "verified_release", "Installing verified CMake release");
                     await installer.InstallAsync(plan.InstallDirectory, ct);
                     if ((await ProbeAsync(definition, plan.InstallDirectory, ct)).Installed)
-                    { ready.Add(status.Id); continue; }
+                    { ready.Add(status.Id); await Progress(status.Id, "tool_ready"); continue; }
                     diagnostics.Add($"{status.Id}: verified CMake release installed, but probing still failed.");
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
                 { diagnostics.Add($"{status.Id}: verified CMake release failed: {error.Message}"); }
             }
             failed.Add(status.Id);
+            await Progress(status.Id, "tool_failed", definition.ManualHint);
             if (definition.ManualHint is { } hint) diagnostics.Add($"{status.Id}: {hint}");
         }
         return new(1, failed.Count == 0, ready.ToArray(), failed.ToArray(), diagnostics.ToArray());
@@ -186,7 +194,10 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         {
             var sudo = runtime.Resolve("sudo", directory)
                 ?? throw new InvalidOperationException("sudo is required for package installation.");
-            return await runtime.RunAsync(sudo, ["-n", executable, .. args], TimeSpan.FromMinutes(15), ct);
+            var result = await runtime.RunAsync(sudo, ["-n", executable, .. args], TimeSpan.FromMinutes(15), ct);
+            if (result.ExitCode != 0)
+                return result with { Error = result.Error + "\nInstallation uses sudo -n and cannot prompt for a password. If authorization is required, install the reviewed packages in a terminal, then run Doctor again." };
+            return result;
         }
         return await runtime.RunAsync(executable, args, TimeSpan.FromMinutes(15), ct);
     }

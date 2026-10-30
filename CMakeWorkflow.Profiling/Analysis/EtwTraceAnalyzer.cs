@@ -41,6 +41,11 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         Directory.CreateDirectory(normalizedDirectory);
         var summaryPath = Path.Combine(normalizedDirectory, captureId + ".etw.json");
         var samplesPath = Path.Combine(normalizedDirectory, captureId + ".etw-samples.jsonl");
+        var timelinePath = Path.Combine(normalizedDirectory, captureId + ".timeline.jsonl");
+        var stackPath = Path.Combine(normalizedDirectory, captureId + ".stacks.json");
+        var stacks = new StackEvidence();
+        var timelineCount = 0;
+        var timelineDropped = 0;
         var threadProcess = new Dictionary<int, int>();
         var threads = new Dictionary<int, ThreadCounts>();
         var readyAt = new Dictionary<int, DateTimeOffset>();
@@ -53,6 +58,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         var rawStacks = 0;
         string? imageName = null;
         using (var sampleWriter = new StreamWriter(samplesPath, false, new UTF8Encoding(false)))
+        using (var timelineWriter = new StreamWriter(timelinePath, false, new UTF8Encoding(false)))
         using (var reader = XmlReader.Create(dump, new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Prohibit,
@@ -61,6 +67,17 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             IgnoreWhitespace = true
         }))
         {
+            void Timeline(DateTimeOffset? time, int tid, string state, int? processor)
+            {
+                if (time is null) return;
+                if (timelineCount >= 10000) { timelineDropped++; return; }
+                timelineCount++;
+                timelineWriter.WriteLine(new JsonObject
+                {
+                    ["timestamp"] = time.Value.ToString("O"), ["threadId"] = tid,
+                    ["state"] = state, ["cpu"] = processor
+                }.ToJsonString());
+            }
             while (!reader.EOF)
             {
                 if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "Event")
@@ -133,7 +150,20 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                         x.Name.LocalName is "StackTrace" or "Stack")?.Value.Trim()
                         ?? data.GetValueOrDefault("StackTrace")
                         ?? data.GetValueOrDefault("Stack");
-                    if (!string.IsNullOrEmpty(stack)) rawStacks++;
+                    if (!string.IsNullOrEmpty(stack))
+                    {
+                        rawStacks++;
+                        // tracerpt may expose only raw addresses: these are
+                        // explicitly marked unresolved, not fabricated symbols.
+                        var frames = stack.Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries
+                            | StringSplitOptions.TrimEntries)
+                            .SelectMany(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                ? x.Split(' ', StringSplitOptions.RemoveEmptyEntries) : [x])
+                            .Select(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                ? "[unknown]" : x).ToArray();
+                        stacks.Add(frames);
+                    }
+                    else stacks.Add([]);
                     var sample = new JsonObject
                     {
                         ["timestamp"] = timestamp?.ToString("O"),
@@ -160,6 +190,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                             if (readyAt.Remove(nextTid, out var readyTime) && switchTime >= readyTime)
                                 counts.AddReadyLatency((switchTime - readyTime).TotalMilliseconds);
                             runningAt[nextTid] = switchTime;
+                            Timeline(timestamp, nextTid, "running", cpu);
                         }
                     }
                     if (previous is { } previousTid && threadProcess.GetValueOrDefault(previousTid) == targetPid)
@@ -167,6 +198,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                         switchesOut++;
                         var counts = Counts(threads, previousTid);
                         counts.SwitchesOut++;
+                        Timeline(timestamp, previousTid, "offcpu", cpu);
                         if (timestamp is { } switchTime
                             && runningAt.Remove(previousTid, out var runningTime)
                             && switchTime >= runningTime)
@@ -180,6 +212,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     {
                         readyEvents++;
                         Counts(threads, readyTid).ReadyEvents++;
+                        Timeline(timestamp, readyTid, "ready", cpu);
                         if (timestamp is { } readyTime) readyAt.TryAdd(readyTid, readyTime);
                     }
                 }
@@ -236,6 +269,10 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             ["threads"] = threadRows,
             ["measurementSemantics"] = "ETW event counts and observed scheduling intervals; CPU samples are statistical observations, not PMU cycles or elapsed time."
         };
+        summary["timelineEventsRecorded"] = timelineCount;
+        summary["timelineEventsDropped"] = timelineDropped;
+        summary["timelineSemantics"] = "Ready/running/offcpu transitions for known target threads; offcpu is not necessarily sleeping. Truncated timelines omit later events.";
+        File.WriteAllText(stackPath, stacks.ToJson("etw", captureId).ToJsonString() + "\n");
         File.WriteAllText(summaryPath,
             summary.ToJsonString(new JsonSerializerOptions
             { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n");

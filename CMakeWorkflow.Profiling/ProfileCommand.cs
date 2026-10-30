@@ -126,6 +126,11 @@ public static class ProfileCommand
         }
         var backend = options.GetValueOrDefault("--backend", "auto");
         var mode = options.GetValueOrDefault("--mode", "cpu");
+        if (mode is not ("cpu" or "scheduler" or "counters" or "diagnostic"))
+            throw new ArgumentException("--mode must be cpu, scheduler, counters or diagnostic.");
+        // Diagnostic is a recipe, not a profiler mode: separate captures keep
+        // CPU sampling / scheduling instrumentation out of the timing series.
+        var diagnostic = mode == "diagnostic";
         if (OperatingSystem.IsLinux() && (backend is "auto" or "perf") && mode != "counters")
         {
             foreach (var variant in variants)
@@ -140,10 +145,18 @@ public static class ProfileCommand
         foreach (var variant in variants)
         {
             var buildId = "build_" + variant.Name;
-            var captureId = "capture_" + variant.Name;
+            var captureId = (mode == "counters" ? "counters_" : "capture_") + variant.Name;
             nodes.Add(ProfileNode(captureId, buildId, previous, targetArgs, seconds, timeout,
-                backend, mode));
+                backend, diagnostic ? "cpu" : mode));
             previous = captureId;
+            if (diagnostic && (OperatingSystem.IsLinux() || OperatingSystem.IsWindows()))
+            {
+                // A second independent target invocation, never a trace of CMake/Ninja.
+                var schedulerId = "scheduler_" + variant.Name;
+                nodes.Add(ProfileNode(schedulerId, buildId, previous, targetArgs, seconds,
+                    timeout, backend, "scheduler"));
+                previous = schedulerId;
+            }
         }
         var document = new WorkflowDocument
         {
@@ -173,7 +186,8 @@ public static class ProfileCommand
 
 public static class ProfileAnalyzer
 {
-    public static async Task<int> AnalyzeAsync(string directory, CancellationToken ct)
+    public static async Task<int> AnalyzeAsync(string directory, CancellationToken ct,
+        bool emitResultPath = true)
     {
         directory = Path.GetFullPath(directory);
         var captures = Directory.GetFiles(directory, "*.results.json")
@@ -225,6 +239,27 @@ public static class ProfileAnalyzer
                 ProfileEnvironment.RequireSuccess(result, "perf report");
                 await File.WriteAllTextAsync(report, result.Output, ct);
                 item["report"] = Path.GetRelativePath(directory, report);
+                try
+                {
+                    if (mode == "cpu")
+                    {
+                        var stacks = await PerfStackAnalyzer.AnalyzeAsync(raw, directory,
+                            item["captureId"]!.GetValue<string>(), ct);
+                        item["stacks"] = Path.GetRelativePath(directory, stacks);
+                    }
+                    else if (mode == "scheduler")
+                    {
+                        var timeline = await PerfSchedulerAnalyzer.AnalyzeAsync(raw, directory,
+                            item["captureId"]!.GetValue<string>(), ct);
+                        item["timeline"] = Path.GetRelativePath(directory, timeline);
+                    }
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    // Preserve raw perf.data when stack/scheduler decoding is
+                    // unsupported by the perf version or event permissions.
+                    item["traceAnalysisWarning"] = error.Message;
+                }
             }
             else if (backend == "instruments")
             {
@@ -252,6 +287,10 @@ public static class ProfileAnalyzer
                 item["report"] = Path.GetRelativePath(directory, analyzed.Summary);
                 item["eventDump"] = Path.GetRelativePath(directory, analyzed.EventDump);
                 item["samples"] = Path.GetRelativePath(directory, analyzed.Samples);
+                item["stacks"] = Path.GetRelativePath(directory,
+                    Path.Combine("traces", "normalized", captureId + ".stacks.json"));
+                item["timeline"] = Path.GetRelativePath(directory,
+                    Path.Combine("traces", "normalized", captureId + ".timeline.jsonl"));
                 item["targetProcessId"] = pid;
                 var normalizedPath = Path.Combine(directory, "traces", "normalized", captureId + ".json");
                 var normalized = File.Exists(normalizedPath)
@@ -276,7 +315,7 @@ public static class ProfileAnalyzer
             items.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
         await WriteTimingComparisonAsync(directory, ct);
         await WriteCounterComparisonAsync(directory, items, ct);
-        Console.WriteLine($"Profile analysis: {resultFile}");
+        if (emitResultPath) Console.WriteLine($"Profile analysis: {resultFile}");
         return 0;
     }
 
@@ -355,6 +394,25 @@ public static class ProfileAnalyzer
         return counters;
     }
 
+    // Normalized, dimensionless PMU signals. Missing or unsupported counters
+    // remain absent; zero is never substituted for missing PMU data.
+    private static Dictionary<string, Counter> DeriveCounters(Dictionary<string, Counter> raw)
+    {
+        var result = new Dictionary<string, Counter>(StringComparer.Ordinal);
+        if (raw.TryGetValue("cycles", out var cycles) && cycles.Value > 0
+            && raw.TryGetValue("instructions", out var instructions) && instructions.Value > 0)
+        {
+            result["ipc"] = new Counter(instructions.Value / cycles.Value, "instructions/cycle");
+            if (raw.TryGetValue("cache-misses", out var misses) && misses.Value >= 0)
+                result["cache_mpki"] = new Counter(1000.0 * misses.Value / instructions.Value,
+                    "misses/kinstructions");
+            if (raw.TryGetValue("branch-misses", out var branchMisses) && branchMisses.Value >= 0)
+                result["branch_mpki"] = new Counter(1000.0 * branchMisses.Value / instructions.Value,
+                    "misses/kinstructions");
+        }
+        return result;
+    }
+
     private static async Task WriteCounterComparisonAsync(string directory, JsonArray items, CancellationToken ct)
     {
         var variants = new Dictionary<string, Dictionary<string, Counter>>(StringComparer.Ordinal);
@@ -371,13 +429,14 @@ public static class ProfileAnalyzer
         if (variants.Count == 0) return;
         var orderedNames = ReadBuildVariantOrder(directory);
         var baselineName = orderedNames.FirstOrDefault(variants.ContainsKey)
-            ?? variants.Keys.Order(StringComparer.Ordinal).First();
+            ?? (variants.ContainsKey("before") ? "before" : variants.Keys.Order(StringComparer.Ordinal).First());
         var baseline = new KeyValuePair<string, Dictionary<string, Counter>>(
             baselineName, variants[baselineName]);
         var rows = new JsonArray();
         var displayOrder = orderedNames.Where(variants.ContainsKey)
             .Concat(variants.Keys.Except(orderedNames, StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal));
+        var baselineDerived = DeriveCounters(baseline.Value);
         foreach (var name in displayOrder)
         {
             var counters = variants[name];
@@ -394,7 +453,22 @@ public static class ProfileAnalyzer
                         ? JsonValue.Create(counter.Value / reference!.Value, ProfileJson.Default.Double) : null
                 };
             }
-            rows.Add((JsonNode?)new JsonObject { ["name"] = name, ["events"] = events });
+            var derived = new JsonObject();
+            foreach (var (metric, signal) in DeriveCounters(counters))
+            {
+                var reference = baselineDerived.GetValueOrDefault(metric);
+                var ratio = reference is not null && reference.Value > 0
+                    && reference.Unit == signal.Unit ? signal.Value / reference.Value : (double?)null;
+                derived[metric] = new JsonObject
+                {
+                    ["value"] = JsonValue.Create(signal.Value, ProfileJson.Default.Double),
+                    ["unit"] = signal.Unit,
+                    ["ratioToBaseline"] = ratio is null ? null
+                        : JsonValue.Create(ratio.Value, ProfileJson.Default.Double)
+                };
+            }
+            rows.Add((JsonNode?)new JsonObject { ["name"] = name, ["events"] = events,
+                ["derived"] = derived });
         }
         var report = new JsonObject
         {

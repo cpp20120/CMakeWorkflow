@@ -14,7 +14,7 @@ public interface IToolingRuntime
         TimeSpan timeout, CancellationToken ct);
 }
 
-public sealed class SystemToolingRuntime : IToolingRuntime
+public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToolingRuntime
 {
     public ToolPlatform Platform => OperatingSystem.IsWindows() ? ToolPlatform.Windows
         : OperatingSystem.IsMacOS() ? ToolPlatform.MacOS : ToolPlatform.Linux;
@@ -49,7 +49,7 @@ public sealed class SystemToolingRuntime : IToolingRuntime
         var start = new ProcessStartInfo(executable)
         {
             UseShellExecute = false, RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true, WorkingDirectory = workingDirectory ?? ""
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException($"Could not start {executable}.");
