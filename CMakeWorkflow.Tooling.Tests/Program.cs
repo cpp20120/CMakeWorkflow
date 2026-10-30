@@ -14,6 +14,25 @@ var root = Path.Combine(Path.GetTempPath(), "cmake-workflow-tooling-" + Guid.New
 Directory.CreateDirectory(root);
 try
 {
+    // Native Windows API smoke: exercise PowrProf.dll, but never change the power scheme.
+    if (OperatingSystem.IsWindows())
+    {
+        var nativePower = new WindowsPowerSettingsBackend();
+        var currentScheme = nativePower.Read(WindowsHostSettingsProvisioner.SchemePath);
+        Check(Guid.TryParseExact(currentScheme, "D", out _), "native Windows power scheme GUID");
+        var noOp = WindowsHostSettingsProvisioner.Plan(
+            new HostRequirements(1, ["native"], WindowsPowerScheme: currentScheme), nativePower);
+        Check(noOp.Count == 0, "native Windows power scheme no-op plan");
+        Check(nativePower.Read(WindowsHostSettingsProvisioner.SchemePath) == currentScheme,
+            "native Windows smoke must not change the power scheme");
+        try
+        {
+            nativePower.Read("windows/power/not-allowed");
+            throw new Exception("native Windows backend accepted arbitrary setting");
+        }
+        catch (InvalidDataException) { }
+        Console.WriteLine("Windows PowrProf native read/no-op smoke passed.");
+    }
     var settingBackend = new FakeHostSettings();
     settingBackend.Values["/proc/sys/kernel/perf_event_paranoid"] = "3";
     settingBackend.Values["/sys/devices/system/cpu/cpufreq/policy0/scaling_governor"] = "powersave";
@@ -57,6 +76,56 @@ try
     catch (IOException) { }
     Check(partial.Writes == 1 && partial.Values["/proc/sys/kernel/perf_event_paranoid"] == "1" &&
         partial.Values[policy0] == "powersave", "partial host change is not rolled back or hidden");
+    // Windows power scheme: validate the exact GUID, stale fingerprint, approval, audit and recheck.
+    const string balanced = "381b4222-f694-41f0-9685-ff5bb260df2e";
+    const string highPerformance = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+    var windowsBackend = new FakeHostSettings();
+    windowsBackend.Values[WindowsHostSettingsProvisioner.SchemePath] = balanced;
+    var windowsRequirements = new HostRequirements(1, ["native"], WindowsPowerScheme: highPerformance);
+    var windowsSettings = WindowsHostSettingsProvisioner.Plan(windowsRequirements, windowsBackend);
+    Check(windowsSettings.Count == 1 && windowsSettings[0].Before == balanced &&
+        windowsSettings[0].After == highPerformance && windowsBackend.Writes == 0, "Windows plan must be read only");
+    var windowsRequirementsFile = Path.Combine(root, "windows-power-acceptance.json");
+    File.WriteAllText(windowsRequirementsFile,
+        """{"schemaVersion":1,"toolProfiles":["native"],"windowsPowerScheme":"8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"}""");
+    var windowsRuntime = new FakeRuntime();
+    windowsRuntime.Add("cmake", "cmake version 4.4.4");
+    windowsRuntime.Add("ctest", "ctest version 4.4.4");
+    windowsRuntime.Add("c++", "g++ version 16.2.1");
+    windowsRuntime.Add("ninja", "1.13.2");
+    var windowsService = new ToolingService(windowsRuntime, new FakeInstaller(windowsRuntime));
+    var windowsPlan = await HostPreparation.InspectAsync(windowsRequirementsFile, windowsService,
+        PackageManagerKind.None, null, default, windowsBackend);
+    Check(!windowsPlan.Ready && windowsPlan.SystemChanges?.Count == 1 &&
+        windowsPlan.Findings.Single(x => x.Id == "windows_power_scheme").Status == "drift",
+        "Windows power scheme drift reported");
+    var windowsDenied = false;
+    try { await HostPreparation.ApplyAsync(windowsPlan, windowsService, PackageManagerKind.None,
+        null, default, backend: windowsBackend); }
+    catch (InvalidOperationException) { windowsDenied = true; }
+    Check(windowsDenied && windowsBackend.Writes == 0, "Windows system setting bypassed approval");
+    windowsBackend.Values[WindowsHostSettingsProvisioner.SchemePath] = highPerformance;
+    windowsDenied = false;
+    try { await HostPreparation.ApplyAsync(windowsPlan, windowsService, PackageManagerKind.None,
+        null, default, allowSystemChanges: true, backend: windowsBackend); }
+    catch (InvalidOperationException) { windowsDenied = true; }
+    Check(windowsDenied && windowsBackend.Writes == 0, "Windows stale plan accepted");
+    windowsBackend.Values[WindowsHostSettingsProvisioner.SchemePath] = balanced;
+    var windowsAudit = Path.Combine(root, "windows-audit");
+    var windowsResult = await HostPreparation.ApplyAsync(windowsPlan, windowsService,
+        PackageManagerKind.None, null, default, allowSystemChanges: true,
+        backend: windowsBackend, auditDirectory: windowsAudit);
+    Check(windowsResult.Ready && windowsBackend.Writes == 1 &&
+        windowsBackend.Values[WindowsHostSettingsProvisioner.SchemePath] == highPerformance &&
+        File.ReadAllLines(windowsResult.AuditPath!).Length == 3,
+        "Windows scheme apply / audit / verification");
+    var windowsInvalid = false;
+    try { WindowsHostSettingsProvisioner.Apply(
+        [new HostSettingChange("windows_power_scheme", "/tmp/arbitrary", balanced, highPerformance)],
+        windowsBackend, default); }
+    catch (InvalidDataException) { windowsInvalid = true; }
+    Check(windowsInvalid, "Windows provisioner accepted arbitrary path");
+    Console.WriteLine("Windows host provisioning checks passed: approval, stale state, audit, verification.");
     // End-to-end environment acceptance through the injectable sysfs backend.
     var acceptancePath = Path.Combine(root, "environment-acceptance.json");
     File.WriteAllText(acceptancePath,

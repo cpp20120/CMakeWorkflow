@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "toolProfiles": ["native", "profiling"],
+  "maxPerfEventParanoid": 1,
+  "cpuGovernor": "performance"
+}
