@@ -1,0 +1,63 @@
+name: Windows ETW acceptance
+
+on:
+  push:
+    paths:
+      - '.github/workflows/windows-etw.yml'
+      - 'CMakeWorkflow.Tooling/**'
+      - 'CMakeWorkflow.Tooling.Tests/**'
+      - 'CMakeWorkflow.Host/**'
+      - 'CMakeWorkflow.Host.Tests/**'
+      - 'CMakeWorkflow.csproj'
+      - 'CMakeWorkflow.slnx'
+      - 'Program.cs'
+  pull_request:
+    paths:
+      - '.github/workflows/windows-etw.yml'
+      - 'CMakeWorkflow.Tooling/**'
+      - 'CMakeWorkflow.Tooling.Tests/**'
+      - 'CMakeWorkflow.Host/**'
+      - 'CMakeWorkflow.Host.Tests/**'
+      - 'CMakeWorkflow.csproj'
+      - 'CMakeWorkflow.slnx'
+      - 'Program.cs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-etw:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Release
+        run: dotnet build CMakeWorkflow.slnx -c Release --nologo
+
+      - name: Tooling acceptance tests
+        run: dotnet CMakeWorkflow.Tooling.Tests/bin/Release/net10.0/CMakeWorkflow.Tooling.Tests.dll
+
+      - name: Host contract and Named Pipe tests
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll
+
+      - name: Native ETW user-mode session (required)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = @(& dotnet bin/Release/net10.0/CMakeWorkflow.dll env probe-etw user --json)
+          if ($LASTEXITCODE -ne 0) { throw "probe-etw exited with code $LASTEXITCODE`n$($output -join "`n")" }
+          $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop
+          if ($result.capability -ne 'user') { throw "Unexpected ETW capability: $($result.capability)" }
+          if ($result.status -ne 'available') {
+            throw "Native ETW user-mode session unavailable: status=$($result.status), win32Error=$($result.win32Error), diagnostic=$($result.diagnostic)"
+          }
+          Write-Host 'ETW user-mode StartTrace/ControlTrace smoke passed.'
+          Write-Host 'Note: event delivery is not tested; kernel probes intentionally not run.'

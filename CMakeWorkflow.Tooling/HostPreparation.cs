@@ -199,6 +199,18 @@ public static class EnvironmentCommand
     {
         try
         {
+            if (args.Length >= 2 && args[0] == "probe-etw")
+            {
+                if (args.Length is not (2 or 3) || args.Length == 3 && args[2] != "--json")
+                    throw new ArgumentException("env probe-etw <user|kernel.cpu|kernel.scheduler> [--json]");
+                var capability = args[1];
+                if (capability is not ("user" or "kernel.cpu" or "kernel.scheduler"))
+                    throw new ArgumentException("Unknown ETW capability.");
+                var probe = new NativeWindowsEtwProbe().Probe(capability, ct);
+                if (args.Length == 3) Console.WriteLine(JsonSerializer.Serialize(probe, HostPreparationJson.Default.EtwProbeResult));
+                else Console.WriteLine($"ETW {probe.Capability}: {probe.Status} ({probe.Diagnostic})");
+                return probe.Status == "available" ? 0 : 2;
+            }
             if (args.Length < 2 || args[0] is not ("doctor" or "plan" or "setup"))
                 throw new ArgumentException("env <doctor|plan|setup> <requirements.json> [--yes] [--json]");
             var action = args[0]; var source = args[1];
@@ -259,6 +271,7 @@ public static class EnvironmentCommand
         typeof(JsonStringEnumConverter<PackageManagerKind>)])]
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(HostRequirements))]
+[JsonSerializable(typeof(EtwProbeResult))]
 [JsonSerializable(typeof(List<HostFinding>))]
 [JsonSerializable(typeof(HostPreparationPlan))]
 [JsonSerializable(typeof(HostPreparationResult))]

@@ -14,6 +14,14 @@ var root = Path.Combine(Path.GetTempPath(), "cmake-workflow-tooling-" + Guid.New
 Directory.CreateDirectory(root);
 try
 {
+    // The native probe is explicitly opt-in; CI exercises only the ordinary user logger.
+    if (OperatingSystem.IsWindows())
+    {
+        var etw = new NativeWindowsEtwProbe().Probe("user", default);
+        Check(etw.Capability == "user" && etw.Status is "available" or "denied" or "busy" or "unverified" or "unsupported",
+            "Windows ETW admission result shape");
+        Console.WriteLine($"Windows ETW admission: {etw.Status} ({etw.Win32Error})");
+    }
     // Native Windows API smoke: exercise PowrProf.dll, but never change the power scheme.
     if (OperatingSystem.IsWindows())
     {
