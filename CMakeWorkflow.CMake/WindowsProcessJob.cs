@@ -70,6 +70,8 @@ internal sealed class WindowsProcessJob : IDisposable
     {
         public long TotalUserTime;
         public long TotalKernelTime;
+        public long ThisPeriodTotalUserTime;
+        public long ThisPeriodTotalKernelTime;
         public uint TotalPageFaultCount;
         public uint TotalProcesses;
         public uint ActiveProcesses;
