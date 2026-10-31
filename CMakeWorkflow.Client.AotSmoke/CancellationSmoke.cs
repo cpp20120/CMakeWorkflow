@@ -57,7 +57,7 @@ internal static class CancellationSmoke
         {
             using var started = CancellationTokenSource.CreateLinkedTokenSource(ct);
             started.CancelAfter(TimeSpan.FromSeconds(15));
-            while (!File.Exists(marker) || !(await File.ReadAllTextAsync(marker, started.Token)).Contains("started\n", StringComparison.Ordinal))
+            while (!File.Exists(marker) || !(await File.ReadAllLinesAsync(marker, started.Token)).Contains("started", StringComparer.Ordinal))
                 await Task.Delay(30, started.Token);
             // Cancellation intent has its own CAS revision, independent of the
             // reconciliation revision returned by InspectRecoveryAsync.
