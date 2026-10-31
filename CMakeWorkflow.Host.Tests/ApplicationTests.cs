@@ -27,7 +27,7 @@ internal static class ApplicationTests
 
     public static async Task RunAsync(string endpoint, string parent, CancellationToken ct)
     {
-        var root = Directory.CreateDirectory(Path.Combine(parent, "application workspace")).FullName;
+        var root = BuildTreeOwnership.CanonicalPath(Directory.CreateDirectory(Path.Combine(parent, "application workspace")).FullName);        
         var outside = Directory.CreateDirectory(Path.Combine(parent, "other application workspace")).FullName;
         var build = Directory.CreateDirectory(Path.Combine(root, "build space")).FullName;
         File.WriteAllText(Path.Combine(build, "CMakeCache.txt"), $"CMAKE_HOME_DIRECTORY:INTERNAL={root}\nCMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Debug\n");
