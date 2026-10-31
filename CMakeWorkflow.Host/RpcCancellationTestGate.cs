@@ -21,6 +21,7 @@ internal static class RpcCancellationTestGate
 
         try
         {
+            Console.Error.WriteLine($"[RPC cancellation gate] entered: {file}; requestCanCancel={request.CanBeCanceled}");
             await File.WriteAllTextAsync(file + ".started", "started", lifetime);
             var elapsed = Stopwatch.StartNew();
             while (!File.Exists(file + ".release"))
@@ -36,11 +37,13 @@ internal static class RpcCancellationTestGate
         {
             // Only the actual RPC token can acknowledge cancellation, never a
             // consumer timeout, a file release, Host shutdown or a disconnect.
+            Console.Error.WriteLine($"[RPC cancellation gate] request canceled: {file}");
             await File.WriteAllTextAsync(file + ".canceled", "request-canceled", CancellationToken.None);
             throw;
         }
         finally
         {
+            Console.Error.WriteLine($"[RPC cancellation gate] exiting: {file}; requestCanceled={request.IsCancellationRequested}; disconnected={disconnected.IsCancellationRequested}; lifetimeCanceled={lifetime.IsCancellationRequested}");
             await File.WriteAllTextAsync(file + ".exited", "exited", CancellationToken.None);
         }
     }

@@ -47,7 +47,8 @@ internal sealed class WindowsProcessJob : IDisposable
             {
                 if (!QueryInformationJobObject(handle, 1, out var info,
                     (uint)Marshal.SizeOf<BasicAccounting>(), out _))
-                    throw new Win32Exception(Marshal.GetLastPInvokeError(), "QueryInformationJobObject failed.");
+                    throw new Win32Exception(Marshal.GetLastPInvokeError(),
+                        $"QueryInformationJobObject failed (class=1, size={Marshal.SizeOf<BasicAccounting>()}).");
                 if (info.ActiveProcesses == 0) return;
                 await Task.Delay(10, timeout.Token);
             }

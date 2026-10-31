@@ -14,7 +14,9 @@ internal static class InFlightCancellationSmoke
         var pending = client.Workflows.PlanAsync(canceledFile, cancelRequest.Token);
         try
         {
+            Console.Error.WriteLine("[RPC inflight] waiting for server started marker");
             await WaitForMarkerAsync(canceledFile + ".started", "started", timeout);
+            Console.Error.WriteLine("[RPC inflight] server entered; canceling invocation");
             if (pending.IsCompleted) throw new InvalidOperationException("RPC completed before in-flight cancellation.");
             cancelRequest.Cancel();
             try
@@ -26,6 +28,7 @@ internal static class InFlightCancellationSmoke
 
             // The client-side exception alone proves nothing about server receipt.
             // Keep this connection open until its handler confirms cancellation.
+            Console.Error.WriteLine("[RPC inflight] pendingCanceled=" + pending.IsCanceled + "; waiting for server cancellation marker");
             await WaitForMarkerAsync(canceledFile + ".canceled", "request-canceled", timeout);
             await WaitForMarkerAsync(canceledFile + ".exited", "exited", timeout);
             if (File.Exists(canceledFile + ".completed"))

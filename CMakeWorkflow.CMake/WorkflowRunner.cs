@@ -181,12 +181,15 @@ public static class WorkflowRunner
             var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct), WorkflowJson.Default.WorkflowReport)
                 ?? throw new InvalidDataException("Invalid resume report.");
             if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") || saved.ManifestHash != plan.ManifestHash ||
-                !WorkflowPlanner.PathComparer.Equals(Path.GetFullPath(saved.Workflow), Path.GetFullPath(plan.File)))
+                !WorkflowPlanner.PathComparer.Equals(
+                    BuildTreeOwnership.CanonicalPath(saved.Workflow), BuildTreeOwnership.CanonicalPath(plan.File)))
                 throw new InvalidDataException("Resume requires a needs_attention checkpoint with identical workflow and manifest; interrupted running checkpoints can only be quarantined.");
             if (saved.Nodes.Count != report.Nodes.Count ||
                 saved.Nodes.Where((n, i) => n.Id != report.Nodes[i].Id || n.Kind != report.Nodes[i].Kind ||
                     n.Target != report.Nodes[i].Target ||
-                    !WorkflowPlanner.PathComparer.Equals(n.BuildDirectory, report.Nodes[i].BuildDirectory) ||
+                    !WorkflowPlanner.PathComparer.Equals(
+                        BuildTreeOwnership.CanonicalPath(n.BuildDirectory),
+                        BuildTreeOwnership.CanonicalPath(report.Nodes[i].BuildDirectory)) ||
                     n.Configuration != report.Nodes[i].Configuration ||
                     !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
                 throw new InvalidDataException("Resume graph differs from saved execution.");
@@ -729,14 +732,15 @@ public static class WorkflowRunner
         {
             processTimer.Stop();
             result.ProcessDurationSeconds = processTimer.Elapsed.TotalSeconds;
-            if (windowsJob is not null)
+            if (windowsJob is not null && (ct.IsCancellationRequested || !process.HasExited))
             {
-                // Do not report terminal cancellation while an assigned descendant
-                // (e.g. cmake -E sleep) is still executing the external effect.
+                // Terminate descendants only on cancellation/failure. Successful
+                // executions must never query or terminate their job in cleanup.
+                // Await the entire job, not only the direct Ninja/CMake process.
                 await windowsJob.TerminateAndWaitAsync(CancellationToken.None);
                 await process.WaitForExitAsync(CancellationToken.None);
             }
-            else if (!process.HasExited)
+            else if (windowsJob is null && !process.HasExited)
             {
                 try { process.Kill(entireProcessTree: true); }
                 catch (InvalidOperationException) when (process.HasExited) { }
