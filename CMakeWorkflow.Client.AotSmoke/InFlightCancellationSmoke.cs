@@ -25,6 +25,11 @@ internal static class InFlightCancellationSmoke
                 throw new InvalidOperationException("In-flight RPC did not throw OperationCanceledException.");
             }
             catch (OperationCanceledException) when (pending.IsCanceled && !timeout.IsCancellationRequested) { }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                throw new TimeoutException("RPC invocation never completed after cancellation; " +
+                    "check SDK trace for $/cancelRequest and Host trace for receipt.");
+            }
 
             // The client-side exception alone proves nothing about server receipt.
             // Keep this connection open until its handler confirms cancellation.

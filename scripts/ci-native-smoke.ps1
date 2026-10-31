@@ -68,8 +68,20 @@ try {
     Invoke-CheckedCli @('host', 'fix', '--endpoint', $endpoint, '--workspace', $workspace, '--profile', 'cmake', '--pm', 'none', '--no-fallback', '--yes', '--json')
     $consumerArguments = @($endpoint, $workspace)
     if ($InFlight) { $consumerArguments += '--inflight' }
-    & $consumerPath @consumerArguments 2>&1 | Tee-Object (Join-Path $logs 'sdk-consumer.log')
-    if ($LASTEXITCODE -ne 0) { throw "NativeAOT consumer exited with $LASTEXITCODE" }
+    # Trace the SDK side too: the Host trace alone cannot distinguish an
+    # unsent cancellation notification from a received-but-unhandled one.
+    $previousRpcTrace = [Environment]::GetEnvironmentVariable('CMAKEWORKFLOW_RPC_TRACE')
+    try {
+        if ($InFlight) { $env:CMAKEWORKFLOW_RPC_TRACE = '1' }
+        & $consumerPath @consumerArguments 2>&1 | Tee-Object (Join-Path $logs 'sdk-consumer.log')
+        if ($LASTEXITCODE -ne 0) { throw "NativeAOT consumer exited with $LASTEXITCODE" }
+    } finally {
+        if ($null -eq $previousRpcTrace) {
+            Remove-Item Env:CMAKEWORKFLOW_RPC_TRACE -ErrorAction SilentlyContinue
+        } else {
+            $env:CMAKEWORKFLOW_RPC_TRACE = $previousRpcTrace
+        }
+    }
     if ($server.HasExited) { throw 'Consumer stopped the externally owned Host.' }
 } finally {
     if ($null -ne $server) {

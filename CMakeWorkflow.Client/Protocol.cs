@@ -59,4 +59,8 @@ internal partial interface IClientRpc
 [JsonSerializable(typeof(ReconcileRequest))]
 [JsonSerializable(typeof(PlanRequest))]
 [JsonSerializable(typeof(JsonElement))]
+// StandardCancellationStrategy serializes its $/cancelRequest params using a
+// boxed StreamJsonRpc.RequestId. Source-generated metadata is required in AOT;
+// a pre-canceled invocation never exercises this path.
+[JsonSerializable(typeof(StreamJsonRpc.RequestId))]
 internal partial class ClientJson : JsonSerializerContext;

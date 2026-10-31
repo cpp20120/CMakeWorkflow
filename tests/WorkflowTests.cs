@@ -155,7 +155,11 @@ internal static class WorkflowTests
         var timeout = Copy(simple); timeout["nodes"]![1]!["arguments"] = new JsonArray("sleep", "30000");
         timeout["nodes"]![1]!["timeoutSeconds"] = 0.3;
         (report, _) = Workflow(root, timeout, expected: 1, name: "timeout");
-        Check(Status(report, "run") == "failed" && S(Item(report, "run")["error"]).Contains("Timed out"), "Timeout did not stop execution");
+        // Report the actual terminal state and Win32 cleanup error instead of
+        // losing the only evidence in a generic assertion failure on CI.
+        var timedOutRun = Item(report, "run");
+        Check(Status(report, "run") == "failed" && S(timedOutRun["error"]).Contains("Timed out"),
+            "Timeout did not stop execution: " + timedOutRun.ToJsonString());
         if (OperatingSystem.IsLinux())
             Check(!Directory.Exists(Path.Combine("/proc", File.ReadAllText(Path.Combine(build, "ready.pid")))), "Timed-out worker survived");
         Pass("timeout and process-tree cleanup");

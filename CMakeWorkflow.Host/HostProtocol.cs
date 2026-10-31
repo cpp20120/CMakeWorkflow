@@ -102,4 +102,7 @@ public partial interface IHostNotifications
 [JsonSerializable(typeof(OperationReference))]
 [JsonSerializable(typeof(ApplicationError))]
 [JsonSerializable(typeof(StreamJsonRpc.Protocol.CommonErrorData))]
+// Incoming $/cancelRequest binds the id to StreamJsonRpc.RequestId.
+// Keep it available to the reflection-free Host formatter as well.
+[JsonSerializable(typeof(StreamJsonRpc.RequestId))]
 public partial class HostJson : JsonSerializerContext;

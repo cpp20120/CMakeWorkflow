@@ -105,6 +105,13 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
             JsonSerializerOptions = new(ClientJson.Default.Options) { TypeInfoResolver = ClientJson.Default }
         };
         var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(stream, stream, formatter));
+        // Diagnostic opt-in for NativeAOT RPC smoke. A lost $/cancelRequest is
+        // otherwise invisible when StreamJsonRpc dispatches it asynchronously.
+        if (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_RPC_TRACE") == "1")
+        {
+            rpc.TraceSource.Switch.Level = SourceLevels.All;
+            rpc.TraceSource.Listeners.Add(new TextWriterTraceListener(Console.Error));
+        }
         try
         {
             var proxy = rpc.Attach<IClientRpc>();
