@@ -19,10 +19,12 @@ CMakeWorkflow — самостоятельный CLI на .NET 10 для вып�
 | [Workflow-манифесты](workflows.md) | Контексты, узлы, зависимости, ресурсы и жизненный цикл |
 | [CLI](cli.md) | Сборка, команды, параметры и примеры вызова |
 | [Результаты и History](results-and-history.md) | План, JSONL, `run.json`, артефакты, сравнения и статистика |
+| [Recovery](recovery.md) | Ручное решение, аудит, fault injection и durability checkpoint |
 | [Профилирование и кампании](profiling-and-campaigns.md) | Варианты сборок, capture/analyze/replay, DagFlow harness и fuzz |
 | [Provisioning и интеграции](integrations.md) | Инструменты, CMake bridge, boilerplate, VS Code и проверки |
 | [Local Host IPC](host-ipc.md) | Doctor/Fix: CLI, VS Code, NativeAOT, планы установки и локальные подключения |
 | [ADR-0002: Local Host](adr/0002-local-host-ipc.md) | Границы первого этапа и выбор транспорта |
+| [ADR-0003: Unified application API](adr/0003-unified-application-api.md) | Предложение API, lifecycle операций и поэтапного переноса CLI/GUI |
 | [ADR-0001: MSBuild backend](adr/0001-msbuild-execution-backend.md) | Предложение; не описание существующего runtime |
 
 ## С чего начать

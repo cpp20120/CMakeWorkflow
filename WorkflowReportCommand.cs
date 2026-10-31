@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Security.Cryptography;
 
 namespace CMakeWorkflow;
 
@@ -11,19 +10,12 @@ public static class WorkflowReportCommand
         try
         {
             var directory = Path.GetFullPath(runDirectory);
-            var path = Path.Combine(directory, "run.json");
-            var bytes = await File.ReadAllBytesAsync(path, ct);
-            var report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
-                ?? throw new InvalidDataException("run.json contains an empty report.");
-            if (report.Nodes is null || string.IsNullOrWhiteSpace(report.Workflow)
-                || string.IsNullOrWhiteSpace(report.Status)
-                || report.Nodes.Any(node => node is null || string.IsNullOrWhiteSpace(node.Id)
-                    || string.IsNullOrWhiteSpace(node.Status)))
-                throw new InvalidDataException("run.json is missing workflow identity, status or valid node entries.");
+            var snapshot = await WorkflowQueries.ReportAsync(directory, ct);
+            var report = snapshot.Report;
             if (json) Console.Out.WriteLine(JsonSerializer.Serialize(report, WorkflowJson.Default.WorkflowReport));
             else
             {
-                Console.WriteLine($"Checkpoint SHA256: {Convert.ToHexString(SHA256.HashData(bytes))}");
+                Console.WriteLine($"Checkpoint SHA256: {snapshot.Revision}");
                 Write(report, directory);
             }
             return 0;

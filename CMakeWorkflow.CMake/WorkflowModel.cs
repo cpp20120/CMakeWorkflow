@@ -59,10 +59,26 @@ public static class WorkflowPlanner
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     public static async Task<WorkflowPlan> LoadAsync(string file, IReadOnlyList<string> only,
-        string? controllerDirectory, CancellationToken ct)
+        string? controllerDirectory, CancellationToken ct, Action<string>? readGuard = null)
     {
         file = Path.GetFullPath(file);
+        readGuard?.Invoke(file);
         var bytes = await System.IO.File.ReadAllBytesAsync(file, ct);
+        return await LoadSnapshotAsync(file, bytes, only, controllerDirectory, ct, readGuard);
+    }
+
+    // Parse a durably accepted manifest snapshot while preserving its ORIGINAL path
+    // as the base for all relative CMake source/build/working directories.
+    // The snapshot bytes must be verified by the durable acceptance store before use.
+    public static async Task<WorkflowPlan> LoadSnapshotAsync(string originalManifestPath, byte[] snapshot,
+        IReadOnlyList<string> only, string? controllerDirectory, CancellationToken ct,
+        Action<string>? readGuard = null)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var file = Path.GetFullPath(originalManifestPath);
+        readGuard?.Invoke(file);
+        ct.ThrowIfCancellationRequested();
+        var bytes = snapshot;
         var document = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowDocument)
             ?? throw new ArgumentException("Empty workflow document.");
         if (document.SchemaVersion is not (1 or 2))
@@ -145,7 +161,9 @@ public static class WorkflowPlanner
                     ? spec.BuildDirectory : Path.Combine(directory, spec.BuildDirectory));
                 var source = spec.SourceDirectory is null ? null : BuildTreeOwnership.CanonicalPath(
                     Path.IsPathFullyQualified(spec.SourceDirectory) ? spec.SourceDirectory : Path.Combine(directory, spec.SourceDirectory));
-                var observed = await CMakeInspection.InspectAsync(path, ct);
+                readGuard?.Invoke(path);
+                if (source is not null) readGuard?.Invoke(source);
+                var observed = await CMakeInspection.InspectAsync(path, ct, readGuard);
                 var hasConfigure = ordered.Any(n => selected.Contains(n.Id) && n.Kind == "configure" && n.Context == contextName);
                 // A configure barrier opts into Managed. An unmanaged tree is
                 // observation-only until mode: adopt is explicitly declared;

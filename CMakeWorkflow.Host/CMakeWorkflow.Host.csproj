@@ -5,9 +5,12 @@
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <EnableStreamJsonRpcInterceptors>true</EnableStreamJsonRpcInterceptors>
+    <DefineConstants Condition="'$(RpcCancellationTesting)' == 'true'">$(DefineConstants);RPC_CANCELLATION_TESTING</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="StreamJsonRpc" Version="2.26.150" />
     <ProjectReference Include="../CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj" />
+    <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj" />
+    <ProjectReference Include="../CMakeWorkflow.History/CMakeWorkflow.History.csproj" />
   </ItemGroup>
 </Project>

@@ -72,9 +72,10 @@ public static class CMakeConfiguration
 
 public static class CMakeFileApi
 {
-    public static async Task<BuiltArtifact> ResolveExecutableAsync(CMakeTargetRef target, CancellationToken ct)
+    public static async Task<BuiltArtifact> ResolveExecutableAsync(CMakeTargetRef target, CancellationToken ct,
+        Action<string>? readGuard = null)
     {
-        var observed = await CMakeInspection.InspectAsync(target.BuildDirectory, ct);
+        var observed = await CMakeInspection.InspectAsync(target.BuildDirectory, ct, readGuard);
         target = CMakeInspection.Resolve(new RequestedBuildContext(target.BuildDirectory, target.Configuration), observed, target.Target);
         var item = CMakeInspection.RequireTarget(observed, target, executableOnly: true);
         if (item.Executable is null)

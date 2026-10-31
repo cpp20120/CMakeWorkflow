@@ -5,5 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../CMakeWorkflow.Host/CMakeWorkflow.Host.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../CMakeWorkflow.Host/CMakeWorkflow.Host.csproj" />
+    <ProjectReference Include="../CMakeWorkflow.Client/CMakeWorkflow.Client.csproj" /></ItemGroup>
 </Project>

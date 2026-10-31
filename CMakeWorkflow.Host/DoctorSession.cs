@@ -5,7 +5,8 @@ namespace CMakeWorkflow.Host;
 // One instance per connection. Never changes process-wide cwd or environment.
 public sealed partial class DoctorSession(Func<string, ToolingService> createTooling,
     Func<DoctorProgress, Task> progress, CancellationToken disconnected,
-    FixCoordinator fixes, Func<FixProgress, Task> fixProgress, TimeProvider? timeProvider = null) : IHostRpc
+    FixCoordinator fixes, Func<FixProgress, Task> fixProgress, TimeProvider? timeProvider = null,
+    DurableExecutionCoordinator? durableExecutions = null) : IHostRpc
 {
     private string? workspace;
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -27,10 +28,12 @@ public sealed partial class DoctorSession(Func<string, ToolingService> createToo
             throw new ArgumentException("workspaceDirectory must be an existing absolute directory.");
         var directory = Path.GetFullPath(request.WorkspaceDirectory);
         var previous = Interlocked.CompareExchange(ref workspace, directory, null);
-        if (previous is not null && previous != directory)
+        if (previous is not null && !WorkflowPlanner.PathComparer.Equals(
+                BuildTreeOwnership.CanonicalPath(previous), BuildTreeOwnership.CanonicalPath(directory)))
             throw new InvalidOperationException("Reconnect to select a different workspace.");
+        directory = previous ?? directory;
         return Task.FromResult(new HostInfo(1, Environment.ProcessId, directory,
-            ["tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress", "environment/plan", "environment/apply", "request-cancellation"],
+            ["tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress", "environment/plan", "environment/apply", "request-cancellation", .. ReadCapabilities],
             ToolCatalog.AllProfiles.Select(p => new ToolingProfileView(p.Id, p.Description, p.Tools)).ToList()));
     }
 

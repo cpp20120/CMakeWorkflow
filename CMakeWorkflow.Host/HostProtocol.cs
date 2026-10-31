@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Tooling;
+using CMakeWorkflow.History;
 using PolyType;
 using StreamJsonRpc;
 
@@ -67,5 +68,38 @@ public partial interface IHostNotifications
 [JsonSerializable(typeof(EnvironmentApplyRequest))]
 [JsonSerializable(typeof(HostPreparationPlan))]
 [JsonSerializable(typeof(HostPreparationResult))]
+[JsonSerializable(typeof(ContextInspectRequest))]
+[JsonSerializable(typeof(TargetResolveRequest))]
+[JsonSerializable(typeof(WorkflowPlanRequest))]
+[JsonSerializable(typeof(RunGetRequest))]
+[JsonSerializable(typeof(HistoryRunsRequest))]
+[JsonSerializable(typeof(HistoryShowRequest))]
+[JsonSerializable(typeof(HistoryMetricsRequest))]
+[JsonSerializable(typeof(HistoryCompareRequest))]
+[JsonSerializable(typeof(HistoryDetectRequest))]
+[JsonSerializable(typeof(ObservedBuildContext))]
+[JsonSerializable(typeof(TargetResolutionView))]
+[JsonSerializable(typeof(WorkflowPlanView))]
+[JsonSerializable(typeof(WorkflowReportSnapshot))]
+[JsonSerializable(typeof(List<HistoryRun>))]
+[JsonSerializable(typeof(HistoryDetail))]
+[JsonSerializable(typeof(List<HistoryMeasurement>))]
+[JsonSerializable(typeof(List<HistoryDifference>))]
+[JsonSerializable(typeof(HistoryDetectionReport))]
+[JsonSerializable(typeof(WorkflowStartRequest))]
+[JsonSerializable(typeof(OperationCancelRequest))]
+[JsonSerializable(typeof(OperationCancelResult))]
+[JsonSerializable(typeof(WorkflowResumeRequest))]
+[JsonSerializable(typeof(OperationEventsRequest))]
+[JsonSerializable(typeof(OperationEventsPage))]
+[JsonSerializable(typeof(List<WorkflowEvent>))]
+[JsonSerializable(typeof(WorkflowEvent))]
+[JsonSerializable(typeof(RecoveryInspectRequest))]
+[JsonSerializable(typeof(RecoveryReconcileRequest))]
+[JsonSerializable(typeof(RecoveryInspectionView))]
+[JsonSerializable(typeof(OperationFindRequest))]
+[JsonSerializable(typeof(OperationGetRequest))]
+[JsonSerializable(typeof(OperationReference))]
+[JsonSerializable(typeof(ApplicationError))]
 [JsonSerializable(typeof(StreamJsonRpc.Protocol.CommonErrorData))]
 public partial class HostJson : JsonSerializerContext;

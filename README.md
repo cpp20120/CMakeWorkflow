@@ -25,6 +25,9 @@ NativeAOT-compatible JSON-RPC contracts. See [ADR-0002](docs/adr/0002-local-host
 for scope and migration boundaries. Fix reuses the existing installer; workflow
 execution continues to use its existing CLI commands.
 
+[Recovery](docs/recovery.md) documents explicit `workflow reconcile` decisions
+for unknown outcomes, checkpoint audit, durable writes and fault-injection tests.
+
 ## Build and try it
 
 Requirements: .NET 10 SDK and CMake 3.26 or newer. The included example and

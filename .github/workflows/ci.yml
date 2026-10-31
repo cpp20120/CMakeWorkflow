@@ -3,20 +3,34 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: Test and publish (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      SDK_VERSION: 0.0.0-smoke.${{ github.run_id }}.${{ github.run_attempt }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
+            rid: linux-x64
             executable: CMakeWorkflow
+            consumer: CMakeWorkflow.Client.AotSmoke
           - os: macos-26
+            rid: osx-arm64
             executable: CMakeWorkflow
+            consumer: CMakeWorkflow.Client.AotSmoke
           - os: windows-latest
+            rid: win-x64
             executable: CMakeWorkflow.exe
+            consumer: CMakeWorkflow.Client.AotSmoke.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -47,6 +61,8 @@ jobs:
         run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll out/recovery-cli/${{ matrix.executable }} --recovery
       - name: History checks
         run: dotnet CMakeWorkflow.History.Tests/bin/Release/net10.0/CMakeWorkflow.History.Tests.dll
+      - name: Profiling checks
+        run: dotnet CMakeWorkflow.Profiling.Tests/bin/Release/net10.0/CMakeWorkflow.Profiling.Tests.dll
       - name: Tool provisioning checks
         run: dotnet CMakeWorkflow.Tooling.Tests/bin/Release/net10.0/CMakeWorkflow.Tooling.Tests.dll
       - name: Host IPC and session checks
@@ -75,36 +91,61 @@ jobs:
             throw 'Unexpected Windows host setting in plan'
           }
           Write-Host 'Windows env plan JSON smoke passed (read-only).'
-      - name: Publish NativeAOT on Linux
-        if: runner.os == 'Linux'
-        run: dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -o out/native -p:TreatWarningsAsErrors=true
+      - name: Publish NativeAOT CLI and Host
+        run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:TreatWarningsAsErrors=true
+      - name: Pack NuGet SDK
+        shell: pwsh
+        run: dotnet pack CMakeWorkflow.Client/CMakeWorkflow.Client.csproj -c Release -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
+      - name: Publish NativeAOT consumer from NuGet
+        shell: pwsh
+        run: |
+          $packages = (Resolve-Path out/sdk-packages).Path
+          dotnet publish CMakeWorkflow.Client.AotSmoke/CMakeWorkflow.Client.AotSmoke.csproj -c Release -r ${{ matrix.rid }} -p:SdkPackageVersion=$env:SDK_VERSION "-p:RestoreAdditionalProjectSources=$packages" -p:TreatWarningsAsErrors=true --artifacts-path out/sdk-smoke-artifacts -o out/sdk-aot
+      - name: Audit NuGet package and consumer dependencies
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/smoke-logs | Out-Null
+          & out/sdk-aot/${{ matrix.consumer }} --verify-package "out/sdk-packages/CMakeWorkflow.Client.$env:SDK_VERSION.nupkg" out/sdk-smoke-artifacts/obj/CMakeWorkflow.Client.AotSmoke/project.assets.json $env:SDK_VERSION 2>&1 | Tee-Object out/smoke-logs/package-audit.log
+          if ($LASTEXITCODE -ne 0) { throw "Package audit failed: $LASTEXITCODE" }
       - name: NativeAOT Host IPC smoke
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          host_dir=$(mktemp -d /tmp/cmwf.XXXXXX)
-          out/native/CMakeWorkflow host serve --endpoint "$host_dir/rpc.sock" >"$host_dir/stdout" 2>"$host_dir/stderr" &
-          host_pid=$!
-          trap 'kill "$host_pid" 2>/dev/null || true; wait "$host_pid" 2>/dev/null || true; rm -rf "$host_dir"' EXIT
-          for attempt in {1..100}; do
-            if [ -S "$host_dir/rpc.sock" ]; then break; fi
-            if ! kill -0 "$host_pid" 2>/dev/null; then cat "$host_dir/stderr"; exit 1; fi
-            sleep 0.1
-          done
-          test -S "$host_dir/rpc.sock"
-          out/native/CMakeWorkflow host doctor --endpoint "$host_dir/rpc.sock" --workspace "$PWD" --profile cmake --json
-          out/native/CMakeWorkflow host fix --endpoint "$host_dir/rpc.sock" --workspace "$PWD" --profile cmake --pm none --no-fallback --dry-run --json
-          out/native/CMakeWorkflow host fix --endpoint "$host_dir/rpc.sock" --workspace "$PWD" --profile cmake --pm none --no-fallback --yes --json
+        shell: pwsh
+        run: ./scripts/ci-native-smoke.ps1 -Cli out/native/${{ matrix.executable }} -Consumer out/sdk-aot/${{ matrix.consumer }}
+      - name: Publish isolated NativeAOT RPC cancellation test Host
+        run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -p:RpcCancellationTesting=true -p:TreatWarningsAsErrors=true --artifacts-path out/rpc-test-artifacts -o out/rpc-test-native
+      - name: NativeAOT in-flight request cancellation
+        shell: pwsh
+        run: ./scripts/ci-native-smoke.ps1 -Cli out/rpc-test-native/${{ matrix.executable }} -Consumer out/sdk-aot/${{ matrix.consumer }} -InFlight -LogDirectory out/smoke-logs/inflight
       - name: NativeAOT smoke
-        if: runner.os == 'Linux'
         shell: bash
+        env:
+          CLI: out/native/${{ matrix.executable }}
         run: |
-          out/native/CMakeWorkflow workflow plan examples/hello/workflow.json
-          out/native/CMakeWorkflow tooling list --json
-          out/native/CMakeWorkflow tooling plan cmake --pm none --json
+          "$CLI" workflow plan examples/hello/workflow.json
+          "$CLI" tooling list --json
+          "$CLI" tooling plan cmake --pm none --json
           mkdir -p out/history-smoke/run
           printf '%s\n' '{"schemaVersion":1,"workflow":"smoke","manifestHash":"test","startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:00:01Z","status":"succeeded","nodes":[]}' > out/history-smoke/run/run.json
-          out/native/CMakeWorkflow history import out/history-smoke/run --db out/history-smoke/history.sqlite
-          out/native/CMakeWorkflow history runs --db out/history-smoke/history.sqlite --json
-          out/native/CMakeWorkflow workflow run examples/hello/workflow.json --results-dir out/history-auto-smoke --history-db out/history-auto-smoke/history.sqlite
-          out/native/CMakeWorkflow history runs --db out/history-auto-smoke/history.sqlite --json | grep -q '"workflow":"'
+          "$CLI" history import out/history-smoke/run --db out/history-smoke/history.sqlite
+          "$CLI" history runs --db out/history-smoke/history.sqlite --json
+          "$CLI" workflow run examples/hello/workflow.json --results-dir out/history-auto-smoke --history-db out/history-auto-smoke/history.sqlite
+          "$CLI" history runs --db out/history-auto-smoke/history.sqlite --json > out/smoke-logs/native-history.json
+          grep -q '"workflow":"' out/smoke-logs/native-history.json
+      - name: Prepare downloadable archives
+        shell: pwsh
+        run: ./scripts/ci-package-artifacts.ps1 -Rid ${{ matrix.rid }}
+      - name: Upload tested native binaries and NuGet SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CMakeWorkflow-${{ matrix.rid }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/distribution/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs-${{ matrix.rid }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/smoke-logs/
+          if-no-files-found: ignore
+          retention-days: 14

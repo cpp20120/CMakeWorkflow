@@ -16,6 +16,7 @@ public static class HostServer
         var clients = new ConcurrentDictionary<long, Task>();
         using var slots = new SemaphoreSlim(16);
         using var fixes = new FixCoordinator();
+        using var executions = new DurableExecutionCoordinator(ct);
         using var downloads = VerifiedCMakeInstaller.CreateDownloadClient();
         var installer = new VerifiedCMakeInstaller(downloads);
         long next = 0;
@@ -29,7 +30,7 @@ public static class HostServer
                 {
                     var session = new DoctorSession(workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
                         value => rpc.NotifyAsync("tooling/progress", value), disconnected.Token,
-                        fixes, value => rpc.NotifyAsync("tooling/fixProgress", value));
+                        fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);
                     rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<IHostRpc>(), session, null);
                     rpc.Disconnected += (_, _) => disconnected.Cancel();
                     using var shutdown = ct.Register(rpc.Dispose);
@@ -96,6 +97,6 @@ public static class HostServer
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        finally { shutdownHost.Cancel(); await Task.WhenAll(clients.Values); }
+        finally { shutdownHost.Cancel(); await Task.WhenAll(clients.Values); await executions.DrainAsync(); }
     }
 }

@@ -49,8 +49,9 @@ public sealed class ConfigureProvenance
 
 public static class CMakeInspection
 {
-    public static async Task<ObservedBuildContext> InspectAsync(string buildDirectory, CancellationToken ct)
+    public static async Task<ObservedBuildContext> InspectAsync(string buildDirectory, CancellationToken ct, Action<string>? readGuard = null)
     {
+        readGuard?.Invoke(buildDirectory);
         var result = new ObservedBuildContext { BuildDirectory = buildDirectory };
         result.Diagnostics.Add("Configuration freshness and native output freshness are Unverified; inspection does not run CMake.");
         if (!Directory.Exists(buildDirectory))
@@ -61,7 +62,7 @@ public static class CMakeInspection
         // Retry only a disappearing File API reply (CMake may replace its reply set).
         for (var attempt = 0; attempt < 3; ++attempt)
         {
-            try { return await ReadAsync(buildDirectory, ct); }
+            try { return await ReadAsync(buildDirectory, ct, readGuard); }
             catch (FileNotFoundException) when (attempt < 2) { }
             catch (Exception error) when (error is IOException or JsonException or InvalidOperationException
                                          or KeyNotFoundException or ArgumentException or UnauthorizedAccessException)
@@ -74,12 +75,13 @@ public static class CMakeInspection
         return result;
     }
 
-    private static async Task<ObservedBuildContext> ReadAsync(string directory, CancellationToken ct)
+    private static async Task<ObservedBuildContext> ReadAsync(string directory, CancellationToken ct, Action<string>? readGuard)
     {
         var result = new ObservedBuildContext { BuildDirectory = directory };
         result.Diagnostics.Add("Configuration freshness and native output freshness are Unverified; inspection does not run CMake.");
-        var cache = ReadObservedCache(directory);
+        var cache = ReadObservedCache(directory, readGuard);
         var reply = Path.Combine(directory, ".cmake", "api", "v1", "reply");
+        readGuard?.Invoke(reply);
         var indexPath = Directory.Exists(reply) ? Directory.EnumerateFiles(reply, "*.json")
             .Where(p => Path.GetFileName(p).StartsWith("index-", StringComparison.Ordinal)
                      || Path.GetFileName(p).StartsWith("error-", StringComparison.Ordinal))
@@ -87,6 +89,7 @@ public static class CMakeInspection
         if (indexPath is not null)
         {
             result.IndexFile = indexPath;
+            readGuard?.Invoke(indexPath);
             var bytes = await File.ReadAllBytesAsync(indexPath, ct);
             result.IndexHash = Convert.ToHexString(SHA256.HashData(bytes));
             using var index = JsonDocument.Parse(bytes);
@@ -106,7 +109,7 @@ public static class CMakeInspection
                 result.CTestExecutable = tools.GetProperty("ctest").GetString();
             }
             var objects = index.RootElement.GetProperty("objects");
-            using var model = await ReadObjectAsync(reply, objects, "codemodel", 2, ct);
+            using var model = await ReadObjectAsync(reply, objects, "codemodel", 2, ct, readGuard);
             if (model is not null)
             {
                 result.HasCodeModel = true;
@@ -121,7 +124,7 @@ public static class CMakeInspection
                     result.Configurations.Add(name);
                     foreach (var entry in configuration.GetProperty("targets").EnumerateArray())
                     {
-                        using var target = await ReadJsonAsync(ReplyPath(reply, entry.GetProperty("jsonFile").GetString()), ct);
+                        using var target = await ReadJsonAsync(ReplyPath(reply, entry.GetProperty("jsonFile").GetString()), ct, readGuard);
                         var data = target.RootElement;
                         var type = data.GetProperty("type").GetString()!;
                         var targetName = data.GetProperty("name").GetString()!;
@@ -140,7 +143,7 @@ public static class CMakeInspection
                     }
                 }
             }
-            using var cacheReply = await ReadObjectAsync(reply, objects, "cache", 2, ct);
+            using var cacheReply = await ReadObjectAsync(reply, objects, "cache", 2, ct, readGuard);
             if (cacheReply is not null)
             {
                 result.HasCacheReply = true;
@@ -149,7 +152,7 @@ public static class CMakeInspection
                     .ToDictionary(e => e.GetProperty("name").GetString()!, e => e.GetProperty("value").GetString()!);
                 if (apiCache.TryGetValue("CMAKE_HOME_DIRECTORY", out var home)) result.SourceDirectory ??= home;
             }
-            using var toolchains = await ReadObjectAsync(reply, objects, "toolchains", 1, ct);
+            using var toolchains = await ReadObjectAsync(reply, objects, "toolchains", 1, ct, readGuard);
             if (toolchains is not null)
                 foreach (var toolchain in toolchains.RootElement.GetProperty("toolchains").EnumerateArray())
                 {
@@ -194,10 +197,11 @@ public static class CMakeInspection
             }
             result.Diagnostics.Add("No codemodel: limited cache/bridge observations only; absent targets have Unknown type.");
             var manifests = Path.Combine(directory, "cmake-workflow", "targets");
+            readGuard?.Invoke(manifests);
             if (Directory.Exists(manifests))
-                foreach (var path in Directory.EnumerateFiles(manifests, "*.json", SearchOption.AllDirectories))
+                foreach (var path in BridgeFiles(manifests, readGuard, ct))
                 {
-                    using var json = await ReadJsonAsync(path, ct);
+                    using var json = await ReadJsonAsync(path, ct, readGuard);
                     var data = json.RootElement;
                     var target = data.GetProperty("target").GetString()!;
                     var configuration = data.GetProperty("configuration").GetString()!;
@@ -215,6 +219,7 @@ public static class CMakeInspection
             result.State = result.HasCodeModel ? "Observed" : "ObservedLimited";
 
         var provenance = ProvenancePath(directory);
+        readGuard?.Invoke(provenance);
         if (File.Exists(provenance))
         {
             var json = await File.ReadAllBytesAsync(provenance, ct);
@@ -308,10 +313,11 @@ public static class CMakeInspection
         File.Move(temporary, path, true);
     }
 
-    private static Dictionary<string, string> ReadObservedCache(string directory)
+    private static Dictionary<string, string> ReadObservedCache(string directory, Action<string>? readGuard)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var path = Path.Combine(directory, "CMakeCache.txt");
+        readGuard?.Invoke(path);
         if (!File.Exists(path)) return values;
         foreach (var line in File.ReadLines(path))
         {
@@ -325,11 +331,11 @@ public static class CMakeInspection
         return values;
     }
 
-    private static async Task<JsonDocument?> ReadObjectAsync(string directory, JsonElement objects, string kind, int version, CancellationToken ct)
+    private static async Task<JsonDocument?> ReadObjectAsync(string directory, JsonElement objects, string kind, int version, CancellationToken ct, Action<string>? readGuard)
     {
         foreach (var item in objects.EnumerateArray())
             if (item.GetProperty("kind").GetString() == kind && item.GetProperty("version").GetProperty("major").GetInt32() == version)
-                return await ReadJsonAsync(ReplyPath(directory, item.GetProperty("jsonFile").GetString()), ct);
+                return await ReadJsonAsync(ReplyPath(directory, item.GetProperty("jsonFile").GetString()), ct, readGuard);
         return null;
     }
 
@@ -340,6 +346,24 @@ public static class CMakeInspection
         return Path.Combine(directory, file);
     }
 
-    private static async Task<JsonDocument> ReadJsonAsync(string path, CancellationToken ct) =>
-        JsonDocument.Parse(await File.ReadAllBytesAsync(path, ct));
+    private static IEnumerable<string> BridgeFiles(string directory, Action<string>? readGuard, CancellationToken ct)
+    {
+        var pending = new Stack<string>();
+        var visited = new HashSet<string>(WorkflowPlanner.PathComparer);
+        pending.Push(directory);
+        while (pending.TryPop(out var current))
+        {
+            ct.ThrowIfCancellationRequested();
+            readGuard?.Invoke(current);
+            if (!visited.Add(BuildTreeOwnership.CanonicalPath(current))) continue;
+            foreach (var file in Directory.EnumerateFiles(current, "*.json")) yield return file;
+            foreach (var child in Directory.EnumerateDirectories(current)) pending.Push(child);
+        }
+    }
+
+    private static async Task<JsonDocument> ReadJsonAsync(string path, CancellationToken ct, Action<string>? readGuard)
+    {
+        readGuard?.Invoke(path);
+        return JsonDocument.Parse(await File.ReadAllBytesAsync(path, ct));
+    }
 }

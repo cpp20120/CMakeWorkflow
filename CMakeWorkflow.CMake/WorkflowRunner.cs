@@ -108,13 +108,7 @@ public static class WorkflowCommand
         var plan = await WorkflowPlanner.LoadAsync(args[0], only, controller, ct);
         if (json && command == "plan")
         {
-            var view = new WorkflowPlanView(1, plan.File, plan.ManifestHash,
-                !plan.Nodes.Any(n => n.Diagnostics.Any(d => d.Severity == "Error")),
-                plan.Nodes.Select(n => new WorkflowPlanNodeView(n.Definition.Id,
-                    n.Definition.Kind, n.Target.Target, n.Target.BuildDirectory,
-                    n.Target.Configuration, n.Dependencies.ToList(), n.Observed.State,
-                    n.Diagnostics.ToList(), n.Definition.Resources.ToList(),
-                    n.Definition.Exclusive)).ToList());
+            var view = WorkflowQueries.PlanView(plan);
             Console.Out.WriteLine(JsonSerializer.Serialize(view, WorkflowProtocolJson.Default.WorkflowPlanView));
         }
         else foreach (var node in plan.Nodes)
@@ -156,7 +150,8 @@ public static class WorkflowCommand
 public static class WorkflowRunner
 {
     public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
-        IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false)
+        IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false,
+        Func<string, CancellationToken, Task>? beforeExternalDispatch = null)
     {
         // The run lease spans validation, the recovery checkpoint, execution and final persistence.
         // No second runner may inspect/commit the same persisted run concurrently.
@@ -341,6 +336,11 @@ public static class WorkflowRunner
                     dispatch.Add((node, snapshot));
                 }
                 await SaveAsync(report, output, events);
+                // The optional host-owned dispatch gate runs only after the runner's
+                // write-ahead checkpoint is durably committed, and strictly before
+                // any selected node starts an external process. CLI runs have no gate.
+                if (dispatch.Count != 0 && beforeExternalDispatch is not null)
+                    await beforeExternalDispatch(output, stop.Token);
                 foreach (var (node, snapshot) in dispatch)
                 {
                     await RecoveryFaults.HitAsync("after-checkpoint", node.Definition.Id, ct);

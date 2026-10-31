@@ -6,13 +6,13 @@ namespace CMakeWorkflow.History;
 
 // This is a one-sided test for a user-declared regression direction. It does
 // not claim that sequential benchmark samples are independent or free of drift.
-internal static class HistoryDetector
+public static class HistoryDetector
 {
     private const int MinimumSamples = 10;
     private const int MonteCarloPermutations = 9999;
     private const int MaximumExactPermutations = 200000;
 
-    internal static HistoryDetectionReport Detect(HistoryDetail baseline,
+    public static HistoryDetectionReport Detect(HistoryDetail baseline,
         HistoryDetail candidate, string metric, string? variant, string? scenario,
         string direction,
         double minimumEffectPercent, double alpha, CancellationToken ct)
@@ -32,7 +32,7 @@ internal static class HistoryDetector
             throw new ArgumentException("--alpha must be between zero and one.");
 
         var results = new List<HistoryDetection>();
-        foreach (var difference in HistoryCommand.Compare(baseline, candidate)
+        foreach (var difference in HistoryComparison.Compare(baseline, candidate)
             .Where(x => x.Metric == metric && (variant is null || x.Variant == variant)
                 && (scenario is null || x.Scenario == scenario)))
         {

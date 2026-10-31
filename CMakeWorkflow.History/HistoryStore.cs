@@ -12,15 +12,17 @@ public sealed class HistoryStore : IDisposable
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "CMakeWorkflow", "history.sqlite");
     private readonly SqliteConnection db;
-    public HistoryStore(string path)
+    public HistoryStore(string path, bool readOnly = false)
     {
         SQLitePCL.Batteries.Init();
         path = Path.GetFullPath(path);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (!readOnly) Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         db = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false
+            DataSource = path, Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false
         }.ToString());
+        try
+        {
         db.Open();
         using (var foreignKeys = db.CreateCommand())
         {
@@ -30,11 +32,18 @@ public sealed class HistoryStore : IDisposable
         using var version = db.CreateCommand();
         version.CommandText = "PRAGMA user_version";
         var current = Convert.ToInt32(version.ExecuteScalar());
+        if (readOnly)
+        {
+            if (current != 4) throw new InvalidDataException($"History schema {current} requires an explicit CLI migration; read-only API supports schema 4.");
+            return;
+        }
         if (current > 4) throw new InvalidDataException($"History database schema {current} is newer than supported version 4.");
         if (current == 0) { Migrate0To1(); current = 1; }
         if (current == 1) { Migrate1To2(); current = 2; }
         if (current == 2) { Migrate2To3(); current = 3; }
         if (current == 3) Migrate3To4();
+        }
+        catch { db.Dispose(); throw; }
     }
     private void Migrate0To1()
     {
@@ -198,7 +207,7 @@ public sealed class HistoryStore : IDisposable
         S(r, 13) is { } builds ? JsonSerializer.Deserialize(builds,
             HistoryJson.Default.ListHistoryBuildEnvironment) : null);
     public List<HistoryRun> Runs(int limit, string? status, string? since, string? until,
-        string? workflow, string? variant)
+        string? workflow, string? variant, Func<string, bool>? includeDirectory = null, CancellationToken ct = default)
     {
         using var cmd = db.CreateCommand();
         cmd.CommandText = """
@@ -210,22 +219,30 @@ public sealed class HistoryStore : IDisposable
               AND ($p4 IS NULL OR EXISTS(SELECT 1 FROM measurements m WHERE m.run_id=runs.id AND m.variant=$p4))
             ORDER BY started_at DESC, id LIMIT $p5
             """;
-        object?[] values = [status, since, until, workflow, variant, limit];
+        object?[] values = [status, since, until, workflow, variant, includeDirectory is null ? limit : int.MaxValue];
         for (var i = 0; i < values.Length; i++) cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);
         using var reader = cmd.ExecuteReader();
         var result = new List<HistoryRun>();
-        while (reader.Read()) result.Add(Run(reader));
+        while (reader.Read())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (includeDirectory is not null && !includeDirectory(reader.GetString(1))) continue;
+            result.Add(Run(reader));
+            if (result.Count >= limit) break;
+        }
         return result;
     }
-    public HistoryDetail Show(string id)
+    public HistoryDetail Show(string id, Action<string>? validateDirectory = null,
+        int maxMeasurements = int.MaxValue, CancellationToken ct = default, Func<string, bool>? artifactAllowed = null)
     {
         using var cmd = db.CreateCommand();
         cmd.CommandText = "SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json FROM runs WHERE id=$p0";
         cmd.Parameters.AddWithValue("$p0", id);
         using var r = cmd.ExecuteReader();
         if (!r.Read()) throw new KeyNotFoundException($"Unknown run ID: {id}");
+        validateDirectory?.Invoke(r.GetString(1));
         var run = Run(r);
-        return new(run, Nodes(id), Metrics(id, null, null, null), Artifacts(id));
+        return new(run, Nodes(id), Metrics(id, null, null, null, maxRows: maxMeasurements, ct: ct), Artifacts(id, artifactAllowed));
     }
     private List<HistoryNode> Nodes(string id)
     {
@@ -238,11 +255,13 @@ public sealed class HistoryStore : IDisposable
             r.GetString(3), D(r, 4), S(r, 5), S(r, 6), S(r, 7), S(r, 8)));
         return list;
     }
-    public List<HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario)
+    public List<HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario,
+        Func<string, bool>? includeDirectory = null, int maxRows = int.MaxValue, CancellationToken ct = default)
     {
         using var cmd = db.CreateCommand();
         cmd.CommandText = """
-            SELECT run_id,node_id,metric,unit,value,variant,scenario,source,method,sample_index,workload,environment
+            SELECT run_id,node_id,metric,unit,value,variant,scenario,source,method,sample_index,workload,environment,
+              (SELECT directory FROM runs WHERE id=measurements.run_id)
             FROM measurements WHERE ($p0 IS NULL OR run_id=$p0) AND ($p1 IS NULL OR metric=$p1)
               AND ($p2 IS NULL OR variant=$p2) AND ($p3 IS NULL OR scenario=$p3)
             ORDER BY metric,unit,method,variant,scenario,run_id,sample_index,node_id
@@ -251,12 +270,18 @@ public sealed class HistoryStore : IDisposable
         for (var i = 0; i < values.Length; i++) cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);
         using var r = cmd.ExecuteReader();
         var list = new List<HistoryMeasurement>();
-        while (r.Read()) list.Add(new(r.GetString(0), S(r, 1), r.GetString(2), r.GetString(3),
+        while (r.Read())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (includeDirectory is not null && !includeDirectory(r.GetString(12))) continue;
+            if (list.Count >= maxRows) throw new InvalidDataException($"Measurement limit {maxRows} exceeded; narrow the query.");
+            list.Add(new(r.GetString(0), S(r, 1), r.GetString(2), r.GetString(3),
             r.GetDouble(4), S(r, 5), S(r, 6), r.GetString(7), r.GetString(8), r.GetInt32(9),
             S(r, 10), S(r, 11)));
+        }
         return list;
     }
-    private List<HistoryArtifact> Artifacts(string id)
+    private List<HistoryArtifact> Artifacts(string id, Func<string, bool>? allowed = null)
     {
         using var cmd = db.CreateCommand();
         cmd.CommandText = "SELECT run_id,node_id,type,path,sha256,metadata FROM artifacts WHERE run_id=$p0 ORDER BY type,path";
@@ -264,7 +289,7 @@ public sealed class HistoryStore : IDisposable
         using var r = cmd.ExecuteReader();
         var list = new List<HistoryArtifact>();
         while (r.Read()) list.Add(new(r.GetString(0), S(r, 1), r.GetString(2), r.GetString(3),
-            S(r, 4), S(r, 5), File.Exists(r.GetString(3)) || Directory.Exists(r.GetString(3))));
+            S(r, 4), S(r, 5), (allowed is null || allowed(r.GetString(3))) && (File.Exists(r.GetString(3)) || Directory.Exists(r.GetString(3)))));
         return list;
     }
     public void Dispose() => db.Dispose();

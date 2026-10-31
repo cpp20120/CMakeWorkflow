@@ -19,6 +19,12 @@ static async Task Reject<T>(Func<Task> action, string name) where T : Exception
     throw new Exception(name);
 }
 
+if (args.Length > 0 && args[0] == "--durable-fault-worker")
+{
+    await DurableCrashTests.WorkerAsync(args);
+    return;
+}
+
 var root = Path.Combine(Path.GetTempPath(), "cmwf-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 // Keep Unix socket endpoints short even when the CI workspace/temp path is long.
@@ -31,6 +37,11 @@ try
         Directory.CreateDirectory(socketDirectory);
         SetPrivateUnixDirectory(socketDirectory);
     }
+    DurableAcceptanceTests.Run(root);
+    DurableRecoveryTests.Run(root);
+    await ResumeReplayTests.RunAsync(root);
+    await DurableExecutionProcessTests.RunAsync(root);
+    await DurableCrashTests.RunAsync(root);
     await FixTests.RunAsync(root);
     using var fixes = new FixCoordinator(Path.Combine(root, "locks"));
     var runtime = new FakeRuntime();
@@ -150,6 +161,10 @@ try
                     "wire environment/apply no-op verified");
             }
             Console.WriteLine("Environment JSON-RPC wire checks passed.");
+            await ApplicationTests.RunAsync(endpoint, root, lifetime.Token); await SdkSmokeTests.RunAsync(endpoint, root, lifetime.Token);
+            await DurableWorkflowWireTests.RunAsync(endpoint, root, lifetime.Token);
+            await DurableResumeExecutionWireTests.RunAsync(endpoint, root, lifetime.Token);
+            await DurableCancellationWireTests.RunAsync(endpoint, root, lifetime.Token);
         }
         finally { lifetime.Cancel(); await server; }
     }
