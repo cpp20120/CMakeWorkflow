@@ -1,5 +1,7 @@
 # ADR-0002: Local CMakeWorkflow Host
 
+> **Language / Язык:** [English](../en/adr/0002-local-host-ipc.md) · [Русский](../ru/adr/0002-local-host-ipc.md)
+
 Date: 2026-10-30. Status: accepted for the read-only Doctor prototype; broader
 migration is deferred until the operation lifecycle is specified and tested.
 

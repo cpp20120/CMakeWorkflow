@@ -1,5 +1,7 @@
 # Результаты, протокол и History
 
+> **Язык / Language:** [Русский](results-and-history.md) · [English](en/results-and-history.md) · [Documentation index](README.md)
+
 ## Версии контрактов
 
 Это независимые значения, их нельзя сравнивать как одну «версию продукта»:

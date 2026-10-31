@@ -1,65 +1,17 @@
-# Документация CMakeWorkflow
+# CMakeWorkflow documentation / Документация
 
-CMakeWorkflow — самостоятельный CLI на .NET 10 для выполнения явно заданных
-сценариев над CMake-проектами. Он поддерживает NativeAOT-публикацию, работу с
-существующими build trees, DAG, контроль происхождения артефактов, профилирование
-и локальную историю результатов.
+Choose a language / Выберите язык:
 
-Эти документы описывают **исходники текущего checkout**, включая локальные
-доработки. Это не обещание наличия всех команд в произвольном установленном
-бинарнике. В частности, `profile replay`, `harnessDirectory` и расширенный анализ
-профилей присутствуют в рабочем дереве на момент написания, но могут отсутствовать
-в более раннем опубликованном CLI. Дата сверки: 2026-10-29.
-
-## Навигация
-
-| Документ | Содержание |
+| English | Русский |
 |---|---|
-| [Архитектура](architecture.md) | Компоненты, границы ответственности, выполнение и расширение |
-| [Workflow-манифесты](workflows.md) | Контексты, узлы, зависимости, ресурсы и жизненный цикл |
-| [CLI](cli.md) | Сборка, команды, параметры и примеры вызова |
-| [Результаты и History](results-and-history.md) | План, JSONL, `run.json`, артефакты, сравнения и статистика |
-| [Recovery](recovery.md) | Ручное решение, аудит, fault injection и durability checkpoint |
-| [Профилирование и кампании](profiling-and-campaigns.md) | Варианты сборок, capture/analyze/replay, DagFlow harness и fuzz |
-| [Provisioning и интеграции](integrations.md) | Инструменты, CMake bridge, boilerplate, VS Code и проверки |
-| [Local Host IPC](host-ipc.md) | Doctor/Fix: CLI, VS Code, NativeAOT, планы установки и локальные подключения |
-| [ADR-0002: Local Host](adr/0002-local-host-ipc.md) | Границы первого этапа и выбор транспорта |
-| [ADR-0003: Unified application API](adr/0003-unified-application-api.md) | Предложение API, lifecycle операций и поэтапного переноса CLI/GUI |
-| [ADR-0001: MSBuild backend](adr/0001-msbuild-execution-backend.md) | Предложение; не описание существующего runtime |
+| **[English documentation →](en/README.md)** | **[Русская документация →](ru/README.md)** |
+| [Get started in 5 minutes](en/getting-started.md) | [Начало работы за 5 минут](ru/getting-started.md) |
+| [CLI reference](en/cli.md) | [Справочник CLI](cli.md) |
+| [Workflows and manifests](en/workflows.md) | [Workflow и манифесты](workflows.md) |
+| [Recovery and safe resumption](en/recovery.md) | [Восстановление и продолжение](recovery.md) |
 
-## С чего начать
+CMakeWorkflow is a **.NET 10 workflow orchestrator for CMake projects**, not a native build-system replacement. It manages workflow dependencies, process lifetime, build-tree coordination, evidence/provenance and saved results; CMake and its generator still manage compilation and native dependencies.
 
-Из корня репозитория, с установленными .NET 10 SDK, CMake 3.26+, Ninja и C++
-компилятором:
+CMakeWorkflow — **оркестратор сценариев для CMake-проектов на .NET 10**, а не замена системе сборки. Он управляет зависимостями между операциями, процессами, координацией build trees, происхождением результатов и сохранёнными отчётами; компиляцией и native dependencies по-прежнему управляют CMake и generator.
 
-```sh
-dotnet build CMakeWorkflow.slnx -c Release
-dotnet bin/Release/net10.0/CMakeWorkflow.dll workflow plan examples/hello/workflow.json --json
-dotnet bin/Release/net10.0/CMakeWorkflow.dll workflow run examples/hello/workflow.json --json --results-dir out/results
-```
-
-Для чтения результата используйте **фактический** `runDirectory` из событий:
-
-```sh
-dotnet bin/Release/net10.0/CMakeWorkflow.dll workflow report RUN_DIRECTORY --json
-```
-
-`RUN_DIRECTORY`, `RUN_ID`, `BUILD_DIR` и аналогичные имена в примерах — значения,
-которые нужно заменить. Пути с пробелами заключайте в кавычки в своей оболочке.
-В интеграциях передавайте executable и массив аргументов отдельно.
-
-## Место в наборе инструментов
-
-- CMake и выбранный generator определяют native dependencies, compiler flags,
-  инкрементальную сборку и интерпретацию presets.
-- CTest запускает зарегистрированные проектом тесты. CDash — отдельный внешний
-  сервис для CTest dashboard; CMakeWorkflow не предоставляет CDash server.
-- Boilerplate помогает создать и настроить проект, но не является обязательной
-  зависимостью CLI.
-- CMakeWorkflow исполняет workflow и сохраняет сведения о результате.
-- VS Code extension предоставляет интерфейс к CLI и сохранённым данным.
-- Tooling provisioning подготавливает инструменты только по явному запросу.
-
-Полезно рассматривать этот набор как инструменты разработки с несколькими
-контрактами. Наличие всех компонентов не означает единого установщика,
-согласованного релиза или автоматически подтверждённой совместимости их версий.
+Documentation describes the **current source checkout**. Not every installed binary or editor extension necessarily exposes every command; check compatible versions before relying on advanced operations. Документация описывает **текущие исходники**; установленная версия и расширение IDE могут отличаться.

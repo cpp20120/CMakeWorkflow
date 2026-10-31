@@ -1,5 +1,7 @@
 # Provisioning, CMake и IDE
 
+> **Язык / Language:** [Русский](integrations.md) · [English](en/integrations.md) · [Documentation index](README.md)
+
 ## Provisioning
 
 Tooling — явная подготовка окружения, независимая от scheduler:

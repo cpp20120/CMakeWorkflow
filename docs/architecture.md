@@ -1,5 +1,7 @@
 # Текущая архитектура
 
+> **Язык / Language:** [Русский](architecture.md) · [English](en/architecture.md) · [Documentation index](README.md)
+
 ## Компоненты
 
 | Компонент | Ответственность | Основные исходники |

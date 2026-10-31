@@ -1,5 +1,7 @@
 # ADR-0001: MSBuild как альтернативный движок исполнения workflow
 
+> **Language / Язык:** [Русский](../ru/README.md) · [English](../en/adr/0001-msbuild-execution-backend.md)
+
 - **Статус:** предложено; решение о внедрении не принято.
 - **Дата:** 2026-10-29.
 - **Область:** исполнение workflow, не выбор native build generator.

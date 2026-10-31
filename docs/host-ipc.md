@@ -1,7 +1,10 @@
 # Local Host IPC preview
 
-Status: Doctor and explicit Fix, 2026-10-30. This is implemented in the
-current checkout, not necessarily in an older installed CLI.
+> **Language / Язык:** [English](en/host-ipc.md) · [Русский](ru/host-ipc.md) · [Documentation index](README.md)
+
+The Doctor/Fix contract below was introduced on 2026-10-30. The current Host also
+exposes workflow operations and history capabilities; negotiate `initialize.capabilities`
+and see the [updated English guide](en/host-ipc.md). Installed older binaries may differ.
 
 `CMakeWorkflow host serve` hosts the existing `ToolingService` over local
 JSON-RPC. Both the CLI client and the VS Code client can connect to the same

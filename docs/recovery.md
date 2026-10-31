@@ -1,5 +1,7 @@
 # Recovery: ручное решение, аудит и durability
 
+> **Язык / Language:** [Русский](recovery.md) · [English](en/recovery.md) · [Documentation index](README.md)
+
 `run.json` остаётся единственным checkpoint исполнения. Нет автоматического
 повтора операций после неизвестного результата и нет второй базы recovery.
 

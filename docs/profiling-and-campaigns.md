@@ -1,5 +1,7 @@
 # Профилирование и предметные кампании
 
+> **Язык / Language:** [Русский](profiling-and-campaigns.md) · [English](en/profiling-and-campaigns.md) · [Documentation index](README.md)
+
 ## Profile run
 
 `profile run` формирует workflow для build, отдельных неинструментированных

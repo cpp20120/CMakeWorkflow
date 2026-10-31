@@ -13,17 +13,19 @@ and run artifacts.
 
 ## Documentation
 
+**Documentation:** [English guide](docs/en/README.md) · [Русская документация](docs/ru/README.md) · [Language index](docs/README.md).
+
 The [documentation index](docs/README.md) describes the current implementation:
 architecture, workflow manifests, CLI commands, result protocols, History,
-profiling, provisioning and IDE integration. Documentation is currently in Russian.
+profiling, provisioning and IDE integration. Full English and Russian guides are available; source files are the authoritative contract.
 The proposed MSBuild execution backend is discussed separately in
 [ADR-0001](docs/adr/0001-msbuild-execution-backend.md); it is not implemented.
 
-The [local Host IPC preview](docs/host-ipc.md) exposes the existing Doctor and explicit Fix services
-to CLI and VS Code clients over Unix sockets / Windows named pipes, with
-NativeAOT-compatible JSON-RPC contracts. See [ADR-0002](docs/adr/0002-local-host-ipc.md)
-for scope and migration boundaries. Fix reuses the existing installer; workflow
-execution continues to use its existing CLI commands.
+The [local JSON-RPC Host](docs/en/host-ipc.md) exposes Tooling Doctor/Fix and
+negotiated workflow, operation and History capabilities through Unix sockets or
+Windows named pipes, with NativeAOT-compatible typed clients. CLI commands remain
+available independently; see [ADR-0002](docs/adr/0002-local-host-ipc.md) for
+the original transport and responsibility decisions.
 
 [Recovery](docs/recovery.md) documents explicit `workflow reconcile` decisions
 for unknown outcomes, checkpoint audit, durable writes and fault-injection tests.
