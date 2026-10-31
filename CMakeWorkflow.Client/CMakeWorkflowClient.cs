@@ -144,6 +144,11 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
     }
 
     internal IClientRpc Proxy { get { ObjectDisposedException.ThrowIf(disposed, this); return proxy; } }
+    internal Task<JsonElement> InvokePlanAsync(PlanRequest request, CancellationToken ct)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return rpc.InvokeWithCancellationAsync<JsonElement>("workflow/plan", new object?[] { request }, ct);
+    }
     internal void RequireCapability(string capability)
     {
         if (!Host.Capabilities.Contains(capability, StringComparer.Ordinal))
@@ -178,7 +183,9 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
     public Task<JsonElement> PlanAsync(string manifest, CancellationToken ct = default)
     {
         client.RequireCapability("workflow/plan");
-        return client.Proxy.PlanAsync(new(manifest), ct);
+        // InvokeWithCancellationAsync explicitly binds ct as the RPC invocation
+        // cancellation token, never as a serialized member of the params array.
+        return client.InvokePlanAsync(new PlanRequest(manifest), ct);
     }
 }
 

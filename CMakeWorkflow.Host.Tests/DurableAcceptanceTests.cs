@@ -97,8 +97,10 @@ internal static class DurableAcceptanceTests
             var checkpoint = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
             File.WriteAllBytes(Path.Combine(runDir, "run.json"), checkpoint);
             var recorded = store.ConfirmRunnerCheckpoint(id, runDir);
+            // macOS may canonicalize /var to /private/var when persisting the binding.
+            var canonicalRunDir = BuildTreeOwnership.CanonicalPath(runDir);
             if (recorded != Convert.ToHexString(SHA256.HashData(checkpoint)) ||
-                store.GetDispatchCheckpoint(id)?.RunDirectory != runDir)
+                store.GetDispatchCheckpoint(id)?.RunDirectory != canonicalRunDir)
                 throw new Exception("checkpoint binding integrity");
             report.ManifestHash = new string('0', 64);
             File.WriteAllBytes(Path.Combine(runDir, "run.json"),
@@ -109,7 +111,7 @@ internal static class DurableAcceptanceTests
                 throw new Exception("failed confirmation overwrote durable binding");
         }
         using (var reopened = new DurableAcceptanceStore(workspace, readOnly: true))
-            if (reopened.GetDispatchCheckpoint(id)?.RunDirectory != runDir)
+            if (reopened.GetDispatchCheckpoint(id)?.RunDirectory != BuildTreeOwnership.CanonicalPath(runDir))
                 throw new Exception("checkpoint binding not durable");
         // The executable bridge must reject an already-authorized operation BEFORE
         // attempting any runner dispatch, even if the source manifest changed.

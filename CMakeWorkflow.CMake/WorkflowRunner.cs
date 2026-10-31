@@ -713,6 +713,9 @@ public static class WorkflowRunner
         { throw new MissingWorkflowToolException(result.Executable!, error); }
         using (process)
         {
+        // Windows Kill(entireProcessTree:true) does not wait for grandchildren.
+        // A Job Object retains custody of descendants even if Ninja exits first.
+        using var windowsJob = OperatingSystem.IsWindows() ? WindowsProcessJob.Attach(process) : null;
         process.StandardInput.Close();
         var copies = Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(stdout),
             process.StandardError.BaseStream.CopyToAsync(stderr));
@@ -726,7 +729,14 @@ public static class WorkflowRunner
         {
             processTimer.Stop();
             result.ProcessDurationSeconds = processTimer.Elapsed.TotalSeconds;
-            if (!process.HasExited)
+            if (windowsJob is not null)
+            {
+                // Do not report terminal cancellation while an assigned descendant
+                // (e.g. cmake -E sleep) is still executing the external effect.
+                await windowsJob.TerminateAndWaitAsync(CancellationToken.None);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            else if (!process.HasExited)
             {
                 try { process.Kill(entireProcessTree: true); }
                 catch (InvalidOperationException) when (process.HasExited) { }
