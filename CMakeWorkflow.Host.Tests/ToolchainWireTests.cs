@@ -35,17 +35,22 @@ internal static class ToolchainWireTests
         var request = new DeveloperEnvironmentRequest("vs:fake", "x64", "x64", "10.0.26100.0", "14.51.36231");
         try
         {
+            // Raw multiline literals may already contain CRLF after Windows checkout.
+            // Normalize before converting to batch CRLF; avoid producing CRCRLF.
             await File.WriteAllTextAsync(script, """
                 @echo off
                 if not "%~1"=="-no_logo" exit /b 31
-                if not "%~2"=="-arch=x64" exit /b 32
+                if not "%~2"=="-arch=x64" (
+                    echo [ERROR:smoke] arg2 mismatch: received [%~2], expected [-arch=x64] 1>&2
+                    exit /b 32
+                )
                 if not "%~3"=="-host_arch=x64" exit /b 33
                 if not "%~4"=="-winsdk=10.0.26100.0" exit /b 34
                 if not "%~5"=="-vcvars_ver=14.51.36231" exit /b 35
                 set "VSCMD_VER=smoke"
                 set "VCToolsInstallDir=C:\Fake\MSVC\"
                 exit /b 0
-                """.Replace("\n", "\r\n"), ct);
+                """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
             var snapshot = await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
             Check(snapshot.VisibleVariables.GetValueOrDefault("VSCMD_VER") == "smoke"
                 && snapshot.VisibleVariables.GetValueOrDefault("VCToolsInstallDir") == @"C:\Fake\MSVC\"
@@ -56,7 +61,7 @@ internal static class ToolchainWireTests
                 @echo off
                 echo [ERROR:smoke] Expected diagnostic from failing batch 1>&2
                 exit /b 19
-                """.Replace("\n", "\r\n"), ct);
+                """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
             try
             {
                 await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
