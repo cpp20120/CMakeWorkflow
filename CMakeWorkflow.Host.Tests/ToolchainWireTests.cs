@@ -78,10 +78,10 @@ internal static class ToolchainWireTests
                     && a.Code == "unsupported_platform", "Missing stable refusal code.");
             }
         }
-        await using var sdk = await ClientSdk.CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct);
-        var sdkInventory = await sdk.Toolchains.DiscoverAsync(ct);
+        await using var sdkClient = await ClientSdk.CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct);
+        var sdkInventory = await sdkClient.Toolchains.DiscoverAsync(ct);
         Check(sdkInventory.Candidates.Count == discovered.Candidates.Count, "SDK discovery differs from Host.");
-        var sdkResolved = await sdk.Toolchains.ResolveAsync(new(), ct);
+        var sdkResolved = await sdkClient.Toolchains.ResolveAsync(new(), ct);
         Check(sdkResolved.Status == resolution.Status, "SDK resolution differs from Host.");
         Console.WriteLine("Toolchain discovery/resolver/SDK wire checks passed.");
     }
