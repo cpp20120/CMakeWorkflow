@@ -39,6 +39,25 @@ internal static class ToolchainWireTests
         Check(chosen.Status == "resolved" && chosen.EnvironmentProfileId == "vs:one"
             && chosen.CMake?.Provider == "path" && chosen.Ninja?.Provider == "path",
             "Resolver must combine standalone tools with MSVC developer environment.");
+        // PATH order must not promote MinGW or an unconfigured LLVM install
+        // ahead of an MSVC installation with a known developer environment.
+        var mingw = new ToolchainCandidate("mingw-g++", "compiler", "gcc", "path",
+            @"C:\mingw64\bin\g++.exe");
+        var looseClang = new ToolchainCandidate("loose-clang", "compiler", "clang", "path",
+            @"C:\tools\llvm\clang++.exe");
+        var mixed = inventory with { Candidates = [cmake, ninja, mingw, looseClang, compiler, sdk] };
+        var automatic = WindowsToolchains.Resolve(mixed, new());
+        Check(automatic.Status == "resolved" && automatic.Compiler?.Id == compiler.Id,
+            "MinGW/PATH must never override an activated MSVC-ABI toolchain.");
+        var onlyGnu = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, mingw] }, new());
+        Check(onlyGnu.Status == "incomplete" && onlyGnu.Compiler is null,
+            "GNU-only Windows PATH must not satisfy automatic toolchain resolution.");
+        var explicitGnu = WindowsToolchains.Resolve(mixed, new(CompilerCandidateId: mingw.Id));
+        Check(explicitGnu.Status == "resolved" && explicitGnu.Compiler?.Id == mingw.Id
+            && explicitGnu.Sdk is null && explicitGnu.EnvironmentProfileId is null,
+            "Explicit GNU toolchain must remain separate from VS/Windows SDK.");
+        var bareClang = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, looseClang, sdk] }, new());
+        Check(bareClang.Status == "incomplete", "Unactivated Windows clang++ must not be treated as configured.");
         var missingSdk = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, compiler] },
             new(CompilerCandidateId: compiler.Id));
         Check(missingSdk.Status == "incomplete", "MSVC ABI without Windows SDK must not be ready.");

@@ -54,7 +54,7 @@ public sealed class WindowsWorkflowToolchainProvider : IWorkflowToolchainProvide
                     throw new InvalidOperationException("VsDevCmd target architecture mismatch.");
             }
         }
-        else if (selected.Compiler.Flavor is "msvc" or "clang-cl")
+        else if (selected.Compiler.Flavor is "msvc" or "clang-cl" or "clang")
             throw new InvalidOperationException("MSVC ABI compilation needs a developer environment.");
 
         // Select exact executables. CMake is invoked by absolute path; selected

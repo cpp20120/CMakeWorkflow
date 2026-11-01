@@ -259,6 +259,30 @@ try
         && runtime.Calls.Any(x => x.Executable == "apt-get" && x.Args.Contains("install")),
         "package installation and re-probe");
 
+    // Host doctor must not consider MinGW in Windows PATH a valid default
+    // just because the runner has g++.exe/c++.exe installed.
+    var winCppProbe = new FakeRuntime { Platform = ToolPlatform.Windows };
+    winCppProbe.Add("g++", "g++ version 15.2.0");
+    winCppProbe.Add("c++", "g++ version 15.2.0");
+    winCppProbe.Add("clang-cl", "clang version 20.1.0");
+    var winCppPlan = await new ToolingService(winCppProbe, new FakeInstaller(winCppProbe))
+        .PlanAsync(["cmake"], PackageManagerKind.None, false, install, default);
+    Check(winCppPlan.Tools.Single(x => x.Id == "cxx").Command == "clang-cl"
+        && winCppProbe.Calls.All(x => x.Executable is not ("g++" or "c++")),
+        "Windows doctor must prefer MSVC/LLVM, never probe GNU by default");
+    winCppProbe.Add("cl", "Microsoft (R) C/C++ Optimizing Compiler Version 19.44");
+    var winMsvcPlan = await new ToolingService(winCppProbe, new FakeInstaller(winCppProbe))
+        .PlanAsync(["cmake"], PackageManagerKind.None, false, install, default);
+    Check(winMsvcPlan.Tools.Single(x => x.Id == "cxx").Command == "cl",
+        "Windows doctor should probe an active MSVC toolset before Clang");
+    var winGnuOnly = new FakeRuntime { Platform = ToolPlatform.Windows };
+    winGnuOnly.Add("g++", "g++ version 15.2.0");
+    winGnuOnly.Add("c++", "g++ version 15.2.0");
+    var winNoCppPlan = await new ToolingService(winGnuOnly, new FakeInstaller(winGnuOnly))
+        .PlanAsync(["cmake"], PackageManagerKind.None, false, install, default);
+    Check(!winNoCppPlan.Tools.Single(x => x.Id == "cxx").Installed,
+        "MinGW-only runner must not be reported as default Windows C++ ready");
+
     var fallbackRuntime = new FakeRuntime();
     fallbackRuntime.Add("apt-get", "apt 2.0");
     fallbackRuntime.Add("c++", "GCC 13.2.0");
@@ -340,7 +364,7 @@ static byte[] Archive(string architecture)
 sealed class FakeRuntime : IToolingRuntime
 {
     private readonly Dictionary<string, string> versions = new(StringComparer.Ordinal);
-    public ToolPlatform Platform => ToolPlatform.Linux;
+    public ToolPlatform Platform { get; set; } = ToolPlatform.Linux;
     public bool IsAdministrator => true;
     public bool PackageWorks { get; set; }
     public List<(string Executable, string[] Args)> Calls { get; } = [];

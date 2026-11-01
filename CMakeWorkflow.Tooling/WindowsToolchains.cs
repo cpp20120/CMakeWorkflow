@@ -87,7 +87,7 @@ public static class WindowsToolchains
         {
             ("cmake", "cmake", "cmake.exe"), ("ninja", "ninja", "ninja.exe"),
             ("compiler", "clang-cl", "clang-cl.exe"), ("compiler", "clang", "clang++.exe"),
-            ("compiler", "gcc", "g++.exe"), ("compiler", "msvc", "cl.exe"),
+            ("compiler", "msvc", "cl.exe"),
             ("msbuild", "msbuild", "MSBuild.exe")
         };
         var pathEntries = (Environment.GetEnvironmentVariable("PATH") ?? "")
@@ -224,8 +224,19 @@ public static class WindowsToolchains
                 if (found is null) throw new ArgumentException("Unknown " + role + " candidate ID; discover again.");
                 return found;
             }
-            var candidates = inventory.Candidates.Where(x => x.Role == role).ToArray();
-            var best = candidates.OrderBy(x => x.Provider == "path" ? 0 : x.Provider == "standalone" ? 1 : 2)
+            // Tool locations are not compatibility policy. For the Windows
+            // compiler, prefer an MSVC-ABI toolset with a known VS environment
+            // over an unrelated executable that happened to occur first in PATH.
+            // In particular, GNU/MinGW is never an implicit selection.
+            var candidates = inventory.Candidates.Where(x => x.Role == role
+                && (role != "compiler" || x.Flavor is "msvc" or "clang-cl" or "clang")).ToArray();
+            var best = candidates.OrderBy(x => role == "compiler"
+                    ? (x.EnvironmentProfileId is null ? 10 : 0) + (x.Flavor switch
+                    {
+                        "msvc" => 0, "clang-cl" => 1, "clang" => 2, _ => 9
+                    })
+                    : x.Provider == "path" ? 0 : x.Provider == "standalone" ? 1 : 2)
+                .ThenBy(x => x.Provider == "visual-studio" ? 0 : x.Provider == "standalone" ? 1 : 2)
                 .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
             if (best is null && required) messages.Add("Missing " + role + " candidate.");
             if (best is not null && candidates.Length > 1)
@@ -237,8 +248,13 @@ public static class WindowsToolchains
             ? (selection.NinjaCandidateId is not null ? Pick("ninja", selection.NinjaCandidateId, false) : null)
             : Pick("ninja", selection.NinjaCandidateId, true);
         var compiler = Pick("compiler", selection.CompilerCandidateId, true);
-        var sdk = Pick("sdk", selection.SdkCandidateId, false);
+        // A manually selected GNU toolchain is a distinct ABI environment:
+        // don't silently bind the Windows SDK or a VS developer prompt to it.
+        var sdk = compiler?.Flavor == "gcc" && selection.SdkCandidateId is null
+            ? null : Pick("sdk", selection.SdkCandidateId, false);
         var environment = selection.EnvironmentProfileId ?? compiler?.EnvironmentProfileId;
+        if (compiler?.Flavor == "gcc" && (environment is not null || selection.SdkCandidateId is not null))
+            throw new ArgumentException("GNU/MinGW cannot be combined with a Visual Studio environment or Windows SDK in this resolver.");
         if (vsGenerator && compiler?.Flavor is not ("msvc" or "clang-cl"))
             messages.Add("Visual Studio generator requires a compatible MSVC ABI toolchain; selection is unverified.");
         if (environment is not null)
@@ -250,15 +266,17 @@ public static class WindowsToolchains
             if (compiler?.VisualStudioInstanceId is { } owner && owner != instanceId)
                 throw new ArgumentException("Compiler and developer environment belong to different Visual Studio instances.");
         }
-        if (compiler?.Flavor is "msvc" or "clang-cl" && environment is null)
-            messages.Add("MSVC ABI compiler requires a Visual Studio developer environment; select a matching profile.");
-        if (compiler?.Flavor is "msvc" or "clang-cl" && sdk is null)
-            messages.Add("MSVC ABI compiler requires a Windows SDK; none was detected.");
-        if (compiler?.Flavor is "clang" or "gcc")
-            messages.Add("Compiler ABI compatibility is unverified; the target CMake configuration must validate headers and linker.");
+        if ((compiler?.Flavor is "msvc" or "clang-cl" or "clang") && environment is null)
+            messages.Add("Windows MSVC-ABI compiler requires a Visual Studio developer environment; select a matching profile.");
+        if ((compiler?.Flavor is "msvc" or "clang-cl" or "clang") && sdk is null)
+            messages.Add("Windows MSVC-ABI compiler requires a Windows SDK; none was detected.");
+        if (compiler?.Flavor == "clang")
+            messages.Add("clang++ target triple must be checked by CMake; this resolver assumes an explicitly activated MSVC environment.");
+        if (compiler?.Flavor == "gcc")
+            messages.Add("Explicit GNU/MinGW toolchain selected; no VS developer environment or Windows SDK is assumed.");
         var valid = cmake is not null && compiler is not null && (vsGenerator || ninja is not null)
             && (!vsGenerator || compiler?.Flavor is "msvc" or "clang-cl")
-            && (compiler?.Flavor is not ("msvc" or "clang-cl") || environment is not null && sdk is not null);
+            && (compiler?.Flavor is not ("msvc" or "clang-cl" or "clang") || environment is not null && sdk is not null);
         return new(1, valid ? "resolved" : "incomplete", cmake, ninja, compiler, sdk, environment, messages);
     }
 

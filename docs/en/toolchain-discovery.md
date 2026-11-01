@@ -8,7 +8,7 @@ The Host exposes three capability-negotiated, **read-only** methods:
 
 C# SDK: `client.Toolchains.DiscoverAsync()`, `ResolveAsync(selection)`, `InspectEnvironmentAsync(request)`. The Host advertises the methods in `initialize.capabilities`.
 
-Discovery covers all installed Visual Studio/Build Tools instances through `vswhere -products *`, VS-bundled CMake/Ninja/MSBuild and MSVC/LLVM, Windows SDKs, `PATH` tools (including package-manager shims), and common standalone LLVM/CMake installations. A package manager is a *source of installations*, not a prerequisite for detecting an executable. There is no priority ordering that makes Visual Studio override an explicit standalone selection. Without explicit IDs, PATH candidates are preferred and the choice is explained.
+Discovery covers all installed Visual Studio/Build Tools instances through `vswhere -products *`, VS-bundled CMake/Ninja/MSBuild and MSVC/LLVM, Windows SDKs, `PATH` tools (including package-manager shims), and common standalone LLVM/CMake installations. A package manager is a *source of installations*, not a prerequisite for detecting an executable. There is no priority ordering that makes Visual Studio override an explicit standalone selection. Without explicit IDs, CMake/Ninja may prefer PATH, but **compiler** selection prefers a known MSVC or LLVM/Clang developer environment over PATH order. MinGW/GNU is not automatically discovered or chosen on Windows; it would require a separate explicit fallback workflow. Windows doctor probes `cl`, `clang-cl`, `clang++`, not `c++`/`g++`. Linux GCC defaults are unchanged.
 
 ## Safety and limitations
 

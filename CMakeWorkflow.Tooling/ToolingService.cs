@@ -105,7 +105,13 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
     private async Task<ToolStatus> ProbeAsync(ToolDefinition tool, string directory, CancellationToken ct)
     {
         ToolStatus? outdated = null;
-        foreach (var command in tool.Commands)
+        // Windows desktop C++ uses the MSVC ABI toolchains. Never let a stray
+        // MSYS2/MinGW c++.exe or g++.exe in PATH satisfy the default doctor probe.
+        // GNU remains a normal default on Linux; an explicitly requested MinGW
+        // workflow is a separate toolchain choice, not a fallback in doctor.
+        var commands = tool.Id == "cxx" && runtime.Platform == ToolPlatform.Windows
+            ? new[] { "cl", "clang-cl", "clang++" } : tool.Commands;
+        foreach (var command in commands)
         {
             var resolved = runtime.Resolve(command, directory);
             if (resolved is null) continue;

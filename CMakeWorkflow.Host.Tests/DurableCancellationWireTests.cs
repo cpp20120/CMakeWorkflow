@@ -153,7 +153,30 @@ internal static class DurableCancellationWireTests
 
     private sealed record Fixture(string Workspace, string Marker, WorkflowStartRequest Request)
     {
-        public string[] Lines() => File.Exists(Marker) ? File.ReadAllLines(Marker) : [];
+        public string[] Lines()
+        {
+            // CMake file(APPEND) opens the marker for writing. On Windows the
+            // writer may briefly deny readers even though the file exists.
+            // Retrying only sharing/lock violations preserves all assertions
+            // about post-cancellation effects and exactly-once dispatch.
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    using var stream = new FileStream(Marker, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream);
+                    return reader.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(line => line.TrimEnd('\r')).ToArray();
+                }
+                catch (FileNotFoundException) { return []; }
+                catch (IOException error) when (OperatingSystem.IsWindows()
+                    && ((error.HResult & 0xffff) is 32 or 33) && attempt < 25)
+                {
+                    Thread.Sleep(20);
+                }
+            }
+        }
 
         public static async Task<Fixture> CreateAsync(string parent, string name, int delaySeconds, CancellationToken ct)
         {
