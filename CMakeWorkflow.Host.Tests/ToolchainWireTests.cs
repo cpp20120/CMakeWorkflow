@@ -30,6 +30,7 @@ internal static class ToolchainWireTests
         var directory = Path.Combine(workspace, "developer command with spaces " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var script = Path.Combine(directory, "VsDevCmd.bat");
+        var argumentCapture = Path.Combine(directory, "received-arguments.txt");
         var fakeVs = new VisualStudioInstance("fake", "Fake VS", "99.0", directory, script);
         var inventory = new ToolchainInventory(1, "windows", [fakeVs], [], []);
         var request = new DeveloperEnvironmentRequest("vs:fake", "x64", "x64", "10.0.26100.0", "14.51.36231");
@@ -39,19 +40,20 @@ internal static class ToolchainWireTests
             // Normalize before converting to batch CRLF; avoid producing CRCRLF.
             await File.WriteAllTextAsync(script, """
                 @echo off
-                if not "%~1"=="-no_logo" exit /b 31
-                if not "%~2"=="-arch=x64" (
-                    echo [ERROR:smoke] arg2 mismatch: received [%~2], expected [-arch=x64] 1>&2
-                    exit /b 32
-                )
-                if not "%~3"=="-host_arch=x64" exit /b 33
-                if not "%~4"=="-winsdk=10.0.26100.0" exit /b 34
-                if not "%~5"=="-vcvars_ver=14.51.36231" exit /b 35
+                rem cmd.exe treats '=' as a separator in positional batch arguments.
+                rem %~2 therefore contains '-arch', not '-arch=x64'. Capture
+                rem %* instead: it preserves the original option syntax.
+                > "%~dp0received-arguments.txt" echo %*
                 set "VSCMD_VER=smoke"
                 set "VCToolsInstallDir=C:\Fake\MSVC\"
                 exit /b 0
                 """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
             var snapshot = await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
+            const string expectedArguments =
+                "-no_logo -arch=x64 -host_arch=x64 -winsdk=10.0.26100.0 -vcvars_ver=14.51.36231";
+            var capturedArguments = (await File.ReadAllTextAsync(argumentCapture, ct)).Trim();
+            Check(string.Equals(capturedArguments, expectedArguments, StringComparison.Ordinal),
+                $"cmd.exe changed VsDevCmd arguments: received [{capturedArguments}]; expected [{expectedArguments}].");
             Check(snapshot.VisibleVariables.GetValueOrDefault("VSCMD_VER") == "smoke"
                 && snapshot.VisibleVariables.GetValueOrDefault("VCToolsInstallDir") == @"C:\Fake\MSVC\"
                 && !string.IsNullOrWhiteSpace(snapshot.Fingerprint),
