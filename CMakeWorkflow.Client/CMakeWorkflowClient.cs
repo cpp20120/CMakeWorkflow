@@ -23,11 +23,16 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
         transport = stream; rpc = connection; proxy = target; Host = identity;
         this.ownedHost = ownedHost; this.ownedSocketDirectory = ownedSocketDirectory;
         Workflows = new(this); Operations = new(this);
+        Profiles = new(this); Targets = new(this); Campaigns = new(this); History = new(this);
     }
 
     public HostIdentity Host { get; }
     public WorkflowService Workflows { get; }
     public OperationService Operations { get; }
+    public ProfileService Profiles { get; }
+    public TargetService Targets { get; }
+    public CampaignService Campaigns { get; }
+    public HistoryService History { get; }
 
     public static async Task<CMakeWorkflowClient> ConnectAsync(ClientOptions options, CancellationToken ct = default)
     {

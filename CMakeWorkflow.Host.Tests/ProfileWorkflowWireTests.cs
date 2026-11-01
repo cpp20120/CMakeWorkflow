@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using CMakeWorkflow;
 using CMakeWorkflow.Host;
+using CMakeWorkflow.Client;
 
 internal static class ProfileWorkflowWireTests
 {
@@ -69,6 +70,45 @@ internal static class ProfileWorkflowWireTests
         if (timing.Status != "succeeded" || capture.Status != "failed" ||
             capture.Error is null || !capture.Error.Contains("Profiling backend", StringComparison.Ordinal))
             throw new Exception("Host did not route profile capture through ProfileWorkflowExecutor.");
+        // Native target UI uses typed prepare + the SAME durable workflow/start.
+        var targetReady = await client.TargetPrepareAsync(new(Guid.NewGuid().ToString("N"),
+            Path.Combine(workspace, "target-definitions"), "run", build, "worker"), cancellationToken);
+        var targetPlan = await client.WorkflowPlanAsync(new(targetReady.Manifest), cancellationToken);
+        if (!targetPlan.Valid || targetPlan.Nodes.Count != 2
+            || targetPlan.Nodes[0].Kind != "build" || targetPlan.Nodes[1].Kind != "run")
+            throw new Exception("Target preparation failed to produce a build/run DAG.");
+        var targetOutput = Path.Combine(workspace, "target-run");
+        var targetAccepted = await client.WorkflowStartAsync(new(Guid.NewGuid().ToString("N"),
+            targetReady.Manifest, targetReady.ManifestSha256, 1, targetOutput), cancellationToken);
+        using var targetDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        targetDeadline.CancelAfter(TimeSpan.FromSeconds(20));
+        OperationReference targetState;
+        do
+        {
+            targetState = await client.OperationGetAsync(new(targetAccepted.OperationId), targetDeadline.Token);
+            if (targetState.State is "failed" or "succeeded" or "canceled") break;
+            await Task.Delay(50, targetDeadline.Token);
+        } while (true);
+        if (targetState.State != "succeeded")
+            throw new Exception("Typed target build/run did not complete: " + targetState.State);
+        // The independently distributed .NET SDK uses its own source-generated
+        // DTOs and must agree with the Host wire contract (including NativeAOT).
+        await using (var sdk = await CMakeWorkflowClient.ConnectAsync(
+            new ClientOptions(endpoint, workspace), cancellationToken))
+        {
+            var sdkReady = await sdk.Targets.PrepareAsync(new PrepareTargetOptions(
+                Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-definitions"),
+                "build", build, "worker"), cancellationToken);
+            if (sdkReady.ManifestSha256.Length != 64
+                || (await sdk.Workflows.PlanAsync(sdkReady.Manifest, cancellationToken))
+                    .GetProperty("valid").ValueKind != JsonValueKind.True)
+                throw new Exception("Typed .NET SDK target preparation/plan mismatch.");
+            var seed = await sdk.Campaigns.FuzzSeedAsync(new FuzzSeedCampaignOptions("exceptions",
+                Path.Combine(workspace, "sdk-seeds")), cancellationToken);
+            if (seed.Status != "succeeded") throw new Exception("Typed .NET SDK campaign call failed.");
+        }
+        Console.WriteLine("Typed .NET SDK checks passed: target preparation, plan and fuzz seed.");
+        Console.WriteLine("Typed target Host RPC checks passed: prepare, plan, start, run and terminal state.");
         Console.WriteLine("Profile Host RPC checks passed: typed prepare, plan, durable dispatch and executor routing.");
     }
 }

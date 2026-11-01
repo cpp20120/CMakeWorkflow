@@ -40,6 +40,28 @@
 Для `profile/replay` и DagFlow campaigns typed RPC пока нет — их CLI-команды
 остаются доступными без изменений.
 
+## Typed API для GUI
+
+В Host добавлены `target/prepare` (build/invoke/run/sequence),
+`profile/replay`, `history/import`, `dagflow/mutation/run`,
+`dagflow/weakMemory/run` и методы `dagflow/fuzz/seed`, `run`, `triage`, `merge`.
+Существующие `profile/prepare` и `profile/analyze` сохраняются.
+
+**Цели и обычный profiling workflow:** сначала `target/prepare` или
+`profile/prepare`, затем `workflow/plan`, затем `workflow/start` с неизменёнными
+`manifest`/`manifestSha256` и уникальным `clientRequestId`. Статус, события,
+отмену и recovery получать из `operations/*`; это durable execution.
+Подготовка манифеста сама по себе ничего не запускает.
+
+**Replay и кампании:** `profile/replay`, mutation/weak-memory/fuzz работают в
+рамках RPC-запроса и соединения. На disconnect/cancel выполнение прерывается,
+возможны частичные артефакты; никакого автоматического retry/resume и
+гарантии exactly-once здесь нет. Результат кампании содержит тип, status,
+exitCode и ссылку на каталог артефактов, если он существует.
+
+Пути абсолютные и ограничены initialized workspace. GUI должен проверять
+`initialize.capabilities`, а не угадывать методы по версии CLI.
+
 ## Запустить Host
 
 После `dotnet build CMakeWorkflow.slnx -c Release` на Linux/macOS:

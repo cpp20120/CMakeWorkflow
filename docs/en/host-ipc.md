@@ -9,7 +9,7 @@ and see the [Host operations](#additional-workflow-and-history-capabilities). In
 `CMakeWorkflow host serve` hosts the existing `ToolingService` over local
 JSON-RPC. Both the CLI client and the VS Code client can connect to the same
 process. Fix delegates installation to the existing ToolingService. Workflow execution,
-History and profiling still use their existing CLI entry points. There is no second scheduler, HTTP listener or new
+Some profiling and campaigns also expose typed Host entry points. There is no second scheduler, HTTP listener or new
 history store.
 
 ## Additional workflow and history capabilities
@@ -50,6 +50,44 @@ Inspect operation state or persisted reports after reconnecting. The older
 Doctor/Fix service described below has a different, connection-scoped lifecycle.
 For exact DTOs and request contracts, use the current [Host sources](../../CMakeWorkflow.Host/)
 and [typed client](../../CMakeWorkflow.Client/) rather than manufacturing JSON.
+
+## Typed profiling, native targets and DagFlow campaigns
+
+The local Host exposes the following typed endpoints (the request is one JSON
+object in the JSON-RPC positional parameters array, as with existing methods):
+
+| Area | RPC methods | Lifetime |
+|---|---|---|
+| Profiling | `profile/prepare`, `profile/analyze`, `profile/replay` | `prepare` creates an immutable manifest; `analyze`/`replay` are connection-scoped |
+| Native targets | `target/prepare` (`build`, `invoke`, `run`, `sequence`) | Metadata-only; execute through durable `workflow/start` |
+| DagFlow campaigns | `dagflow/mutation/run`, `dagflow/weakMemory/run` | Connection-scoped |
+| Fuzz | `dagflow/fuzz/seed`, `dagflow/fuzz/run`, `dagflow/fuzz/triage`, `dagflow/fuzz/merge` | Connection-scoped |
+| History mutation | `history/import` | Connection-scoped; mutates the selected workspace-local SQLite catalog |
+
+For profiling or targets, request `profile/prepare` or `target/prepare`, check
+`workflow/plan`, then send its **exact** `manifest` and `manifestSha256` to
+`workflow/start` with a distinct `clientRequestId`, `jobs` and execution
+`resultsDirectory`. The resulting `operationId` is durable, including across
+client disconnects. Use `operations/find/get/events/cancel` and explicit
+reconciliation/resume. A prepared definition is not an accepted execution.
+
+`target/prepare` does not support the legacy `--prepared` CLI shortcut; it
+constructs build/run or interleaved build/run DAG nodes with their normal
+build-verification rules. `invoke` remains explicit, including CMake utility
+and campaign targets. Target arguments are arrays, never shell strings.
+
+`profile/replay` is *not* yet a durable workflow operation: cancellation or
+connection loss can leave a partial replay directory. Fuzz, mutation and
+weak-memory campaigns also use request-scoped cancellation and return typed
+status, exit code and the available artifact directory; they are not resumed
+or retried automatically. Converting them into host-owned durable operations
+requires a separate admission/checkpoint design; do not claim exactly-once
+execution or treat a lost response as a successful run.
+
+All Host input/output paths use the initialized workspace filesystem, including
+Remote SSH/WSL/container workspaces. Absolute paths outside that workspace
+are refused. `initialize.capabilities` is authoritative; older binaries can
+lack any individual endpoint.
 
 ## Build and use
 

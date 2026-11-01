@@ -9,7 +9,7 @@ namespace CMakeWorkflow.Host;
 public sealed partial class DoctorSession
 {
     private static readonly string[] ReadCapabilities = ["context/inspect", "target/resolve", "workflow/plan", "runs/get",
-        "profile/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect"];
+        "profile/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/import", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect", "target/prepare", "profile/replay", "dagflow/mutation/run", "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"];
     private const int MeasurementLimit = 50000;
 
     // Operation lifetime belongs to Host, not to the RPC request or connection.
@@ -183,6 +183,28 @@ public sealed partial class DoctorSession
 
     public Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) => WorkflowQueries.ReportAsync(paths.Require(request.RunDirectory), ct, paths.Read), cancellationToken);
+
+    public Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request, CancellationToken cancellationToken) =>
+        ApplicationCallAsync(request, (paths, ct) =>
+        {
+            var database = paths.Require(request.DatabasePath);
+            foreach (var suffix in new[] { "-wal", "-shm", "-journal" }) paths.Require(database + suffix);
+            var directory = paths.Require(request.Directory);
+            ct.ThrowIfCancellationRequested();
+            using var store = new HistoryStore(database);
+            HistoryImportResult? result = null;
+            store.Import(directory, request.Recursive, value => result = value,
+                candidate =>
+                {
+                    ct.ThrowIfCancellationRequested();
+                    paths.Require(candidate);
+                    foreach (var name in new[] { "run.json", "report.json", "campaign-completion.json" })
+                        paths.Require(Path.Combine(candidate, name));
+                    foreach (var file in Directory.EnumerateFiles(candidate, "*.results.json"))
+                        paths.Require(file);
+                });
+            return Task.FromResult(result ?? throw new InvalidDataException("Import produced no summary."));
+        }, cancellationToken);
 
     public Task<List<HistoryRun>> HistoryRunsAsync(HistoryRunsRequest request, CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>

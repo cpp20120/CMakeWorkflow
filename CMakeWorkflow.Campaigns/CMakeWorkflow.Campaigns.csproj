@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="CampaignCommand.cs" />
+    <Compile Include="CampaignService.cs" />
     <Compile Include="Mutation/*.cs" />
     <Compile Include="FuzzCorpus/*.cs" />
     <Compile Include="WeakMemory/*.cs" />

@@ -15,6 +15,7 @@ public sealed record HistoryShowRequest(string DatabasePath, string RunId);
 public sealed record HistoryMetricsRequest(string DatabasePath, string? RunId = null, string? Metric = null,
     string? Variant = null, string? Scenario = null);
 public sealed record HistoryCompareRequest(string DatabasePath, string BaselineRunId, string CandidateRunId);
+public sealed record HistoryImportRequest(string DatabasePath, string Directory, bool Recursive = false);
 public sealed record HistoryDetectRequest(string DatabasePath, string BaselineRunId, string CandidateRunId,
     string Metric, string Direction, double MinimumEffectPercent, string? Variant = null,
     string? Scenario = null, double Alpha = 0.05);
@@ -29,6 +30,35 @@ public sealed record ProfilePreparation(int SchemaVersion, string Manifest, stri
     string ResultsDirectory);
 public sealed record ProfileAnalyzeRequest(string RunDirectory);
 public sealed record ProfileAnalysis(int SchemaVersion, string RunDirectory, string AnalysisFile);
+// Prepared native actions reuse the durable workflow engine and its operation API.
+public sealed record TargetPrepareRequest(string RequestId, string ResultsDirectory, string Action,
+    string BuildDirectory, string? Target = null, string? SecondTarget = null,
+    string? Configuration = null, string[]? Arguments = null, string[]? SecondArguments = null);
+public sealed record TargetPreparation(int SchemaVersion, string Manifest, string ManifestSha256,
+    string ResultsDirectory);
+
+// These analysis/replay/campaign calls are request-scoped, unlike workflow/start.
+// A disconnect cancels their token; never assume durable acceptance or retry.
+public sealed record ProfileReplayRequest(string BaselineDirectory, string CandidateDirectory,
+    string NodeId, string ResultsDirectory, string? CaseName = null, int HarnessIndex = 0,
+    string Backend = "auto", double TimeoutSeconds = 300);
+public sealed record ProfileReplayResponse(int SchemaVersion, string RunDirectory, string AnalysisFile);
+public sealed record CampaignMutationRequest(string SourceDirectory, string? ReportPath = null,
+    string Suite = "all", string Compiler = "c++", string Seed = "496833221358",
+    int Cases = 48, int Steps = 48, int TimeoutSeconds = 30);
+public sealed record CampaignWeakMemoryRequest(string SourceDirectory, string RelacyDirectory,
+    string? ReportPath = null, string Protocol = "all", string Compiler = "c++", int TimeoutSeconds = 60);
+public sealed record CampaignFuzzSeedRequest(string Layer, string OutputDirectory);
+public sealed record CampaignFuzzRunRequest(string BuildDirectory, string Layer,
+    string ResultsDirectory, string? Backend = null, string? CorpusDirectory = null,
+    string? Configuration = null, int DurationSeconds = 60, int InputTimeoutSeconds = 15,
+    int MaxLength = 4096, bool ReplayOnly = false);
+public sealed record CampaignFuzzTriageRequest(string RunDirectory);
+public sealed record CampaignFuzzMergeRequest(string RunDirectory, string? OutputDirectory = null,
+    bool Coverage = false);
+public sealed record CampaignExecutionResult(int SchemaVersion, string Kind, string Status,
+    int ExitCode, string? ArtifactDirectory);
+
 public sealed record OperationCancelRequest(string OperationId, long ExpectedRevision);
 public sealed record OperationCancelResult(string OperationId, string State, long Revision, bool Requested);
 public sealed record WorkflowResumeRequest(string OperationId, long ExpectedRevision, bool ConfirmedQuiescent);
@@ -76,8 +106,26 @@ public partial interface IHostRpc
     Task<ProfilePreparation> ProfilePrepareAsync(ProfilePrepareRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("profile/analyze")]
     Task<ProfileAnalysis> ProfileAnalyzeAsync(ProfileAnalyzeRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("target/prepare")]
+    Task<TargetPreparation> TargetPrepareAsync(TargetPrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("profile/replay")]
+    Task<ProfileReplayResponse> ProfileReplayAsync(ProfileReplayRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("dagflow/mutation/run")]
+    Task<CampaignExecutionResult> CampaignMutationAsync(CampaignMutationRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("dagflow/weakMemory/run")]
+    Task<CampaignExecutionResult> CampaignWeakMemoryAsync(CampaignWeakMemoryRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("dagflow/fuzz/seed")]
+    Task<CampaignExecutionResult> CampaignFuzzSeedAsync(CampaignFuzzSeedRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("dagflow/fuzz/run")]
+    Task<CampaignExecutionResult> CampaignFuzzRunAsync(CampaignFuzzRunRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("dagflow/fuzz/triage")]
+    Task<CampaignExecutionResult> CampaignFuzzTriageAsync(CampaignFuzzTriageRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("dagflow/fuzz/merge")]
+    Task<CampaignExecutionResult> CampaignFuzzMergeAsync(CampaignFuzzMergeRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("runs/get")]
     Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("history/import")]
+    Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("history/runs")]
     Task<List<HistoryRun>> HistoryRunsAsync(HistoryRunsRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("history/show")]

@@ -4,6 +4,11 @@ using System.Text.Json.Nodes;
 
 namespace CMakeWorkflow.Profiling;
 
+public sealed record ProfileReplayOptions(string BaselineDirectory, string CandidateDirectory,
+    string NodeId, string? CaseName = null, int HarnessIndex = 0,
+    string Backend = "auto", string ResultsDirectory = "out/profiles", double TimeoutSeconds = 300);
+public sealed record ProfileReplayOutcome(int SchemaVersion, string RunDirectory, string AnalysisFile);
+
 // Replay never profiles a CMake UTILITY wrapper. Direct run nodes and opted-in
 // native harness cases are replayable only with preserved binary identity.
 // The replay is instrumented evidence, not another timing sample.
@@ -14,9 +19,10 @@ public static class ProfileReplayCommand
         string? WorkloadRecipe);
 
     private static async Task<Input> LoadAsync(string directory, string nodeId,
-        string? caseName, int harnessIndex, CancellationToken ct)
+        string? caseName, int harnessIndex, CancellationToken ct, Action<string>? pathGuard = null)
     {
         directory = Path.GetFullPath(directory);
+        pathGuard?.Invoke(Path.Combine(directory, "run.json"));
         using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(directory, "run.json"), ct));
         var root = doc.RootElement;
         if (root.GetProperty("status").GetString() != "succeeded")
@@ -30,7 +36,7 @@ public static class ProfileReplayCommand
         {
             if (node.GetProperty("kind").GetString() != "invoke")
                 throw new InvalidDataException("--case is valid only for native harness invoke nodes.");
-            return await LoadHarnessCaseAsync(directory, node, nodeId, caseName, harnessIndex, ct);
+            return await LoadHarnessCaseAsync(directory, node, nodeId, caseName, harnessIndex, ct, pathGuard);
         }
         if (node.GetProperty("kind").GetString() != "run")
             throw new InvalidDataException("A direct run node or an explicit --case is required; CMake wrappers are not profiled.");
@@ -47,6 +53,8 @@ public static class ProfileReplayCommand
             throw new InvalidDataException("Cannot replay a run with environment overrides absent from the report.");
         var args = node.GetProperty("arguments").EnumerateArray().Select(x => x.GetString()!).ToArray();
         var cwd = node.GetProperty("workingDirectory").GetString()!;
+        pathGuard?.Invoke(executable);
+        pathGuard?.Invoke(cwd);
         if (!Directory.Exists(cwd)) throw new DirectoryNotFoundException(cwd);
         if (!File.Exists(executable)) throw new FileNotFoundException("Old benchmark executable no longer exists.", executable);
         await using var stream = File.OpenRead(executable);
@@ -60,7 +68,8 @@ public static class ProfileReplayCommand
     // exact *native* argv/cwd and effective CPU affinity. The C# snapshotter
     // copies its binary while the original workflow still owns the build tree.
     private static async Task<Input> LoadHarnessCaseAsync(string directory,
-        JsonElement node, string nodeId, string caseName, int harnessIndex, CancellationToken ct)
+        JsonElement node, string nodeId, string caseName, int harnessIndex, CancellationToken ct,
+        Action<string>? pathGuard = null)
     {
         if (harnessIndex < 0 || harnessIndex > 1000)
             throw new ArgumentOutOfRangeException(nameof(harnessIndex));
@@ -82,6 +91,7 @@ public static class ProfileReplayCommand
             if (Path.IsPathRooted(relative))
                 throw new InvalidDataException("Harness snapshot path is absolute.");
             var absolute = Path.GetFullPath(Path.Combine(directory, relative));
+            pathGuard?.Invoke(absolute);
             var rel = Path.GetRelativePath(directory, absolute);
             if (rel == ".." || rel.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
                 || Path.IsPathRooted(rel) || !File.Exists(absolute))
@@ -116,6 +126,7 @@ public static class ProfileReplayCommand
                 StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Snapshotted benchmark binary changed since its original run.");
         var cwd = spec.GetProperty("workingDirectory").GetString()!;
+        pathGuard?.Invoke(cwd);
         if (!Path.IsPathFullyQualified(cwd) || !Directory.Exists(cwd))
             throw new DirectoryNotFoundException("Original benchmark cwd is not available: " + cwd);
         var argv = spec.GetProperty("arguments").EnumerateArray().Select(x => x.GetString()!).ToArray();
@@ -146,8 +157,36 @@ public static class ProfileReplayCommand
         if (!int.TryParse(options.GetValueOrDefault("--harness", "0"), out var harnessIndex)
             || harnessIndex < 0 || harnessIndex > 1000 || (caseName is null && options.ContainsKey("--harness")))
             throw new ArgumentException("--harness requires --case and an index from 0 to 1000.");
-        var before = await LoadAsync(args[1], nodeId, caseName, harnessIndex, ct);
-        var after = await LoadAsync(args[2], nodeId, caseName, harnessIndex, ct);
+        var result = await ReplayAsync(new ProfileReplayOptions(args[1], args[2], nodeId,
+            caseName, harnessIndex, options.GetValueOrDefault("--backend", "auto"),
+            options.GetValueOrDefault("--results-dir", "out/profiles"),
+            double.TryParse(options.GetValueOrDefault("--timeout-seconds", "300"),
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
+                out var parsedSeconds) ? parsedSeconds : double.NaN), ct, onRunDirectory);
+        Console.WriteLine($"Profile replay: {result.RunDirectory}");
+        return 0;
+    }
+
+    // Typed application entry: validation/replay are shared by the CLI adapter
+    // and Host RPC. The optional guard restricts all executable evidence paths.
+    public static async Task<ProfileReplayOutcome> ReplayAsync(ProfileReplayOptions request,
+        CancellationToken ct, Action<string>? onRunDirectory = null, Action<string>? pathGuard = null)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.NodeId) || request.HarnessIndex is < 0 or > 1000
+            || (request.CaseName is null && request.HarnessIndex != 0))
+            throw new ArgumentException("Invalid profile replay node, case or harness index.");
+        if (!double.IsFinite(request.TimeoutSeconds) || request.TimeoutSeconds is <= 0 or > 86400)
+            throw new ArgumentException("--timeout-seconds must be in (0, 86400].");
+        if (request.Backend is not ("auto" or "perf" or "etw" or "instruments"))
+            throw new ArgumentException("Invalid profiling backend.");
+        pathGuard?.Invoke(request.BaselineDirectory);
+        pathGuard?.Invoke(request.CandidateDirectory);
+        pathGuard?.Invoke(request.ResultsDirectory);
+        var before = await LoadAsync(request.BaselineDirectory, request.NodeId,
+            request.CaseName, request.HarnessIndex, ct, pathGuard);
+        var after = await LoadAsync(request.CandidateDirectory, request.NodeId,
+            request.CaseName, request.HarnessIndex, ct, pathGuard);
         if (!before.Arguments.SequenceEqual(after.Arguments, StringComparer.Ordinal))
             throw new InvalidOperationException("Baseline and candidate argv differ; automatic replay requires the identical workload.");
         if (!string.Equals(before.WorkloadRecipe, after.WorkloadRecipe, StringComparison.Ordinal))
@@ -157,20 +196,17 @@ public static class ProfileReplayCommand
         if (string.Equals(before.Executable, after.Executable,
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
             throw new InvalidOperationException("Baseline/candidate reference the same mutable executable path; use independently preserved builds.");
-        var backend = options.GetValueOrDefault("--backend", "auto");
-        var duration = double.TryParse(options.GetValueOrDefault("--timeout-seconds", "300"),
-            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
-            out var seconds) && seconds is > 0 and <= 86400
-            ? seconds : throw new ArgumentException("--timeout-seconds must be in (0, 86400].");
-        var destination = Path.GetFullPath(options.GetValueOrDefault("--results-dir", "out/profiles"));
+        var backend = request.Backend;
+        var duration = request.TimeoutSeconds;
+        var destination = Path.GetFullPath(request.ResultsDirectory);
         var output = Path.Combine(destination, "profile-replay-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ")
             + "-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(output);
         onRunDirectory?.Invoke(output);
         var metadata = new JsonObject
         {
-            ["schemaVersion"] = 1, ["nodeId"] = nodeId, ["case"] = caseName,
-            ["harnessIndex"] = harnessIndex, ["cpuSet"] = before.CpuSet,
+            ["schemaVersion"] = 1, ["nodeId"] = request.NodeId, ["case"] = request.CaseName,
+            ["harnessIndex"] = request.HarnessIndex, ["cpuSet"] = before.CpuSet,
             ["sourceBaseline"] = before.SourceDirectory, ["sourceCandidate"] = after.SourceDirectory,
             ["baselineExecutableSha256"] = before.Sha256, ["candidateExecutableSha256"] = after.Sha256,
             ["semantics"] = "Independent, instrumented replays of verified original run argv; not additional uninstrumented timing samples."
@@ -204,8 +240,7 @@ public static class ProfileReplayCommand
                 if (result.ExitCode != 0)
                     throw new InvalidOperationException($"Profile replay {name} failed with exit code {result.ExitCode}.");
             }
-        await ProfileAnalyzer.AnalyzeAsync(output, ct);
-        Console.WriteLine($"Profile replay: {output}");
-        return 0;
+        await ProfileAnalyzer.AnalyzeAsync(output, ct, emitResultPath: false);
+        return new ProfileReplayOutcome(1, output, Path.Combine(output, "analysis.json"));
     }
 }

@@ -105,7 +105,8 @@ public sealed class HistoryStore : IDisposable
     }
     private static string? S(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
     private static double? D(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetDouble(i);
-    public string Import(string directory, bool recursive, Action<HistoryImportResult>? onComplete = null)
+    public string Import(string directory, bool recursive, Action<HistoryImportResult>? onComplete = null,
+        Action<string>? pathGuard = null)
     {
         directory = Path.GetFullPath(directory);
         if (File.Exists(directory))
@@ -122,6 +123,7 @@ public sealed class HistoryStore : IDisposable
         var parsedRuns = new List<ParsedRun>();
         foreach (var path in dirs)
         {
+            pathGuard?.Invoke(path);
             var parsed = HistoryReports.Parse(path);
             if (parsed is null) { skipped++; continue; }
             parsedRuns.Add(parsed);

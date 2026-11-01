@@ -34,64 +34,40 @@ public static class CampaignCommand
         }
         var source = Option(args, "--source-dir") ?? Directory.GetCurrentDirectory();
         source = Path.GetFullPath(source);
-        switch (args[0], args[1])
+        return (args[0], args[1]) switch
         {
-            case ("mutation", "run"):
-            {
-                var report = Option(args, "--report") ?? Path.Combine(source,
-                    Option(args, "--suite") == "queue" ? "out/queue-mutations/report.json"
-                        : "out/protocol-mutations/report.json");
-                if (Option(args, "--suite") == "queue")
-                    return await RunWithCompletionAsync(report, "mutation", () =>
-                        QueueMutationCampaign.RunAsync(source,
-                        Option(args, "--cxx") ?? "c++", Option(args, "--seed") ?? "496833221358",
-                        Integer(args, "--cases", 32), Integer(args, "--steps", 36),
-                        Integer(args, "--timeout", 20),
-                        report, ct));
-                return await RunWithCompletionAsync(report, "mutation", () =>
-                    MutationCampaign.RunAsync(source,
-                    Option(args, "--suite") ?? "all", Option(args, "--cxx") ?? "c++",
-                    Option(args, "--seed") ?? "496833221358",
-                    Integer(args, "--cases", 48), Integer(args, "--steps", 48),
-                    Integer(args, "--timeout", 30),
-                    report, ct));
-            }
-            case ("fuzz", "seed"):
-                return await FuzzSeedCampaign.RunAsync(
-                    Option(args, "--layer") ?? throw new ArgumentException("--layer is required."),
-                    Option(args, "--output") ?? Path.Combine(source, "fuzz/corpus"), ct);
-            case ("fuzz", "run"):
-                return await FuzzRunCampaign.RunAsync(new FuzzRunOptions(
-                    Option(args, "--build-dir") ?? throw new ArgumentException("--build-dir is required."),
-                    Option(args, "--layer") ?? throw new ArgumentException("--layer is required."),
-                    Option(args, "--backend"), Option(args, "--corpus"),
-                    Option(args, "--results-dir") ?? "out/fuzz-runs",
-                    Option(args, "--config"), Integer(args, "--duration", 60),
-                    Integer(args, "--timeout", 15), Integer(args, "--max-len", 4096),
-                    args.Contains("--replay-only")), ct);
-            case ("fuzz", "triage"):
-                return await FuzzRunCampaign.TriageAsync(
-                    Option(args, "--run-dir") ?? throw new ArgumentException("--run-dir is required."), ct);
-            case ("fuzz", "merge"):
-                return await FuzzRunCampaign.MergeAsync(
-                    Option(args, "--run-dir") ?? throw new ArgumentException("--run-dir is required."),
-                    Option(args, "--output"), args.Contains("--coverage"), ct);
-            case ("weak-memory", "run"):
-            {
-                var report = Option(args, "--report") ?? Path.Combine(source, "out/weak-memory/report.json");
-                return await RunWithCompletionAsync(report, "weak-memory", () =>
-                    WeakMemoryCampaign.RunAsync(source,
-                    Option(args, "--protocol") ?? "all",
-                    Option(args, "--relacy") ?? throw new ArgumentException("--relacy is required."),
-                    Option(args, "--cxx") ?? "c++", Integer(args, "--timeout", 60),
-                    report, ct));
-            }
-            default:
-                throw new ArgumentException($"Unknown DagFlow campaign: {args[0]} {args[1]}");
-        }
+            ("mutation", "run") => await CampaignService.MutationAsync(new MutationOptions(source,
+                Option(args, "--suite") ?? "all", Option(args, "--cxx") ?? "c++",
+                Option(args, "--seed") ?? "496833221358",
+                Integer(args, "--cases", Option(args, "--suite") == "queue" ? 32 : 48),
+                Integer(args, "--steps", Option(args, "--suite") == "queue" ? 36 : 48),
+                Integer(args, "--timeout", Option(args, "--suite") == "queue" ? 20 : 30),
+                Option(args, "--report")), ct),
+            ("weak-memory", "run") => await CampaignService.WeakMemoryAsync(new WeakMemoryOptions(source,
+                Option(args, "--protocol") ?? "all",
+                Option(args, "--relacy") ?? throw new ArgumentException("--relacy is required."),
+                Option(args, "--cxx") ?? "c++", Integer(args, "--timeout", 60),
+                Option(args, "--report")), ct),
+            ("fuzz", "seed") => await CampaignService.FuzzSeedAsync(new FuzzSeedOptions(
+                Option(args, "--layer") ?? throw new ArgumentException("--layer is required."),
+                Option(args, "--output") ?? Path.Combine(source, "fuzz/corpus")), ct),
+            ("fuzz", "run") => await CampaignService.FuzzRunAsync(new FuzzRunOptions(
+                Option(args, "--build-dir") ?? throw new ArgumentException("--build-dir is required."),
+                Option(args, "--layer") ?? throw new ArgumentException("--layer is required."),
+                Option(args, "--backend"), Option(args, "--corpus"),
+                Option(args, "--results-dir") ?? "out/fuzz-runs", Option(args, "--config"),
+                Integer(args, "--duration", 60), Integer(args, "--timeout", 15),
+                Integer(args, "--max-len", 4096), args.Contains("--replay-only")), ct),
+            ("fuzz", "triage") => await CampaignService.FuzzTriageAsync(new FuzzTriageOptions(
+                Option(args, "--run-dir") ?? throw new ArgumentException("--run-dir is required.")), ct),
+            ("fuzz", "merge") => await CampaignService.FuzzMergeAsync(new FuzzMergeOptions(
+                Option(args, "--run-dir") ?? throw new ArgumentException("--run-dir is required."),
+                Option(args, "--output"), args.Contains("--coverage")), ct),
+            _ => throw new ArgumentException($"Unknown DagFlow campaign: {args[0]} {args[1]}")
+        };
     }
 
-    private static async Task<int> RunWithCompletionAsync(string reportPath, string campaign,
+    internal static async Task<int> RunWithCompletionAsync(string reportPath, string campaign,
         Func<Task<int>> execute)
     {
         reportPath = Path.GetFullPath(reportPath);

@@ -219,6 +219,35 @@ internal static class ApplicationTests
             Check(!Directory.Exists(Path.Combine(outside, ".cmakeworkflow")), "Foreign query created store");
         }
         Check(File.ReadAllBytes(Path.Combine(run, "run.json")).SequenceEqual(raw), "Operation lookup modified runner report");
+        // Domain RPCs are typed and confined to this initialized workspace.
+        var targetRequest = new TargetPrepareRequest("acdcacdcacdcacdcacdcacdcacdcacdc",
+            Path.Combine(root, "target-definitions"), "run", build, "worker", Arguments: ["--demo"]);
+        var targetReady = await client.TargetPrepareAsync(targetRequest, ct);
+        Check(targetReady.ManifestSha256.Length == 64 && File.Exists(targetReady.Manifest),
+            "Target preparation did not emit an immutable manifest.");
+        Check(targetReady == await client.TargetPrepareAsync(targetRequest, ct),
+            "Target preparation should be idempotent across retries.");
+        await Refused(() => client.TargetPrepareAsync(targetRequest with { Target = "different" }, ct),
+            "request_id_conflict");
+        await Refused(() => client.TargetPrepareAsync(targetRequest with { BuildDirectory = outside }, ct),
+            "path_not_allowed");
+        await Refused(() => client.TargetPrepareAsync(targetRequest with { Action = "unknown" }, ct),
+            "invalid_argument");
+        await Refused(() => client.ProfileReplayAsync(new(otherRun, run, "run",
+            Path.Combine(root, "profile-replays")), ct), "path_not_allowed");
+        await Refused(() => client.CampaignMutationAsync(new(outside), ct), "path_not_allowed");
+        await Refused(() => client.CampaignWeakMemoryAsync(new(outside, outside), ct), "path_not_allowed");
+        await Refused(() => client.CampaignFuzzRunAsync(new(outside, "exceptions",
+            Path.Combine(root, "fuzz")), ct), "path_not_allowed");
+        await Refused(() => client.CampaignFuzzTriageAsync(new(otherRun), ct), "path_not_allowed");
+        await Refused(() => client.CampaignFuzzMergeAsync(new(otherRun), ct), "path_not_allowed");
+        var seeded = await client.CampaignFuzzSeedAsync(new("exceptions", Path.Combine(root, "fuzz-seeds")), ct);
+        Check(seeded.Status == "succeeded" && seeded.Kind == "fuzz-seed"
+            && Directory.Exists(seeded.ArtifactDirectory), "Typed fuzz seed RPC failed.");
+        Check(info.Capabilities.Contains("target/prepare") && info.Capabilities.Contains("profile/replay")
+            && info.Capabilities.Contains("dagflow/weakMemory/run") && info.Capabilities.Contains("dagflow/fuzz/merge"),
+            "Host capabilities do not match typed RPC contract.");
+        Console.WriteLine("Typed target/profile/campaign RPC checks passed: preparation, idempotence, isolation, seed.");
         Console.WriteLine("Operation RPC wire checks passed: find/get, restart persistence, isolation and no dispatch.");
         Console.WriteLine("Read API wire checks passed: plan/context/report/history, revisions, isolation, symlink policy, no mutations and refusals.");
     }

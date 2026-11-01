@@ -9,7 +9,8 @@ public sealed record FuzzRunOptions(string BuildDirectory, string Layer, string?
 
 public static class FuzzRunCampaign
 {
-    public static async Task<int> RunAsync(FuzzRunOptions options, CancellationToken ct)
+    public static async Task<int> RunAsync(FuzzRunOptions options, CancellationToken ct,
+        Action<string>? onRunDirectory = null, Action<string>? pathGuard = null)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(options.Layer, "^[a-z][a-z0-9_]*$"))
             throw new ArgumentException("--layer must be a DagFlow fuzz layer name.");
@@ -27,6 +28,7 @@ public static class FuzzRunCampaign
             throw new InvalidOperationException($"Unsupported configured fuzz backend: {backend}");
         if (options.Backend is not null && options.Backend != backend)
             throw new InvalidOperationException($"Requested backend {options.Backend} disagrees with configured {backend}.");
+        pathGuard?.Invoke(observed.SourceDirectory);
         var target = CMakeInspection.Resolve(new RequestedBuildContext(buildDirectory, options.Configuration),
             observed, targetName);
         CMakeInspection.RequireTarget(observed, target, executableOnly: true);
@@ -37,10 +39,12 @@ public static class FuzzRunCampaign
         RequireSuccess(buildResult, "CMake build");
         var artifact = await CMakeFileApi.ResolveExecutableAsync(target, ct);
         var executable = artifact.ExecutablePath;
+        pathGuard?.Invoke(executable);
         var executableHash = await CommandExecution.Sha256Async(executable, ct);
 
         var run = Path.Combine(Path.GetFullPath(options.ResultsDirectory),
             DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + Guid.NewGuid().ToString("N"));
+        pathGuard?.Invoke(run);
         var corpus = Path.Combine(run, "corpus");
         var artifacts = Path.Combine(run, "artifacts");
         Directory.CreateDirectory(corpus);
@@ -49,9 +53,13 @@ public static class FuzzRunCampaign
         var sourceCorpus = options.CorpusDirectory is null
             ? Path.Combine(observed.SourceDirectory, "fuzz", "corpus", options.Layer)
             : Path.GetFullPath(options.CorpusDirectory);
+        pathGuard?.Invoke(sourceCorpus);
         CopyInputs(sourceCorpus, corpus);
         if (options.CorpusDirectory is null)
+        {
+            pathGuard?.Invoke(Path.Combine(buildDirectory, targetName + "-corpus"));
             CopyInputs(Path.Combine(buildDirectory, targetName + "-corpus"), corpus);
+        }
         if (Directory.GetFiles(corpus).Length == 0)
             throw new InvalidOperationException("Fuzz corpus is empty; supply --corpus or initialize seeds.");
         var baseline = await InventoryAsync(corpus, ct);
@@ -67,6 +75,7 @@ public static class FuzzRunCampaign
             MaxLength = options.MaxLength,
             BuildArguments = build.Arguments.ToList()
         };
+        onRunDirectory?.Invoke(run);
         Console.WriteLine($"Fuzz run: {run}");
         try
         {
@@ -174,12 +183,15 @@ public static class FuzzRunCampaign
         return report.Status == "succeeded" ? 0 : 1;
     }
 
-    public static async Task<int> TriageAsync(string runDirectory, CancellationToken ct)
+    public static async Task<int> TriageAsync(string runDirectory, CancellationToken ct,
+        Action<string>? pathGuard = null)
     {
         var run = Path.GetFullPath(runDirectory);
+        pathGuard?.Invoke(Path.Combine(run, "report.json"));
         var report = JsonSerializer.Deserialize(await File.ReadAllTextAsync(
             Path.Combine(run, "report.json"), ct), FuzzJson.Default.FuzzRunReport)
             ?? throw new IOException("Invalid fuzz report.");
+        pathGuard?.Invoke(report.Executable);
         if (report.InfrastructureError)
             throw new InvalidOperationException(report.Error ?? "Fuzz run failed because the execution environment was unavailable.");
         if (await CommandExecution.Sha256Async(report.Executable, ct) != report.ExecutableSha256)
@@ -197,6 +209,7 @@ public static class FuzzRunCampaign
         foreach (var artifact in candidates)
         {
             var path = Path.GetFullPath(Path.Combine(run, artifact));
+            pathGuard?.Invoke(path);
             if (!path.StartsWith(run + Path.DirectorySeparatorChar,
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new IOException($"Triage artifact escapes the run directory: {artifact}");
@@ -263,18 +276,23 @@ public static class FuzzRunCampaign
         MergeAsync(runDirectory, outputDirectory, coverage: false, ct: ct);
 
     public static async Task<int> MergeAsync(string runDirectory, string? outputDirectory,
-        bool coverage, CancellationToken ct)
+        bool coverage, CancellationToken ct, Action<string>? pathGuard = null)
     {
         var run = Path.GetFullPath(runDirectory);
+        pathGuard?.Invoke(Path.Combine(run, "report.json"));
         var report = JsonSerializer.Deserialize(await File.ReadAllTextAsync(
             Path.Combine(run, "report.json"), ct), FuzzJson.Default.FuzzRunReport)
             ?? throw new IOException("Invalid fuzz report.");
+        pathGuard?.Invoke(report.BuildDirectory);
+        pathGuard?.Invoke(report.Executable);
         if (report.Status != "succeeded")
             throw new InvalidOperationException("Only a successful fuzz run can be merged; triage failed runs first.");
         var source = Path.Combine(run, "corpus");
         await VerifyCorpusSnapshotAsync(run, source, ct);
         var destination = Path.GetFullPath(outputDirectory
             ?? Path.Combine(report.BuildDirectory, report.Target + "-corpus"));
+        pathGuard?.Invoke(destination);
+        pathGuard?.Invoke(source);
         using var ownership = outputDirectory is null
             ? await BuildTreeOwnership.AcquireAsync([report.BuildDirectory], ct) : null;
         Directory.CreateDirectory(destination);
