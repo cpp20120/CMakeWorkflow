@@ -22,6 +22,60 @@ internal static class ToolchainWireTests
         }
     }
 
+    // This is a real cmd.exe + batch execution smoke, deliberately independent
+    // of the Visual Studio installations present on the CI runner. A path with
+    // spaces exercises /s /c quoting, and `&& set` requires CALL to the batch.
+    private static async Task CheckWindowsDeveloperCommandAsync(string workspace, CancellationToken ct)
+    {
+        var directory = Path.Combine(workspace, "developer command with spaces " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var script = Path.Combine(directory, "VsDevCmd.bat");
+        var fakeVs = new VisualStudioInstance("fake", "Fake VS", "99.0", directory, script);
+        var inventory = new ToolchainInventory(1, "windows", [fakeVs], [], []);
+        var request = new DeveloperEnvironmentRequest("vs:fake", "x64", "x64", "10.0.26100.0", "14.51.36231");
+        try
+        {
+            await File.WriteAllTextAsync(script, """
+                @echo off
+                if not "%~1"=="-no_logo" exit /b 31
+                if not "%~2"=="-arch=x64" exit /b 32
+                if not "%~3"=="-host_arch=x64" exit /b 33
+                if not "%~4"=="-winsdk=10.0.26100.0" exit /b 34
+                if not "%~5"=="-vcvars_ver=14.51.36231" exit /b 35
+                set "VSCMD_VER=smoke"
+                set "VCToolsInstallDir=C:\Fake\MSVC\"
+                exit /b 0
+                """.Replace("\n", "\r\n"), ct);
+            var snapshot = await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
+            Check(snapshot.VisibleVariables.GetValueOrDefault("VSCMD_VER") == "smoke"
+                && snapshot.VisibleVariables.GetValueOrDefault("VCToolsInstallDir") == @"C:\Fake\MSVC\"
+                && !string.IsNullOrWhiteSpace(snapshot.Fingerprint),
+                "cmd.exe quoted VsDevCmd activation did not return to `set` or lost pinned versions.");
+
+            await File.WriteAllTextAsync(script, """
+                @echo off
+                echo [ERROR:smoke] Expected diagnostic from failing batch 1>&2
+                exit /b 19
+                """.Replace("\n", "\r\n"), ct);
+            try
+            {
+                await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
+                throw new Exception("A failed VsDevCmd was accepted.");
+            }
+            catch (InvalidOperationException error)
+            {
+                Check(error.Message.Contains("exit 19", StringComparison.Ordinal)
+                    && error.Message.Contains("[ERROR:smoke]", StringComparison.Ordinal)
+                    && !error.Message.Contains("PATH=", StringComparison.OrdinalIgnoreCase),
+                    "VsDevCmd failure lost diagnostics or exposed environment variables.");
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     public static async Task RunAsync(string endpoint, string workspace, CancellationToken ct)
     {
         // Pure resolver checks run on Linux/macOS CI too; no VS installation required.
@@ -171,6 +225,9 @@ internal static class ToolchainWireTests
             throw new Exception("Configured build tree was silently rebound to another compiler.");
         }
         catch (InvalidOperationException) { }
+
+        if (OperatingSystem.IsWindows())
+            await CheckWindowsDeveloperCommandAsync(workspace, ct);
 
         using var wire = await LocalTransport.ConnectAsync(endpoint, ct);
         using var rpc = HostConnection.Create(wire);

@@ -323,28 +323,24 @@ public static class WindowsToolchains
             ?? throw new ArgumentException("Unknown developer environment profile.");
         var devcmd = instance.DeveloperCommandPath
             ?? throw new InvalidOperationException("Visual Studio instance has no VsDevCmd.bat.");
-        if (devcmd.IndexOfAny(['"', '%', '\r', '\n']) >= 0)
-            throw new InvalidDataException("Unsupported characters in Visual Studio installation path.");
         if (!File.Exists(devcmd)) throw new FileNotFoundException("Developer prompt script disappeared.", devcmd);
-        var arguments = new StringBuilder();
-        // Script path is exclusively obtained from verified local discovery; request values
-        // are allowlisted above. cmd /s /c quotes keep spaces in installation paths.
-        arguments.Append('"').Append('"').Append(devcmd).Append('"')
-            .Append(" -no_logo -arch=").Append(request.TargetArchitecture)
-            .Append(" -host_arch=").Append(request.HostArchitecture);
-        if (request.WindowsSdkVersion is not null)
-            arguments.Append(" -winsdk=").Append(request.WindowsSdkVersion);
-        if (request.ToolsetVersion is not null)
-            arguments.Append(" -vcvars_ver=").Append(request.ToolsetVersion);
-        arguments.Append(" >nul && set").Append('"');
         var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
         if (string.IsNullOrWhiteSpace(system))
             throw new InvalidOperationException("Windows system directory is unavailable.");
-        var result = await RunBoundedAsync(Path.Combine(system, "cmd.exe"),
-            ["/d", "/s", "/c", arguments.ToString()],
-            TimeSpan.FromSeconds(20), ct);
+
+        // cmd /s /c accepts an entire COMMAND LINE, not one argv element.
+        // ArgumentList's CreateProcess quoting is not cmd.exe's quoting language:
+        // it can alter the nested quotes around a path such as "Program Files".
+        // Supply the raw shell command through Arguments, and CALL the batch file
+        // so control returns to `&& set` after successful VsDevCmd activation.
+        var start = new ProcessStartInfo(Path.Combine(system, "cmd.exe"))
+        {
+            Arguments = DeveloperCommandLine(devcmd, request)
+        };
+        var result = await RunBoundedAsync(start, TimeSpan.FromSeconds(20), ct);
         if (result.ExitCode != 0)
-            throw new InvalidOperationException("VsDevCmd failed (exit " + result.ExitCode + ").");
+            throw new InvalidOperationException("VsDevCmd failed (exit " + result.ExitCode + "). " +
+                DeveloperCommandFailureDetails(result.Error));
         var vars = ParseVisibleEnvironment(result.Output);
         if (!vars.ContainsKey("VSCMD_VER") || !vars.ContainsKey("VCToolsInstallDir"))
             throw new InvalidDataException("VsDevCmd returned no initialized VC environment.");
@@ -356,15 +352,59 @@ public static class WindowsToolchains
             ["Developer environment preview. Workflow context opt-in must still bind a selected toolchain."]);
     }
 
+    private static string DeveloperCommandLine(string devcmd, DeveloperEnvironmentRequest request)
+    {
+        // VS installation paths come from local discovery, but are still passed
+        // through cmd's parser. Avoid metacharacter/variable expansion, including
+        // delayed expansion if it was enabled by the caller's environment.
+        if (devcmd.IndexOfAny(['"', '%', '!', '^', '&', '|', '<', '>', '\r', '\n']) >= 0)
+            throw new InvalidDataException("Unsafe characters in Visual Studio developer command path.");
+
+        var command = new StringBuilder("call \"").Append(devcmd).Append('"')
+            .Append(" -no_logo -arch=").Append(request.TargetArchitecture)
+            .Append(" -host_arch=").Append(request.HostArchitecture);
+        if (request.WindowsSdkVersion is not null)
+            command.Append(" -winsdk=").Append(request.WindowsSdkVersion);
+        if (request.ToolsetVersion is not null)
+            command.Append(" -vcvars_ver=").Append(request.ToolsetVersion);
+
+        // The batch script's normal output and errors go only to stderr.
+        // stdout is reserved for the environment snapshot emitted by `set`.
+        // Never include stdout in an exception: it may contain credentials.
+        command.Append(" 1>&2 && set");
+        return "/d /v:off /s /c \"" + command + "\"";
+    }
+
+    private static string DeveloperCommandFailureDetails(string stderr)
+    {
+        // Do not return arbitrary debug output or the `set` environment block
+        // through Host RPC. Keep only characteristic diagnostic lines.
+        var lines = stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("[ERROR", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("is not recognized", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("The system cannot find", StringComparison.OrdinalIgnoreCase))
+            .Take(6)
+            .Select(line => line.Length > 240 ? line[..240] + "..." : line);
+        var errors = string.Join(" | ", lines);
+        return errors.Length == 0 ? "No diagnostic error lines were emitted." : errors;
+    }
+
     private static async Task<ToolCommandResult> RunBoundedAsync(string executable,
         IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken ct)
     {
-        var info = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
-        };
+        var info = new ProcessStartInfo(executable);
         foreach (var arg in arguments) info.ArgumentList.Add(arg);
+        return await RunBoundedAsync(info, timeout, ct);
+    }
+
+    private static async Task<ToolCommandResult> RunBoundedAsync(ProcessStartInfo info,
+        TimeSpan timeout, CancellationToken ct)
+    {
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
         using var process = Process.Start(info) ?? throw new IOException("Cannot start discovery process.");
         var stdout = process.StandardOutput.ReadToEndAsync(ct);
         var stderr = process.StandardError.ReadToEndAsync(ct);
@@ -387,7 +427,7 @@ public static class WindowsToolchains
                 await process.WaitForExitAsync(CancellationToken.None);
             }
             if (ct.IsCancellationRequested) throw;
-            throw new TimeoutException("Tool discovery timed out: " + executable);
+            throw new TimeoutException("Tool discovery timed out: " + info.FileName);
         }
     }
 }
