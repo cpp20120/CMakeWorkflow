@@ -81,6 +81,32 @@ internal static class ToolchainWireTests
               WindowsToolchains.CandidateId("cmake", @"c:\tools\cmake.exe"),
             "Candidate identities must be Windows-path case insensitive.");
 
+        // The published JSON contract spells CMake as "cmake", rather than the
+        // default camel-case transform of the .NET name CMakeCandidateId ("cMake").
+        // Exercise the exact external JSON, not just generated roundtrips.
+        const string selectionJson = """{"cmakeCandidateId":"cmake-path","compilerCandidateId":"msvc-vs1"}""";
+        var fromManifest = JsonSerializer.Deserialize(selectionJson,
+            WorkflowJson.Default.WorkflowToolchainBinding);
+        Check(fromManifest?.CMakeCandidateId == cmake.Id &&
+            fromManifest.CompilerCandidateId == compiler.Id,
+            "Documented workflow cmakeCandidateId was rejected by strict JSON deserializer.");
+        Check(JsonSerializer.Serialize(fromManifest, WorkflowJson.Default.WorkflowToolchainBinding)
+                .Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
+            "Workflow serializer emitted nonstandard CMake candidate property casing.");
+        var fromHostSelection = JsonSerializer.Deserialize(selectionJson,
+            HostJson.Default.ToolchainSelection);
+        Check(fromHostSelection?.CMakeCandidateId == cmake.Id,
+            "Host resolver did not accept documented cmakeCandidateId.");
+        var clientSelection = JsonSerializer.Serialize(
+            new ClientSdk.ToolchainSelection(CMakeCandidateId: cmake.Id),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var clientPreparation = JsonSerializer.Serialize(
+            new ClientSdk.PrepareToolchainSelection(CMakeCandidateId: cmake.Id),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        Check(clientSelection.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal) &&
+            clientPreparation.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
+            "Client SDK must use documented cmakeCandidateId for discovery and preparation.");
+
         // A selected toolchain is part of the manifest and checkpoint identity,
         // but its inherited environment must never be persisted in run.json.
         var bound = new WorkflowToolchainBinding(

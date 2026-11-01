@@ -25,7 +25,9 @@ public sealed record VisualStudioInstance(string Id, string Name, string Version
 public sealed record ToolchainInventory(int SchemaVersion, string Platform,
     List<VisualStudioInstance> VisualStudio, List<ToolchainCandidate> Candidates,
     List<string> Diagnostics);
-public sealed record ToolchainSelection(string? CMakeCandidateId = null, string? NinjaCandidateId = null,
+public sealed record ToolchainSelection(
+    [property: JsonPropertyName("cmakeCandidateId")] string? CMakeCandidateId = null,
+    string? NinjaCandidateId = null,
     string? CompilerCandidateId = null, string? SdkCandidateId = null,
     string? EnvironmentProfileId = null, string Generator = "Ninja");
 public sealed record ToolchainResolution(int SchemaVersion, string Status,
@@ -54,7 +56,8 @@ public sealed record PreparedWorkflow(int SchemaVersion, string Manifest, string
     string ResultsDirectory);
 // Serializes to the same contract as the engine type without coupling SDK to Host.
 public sealed record PrepareToolchainSelection(
-    string? CMakeCandidateId = null, string? NinjaCandidateId = null,
+    [property: JsonPropertyName("cmakeCandidateId")] string? CMakeCandidateId = null,
+    string? NinjaCandidateId = null,
     string? CompilerCandidateId = null, string? SdkCandidateId = null,
     string? EnvironmentProfileId = null, string Generator = "Ninja",
     string HostArchitecture = "x64", string TargetArchitecture = "x64");

@@ -11,13 +11,13 @@
   hash formula used by WindowsToolchains.CandidateId(). The application itself
   performs authoritative discovery/resolution again before execution.
 .EXAMPLE
-  .\Test-CMakeWorkflow-WindowsToolchain.ps1 -RepoRoot C:\Code\CMakeWorkflow
+  .\scripts\windows-test.ps1 -RepoRoot C:\Code\CMakeWorkflow
 .EXAMPLE
-  .\Test-CMakeWorkflow-WindowsToolchain.ps1 -Compiler clang-cl -SkipDriftTest
+  .\scripts\windows-test.ps1 -Compiler clang-cl -SkipDriftTest
 #>
 [CmdletBinding()]
 param(
-    [string] $RepoRoot = (Get-Location).Path,
+    [string] $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [ValidateSet('msvc', 'clang-cl')]
     [string] $Compiler = 'msvc',
     [string] $VsInstanceId,
