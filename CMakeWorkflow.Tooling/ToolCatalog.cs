@@ -66,7 +66,7 @@ public static class ToolCatalog
                 Packages("ninja-build", "ninja", "ninja-build", "ninja", "Ninja-build.Ninja")),
             new ToolDefinition("cxx", "C++ compiler", ["c++", "g++", "clang++", "cl"],
                 ["--version"], null, Packages("g++", "gcc", "gcc-c++", null, null),
-                ManualHint: "Install Xcode Command Line Tools or MSVC Build Tools for the selected generator."),
+                ManualHint: "Select a C++ toolchain for the chosen generator (Xcode CLT on macOS, MSVC/Windows SDK or standalone compiler on Windows). Use toolchains/discover to locate Visual Studio toolsets."),
             new ToolDefinition("clangxx", "Clang C++ compiler", ["clang++"], ["--version"], null,
                 Packages("clang", "clang", "clang", "llvm", "LLVM.LLVM")),
             new ToolDefinition("perf", "Linux perf", ["perf"], ["--version"], null,

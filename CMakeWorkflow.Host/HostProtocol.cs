@@ -22,6 +22,10 @@ public sealed record ApplyFixRequest(string OperationId, string PlanId);
 public sealed record FixProgress(string OperationId, int Sequence, string Stage, string? Tool, string? Message);
 public sealed record EnvironmentPlanRequest(string RequirementsPath);
 public sealed record EnvironmentApplyRequest(string RequirementsPath, string ApprovalSha256, bool AllowSystemChanges);
+public sealed record ToolchainDiscoverRequest();
+public sealed record ToolchainResolveRequest(ToolchainSelection Selection);
+public sealed record ToolchainInspectEnvironmentRequest(DeveloperEnvironmentRequest Environment);
+
 public sealed record FixResult(int SchemaVersion, string Status, ToolingResult? Installation,
     ToolingPlan? Verification, string[] Diagnostics, bool ReadyToResume = false);
 
@@ -34,6 +38,12 @@ public partial interface IHostRpc
     Task<ToolingPlan> DoctorAsync(DoctorRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("tooling/planFix")]
     Task<FixPlan> PlanFixAsync(PlanFixRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("toolchains/discover")]
+    Task<ToolchainInventory> ToolchainsDiscoverAsync(ToolchainDiscoverRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("toolchains/resolve")]
+    Task<ToolchainResolution> ToolchainsResolveAsync(ToolchainResolveRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("toolchains/inspectEnvironment")]
+    Task<DeveloperEnvironmentSnapshot> ToolchainsInspectEnvironmentAsync(ToolchainInspectEnvironmentRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("environment/plan")]
     Task<HostPreparationPlan> EnvironmentPlanAsync(EnvironmentPlanRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("environment/apply")]
@@ -64,6 +74,16 @@ public partial interface IHostNotifications
 [JsonSerializable(typeof(ApplyFixRequest))]
 [JsonSerializable(typeof(FixProgress))]
 [JsonSerializable(typeof(FixResult))]
+[JsonSerializable(typeof(ToolchainDiscoverRequest))]
+[JsonSerializable(typeof(ToolchainResolveRequest))]
+[JsonSerializable(typeof(ToolchainInspectEnvironmentRequest))]
+[JsonSerializable(typeof(ToolchainInventory))]
+[JsonSerializable(typeof(ToolchainSelection))]
+[JsonSerializable(typeof(ToolchainResolution))]
+[JsonSerializable(typeof(ToolchainCandidate))]
+[JsonSerializable(typeof(VisualStudioInstance))]
+[JsonSerializable(typeof(DeveloperEnvironmentRequest))]
+[JsonSerializable(typeof(DeveloperEnvironmentSnapshot))]
 [JsonSerializable(typeof(EnvironmentPlanRequest))]
 [JsonSerializable(typeof(EnvironmentApplyRequest))]
 [JsonSerializable(typeof(HostPreparationPlan))]

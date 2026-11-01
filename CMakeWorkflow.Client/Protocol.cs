@@ -16,6 +16,29 @@ public sealed record RecoverySnapshot(string OperationId, string AcceptanceState
 public sealed record WorkflowEvent(long Sequence, string Kind, JsonElement Data);
 public sealed record EventPage(string OperationId, long AfterSequence, long NextSequence, bool HasMore, List<JsonElement> Events);
 public sealed record RpcErrorData(string Code, string Message);
+// Independent SDK models: the client never references the Host assembly.
+public sealed record ToolchainCandidate(string Id, string Role, string Flavor, string Provider,
+    string Path, string? Version = null, string? VisualStudioInstanceId = null,
+    string? EnvironmentProfileId = null);
+public sealed record VisualStudioInstance(string Id, string Name, string Version,
+    string InstallationPath, string? DeveloperCommandPath);
+public sealed record ToolchainInventory(int SchemaVersion, string Platform,
+    List<VisualStudioInstance> VisualStudio, List<ToolchainCandidate> Candidates,
+    List<string> Diagnostics);
+public sealed record ToolchainSelection(string? CMakeCandidateId = null, string? NinjaCandidateId = null,
+    string? CompilerCandidateId = null, string? SdkCandidateId = null,
+    string? EnvironmentProfileId = null, string Generator = "Ninja");
+public sealed record ToolchainResolution(int SchemaVersion, string Status,
+    ToolchainCandidate? CMake, ToolchainCandidate? Ninja, ToolchainCandidate? Compiler,
+    ToolchainCandidate? Sdk, string? EnvironmentProfileId, List<string> Diagnostics);
+public sealed record DeveloperEnvironmentRequest(string EnvironmentProfileId, string HostArchitecture = "x64",
+    string TargetArchitecture = "x64", string? WindowsSdkVersion = null);
+public sealed record DeveloperEnvironmentSnapshot(int SchemaVersion, string EnvironmentProfileId,
+    string HostArchitecture, string TargetArchitecture, string Fingerprint,
+    Dictionary<string, string> VisibleVariables, List<string> Diagnostics);
+internal sealed record ToolchainDiscoverRequest();
+internal sealed record ToolchainResolveRequest(ToolchainSelection Selection);
+internal sealed record ToolchainInspectEnvironmentRequest(DeveloperEnvironmentRequest Environment);
 internal sealed record InitRequest(int ProtocolVersion, string WorkspaceDirectory);
 internal sealed record OpIdRequest(string OperationId);
 internal sealed record FindRequest(string ClientRequestId);
@@ -65,6 +88,10 @@ public sealed record ImportHistoryResult(int SchemaVersion, int Imported, int Un
 internal partial interface IClientRpc
 {
     [JsonRpcMethod("initialize")] Task<HostIdentity> InitializeAsync(InitRequest request, CancellationToken ct);
+    [JsonRpcMethod("toolchains/discover")] Task<ToolchainInventory> ToolchainsDiscoverAsync(ToolchainDiscoverRequest request, CancellationToken ct);
+    [JsonRpcMethod("toolchains/resolve")] Task<ToolchainResolution> ToolchainsResolveAsync(ToolchainResolveRequest request, CancellationToken ct);
+    [JsonRpcMethod("toolchains/inspectEnvironment")] Task<DeveloperEnvironmentSnapshot> ToolchainsInspectEnvironmentAsync(ToolchainInspectEnvironmentRequest request, CancellationToken ct);
+
     [JsonRpcMethod("profile/prepare")] Task<PreparedWorkflow> ProfilePrepareAsync(PrepareProfileOptions request, CancellationToken ct);
     [JsonRpcMethod("profile/analyze")] Task<AnalyzedProfile> ProfileAnalyzeAsync(AnalyzeProfileOptions request, CancellationToken ct);
     [JsonRpcMethod("profile/replay")] Task<ReplayProfileResult> ProfileReplayAsync(ReplayProfileOptions request, CancellationToken ct);
@@ -89,6 +116,16 @@ internal partial interface IClientRpc
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(ToolchainCandidate))]
+[JsonSerializable(typeof(VisualStudioInstance))]
+[JsonSerializable(typeof(ToolchainInventory))]
+[JsonSerializable(typeof(ToolchainSelection))]
+[JsonSerializable(typeof(ToolchainResolution))]
+[JsonSerializable(typeof(DeveloperEnvironmentRequest))]
+[JsonSerializable(typeof(DeveloperEnvironmentSnapshot))]
+[JsonSerializable(typeof(ToolchainDiscoverRequest))]
+[JsonSerializable(typeof(ToolchainResolveRequest))]
+[JsonSerializable(typeof(ToolchainInspectEnvironmentRequest))]
 [JsonSerializable(typeof(PreparedWorkflow))]
 [JsonSerializable(typeof(ProfileVariantOptions))]
 [JsonSerializable(typeof(List<ProfileVariantOptions>))]

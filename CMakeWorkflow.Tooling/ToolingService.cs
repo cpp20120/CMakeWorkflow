@@ -126,6 +126,21 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
             { outdated = new(tool.Id, tool.DisplayName, false, resolved, null,
                 tool.MinimumVersion?.ToString(), error.Message); }
         }
+        // A Visual Studio install does not imply cl.exe works in this process's
+        // uninitialized PATH/INCLUDE/LIB. Report its presence without lying
+        // about readiness or implicitly mutating the Host environment.
+        if (outdated is null && tool.Id == "cxx" && runtime.Platform == ToolPlatform.Windows
+            && runtime is SystemToolingRuntime)
+        {
+            var inventory = await WindowsToolchains.DiscoverAsync(ct);
+            var msvc = inventory.Candidates.FirstOrDefault(x => x.Role == "compiler"
+                && x.Flavor == "msvc" && x.EnvironmentProfileId is not null);
+            if (msvc is not null)
+                return new(tool.Id, tool.DisplayName, false, msvc.Path, msvc.Version,
+                    tool.MinimumVersion?.ToString(),
+                    "MSVC is installed but its Developer Command Prompt is not active. " +
+                    "Use toolchains/resolve and toolchains/inspectEnvironment; execution environment binding is required.");
+        }
         return outdated ?? new(tool.Id, tool.DisplayName, false, null, null,
             tool.MinimumVersion?.ToString(), "Command not found.");
     }
