@@ -79,6 +79,7 @@ public partial interface IHostNotifications
 [JsonSerializable(typeof(ToolchainInspectEnvironmentRequest))]
 [JsonSerializable(typeof(ToolchainInventory))]
 [JsonSerializable(typeof(ToolchainSelection))]
+[JsonSerializable(typeof(WorkflowToolchainBinding))]
 [JsonSerializable(typeof(ToolchainResolution))]
 [JsonSerializable(typeof(ToolchainCandidate))]
 [JsonSerializable(typeof(VisualStudioInstance))]

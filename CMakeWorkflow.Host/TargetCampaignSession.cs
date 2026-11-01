@@ -19,7 +19,8 @@ public sealed partial class DoctorSession
             var output = paths.Require(request.ResultsDirectory);
             var build = paths.Require(request.BuildDirectory);
             var workflow = TargetWorkflowBuilder.Build(request.Action, build, request.Target,
-                request.SecondTarget, request.Configuration, request.Arguments, request.SecondArguments);
+                request.SecondTarget, request.Configuration, request.Arguments, request.SecondArguments,
+                request.Toolchain);
             var bytes = Encoding.UTF8.GetBytes(
                 JsonSerializer.Serialize(workflow, WorkflowJson.Default.WorkflowDocument) + "\n");
             var hash = Convert.ToHexString(SHA256.HashData(bytes));

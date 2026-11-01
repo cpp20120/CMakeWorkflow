@@ -22,6 +22,7 @@ public sealed class WorkflowReport
     public HostEnvironment? Environment { get; set; }
     public HostEnvironment? EnvironmentAtEnd { get; set; }
     public List<BuildEnvironment> BuildEnvironments { get; set; } = [];
+    public List<WorkflowToolchainIdentity> Toolchains { get; set; } = [];
 }
 
 public sealed record WorkflowFinding(string Code, string Severity, string NodeId,
@@ -58,6 +59,7 @@ public sealed class NodeResult
     public string? ExecutableSha256 { get; set; }
     public List<string> Arguments { get; set; } = [];
     public string? EnvironmentOverrideHash { get; set; }
+    public string? ToolchainFingerprint { get; set; }
     public string WorkingDirectory { get; set; } = "";
     public string? Stdout { get; set; }
     public string? Stderr { get; set; }
@@ -77,7 +79,8 @@ public sealed class NodeResult
 public static class WorkflowCommand
 {
     public static async Task<int> ExecuteAsync(string command, string[] args, CancellationToken ct,
-        IWorkflowOperationExecutor? extension = null, Action<string>? onRunDirectory = null)
+        IWorkflowOperationExecutor? extension = null, Action<string>? onRunDirectory = null,
+        IWorkflowToolchainProvider? toolchainProvider = null)
     {
         if (args.Length == 0 || args[0].StartsWith('-'))
             throw new ArgumentException("workflow plan/run requires a JSON file.");
@@ -140,10 +143,12 @@ public static class WorkflowCommand
         var output = resumeDirectory is null
             ? Path.Combine(Path.GetFullPath(results), $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}")
             : Path.GetFullPath(resumeDirectory);
+        var toolchains = await WorkflowToolchainAdmission.ResolveAsync(plan, toolchainProvider, ct);
         Directory.CreateDirectory(output);
         onRunDirectory?.Invoke(output);
         Console.Error.WriteLine($"[CMakeWorkflow] Results: {output}");
-        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension, json, resumeDirectory is not null);
+        return await WorkflowRunner.RunAsync(plan, jobs, output, ct, extension, json, resumeDirectory is not null,
+            toolchains: toolchains);
     }
 }
 
@@ -151,8 +156,13 @@ public static class WorkflowRunner
 {
     public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
         IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false,
-        Func<string, CancellationToken, Task>? beforeExternalDispatch = null)
+        Func<string, CancellationToken, Task>? beforeExternalDispatch = null,
+        IReadOnlyDictionary<string, WorkflowToolchainRuntime>? toolchains = null)
     {
+        toolchains ??= new Dictionary<string, WorkflowToolchainRuntime>(WorkflowPlanner.PathComparer);
+        if (plan.Nodes.Any(n => n.Toolchain is not null && n.Definition.Kind != "inspect"
+            && !toolchains.ContainsKey(n.Target.BuildDirectory)))
+            throw new InvalidOperationException("Selected toolchain was not materialized before workflow admission.");
         // The run lease spans validation, the recovery checkpoint, execution and final persistence.
         // No second runner may inspect/commit the same persisted run concurrently.
         Directory.CreateDirectory(output);
@@ -166,6 +176,7 @@ public static class WorkflowRunner
         {
             Workflow = plan.File,
             ManifestHash = plan.ManifestHash,
+            Toolchains = WorkflowToolchainAdmission.Identities(toolchains),
             Nodes = plan.Nodes.Select(n => new NodeResult
             {
                 Id = n.Definition.Id, Kind = n.Definition.Kind,
@@ -193,6 +204,7 @@ public static class WorkflowRunner
                     n.Configuration != report.Nodes[i].Configuration ||
                     !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
                 throw new InvalidDataException("Resume graph differs from saved execution.");
+            WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
             // A write-ahead admission is not proof that a process started, nor
             // that it did not produce side effects. Classify before validating
             // old build/artifact observations: an interrupted operation may have
@@ -348,7 +360,8 @@ public static class WorkflowRunner
                 {
                     await RecoveryFaults.HitAsync("after-checkpoint", node.Definition.Id, ct);
                     active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
-                        snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id), stop.Token, extension)));
+                        snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id), stop.Token, extension,
+                        toolchains.GetValueOrDefault(node.Target.BuildDirectory))));
                 }
                 if (active.Count == 0)
                 {
@@ -450,7 +463,7 @@ public static class WorkflowRunner
 
     private static async Task<NodeResult> ExecuteAsync(PlannedNode node, NodeResult? prerequisite,
         bool snapshotExecutable, BuildContextSession session, string output, string logStem, CancellationToken ct,
-        IWorkflowOperationExecutor? extension)
+        IWorkflowOperationExecutor? extension, WorkflowToolchainRuntime? toolchain)
     {
         var definition = node.Definition;
         var result = new NodeResult
@@ -459,6 +472,7 @@ public static class WorkflowRunner
             BuildDirectory = node.Target.BuildDirectory, Configuration = node.Target.Configuration,
             Target = node.Target.Target, WorkingDirectory = node.WorkingDirectory, RequestedContext = node.Requested,
             EnvironmentOverrideHash = EnvironmentProvenance.FingerprintOverrides(definition.Environment),
+            ToolchainFingerprint = toolchain?.Fingerprint,
             StartedAt = DateTimeOffset.UtcNow, Status = "running",
             Stdout = logStem + ".stdout.log", Stderr = logStem + ".stderr.log"
         };
@@ -467,6 +481,7 @@ public static class WorkflowRunner
         if (definition.TimeoutSeconds is { } seconds) deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
         try
         {
+            if (toolchain is not null) WorkflowToolchainAdmission.ValidateBuildTree(node.Target.BuildDirectory, toolchain);
             result.ObservedContext = await CMakeInspection.InspectAsync(node.Requested.BuildDirectory, deadline.Token);
             // Inspect never changes the execution session or claims ownership.
             result.SessionBefore = definition.Kind == "inspect"
@@ -480,7 +495,7 @@ public static class WorkflowRunner
             else if (definition.Kind == "configure")
             {
                 session.BeginConfigure();
-                await ConfigureAsync(node, result, session, output, deadline.Token);
+                await ConfigureAsync(node, result, session, output, deadline.Token, toolchain);
             }
             else
             {
@@ -494,7 +509,7 @@ public static class WorkflowRunner
                     case "invoke":
                         if (definition.Kind == "build") CMakeInspection.RequireTarget(result.ObservedContext, target);
                         var command = CMakeBuildCommand.Create(target);
-                        result.Executable = result.ObservedContext.CMakeExecutable ?? "cmake";
+                        result.Executable = toolchain?.CMake ?? result.ObservedContext.CMakeExecutable ?? "cmake";
                         result.Arguments = command.Arguments.ToList();
                         break;
                     case "run":
@@ -534,7 +549,7 @@ public static class WorkflowRunner
                         throw new InvalidOperationException("Profile operation is unavailable in this CLI.");
                     var operation = await extension.ExecuteAsync(new WorkflowOperationRequest(
                         "profile", result.Executable!, result.Arguments, node.WorkingDirectory,
-                        definition.Environment, definition.Options, output, definition.Id), deadline.Token);
+                        MergeEnvironment(toolchain, definition.Environment), definition.Options, output, definition.Id), deadline.Token);
                     result.ExitCode = operation.ExitCode;
                     result.Outputs = new Dictionary<string, string>(operation.Outputs);
                     result.ExperimentResult = operation.Status;
@@ -544,7 +559,7 @@ public static class WorkflowRunner
                 {
                     if (definition.Kind == "invoke" && definition.HarnessDirectory is not null)
                         DagFlowHarnessSnapshot.RequireFresh(node.Target.BuildDirectory, definition.HarnessDirectory);
-                    result.ExitCode = await RunProcessAsync(result, definition.Environment, output, deadline.Token);
+                    result.ExitCode = await RunProcessAsync(result, MergeEnvironment(toolchain, definition.Environment), output, deadline.Token);
                 }
                 result.Status = result.ExitCode == 0 ? "succeeded" : "failed";
                 if (result.ExitCode != 0) result.Error ??= $"Process exited with code {result.ExitCode}.";
@@ -628,7 +643,8 @@ public static class WorkflowRunner
         return result;
     }
 
-    private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session, string output, CancellationToken ct)
+    private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session, string output, CancellationToken ct,
+        WorkflowToolchainRuntime? toolchain)
     {
         var request = node.Requested;
         if (request.SourceDirectory is null || !Directory.Exists(request.SourceDirectory))
@@ -641,10 +657,22 @@ public static class WorkflowRunner
             BuildDirectory = request.BuildDirectory, SourceDirectory = request.SourceDirectory,
             Preset = request.ConfigurePreset
         };
-        result.Executable = result.ObservedContext?.CMakeExecutable ?? "cmake";
+        result.Executable = toolchain?.CMake ?? result.ObservedContext?.CMakeExecutable ?? "cmake";
         result.WorkingDirectory = request.SourceDirectory;
         result.Arguments = [];
-        if (request.ConfigurePreset is not null) result.Arguments.AddRange(["--preset", request.ConfigurePreset]);
+        if (request.ConfigurePreset is not null)
+        {
+            if (toolchain is not null) throw new InvalidOperationException(
+                "Explicit toolchain and configurePreset cannot be combined without verifying preset compiler selection.");
+            result.Arguments.AddRange(["--preset", request.ConfigurePreset]);
+        }
+        else if (toolchain is not null)
+        {
+            result.Arguments.AddRange(["-G", toolchain.Generator,
+                "-DCMAKE_CXX_COMPILER:FILEPATH=" + toolchain.Compiler]);
+            if (toolchain.Ninja is not null)
+                result.Arguments.Add("-DCMAKE_MAKE_PROGRAM:FILEPATH=" + toolchain.Ninja);
+        }
         result.Arguments.AddRange(["-S", request.SourceDirectory, "-B", request.BuildDirectory]);
         result.Configure.Executable = result.Executable;
         result.Configure.WorkingDirectory = result.WorkingDirectory;
@@ -656,7 +684,7 @@ public static class WorkflowRunner
             Directory.CreateDirectory(query);
             foreach (var kind in new[] { "codemodel-v2", "cache-v2", "toolchains-v1" })
                 await File.WriteAllTextAsync(Path.Combine(query, kind), "", ct);
-            result.ExitCode = await RunProcessAsync(result, new Dictionary<string, string>(), output, ct);
+            result.ExitCode = await RunProcessAsync(result, MergeEnvironment(toolchain, new Dictionary<string, string>()), output, ct);
             result.Configure.ExitCode = result.ExitCode;
             result.Configure.State = result.ExitCode == 0 ? "Succeeded" : "Failed";
             await CMakeInspection.WriteProvenanceAsync(request.BuildDirectory, result.Configure);
@@ -692,6 +720,26 @@ public static class WorkflowRunner
     {
         await using var file = File.OpenRead(executable);
         return Convert.ToHexString(await SHA256.HashDataAsync(file, ct));
+    }
+
+    private static IReadOnlyDictionary<string, string> MergeEnvironment(WorkflowToolchainRuntime? toolchain,
+        IReadOnlyDictionary<string, string> overrides)
+    {
+        if (toolchain is null) return overrides;
+        var values = toolchain.Variables.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        // A run recipe may override application variables, but not silently
+        // replace the compiler/SDK activation promised by its build context.
+        var protectedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "PATH", "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "VCINSTALLDIR",
+          "WindowsSdkDir", "WindowsSDKVersion", "VSCMD_ARG_HOST_ARCH", "VSCMD_ARG_TGT_ARCH" };
+        foreach (var entry in overrides)
+        {
+            if (protectedKeys.Contains(entry.Key) && (!values.TryGetValue(entry.Key, out var current)
+                || !string.Equals(current, entry.Value, StringComparison.Ordinal)))
+                throw new InvalidOperationException("Run override conflicts with bound toolchain environment: " + entry.Key);
+            values[entry.Key] = entry.Value;
+        }
+        return values;
     }
 
     private static async Task<int> RunProcessAsync(NodeResult result,

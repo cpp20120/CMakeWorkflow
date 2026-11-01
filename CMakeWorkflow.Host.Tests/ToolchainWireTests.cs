@@ -2,12 +2,24 @@ using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 using StreamJsonRpc;
 using ClientSdk = CMakeWorkflow.Client;
+using CMakeWorkflow;
+using System.Text.Json;
 
 internal static class ToolchainWireTests
 {
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException("Toolchain: " + message);
+    }
+
+    private sealed class FakeToolchainProvider(WorkflowToolchainRuntime runtime) : IWorkflowToolchainProvider
+    {
+        public int Calls { get; private set; }
+        public Task<WorkflowToolchainRuntime> ResolveAsync(WorkflowToolchainBinding binding, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(runtime);
+        }
     }
 
     public static async Task RunAsync(string endpoint, string workspace, CancellationToken ct)
@@ -49,6 +61,71 @@ internal static class ToolchainWireTests
         Check(WindowsToolchains.CandidateId("cmake", @"C:\Tools\CMake.exe") ==
               WindowsToolchains.CandidateId("cmake", @"c:\tools\cmake.exe"),
             "Candidate identities must be Windows-path case insensitive.");
+
+        // A selected toolchain is part of the manifest and checkpoint identity,
+        // but its inherited environment must never be persisted in run.json.
+        var bound = new WorkflowToolchainBinding(
+            CMakeCandidateId: cmake.Id, NinjaCandidateId: ninja.Id,
+            CompilerCandidateId: compiler.Id, SdkCandidateId: sdk.Id,
+            EnvironmentProfileId: "vs:one");
+        var manifest = new WorkflowDocument { SchemaVersion = 2, Contexts =
+            { ["main"] = new WorkflowContext { BuildDirectory = workspace, Toolchain = bound } },
+            Nodes = [new WorkflowNode { Id = "inspect", Kind = "inspect", Context = "main" }] };
+        var roundtrip = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(manifest, WorkflowJson.Default.WorkflowDocument),
+            WorkflowJson.Default.WorkflowDocument);
+        Check(roundtrip?.Contexts["main"].Toolchain == bound, "Workflow context lost toolchain binding.");
+        var runtime = new WorkflowToolchainRuntime(cmake.Path, ninja.Path, compiler.Path,
+            sdk.Path, "vs:one", "Ninja", "environment-fingerprint",
+            new Dictionary<string, string> { ["INCLUDE"] = "secret-not-in-persisted-identity" });
+        var resolved = new Dictionary<string, WorkflowToolchainRuntime> { [workspace] = runtime };
+        // The engine must materialize a single snapshot per physical build tree,
+        // even if multiple workflow nodes share its context.
+        var fakeRuntime = runtime with
+        {
+            CMake = Path.Combine(workspace, "cmake.exe"),
+            Ninja = Path.Combine(workspace, "ninja.exe"),
+            Compiler = Path.Combine(workspace, "cl.exe")
+        };
+        var provider = new FakeToolchainProvider(fakeRuntime);
+        var requestContext = new RequestedBuildContext(workspace);
+        var observedContext = new ObservedBuildContext { BuildDirectory = workspace };
+        var planned = new WorkflowPlan(Path.Combine(workspace, "toolchain-test.json"), "hash",
+        [
+            new PlannedNode(new WorkflowNode { Id = "first", Kind = "build" },
+                new CMakeTargetRef(workspace, "first", null), workspace, [],
+                requestContext, observedContext, [], bound),
+            new PlannedNode(new WorkflowNode { Id = "second", Kind = "build" },
+                new CMakeTargetRef(workspace, "second", null), workspace, [],
+                requestContext, observedContext, [], bound)
+        ]);
+        var materialized = await WorkflowToolchainAdmission.ResolveAsync(planned, provider, ct);
+        Check(provider.Calls == 1 && materialized.Count == 1,
+            "One physical build tree created multiple toolchain environments.");
+        var identities = WorkflowToolchainAdmission.Identities(resolved);
+        Check(identities.Single().Fingerprint == runtime.Fingerprint &&
+            !JsonSerializer.Serialize(identities).Contains("secret-not-in-persisted-identity", StringComparison.Ordinal),
+            "Execution identity leaked environment variables.");
+        WorkflowToolchainAdmission.RequireSameIdentity(identities, resolved);
+        try
+        {
+            WorkflowToolchainAdmission.RequireSameIdentity(identities,
+                new Dictionary<string, WorkflowToolchainRuntime> { [workspace] = runtime with { Fingerprint = "changed" } });
+            throw new Exception("Resume accepted changed toolchain fingerprint.");
+        }
+        catch (InvalidDataException) { }
+        var oldCache = Path.Combine(workspace, "toolchain-verification-build");
+        Directory.CreateDirectory(oldCache);
+        File.WriteAllText(Path.Combine(oldCache, "CMakeCache.txt"),
+            $"CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_CXX_COMPILER:FILEPATH={compiler.Path}\nCMAKE_MAKE_PROGRAM:FILEPATH={ninja.Path}\n");
+        WorkflowToolchainAdmission.ValidateBuildTree(oldCache, runtime);
+        try
+        {
+            WorkflowToolchainAdmission.ValidateBuildTree(oldCache,
+                runtime with { Compiler = Path.Combine(oldCache, "other-compiler.exe") });
+            throw new Exception("Configured build tree was silently rebound to another compiler.");
+        }
+        catch (InvalidOperationException) { }
 
         using var wire = await LocalTransport.ConnectAsync(endpoint, ct);
         using var rpc = HostConnection.Create(wire);

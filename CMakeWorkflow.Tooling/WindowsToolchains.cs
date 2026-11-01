@@ -23,7 +23,7 @@ public sealed record ToolchainResolution(int SchemaVersion, string Status,
     ToolchainCandidate? CMake, ToolchainCandidate? Ninja, ToolchainCandidate? Compiler,
     ToolchainCandidate? Sdk, string? EnvironmentProfileId, List<string> Diagnostics);
 public sealed record DeveloperEnvironmentRequest(string EnvironmentProfileId, string HostArchitecture = "x64",
-    string TargetArchitecture = "x64", string? WindowsSdkVersion = null);
+    string TargetArchitecture = "x64", string? WindowsSdkVersion = null, string? ToolsetVersion = null);
 public sealed record DeveloperEnvironmentSnapshot(int SchemaVersion, string EnvironmentProfileId,
     string HostArchitecture, string TargetArchitecture, string Fingerprint,
     Dictionary<string, string> VisibleVariables, List<string> Diagnostics);
@@ -295,6 +295,9 @@ public static class WindowsToolchains
             (request.WindowsSdkVersion.Length > 32 ||
              request.WindowsSdkVersion.Any(c => !char.IsAsciiDigit(c) && c != '.')))
             throw new ArgumentException("Invalid SDK version.");
+        if (request.ToolsetVersion is not null &&
+            (request.ToolsetVersion.Length > 32 || request.ToolsetVersion.Any(c => !char.IsAsciiDigit(c) && c != '.')))
+            throw new ArgumentException("Invalid MSVC toolset version.");
         var instance = inventory.VisualStudio.SingleOrDefault(x => "vs:" + x.Id == request.EnvironmentProfileId)
             ?? throw new ArgumentException("Unknown developer environment profile.");
         var devcmd = instance.DeveloperCommandPath
@@ -310,6 +313,8 @@ public static class WindowsToolchains
             .Append(" -host_arch=").Append(request.HostArchitecture);
         if (request.WindowsSdkVersion is not null)
             arguments.Append(" -winsdk=").Append(request.WindowsSdkVersion);
+        if (request.ToolsetVersion is not null)
+            arguments.Append(" -vcvars_ver=").Append(request.ToolsetVersion);
         arguments.Append(" >nul && set").Append('"');
         var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
         if (string.IsNullOrWhiteSpace(system))
@@ -327,7 +332,7 @@ public static class WindowsToolchains
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         return new(1, request.EnvironmentProfileId, request.HostArchitecture,
             request.TargetArchitecture, fingerprint, vars,
-            ["Preview only: workflow execution does not yet consume this environment snapshot."]);
+            ["Developer environment preview. Workflow context opt-in must still bind a selected toolchain."]);
     }
 
     private static async Task<ToolCommandResult> RunBoundedAsync(string executable,

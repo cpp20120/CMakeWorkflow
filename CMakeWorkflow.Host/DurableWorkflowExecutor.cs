@@ -1,5 +1,6 @@
 using CMakeWorkflow;
 using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Tooling;
 
 namespace CMakeWorkflow.Host;
 
@@ -35,12 +36,17 @@ public static class DurableWorkflowExecutor
             cancellationToken, paths.Read);
         if (!string.Equals(plan.ManifestHash, accepted.ManifestSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Resume snapshot mismatch.");
+        var toolchains = await WorkflowToolchainAdmission.ResolveAsync(plan,
+            new WindowsWorkflowToolchainProvider(), cancellationToken);
+        foreach (var (tree, selected) in toolchains)
+            WorkflowToolchainAdmission.ValidateBuildTree(tree, selected);
+        WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
         // Permanent claim occurs before any runner mutation or external dispatch.
         store.ClaimResumeAttempt(operationId, output);
         var gate = new DurableRunnerDispatchGate(paths.WorkspaceDirectory, operationId);
         var code = await WorkflowRunner.RunAsync(plan, 1, output, cancellationToken,
             extension: new ProfileWorkflowExecutor(), resume: true,
-            beforeExternalDispatch: gate.ConfirmAsync);
+            beforeExternalDispatch: gate.ConfirmAsync, toolchains: toolchains);
         if (code is 0 or 1 or 130) store.FinalizeExecution(operationId, output, code);
         return code;
     }
@@ -84,6 +90,10 @@ public static class DurableWorkflowExecutor
             throw new InvalidOperationException("workflow_preflight_rejected: " + string.Join(" | ", errors));
         if (Directory.Exists(output) && File.Exists(Path.Combine(output, "run.json")))
             throw new InvalidOperationException("run_directory_already_initialized");
+        var toolchains = await WorkflowToolchainAdmission.ResolveAsync(plan,
+            new WindowsWorkflowToolchainProvider(), cancellationToken);
+        foreach (var (tree, selected) in toolchains)
+            WorkflowToolchainAdmission.ValidateBuildTree(tree, selected);
         // Reserve before authorization so two distinct operations cannot use one
         // results tree, even if the first host dies before its runner starts.
         store.ReserveResultsDirectory(operationId, output);
@@ -93,7 +103,7 @@ public static class DurableWorkflowExecutor
         if (faultBarrier is not null) await faultBarrier("authorized", cancellationToken);
         var gate = new DurableRunnerDispatchGate(paths.WorkspaceDirectory, operationId);
         var exitCode = await WorkflowRunner.RunAsync(plan, jobs, output, cancellationToken,
-            extension: new ProfileWorkflowExecutor(),
+            extension: new ProfileWorkflowExecutor(), toolchains: toolchains,
             beforeExternalDispatch: async (checkpoint, ct) =>
             {
                 await gate.ConfirmAsync(checkpoint, ct);

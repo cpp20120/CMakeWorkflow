@@ -39,6 +39,8 @@ public sealed partial class DoctorSession
             workflow = ProfileWorkflowBuilder.Build(variants, request.Target, source,
                 request.Configuration, request.ConfigurePreset, request.Repeats,
                 request.TimeoutSeconds, request.Arguments ?? [], request.Backend, request.Mode);
+            foreach (var variant in request.Variants)
+                workflow.Contexts[variant.Name].Toolchain = variant.Toolchain;
         }
         catch (ArgumentException error)
         {

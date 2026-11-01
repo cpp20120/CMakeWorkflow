@@ -8,7 +8,8 @@ public static class TargetWorkflowBuilder
     // committed snapshot before workflow/start admits any external processes.
     public static WorkflowDocument Build(string action, string buildDirectory,
         string? target, string? secondTarget, string? configuration,
-        IReadOnlyList<string>? arguments, IReadOnlyList<string>? secondArguments)
+        IReadOnlyList<string>? arguments, IReadOnlyList<string>? secondArguments,
+        WorkflowToolchainBinding? toolchain = null)
     {
         if (action is not ("build" or "invoke" or "run" or "sequence"))
             throw new ArgumentException("Unsupported target action.");
@@ -48,7 +49,7 @@ public static class TargetWorkflowBuilder
             SchemaVersion = 2,
             Contexts = new Dictionary<string, WorkflowContext>(StringComparer.Ordinal)
             { ["build"] = new() { BuildDirectory = buildDirectory, Configuration = configuration,
-                Mode = "adopt", ProvenancePolicy = "allowUnverified" } },
+                Mode = "adopt", ProvenancePolicy = "allowUnverified", Toolchain = toolchain } },
             Nodes = nodes
         };
     }

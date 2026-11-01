@@ -32,7 +32,7 @@ public sealed record ToolchainResolution(int SchemaVersion, string Status,
     ToolchainCandidate? CMake, ToolchainCandidate? Ninja, ToolchainCandidate? Compiler,
     ToolchainCandidate? Sdk, string? EnvironmentProfileId, List<string> Diagnostics);
 public sealed record DeveloperEnvironmentRequest(string EnvironmentProfileId, string HostArchitecture = "x64",
-    string TargetArchitecture = "x64", string? WindowsSdkVersion = null);
+    string TargetArchitecture = "x64", string? WindowsSdkVersion = null, string? ToolsetVersion = null);
 public sealed record DeveloperEnvironmentSnapshot(int SchemaVersion, string EnvironmentProfileId,
     string HostArchitecture, string TargetArchitecture, string Fingerprint,
     Dictionary<string, string> VisibleVariables, List<string> Diagnostics);
@@ -52,7 +52,14 @@ internal sealed record PlanRequest(string Manifest, string[]? Only = null, strin
 // the Host assembly. TypeScript uses the same JSON field names.
 public sealed record PreparedWorkflow(int SchemaVersion, string Manifest, string ManifestSha256,
     string ResultsDirectory);
-public sealed record ProfileVariantOptions(string Name, string BuildDirectory);
+// Serializes to the same contract as the engine type without coupling SDK to Host.
+public sealed record PrepareToolchainSelection(
+    string? CMakeCandidateId = null, string? NinjaCandidateId = null,
+    string? CompilerCandidateId = null, string? SdkCandidateId = null,
+    string? EnvironmentProfileId = null, string Generator = "Ninja",
+    string HostArchitecture = "x64", string TargetArchitecture = "x64");
+public sealed record ProfileVariantOptions(string Name, string BuildDirectory,
+    PrepareToolchainSelection? Toolchain = null);
 public sealed record PrepareProfileOptions(string RequestId, string ResultsDirectory, string Target,
     List<ProfileVariantOptions> Variants, int Repeats = 3, double TimeoutSeconds = 300,
     string Backend = "auto", string Mode = "cpu", string? Configuration = null,
@@ -65,7 +72,8 @@ public sealed record ReplayProfileOptions(string BaselineDirectory, string Candi
 public sealed record ReplayProfileResult(int SchemaVersion, string RunDirectory, string AnalysisFile);
 public sealed record PrepareTargetOptions(string RequestId, string ResultsDirectory, string Action,
     string BuildDirectory, string? Target = null, string? SecondTarget = null,
-    string? Configuration = null, string[]? Arguments = null, string[]? SecondArguments = null);
+    string? Configuration = null, string[]? Arguments = null, string[]? SecondArguments = null,
+    PrepareToolchainSelection? Toolchain = null);
 public sealed record MutationCampaignOptions(string SourceDirectory, string? ReportPath = null,
     string Suite = "all", string Compiler = "c++", string Seed = "496833221358",
     int Cases = 48, int Steps = 48, int TimeoutSeconds = 30);
@@ -127,6 +135,7 @@ internal partial interface IClientRpc
 [JsonSerializable(typeof(ToolchainResolveRequest))]
 [JsonSerializable(typeof(ToolchainInspectEnvironmentRequest))]
 [JsonSerializable(typeof(PreparedWorkflow))]
+[JsonSerializable(typeof(PrepareToolchainSelection))]
 [JsonSerializable(typeof(ProfileVariantOptions))]
 [JsonSerializable(typeof(List<ProfileVariantOptions>))]
 [JsonSerializable(typeof(PrepareProfileOptions))]

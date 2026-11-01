@@ -3,6 +3,7 @@ using CMakeWorkflow.Campaigns;
 using CMakeWorkflow.Profiling;
 using CMakeWorkflow.History;
 using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host;
 
 namespace CMakeWorkflow;
 
@@ -45,7 +46,7 @@ public static class Program
             {
                 if (args[1] == "plan")
                     return await WorkflowCommand.ExecuteAsync("plan", args[2..], cts.Token,
-                        new ProfileWorkflowExecutor());
+                        new ProfileWorkflowExecutor(), toolchainProvider: new WindowsWorkflowToolchainProvider());
                 if (args[1] == "resume")
                 {
                     if (args.Length != 3) throw new ArgumentException("Usage: workflow resume <run-directory>");
@@ -54,7 +55,8 @@ public static class Program
                         Path.Combine(directory, "run.json"), cts.Token), WorkflowJson.Default.WorkflowReport)
                         ?? throw new InvalidDataException("Invalid run report.");
                     return await WorkflowCommand.ExecuteAsync("run",
-                        [saved.Workflow, "--resume-dir", directory], cts.Token, new ProfileWorkflowExecutor());
+                        [saved.Workflow, "--resume-dir", directory], cts.Token, new ProfileWorkflowExecutor(),
+                        toolchainProvider: new WindowsWorkflowToolchainProvider());
                 }
                 var history = HistoryOptions(args[2..]);
                 return await RunAndIndexAsync(async onRun =>
@@ -62,7 +64,8 @@ public static class Program
                     string? runDirectory = null;
                     var code = await WorkflowCommand.ExecuteAsync("run", history.Args, cts.Token,
                         new ProfileWorkflowExecutor(), directory =>
-                        { runDirectory = directory; onRun(directory); });
+                        { runDirectory = directory; onRun(directory); },
+                        toolchainProvider: new WindowsWorkflowToolchainProvider());
                     // Explicit profile nodes are captured as independent passes. Analyze
                     // their saved artifacts before History import; ordinary workflows do
                     // not invoke perf, WPR or the analyzer.

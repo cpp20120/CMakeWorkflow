@@ -21,7 +21,8 @@ public sealed record HistoryDetectRequest(string DatabasePath, string BaselineRu
     string? Scenario = null, double Alpha = 0.05);
 public sealed record WorkflowStartRequest(string ClientRequestId, string Manifest, string ManifestSha256,
     int Jobs, string ResultsDirectory);
-public sealed record ProfileVariantRequest(string Name, string BuildDirectory);
+public sealed record ProfileVariantRequest(string Name, string BuildDirectory,
+    WorkflowToolchainBinding? Toolchain = null);
 public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirectory, string Target,
     List<ProfileVariantRequest> Variants, int Repeats = 3, double TimeoutSeconds = 300,
     string Backend = "auto", string Mode = "cpu", string? Configuration = null,
@@ -33,7 +34,8 @@ public sealed record ProfileAnalysis(int SchemaVersion, string RunDirectory, str
 // Prepared native actions reuse the durable workflow engine and its operation API.
 public sealed record TargetPrepareRequest(string RequestId, string ResultsDirectory, string Action,
     string BuildDirectory, string? Target = null, string? SecondTarget = null,
-    string? Configuration = null, string[]? Arguments = null, string[]? SecondArguments = null);
+    string? Configuration = null, string[]? Arguments = null, string[]? SecondArguments = null,
+    WorkflowToolchainBinding? Toolchain = null);
 public sealed record TargetPreparation(int SchemaVersion, string Manifest, string ManifestSha256,
     string ResultsDirectory);
 

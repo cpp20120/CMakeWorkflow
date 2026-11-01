@@ -14,9 +14,9 @@ Discovery covers all installed Visual Studio/Build Tools instances through `vswh
 
 - Discovery is observational: paths and basic metadata are **not compiler/version/ABI validation**. `resolved` means a structurally compatible selection exists, not that a given CMake target will compile. Existing CMake cache/generator settings and the corresponding toolchain's actual ABI must still be checked at execution admission.
 - MSVC and clang-cl selections require a valid matching Visual Studio developer environment profile **and** a discovered Windows SDK. A `cl.exe` found on PATH inside one Visual Studio installation cannot be combined with the profile of a different instance.
-- `inspectEnvironment` is **preview-only**. Its output is not yet injected into CMake/WorkflowRunner. Do not advertise a selected MSVC toolchain as executable in an uninitialized Host until process-scoped environment application, CMake tree compatibility and admission revalidation are implemented.
+- `inspectEnvironment` remains a **read-only preview**. Execution uses a separate opt-in `WorkflowContext.toolchain` binding, resolved afresh by the Host/CLI before dispatch. Preview output is not blindly reused as a credential-bearing process environment.
 - No registry writes, package installation, `SetEnvironmentVariable`, SDK installation, or elevation occurs in this slice. Existing `tooling/doctor`, `tooling/planFix`, `environment/plan` and `environment/apply` retain their current semantics. No default Visual Studio installation is silently selected for a previously configured CMake build tree.
 - The visible environment projection includes build paths such as `PATH`, `INCLUDE`, `LIB` and `LIBPATH`, which may be user-specific. It intentionally omits all non-allowlisted inherited variables. Do not log it by default.
 - Other platforms respond with an `unsupported` inventory/resolution and a stable `unsupported_platform` refusal for developer-prompt inspection.
 
-Recommended next slice: **explicit execution environment snapshots** bound to a resolved toolchain, with an immutable identity and a scoped `ProcessStartInfo.Environment` injected into CMake/build/run subprocesses. Never mutate the Host's global environment.
+See **[Toolchain execution binding](toolchain-execution.md)** for the opt-in workflow execution contract, checkpoint identity, current limitations and usage.

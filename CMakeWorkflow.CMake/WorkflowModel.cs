@@ -21,6 +21,8 @@ public sealed class WorkflowContext
     public string? Generator { get; set; }
     // strict (default) or allowUnverified: explicit adoption of unknown preset provenance.
     public string ProvenancePolicy { get; set; } = "strict";
+    // Opt-in. Candidate IDs are resolved on the execution host; not executable paths.
+    public WorkflowToolchainBinding? Toolchain { get; set; }
 }
 
 public sealed class WorkflowNode
@@ -48,7 +50,8 @@ public sealed record PlanDiagnostic(string Severity, string Message);
 
 public sealed record PlannedNode(WorkflowNode Definition, CMakeTargetRef Target,
     string WorkingDirectory, IReadOnlyList<string> Dependencies,
-    RequestedBuildContext Requested, ObservedBuildContext Observed, IReadOnlyList<PlanDiagnostic> Diagnostics);
+    RequestedBuildContext Requested, ObservedBuildContext Observed, IReadOnlyList<PlanDiagnostic> Diagnostics,
+    WorkflowToolchainBinding? Toolchain = null);
 
 public sealed record WorkflowPlan(string File, string ManifestHash,
     IReadOnlyList<PlannedNode> Nodes);
@@ -157,6 +160,9 @@ public static class WorkflowPlanner
                     throw new ArgumentException($"{contextName}: provenancePolicy must be strict or allowUnverified.");
                 if (spec.Mode is not (null or "observe" or "adopt" or "managed"))
                     throw new ArgumentException($"{contextName}: mode must be observe, adopt or managed.");
+                if (spec.Toolchain is { } selectedToolchain && spec.Generator is { } identity
+                    && !string.Equals(selectedToolchain.Generator, identity, StringComparison.Ordinal))
+                    throw new ArgumentException($"{contextName}: toolchain generator disagrees with context.generator.");
                 var path = BuildTreeOwnership.CanonicalPath(Path.IsPathFullyQualified(spec.BuildDirectory)
                     ? spec.BuildDirectory : Path.Combine(directory, spec.BuildDirectory));
                 var source = spec.SourceDirectory is null ? null : BuildTreeOwnership.CanonicalPath(
@@ -235,12 +241,16 @@ public static class WorkflowPlanner
             if (node.WorkingDirectory is not null && !Directory.Exists(workingDirectory))
                 diagnostics.Add(new("Runtime", "Working directory must exist when execution starts."));
             plan.Add(new PlannedNode(node, target, workingDirectory, dependencies[node.Id],
-                context.Request, context.Observed, diagnostics));
+                context.Request, context.Observed, diagnostics, document.Contexts[contextName].Toolchain));
         }
 
         foreach (var tree in plan.Where(n => n.Definition.Kind != "inspect").GroupBy(n => n.Target.BuildDirectory, PathComparer))
+        {
             if (tree.Select(n => (n.Requested.Mode, n.Requested.ProvenancePolicy)).Distinct().Count() != 1)
                 throw new ArgumentException("Aliases of one physical build tree must use the same session mode and provenancePolicy.");
+            if (tree.Select(n => n.Toolchain).Distinct().Count() != 1)
+                throw new ArgumentException("Aliases of one physical build tree must use the same toolchain selection.");
+        }
 
         // CTest does not build its executables. Require a declared build prerequisite.
         foreach (var node in plan.Where(n => n.Definition.Kind == "ctest"))
@@ -310,6 +320,8 @@ public static class WorkflowPlanner
     WriteIndented = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(WorkflowDocument))]
 [JsonSerializable(typeof(WorkflowReport))]
+[JsonSerializable(typeof(WorkflowToolchainIdentity))]
+[JsonSerializable(typeof(WorkflowToolchainBinding))]
 [JsonSerializable(typeof(NodeResult))]
 [JsonSerializable(typeof(ObservedBuildContext))]
 [JsonSerializable(typeof(ConfigureProvenance))]
