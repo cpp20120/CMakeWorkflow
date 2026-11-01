@@ -143,7 +143,15 @@ try
                     info.WorkspaceDirectory == root, "wire environment capabilities and workspace");
 
                 var wirePlan = await remote.EnvironmentPlanAsync(new(environmentFile), lifetime.Token);
-                Check(wirePlan.Ready && wirePlan.SystemChanges?.Count is null or 0 &&
+                // The RPC must report actual host readiness, not assume that an
+                // interactive Windows session has an activated MSVC environment.
+                // `cmake` profile includes cxx: an installed but inactive cl.exe
+                // correctly makes the plan not-ready, without breaking the API.
+                Check(wirePlan.SchemaVersion == 1 &&
+                    wirePlan.Tools.Tools.Any(tool => tool.Id == "cxx") &&
+                    wirePlan.Ready == (wirePlan.Tools.Ready &&
+                        wirePlan.Findings.All(finding => finding.Status == "ready")) &&
+                    (wirePlan.SystemChanges?.Count ?? 0) == 0 &&
                     wirePlan.ApprovalSha256.Length == 64, "wire environment/plan response");
 
                 await Reject<StreamJsonRpc.RemoteInvocationException>(
@@ -155,10 +163,23 @@ try
                         new(Path.Combine(Path.GetTempPath(), "outside-environment.json")), lifetime.Token),
                     "wire environment/plan accepted path outside workspace");
 
-                var wireResult = await remote.EnvironmentApplyAsync(
-                    new(environmentFile, wirePlan.ApprovalSha256, false), lifetime.Token);
-                Check(wireResult.Ready && wireResult.AppliedSystemChanges?.Count is null or 0,
-                    "wire environment/apply no-op verified");
+                // Exercise successful approval only when the real host is already
+                // ready. A not-ready plan may contain installation steps, which
+                // a read-only transport test must not execute on the host.
+                if (wirePlan.Ready)
+                {
+                    var wireResult = await remote.EnvironmentApplyAsync(
+                        new(environmentFile, wirePlan.ApprovalSha256, false), lifetime.Token);
+                    Check(wireResult.Ready && (wireResult.AppliedSystemChanges?.Count ?? 0) == 0,
+                        "wire environment/apply no-op verified");
+                }
+                else
+                {
+                    Check(wirePlan.Tools.Tools.Any(tool => !tool.Installed) ||
+                        wirePlan.Findings.Any(finding => finding.Status != "ready"),
+                        "not-ready environment plan has no missing requirements");
+                    Console.WriteLine("Environment apply no-op skipped: real host requirements are not ready.");
+                }
             }
             Console.WriteLine("Environment JSON-RPC wire checks passed.");
             await ToolchainWireTests.RunAsync(endpoint, root, lifetime.Token); await ApplicationTests.RunAsync(endpoint, root, lifetime.Token); await SdkSmokeTests.RunAsync(endpoint, root, lifetime.Token);
