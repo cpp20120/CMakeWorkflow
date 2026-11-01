@@ -1,4 +1,5 @@
 using CMakeWorkflow;
+using CMakeWorkflow.Profiling;
 
 namespace CMakeWorkflow.Host;
 
@@ -38,7 +39,8 @@ public static class DurableWorkflowExecutor
         store.ClaimResumeAttempt(operationId, output);
         var gate = new DurableRunnerDispatchGate(paths.WorkspaceDirectory, operationId);
         var code = await WorkflowRunner.RunAsync(plan, 1, output, cancellationToken,
-            resume: true, beforeExternalDispatch: gate.ConfirmAsync);
+            extension: new ProfileWorkflowExecutor(), resume: true,
+            beforeExternalDispatch: gate.ConfirmAsync);
         if (code is 0 or 1 or 130) store.FinalizeExecution(operationId, output, code);
         return code;
     }
@@ -91,6 +93,7 @@ public static class DurableWorkflowExecutor
         if (faultBarrier is not null) await faultBarrier("authorized", cancellationToken);
         var gate = new DurableRunnerDispatchGate(paths.WorkspaceDirectory, operationId);
         var exitCode = await WorkflowRunner.RunAsync(plan, jobs, output, cancellationToken,
+            extension: new ProfileWorkflowExecutor(),
             beforeExternalDispatch: async (checkpoint, ct) =>
             {
                 await gate.ConfirmAsync(checkpoint, ct);

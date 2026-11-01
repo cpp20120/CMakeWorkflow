@@ -20,6 +20,15 @@ public sealed record HistoryDetectRequest(string DatabasePath, string BaselineRu
     string? Scenario = null, double Alpha = 0.05);
 public sealed record WorkflowStartRequest(string ClientRequestId, string Manifest, string ManifestSha256,
     int Jobs, string ResultsDirectory);
+public sealed record ProfileVariantRequest(string Name, string BuildDirectory);
+public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirectory, string Target,
+    List<ProfileVariantRequest> Variants, int Repeats = 3, double TimeoutSeconds = 300,
+    string Backend = "auto", string Mode = "cpu", string? Configuration = null,
+    string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
+public sealed record ProfilePreparation(int SchemaVersion, string Manifest, string ManifestSha256,
+    string ResultsDirectory);
+public sealed record ProfileAnalyzeRequest(string RunDirectory);
+public sealed record ProfileAnalysis(int SchemaVersion, string RunDirectory, string AnalysisFile);
 public sealed record OperationCancelRequest(string OperationId, long ExpectedRevision);
 public sealed record OperationCancelResult(string OperationId, string State, long Revision, bool Requested);
 public sealed record WorkflowResumeRequest(string OperationId, long ExpectedRevision, bool ConfirmedQuiescent);
@@ -63,6 +72,10 @@ public partial interface IHostRpc
     Task<TargetResolutionView> TargetResolveAsync(TargetResolveRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("workflow/plan")]
     Task<WorkflowPlanView> WorkflowPlanAsync(WorkflowPlanRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("profile/prepare")]
+    Task<ProfilePreparation> ProfilePrepareAsync(ProfilePrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("profile/analyze")]
+    Task<ProfileAnalysis> ProfileAnalyzeAsync(ProfileAnalyzeRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("runs/get")]
     Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("history/runs")]

@@ -15,9 +15,30 @@
 | Workflow | `workflow/start`, `workflow/recoveryInspect`, `workflow/reconcile`, `workflow/resume`, `workflow/resumeExecute` |
 | Operations | `operations/find`, `operations/get`, `operations/cancel`, `operations/events`, `runs/get` |
 | History | `history/runs`, `history/show`, `history/metrics`, `history/query`, `history/compare`, `history/detect` |
+| Profiling | `profile/prepare`, `profile/analyze`; исполнение — через `workflow/start` |
 | Environment | `environment/plan`, `environment/apply` |
 
 **Важно:** Doctor/Fix работают в рамках соединения, а durable workflow operations обладают собственной идентичностью и могут пережить разрыв соединения. Disconnect не означает отмену запущенного workflow. При переподключении нужно прочитать operation state или persisted report. Отмена запроса `$/cancelRequest` и явная отмена операции — разные контракты.
+
+### Profiling через общий workflow lifecycle
+
+`profile/prepare` принимает типизированные параметры (target, варианты сборки,
+режим, backend, повторы, аргументы и каталоги) и создаёт только манифест без
+запуска процессов. `requestId` — 32 шестнадцатеричных символа. Повтор запроса
+с тем же ID и содержимым возвращает тот же manifest/hash; другие параметры
+с тем же ID отвергаются. Все пути абсолютные и находятся внутри workspace.
+
+Для исполнения передайте `manifest` и `manifestSha256` в durable `workflow/start`
+с неизменным `clientRequestId`, положительным `jobs` и отдельным каталогом
+результатов. Прогресс, отмену и восстановление обеспечивает обычный API
+`operations/*` / `workflow/reconcile` / `workflow/resume`. Host подключает
+`ProfileWorkflowExecutor` и при первоначальном запуске, и при resume.
+Сохранённый capture обрабатывается через `profile/analyze`: метод возвращает
+путь `analysis.json`. Сам анализ не является durable operation; после обрыва
+запроса прежде всего проверьте уже записанные артефакты.
+
+Для `profile/replay` и DagFlow campaigns typed RPC пока нет — их CLI-команды
+остаются доступными без изменений.
 
 ## Запустить Host
 

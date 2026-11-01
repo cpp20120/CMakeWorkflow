@@ -9,7 +9,7 @@ namespace CMakeWorkflow.Host;
 public sealed partial class DoctorSession
 {
     private static readonly string[] ReadCapabilities = ["context/inspect", "target/resolve", "workflow/plan", "runs/get",
-        "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect"];
+        "profile/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect"];
     private const int MeasurementLimit = 50000;
 
     // Operation lifetime belongs to Host, not to the RPC request or connection.
@@ -246,7 +246,10 @@ public sealed partial class DoctorSession
         return parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
     }
 
-    private async Task<T> ReadAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct)
+    private Task<T> ReadAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct) =>
+        ApplicationCallAsync(request, query, ct);
+
+    private async Task<T> ApplicationCallAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, disconnected);
         try

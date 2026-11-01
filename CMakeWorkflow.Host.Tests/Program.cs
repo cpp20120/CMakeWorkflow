@@ -162,6 +162,7 @@ try
             }
             Console.WriteLine("Environment JSON-RPC wire checks passed.");
             await ApplicationTests.RunAsync(endpoint, root, lifetime.Token); await SdkSmokeTests.RunAsync(endpoint, root, lifetime.Token);
+            await ProfileWorkflowWireTests.RunAsync(endpoint, root, lifetime.Token);
             await DurableWorkflowWireTests.RunAsync(endpoint, root, lifetime.Token);
             await DurableResumeExecutionWireTests.RunAsync(endpoint, root, lifetime.Token);
             await DurableCancellationWireTests.RunAsync(endpoint, root, lifetime.Token);

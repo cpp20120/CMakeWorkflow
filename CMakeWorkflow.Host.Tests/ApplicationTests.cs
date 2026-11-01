@@ -70,7 +70,40 @@ internal static class ApplicationTests
             new("preinit", manifest, "0", 1, Path.Combine(root, "preinit-results")), ct), "not_initialized");
         var info = await client.InitializeAsync(new(1, root), ct);
         Check(info.Capabilities.Contains("workflow/plan") && info.Capabilities.Contains("history/detect")
-            && info.Capabilities.Contains("workflow/start"), "Capabilities omit implemented workflow/start lifecycle");
+            && info.Capabilities.Contains("workflow/start") && info.Capabilities.Contains("profile/prepare"),
+            "Capabilities omit implemented profile/workflow lifecycle");
+        var prepareRequest = new ProfilePrepareRequest("0123456789abcdef0123456789abcdef",
+            Path.Combine(root, "profile definitions"), "worker", [new("main", build)],
+            Repeats: 1, Arguments: ["--case", "chain"]);
+        var prepared = await client.ProfilePrepareAsync(prepareRequest, ct);
+        Check(prepared.SchemaVersion == 1 && File.Exists(prepared.Manifest)
+            && prepared.ManifestSha256 == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(prepared.Manifest))),
+            "Profile preparation missing versioned immutable manifest and digest");
+        Check(prepared == await client.ProfilePrepareAsync(prepareRequest, ct),
+            "Profile preparation must be idempotent with the same request ID and contents");
+        var profilePlan = await client.WorkflowPlanAsync(new(prepared.Manifest), ct);
+        Check(profilePlan.Nodes.Any(node => node.Kind == "profile") && profilePlan.Nodes.Any(node => node.Kind == "run"),
+            "Profile graph must include separate timing and instrumented capture nodes");
+        await Refused(() => client.ProfilePrepareAsync(prepareRequest with { Target = "other" }, ct),
+            "request_id_conflict");
+        var otherProfileDirectory = Path.Combine(root, "other profile definitions");
+        await Refused(() => client.ProfilePrepareAsync(prepareRequest with
+        { ResultsDirectory = otherProfileDirectory }, ct), "request_id_conflict");
+        Check(!Directory.Exists(otherProfileDirectory),
+            "Conflicting profile request created an alternate result directory");
+        await Refused(() => client.ProfilePrepareAsync(prepareRequest with
+        { RequestId = "11111111111111111111111111111111", Variants = [new("escape", outside)] }, ct),
+            "path_not_allowed");
+        await Refused(() => client.ProfilePrepareAsync(prepareRequest with { RequestId = "../escape" }, ct),
+            "invalid_argument");
+        var fixture = Directory.CreateDirectory(Path.Combine(root, "profile analysis fixture")).FullName;
+        File.WriteAllText(Path.Combine(fixture, "raw.txt"), "raw fixture");
+        File.WriteAllText(Path.Combine(fixture, "capture.results.json"),
+            """{"captureId":"capture","backend":"fixture","mode":"cpu","eventSource":"test","rawTrace":"raw.txt"}""");
+        var analyzed = await client.ProfileAnalyzeAsync(new(fixture), ct);
+        Check(analyzed.SchemaVersion == 1 && analyzed.AnalysisFile == Path.Combine(fixture, "analysis.json")
+            && File.Exists(analyzed.AnalysisFile), "Profile analyze RPC must return the saved artifact path");
+        await Refused(() => client.ProfileAnalyzeAsync(new(otherRun), ct), "path_not_allowed");
         // Recovery mutation and event replay must be real wire methods, not local-only helpers.
         var recoveryManifest = Path.Combine(root, "recovery-wire.json");
         var recoveryBytes = Encoding.UTF8.GetBytes("{\"schemaVersion\":1}");

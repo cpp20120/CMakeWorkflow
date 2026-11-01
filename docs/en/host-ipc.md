@@ -22,6 +22,27 @@ Besides Doctor and explicit Fix, newer Host builds negotiate a wider method set 
 `history/show`, `history/metrics`, `history/query`, `history/compare` and
 `history/detect`, along with environment planning/apply methods.
 
+### Profiling through the durable workflow API
+
+`profile/prepare` accepts a **typed profile configuration**, returns a generated
+`manifest` path and its `manifestSha256`, and does not execute processes. Its
+`requestId` is 32 hexadecimal characters; repeating the same request with the
+same contents returns the same file, while changed contents are rejected. All
+paths must be absolute and within the workspace negotiated at `initialize`.
+
+Pass the returned manifest and hash to the existing `workflow/start` with a
+**stable** `clientRequestId`, a positive `jobs` count, and a unique, workspace-
+owned run directory. Then use `operations/find/get/events/cancel` as for any
+other durable workflow. The Host supplies `ProfileWorkflowExecutor` for both
+initial execution and explicit recovery/resume. After a successful capture,
+`profile/analyze` processes its saved run directory and returns the path to
+`analysis.json`. Analysis is re-runnable but **not** a durable operation: if its
+RPC request is interrupted, inspect the artifacts before invoking it again.
+
+This is an explicit prepare → start → observe → analyze pipeline, not a second
+scheduler. `profile/replay` and project-specific campaigns do not yet have
+corresponding typed Host methods; their CLI entry points remain available.
+
 The application operation API uses durable operation identifiers and explicit
 cancellation/reconnection semantics. **Do not** treat connection loss as implicit
 cancellation of a running workflow or infer completion from a dropped notification.
