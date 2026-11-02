@@ -121,6 +121,9 @@ jobs:
           CLI: out/native/${{ matrix.executable }}
         run: |
           "$CLI" workflow plan examples/hello/workflow.json
+          # The benchmark and matrix recipes adopt the existing CMake tree.
+          # Execute the managed hello workflow first; planning alone does not configure it.
+          "$CLI" workflow run examples/hello/workflow.json --results-dir out/history-auto-smoke --history-db out/history-auto-smoke/history.sqlite
           "$CLI" workflow generate benchmark --build-dir out/hello --target hello --config Debug --repeats 1 --timeout-seconds 30 --output out/benchmark-smoke/workflow.json
           "$CLI" workflow plan out/benchmark-smoke/workflow.json
           "$CLI" tooling list --json
@@ -129,7 +132,6 @@ jobs:
           printf '%s\n' '{"schemaVersion":1,"workflow":"smoke","manifestHash":"test","startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:00:01Z","status":"succeeded","nodes":[]}' > out/history-smoke/run/run.json
           "$CLI" history import out/history-smoke/run --db out/history-smoke/history.sqlite
           "$CLI" history runs --db out/history-smoke/history.sqlite --json
-          "$CLI" workflow run examples/hello/workflow.json --results-dir out/history-auto-smoke --history-db out/history-auto-smoke/history.sqlite
           "$CLI" workflow generate test-matrix --build-dir out/hello --target hello --label smoke --output out/benchmark-smoke/test-matrix.json
           "$CLI" workflow plan out/benchmark-smoke/test-matrix.json
           "$CLI" workflow generate build-matrix --variant main=out/hello --target hello --output out/benchmark-smoke/build-matrix.json

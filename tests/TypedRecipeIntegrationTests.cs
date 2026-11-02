@@ -53,9 +53,16 @@ internal static class TypedRecipeIntegrationTests
         var (builds, _) = Workflow(temp.Path, J(File.ReadAllText(buildManifest)),
             name: "build-matrix", options: ["--jobs", "8"]);
         AllSucceeded(builds);
+        // The planner resolves directory symlinks (e.g. /var -> /private/var on macOS),
+        // while Path.GetTempPath() can return the lexical path. Compare filesystem
+        // identities using the same canonicalization as the production planner.
+        var canonicalFirstBuild = BuildTreeOwnership.CanonicalPath(firstBuild);
+        var canonicalSecondBuild = BuildTreeOwnership.CanonicalPath(secondBuild);
         Check(builds["nodes"]!.AsArray().Count == 4
-            && builds["nodes"]!.AsArray().Count(n => S(n?["buildDirectory"]) == firstBuild) == 2
-            && builds["nodes"]!.AsArray().Count(n => S(n?["buildDirectory"]) == secondBuild) == 2,
+            && builds["nodes"]!.AsArray().Count(n => WorkflowPlanner.PathComparer.Equals(
+                BuildTreeOwnership.CanonicalPath(S(n?["buildDirectory"])), canonicalFirstBuild)) == 2
+            && builds["nodes"]!.AsArray().Count(n => WorkflowPlanner.PathComparer.Equals(
+                BuildTreeOwnership.CanonicalPath(S(n?["buildDirectory"])), canonicalSecondBuild)) == 2,
             "Build Matrix mixed build contexts");
 
         var testRecipeFile = Path.Combine(definitions, "tests.json");
