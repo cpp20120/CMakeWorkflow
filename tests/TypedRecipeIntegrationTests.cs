@@ -48,22 +48,30 @@ internal static class TypedRecipeIntegrationTests
         RunCli("workflow", "generate", "build-matrix", "--variant", "one=" + firstBuild,
             "--variant", "two=" + secondBuild, "--target", "first", "--target", "third",
             "--config", "Debug", "--output", buildManifest);
-        Check(RunCli("workflow", "plan", buildManifest, "--json").Contains("build_two_002",
-            StringComparison.Ordinal), "Build Matrix manifest rejected by planner");
+        // Treat the CLI plan as the canonical path contract. The test project
+        // intentionally does not link CMakeWorkflow.CMake: this is black-box E2E.
+        var buildPlan = J(RunCli("workflow", "plan", buildManifest, "--json"));
+        var planned = buildPlan["nodes"]!.AsArray();
+        Check(planned.Count == 4 && planned.Any(n => S(n?["id"]) == "build_two_002"),
+            "Build Matrix manifest rejected by planner");
+        var manifestContexts = J(File.ReadAllText(buildManifest))["contexts"]!;
+        Check(S(manifestContexts["one"]?["buildDirectory"]) == firstBuild
+            && S(manifestContexts["two"]?["buildDirectory"]) == secondBuild,
+            "Build Matrix recipe did not preserve input build directories");
+        string PlannedDirectory(string id) => S(planned.Single(n => S(n?["id"]) == id)?["buildDirectory"]);
+        var pathComparer = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var firstPlannedDirectory = PlannedDirectory("build_one_001");
+        var secondPlannedDirectory = PlannedDirectory("build_two_001");
         var (builds, _) = Workflow(temp.Path, J(File.ReadAllText(buildManifest)),
             name: "build-matrix", options: ["--jobs", "8"]);
         AllSucceeded(builds);
-        // The planner resolves directory symlinks (e.g. /var -> /private/var on macOS),
-        // while Path.GetTempPath() can return the lexical path. Compare filesystem
-        // identities using the same canonicalization as the production planner.
-        var canonicalFirstBuild = BuildTreeOwnership.CanonicalPath(firstBuild);
-        var canonicalSecondBuild = BuildTreeOwnership.CanonicalPath(secondBuild);
-        Check(builds["nodes"]!.AsArray().Count == 4
-            && builds["nodes"]!.AsArray().Count(n => WorkflowPlanner.PathComparer.Equals(
-                BuildTreeOwnership.CanonicalPath(S(n?["buildDirectory"])), canonicalFirstBuild)) == 2
-            && builds["nodes"]!.AsArray().Count(n => WorkflowPlanner.PathComparer.Equals(
-                BuildTreeOwnership.CanonicalPath(S(n?["buildDirectory"])), canonicalSecondBuild)) == 2,
-            "Build Matrix mixed build contexts");
+        var actualNodes = builds["nodes"]!.AsArray();
+        Check(actualNodes.Count == 4
+            && !pathComparer.Equals(firstPlannedDirectory, secondPlannedDirectory)
+            && actualNodes.All(n => pathComparer.Equals(
+                S(n?["buildDirectory"]), PlannedDirectory(S(n?["id"])))),
+            "Build Matrix mixed build contexts: plan and run disagree on canonical build directories");
 
         var testRecipeFile = Path.Combine(definitions, "tests.json");
         File.WriteAllText(testRecipeFile, JsonSerializer.Serialize(new
