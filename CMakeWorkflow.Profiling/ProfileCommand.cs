@@ -248,7 +248,7 @@ public static class ProfileAnalyzer
                             {
                                 var count = normalized[field]?.GetValue<int>() ?? 0;
                                 if (count > 0)
-                                    warnings.Add(JsonValue.Create($"{count} {description}; check normalized stack quality."));
+                                    warnings.Add((JsonNode?)JsonValue.Create($"{count} {description}; check normalized stack quality."));
                             }
                             if (warnings.Count > 0) item["analysisWarnings"] = warnings;
                         }
@@ -351,7 +351,7 @@ public static class ProfileAnalyzer
             if (captureIdElement.ValueKind != JsonValueKind.String
                 || captureIdElement.GetString() != captureId)
             {
-                items.Add(new JsonObject
+                items.Add((JsonNode?)new JsonObject
                 {
                     ["captureId"] = captureId,
                     ["analysisStatus"] = "capture_incomplete",
@@ -362,7 +362,7 @@ public static class ProfileAnalyzer
             }
             if (File.Exists(Path.Combine(directory, captureId + ".results.json"))) continue;
             captureJournal.TryGetValue(captureId, out var failure);
-            items.Add(new JsonObject
+            items.Add((JsonNode?)new JsonObject
             {
                 ["captureId"] = captureId,
                 ["backend"] = manifestRoot.TryGetProperty("backend", out var backendValue)
