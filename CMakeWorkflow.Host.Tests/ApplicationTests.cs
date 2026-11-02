@@ -102,10 +102,13 @@ internal static class ApplicationTests
         var benchmarkRequest = new BenchmarkPrepareRequest("abcdef0123456789abcdef0123456789",
             Path.Combine(root, "benchmark definitions", "chain.json"), benchmarkRecipe);
         var benchmarkPrepared = await client.BenchmarkPrepareAsync(benchmarkRequest, ct);
-        Check(benchmarkPrepared.SchemaVersion == 1 && benchmarkPrepared.Manifest == benchmarkRequest.OutputPath
-            && File.Exists(benchmarkPrepared.Manifest)
+        // WorkspaceReadPaths canonicalizes filesystem aliases; the response may
+        // use /private/var even when the request uses /var on macOS.
+        var benchmarkBytes = File.ReadAllBytes(benchmarkPrepared.Manifest);
+        Check(benchmarkPrepared.SchemaVersion == 1 && File.Exists(benchmarkRequest.OutputPath)
+            && File.ReadAllBytes(benchmarkRequest.OutputPath).SequenceEqual(benchmarkBytes)
             && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
-                File.ReadAllBytes(benchmarkPrepared.Manifest))), "Benchmark preparation hash or path");
+                benchmarkBytes)), "Benchmark preparation hash or path");
         Check(benchmarkPrepared == await client.BenchmarkPrepareAsync(benchmarkRequest, ct),
             "Benchmark preparation retry changed committed result");
         var benchmarkPlan = await client.WorkflowPlanAsync(new(benchmarkPrepared.Manifest), ct);

@@ -63,11 +63,17 @@ try
         benchmarkOutput, new CMakeWorkflow.BenchmarkRecipeV1("benchmark", 1,
             Path.Combine(root, "unconfigured build"), "worker", "Release", 2, 30, ["a b"]));
     var benchmarkPrepared = await session.BenchmarkPrepareAsync(benchmarkRequest, default);
-    Check(benchmarkPrepared.Manifest == benchmarkOutput
-        && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(benchmarkOutput)))
-        && await session.BenchmarkPrepareAsync(benchmarkRequest, default) == benchmarkPrepared,
-        "Direct Host Benchmark preparation is not persistent and idempotent");
+    // Host resolves filesystem aliases (on macOS, /var is often /private/var).
+    // Verify the committed bytes through both paths, not lexical path equality.
+    var preparedBytes = File.ReadAllBytes(benchmarkPrepared.Manifest);
+    Check(File.Exists(benchmarkOutput)
+        && File.ReadAllBytes(benchmarkOutput).SequenceEqual(preparedBytes),
+        "Direct Host Benchmark returned a different manifest than requested");
+    Check(benchmarkPrepared.ManifestSha256 == Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(preparedBytes)),
+        "Direct Host Benchmark committed manifest hash mismatch");
+    Check(await session.BenchmarkPrepareAsync(benchmarkRequest, default) == benchmarkPrepared,
+        "Direct Host Benchmark retry is not idempotent");
     await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkPrepareAsync(
         benchmarkRequest with { Recipe = benchmarkRequest.Recipe with { Repeats = 3 } }, default),
         "Benchmark request ID conflict not rejected");

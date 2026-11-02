@@ -46,9 +46,12 @@ try
             Path.Combine(fixture, "benchmark.json"), new BenchmarkRecipeV1("benchmark", 1,
                 benchmarkBuild, "example", "Release", 2, 30, ["--case", "a b"]));
         var benchmark = await client.Benchmarks.PrepareAsync(benchmarkOptions, ct);
-        if (benchmark.SchemaVersion != 1 || benchmark.Manifest != benchmarkOptions.OutputPath
-            || benchmark.ManifestSha256 != Convert.ToHexString(SHA256.HashData(
-                await File.ReadAllBytesAsync(benchmark.Manifest, ct)))
+        // Compare the manifest's committed bytes, not lexical paths: macOS
+        // temp paths may use /var while Host returns the canonical /private/var.
+        var requestedBytes = await File.ReadAllBytesAsync(benchmarkOptions.OutputPath, ct);
+        var committedBytes = await File.ReadAllBytesAsync(benchmark.Manifest, ct);
+        if (benchmark.SchemaVersion != 1 || !requestedBytes.SequenceEqual(committedBytes)
+            || benchmark.ManifestSha256 != Convert.ToHexString(SHA256.HashData(committedBytes))
             || benchmark != await client.Benchmarks.PrepareAsync(benchmarkOptions, ct))
             throw new InvalidOperationException("NativeAOT Benchmark preparation or replay failed.");
         Console.WriteLine("PASS NativeAOT typed benchmark preparation and exact manifest hash.");
