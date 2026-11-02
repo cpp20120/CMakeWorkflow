@@ -470,7 +470,8 @@ internal static class HistoryReports
         {
             using var doc = Read(counterPath);
             var root = doc.RootElement;
-            Version(root, counterPath, 1);
+            if (Num(root, "schemaVersion") is not (1 or 2))
+                throw new InvalidDataException($"{counterPath}: unsupported counter-comparison schemaVersion; expected 1 or 2.");
             var backend = Str(root, "backend") ?? "unknown";
             if (root.TryGetProperty("variants", out var variants) && variants.ValueKind == JsonValueKind.Array)
                 foreach (var variant in variants.EnumerateArray())
@@ -481,11 +482,14 @@ internal static class HistoryReports
                                     run.Measurements.Add(new(run.Run.Id, null, ev.Name,
                                         Str(ev.Value, "unit") ?? "", value, Str(variant, "name"),
                                         run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Scenario,
-                                        "counter-comparison.json", collection == "derived" ? "perf stat derived" : backend, 0,
+                                        "counter-comparison.json", collection == "derived"
+                                            ? "perf stat derived" + (Str(ev.Value, "domain") is { } domain ? " " + domain : "")
+                                            : backend, 0,
                                         run.ProfileInputs.GetValueOrDefault("counters_" + Str(variant, "name")).Workload,
                                         null));
         }
         var analysisPath = Path.Combine(directory, "analysis.json");
+        var failedAnalyses = new HashSet<string>(StringComparer.Ordinal);
         if (File.Exists(analysisPath))
         {
             using var doc = Read(analysisPath);
@@ -493,8 +497,11 @@ internal static class HistoryReports
                 throw new InvalidDataException($"{analysisPath}: expected an array of profile captures.");
             foreach (var capture in doc.RootElement.EnumerateArray())
             {
-                if (capture.ValueKind != JsonValueKind.Object
-                    || Str(capture, "backend") != "perf"
+                if (capture.ValueKind != JsonValueKind.Object) continue;
+                if (Str(capture, "analysisStatus") is "failed" or "capture_failed"
+                    && Str(capture, "captureId") is { } failedId)
+                    failedAnalyses.Add(failedId);
+                if (Str(capture, "backend") != "perf"
                     || Str(capture, "mode") != "counters"
                     || Obj(capture, "counters") is not { } counters) continue;
                 var captureId = Str(capture, "captureId");
@@ -520,10 +527,13 @@ internal static class HistoryReports
         {
             foreach (var file in Directory.GetFiles(normalized, "*.stacks.json"))
             {
+                var captureId = Path.GetFileName(file)[..^".stacks.json".Length];
+                if (failedAnalyses.Contains(captureId)) continue;
                 using var parsed = Read(file);
-                Version(parsed.RootElement, file, 1);
-                AddArtifact(run, Path.GetFileName(file)[..^".stacks.json".Length],
-                    "cpu-stacks", file, HashFile(file));
+                if (Num(parsed.RootElement, "schemaVersion") is not (1 or 2))
+                    throw new InvalidDataException($"{file}: unsupported normalized stack schemaVersion; expected 1 or 2.");
+                AddArtifact(run, captureId, "cpu-stacks", file, HashFile(file),
+                    Str(parsed.RootElement, "analysisStatus"));
             }
             foreach (var file in Directory.GetFiles(normalized, "*.timeline.jsonl"))
                 AddArtifact(run, Path.GetFileName(file)[..^".timeline.jsonl".Length],

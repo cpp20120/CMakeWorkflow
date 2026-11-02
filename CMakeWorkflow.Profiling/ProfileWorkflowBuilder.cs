@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace CMakeWorkflow.Profiling;
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ProfileVariant(string Name, string BuildDirectory);
 
 // Single typed graph builder for the CLI and the local Host. It does no I/O and
@@ -12,7 +14,7 @@ public static class ProfileWorkflowBuilder
     public static WorkflowDocument Build(IReadOnlyList<ProfileVariant> variants, string target,
         string? sourceDirectory, string? configuration, string? configurePreset,
         int repeats, double timeoutSeconds, IReadOnlyList<string> arguments,
-        string backend = "auto", string mode = "cpu")
+        string backend = "auto", string mode = "cpu", string? capturePlatform = null)
     {
         ArgumentNullException.ThrowIfNull(variants);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -25,6 +27,11 @@ public static class ProfileWorkflowBuilder
             throw new ArgumentException("--mode must be cpu, scheduler, counters or diagnostic.");
         if (backend is not ("auto" or "perf" or "etw" or "instruments"))
             throw new ArgumentException("Unknown profiler backend.");
+        if (capturePlatform is not (null or "linux" or "windows" or "macos"))
+            throw new ArgumentException("Profile capture platform must be linux, windows or macos.");
+        if (capturePlatform is not null && backend != "auto" &&
+            backend != (capturePlatform switch { "linux" => "perf", "windows" => "etw", _ => "instruments" }))
+            throw new ArgumentException("Profiler backend does not match the capture platform.");
         if (configurePreset is not null && (variants.Count != 1 || sourceDirectory is null))
             throw new ArgumentException("A configured profile requires one variant and a source directory.");
         if (variants.Any(v => !Regex.IsMatch(v.Name, "^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant)
@@ -71,7 +78,9 @@ public static class ProfileWorkflowBuilder
             }
         }
         var diagnostic = mode == "diagnostic";
-        if (OperatingSystem.IsLinux() && (backend is "auto" or "perf") && mode != "counters")
+        var linux = capturePlatform is null ? OperatingSystem.IsLinux() : capturePlatform == "linux";
+        var windows = capturePlatform is null ? OperatingSystem.IsWindows() : capturePlatform == "windows";
+        if (linux && (backend is "auto" or "perf") && mode != "counters")
         {
             foreach (var variant in variants)
             {
@@ -88,7 +97,7 @@ public static class ProfileWorkflowBuilder
             nodes.Add(ProfileNode(captureId, buildId, previous, arguments, timeoutSeconds, timeout,
                 backend, diagnostic ? "cpu" : mode));
             previous = captureId;
-            if (diagnostic && (OperatingSystem.IsLinux() || OperatingSystem.IsWindows()))
+            if (diagnostic && (linux || windows))
             {
                 var schedulerId = "scheduler_" + variant.Name;
                 nodes.Add(ProfileNode(schedulerId, buildId, previous, arguments,

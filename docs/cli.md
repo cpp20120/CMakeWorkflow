@@ -41,12 +41,22 @@ executable. `build` допускает native executable/library targets. `invok
 ## Workflow
 
 ```sh
+CMakeWorkflow workflow generate benchmark --build-dir BUILD_DIR --target EXECUTABLE --config Release --repeats 10 --timeout-seconds 300 --output workflows/bench.json -- PROGRAM_ARG
 CMakeWorkflow workflow plan FILE --only NODE_A --only NODE_B --json
 CMakeWorkflow workflow run FILE --only NODE_A --only NODE_B --jobs 2 --results-dir DIR --history-db CATALOG --json
 CMakeWorkflow workflow run FILE --no-history --json
 CMakeWorkflow workflow report RUN_DIRECTORY --json
 CMakeWorkflow workflow sequence --build-dir BUILD_DIR --first FIRST --second SECOND --config Release --first-arg ARG --second-arg ARG
 ```
+
+`workflow generate benchmark` только записывает обычный манифест v2 и не
+перезаписывает существующий файл. Относительные `--build-dir` и `--output`
+считаются от cwd CLI. Полный пример — в [рецептах](ru/recipes.md).
+
+`workflow generate profile`, `test-matrix`, `build-matrix` и
+`benchmark-matrix` используют отдельные типизированные контракты. Сложные
+матрицы передаются через `--recipe FILE --output MANIFEST`;
+см. [описание рецептов](ru/recipes.md).
 
 `--jobs` по умолчанию 1. `--only` повторяемый. Без `--results-dir` workflow run
 использует `out/workflow-runs` рядом с manifest и создаёт внутри отдельный run.

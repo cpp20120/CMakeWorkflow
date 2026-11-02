@@ -91,7 +91,11 @@ public static class ToolingCommand
         { Console.Out.WriteLine(JsonSerializer.Serialize(plan, ToolingJson.Default.ToolingPlan)); return; }
         Console.Out.WriteLine($"Profiles: {string.Join(", ", plan.Profiles)}; platform: {plan.Platform}; package manager: {plan.PackageManager}");
         foreach (var tool in plan.Tools)
+        {
             Console.Out.WriteLine($"{(tool.Installed ? "ready" : "missing"),-7} {tool.Id,-12} {tool.Command ?? tool.Diagnostic ?? ""} {tool.Version ?? ""}");
+            if (tool.Installed && tool.Diagnostic is not null)
+                Console.Out.WriteLine($"  {tool.Id}: {tool.Diagnostic}");
+        }
         foreach (var step in plan.Steps)
             Console.Out.WriteLine($"  {step.Tool}: {step.Method} {step.Executable} {string.Join(" ", step.Arguments)} {step.Source} {step.Diagnostic}");
     }

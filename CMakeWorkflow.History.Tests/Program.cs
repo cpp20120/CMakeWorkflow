@@ -267,6 +267,42 @@ try
         Check(store.Metrics(id, "cycles:u", "main", null).Single().Value == 1234,
             "single-profile analysis counters");
     }
+    var userProfile = Path.Combine(root, "profile-user-domain");
+    var kernelProfile = Path.Combine(root, "profile-kernel-domain");
+    foreach (var (path, domain) in new[] { (userProfile, "user"), (kernelProfile, "kernel") })
+    {
+        Directory.CreateDirectory(Path.Combine(path, "traces", "normalized"));
+        Write(path, "run.json", Workflow("succeeded", 1, 2));
+        Write(path, "counter-comparison.json",
+            "{\"schemaVersion\":2,\"backend\":\"perf stat\",\"variants\":[" +
+            "{\"name\":\"main\",\"events\":{},\"derived\":{" +
+            "\"ipc\":{\"value\":1.25,\"unit\":\"instructions/cycle\",\"domain\":\"" + domain + "\"}}}]}");
+    }
+    Write(userProfile, "analysis.json", """
+        [{"captureId":"capture_main","backend":"perf","mode":"cpu",
+          "captureStatus":"complete","analysisStatus":"failed"}]
+        """);
+    Write(Path.Combine(userProfile, "traces", "normalized"), "capture_main.stacks.json", """
+        {"schemaVersion":2,"analysisStatus":"complete","samples":10,"stacks":[]}
+        """);
+    using (var store = new HistoryStore(dbPath))
+    {
+        store.Import(userProfile, false);
+        store.Import(kernelProfile, false);
+        var user = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == userProfile);
+        var kernel = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == kernelProfile);
+        Check(store.Metrics(user.Id, "ipc", null, null).Single().Method == "perf stat derived user"
+            && !store.Show(user.Id).Artifacts.Any(x => x.Type == "cpu-stacks"),
+            "History indexed a stale stack after failed normalization.");
+        var output = new StringWriter(); var old = Console.Out; Console.SetOut(output);
+        try { await HistoryCommand.ExecuteAsync(["compare", user.Id, kernel.Id, "--db", dbPath, "--json"], default); }
+        finally { Console.SetOut(old); }
+        using var comparison = JsonDocument.Parse(output.ToString());
+        Check(comparison.RootElement.EnumerateArray().Any(x =>
+            x.GetProperty("metric").GetString() == "ipc"
+            && x.GetProperty("status").GetString() == "incompatible"),
+            "History compared user and kernel IPC as equivalent.");
+    }
     var generatedA = Path.Combine(root, "generated-a");
     var generatedB = Path.Combine(root, "generated-b");
     Directory.CreateDirectory(generatedA);

@@ -8,6 +8,7 @@ Choose a language / Выберите язык:
 | [Get started in 5 minutes](en/getting-started.md) | [Начало работы за 5 минут](ru/getting-started.md) |
 | [CLI reference](en/cli.md) | [Справочник CLI](cli.md) |
 | [Workflows and manifests](en/workflows.md) | [Workflow и манифесты](workflows.md) |
+| [Typed recipes](en/recipes.md) | [Типизированные рецепты](ru/recipes.md) |
 | [Recovery and safe resumption](en/recovery.md) | [Восстановление и продолжение](recovery.md) |
 
 CMakeWorkflow is a **.NET 10 workflow orchestrator for CMake projects**, not a native build-system replacement. It manages workflow dependencies, process lifetime, build-tree coordination, evidence/provenance and saved results; CMake and its generator still manage compilation and native dependencies.

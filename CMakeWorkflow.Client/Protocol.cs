@@ -67,6 +67,31 @@ public sealed record PrepareProfileOptions(string RequestId, string ResultsDirec
     List<ProfileVariantOptions> Variants, int Repeats = 3, double TimeoutSeconds = 300,
     string Backend = "auto", string Mode = "cpu", string? Configuration = null,
     string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
+public sealed record BenchmarkRecipeV1(string Kind, int SchemaVersion, string BuildDirectory,
+    string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments);
+public sealed record PrepareBenchmarkOptions(string RequestId, string OutputPath, BenchmarkRecipeV1 Recipe);
+public sealed record PreparedBenchmark(int SchemaVersion, string Manifest, string ManifestSha256);
+public sealed record ProfileRecipeVariantV1(string Name, string BuildDirectory);
+public sealed record ProfileRecipeV1(string Kind, int SchemaVersion, ProfileRecipeVariantV1[] Variants,
+    string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments,
+    string Backend, string Mode, string Platform, string? SourceDirectory = null,
+    string? ConfigurePreset = null);
+public sealed record TestMatrixGroupV1(string Name, string? TestRegex = null, string? LabelRegex = null);
+public sealed record TestMatrixRecipeV1(string Kind, int SchemaVersion, string BuildDirectory,
+    string Target, string? Configuration, TestMatrixGroupV1[] Groups,
+    string ExecutionOrder, double TimeoutSeconds);
+public sealed record BuildVariantV1(string Name, string BuildDirectory, string? Configuration = null);
+public sealed record BuildMatrixRecipeV1(string Kind, int SchemaVersion, BuildVariantV1[] Variants,
+    string[] Targets);
+public sealed record BenchmarkAxisV1(string Name, string Flag, string[] Values);
+public sealed record BenchmarkMatrixRecipeV1(string Kind, int SchemaVersion, BuildVariantV1[] Variants,
+    string Target, int Repeats, double TimeoutSeconds, string[] FixedArguments,
+    BenchmarkAxisV1[] Axes, string ExecutionOrder);
+public sealed record PrepareProfileRecipeOptions(string RequestId, string OutputPath, ProfileRecipeV1 Recipe);
+public sealed record PrepareTestMatrixOptions(string RequestId, string OutputPath, TestMatrixRecipeV1 Recipe);
+public sealed record PrepareBuildMatrixOptions(string RequestId, string OutputPath, BuildMatrixRecipeV1 Recipe);
+public sealed record PrepareBenchmarkMatrixOptions(string RequestId, string OutputPath, BenchmarkMatrixRecipeV1 Recipe);
+public sealed record PreparedRecipe(int SchemaVersion, string Manifest, string ManifestSha256);
 public sealed record AnalyzeProfileOptions(string RunDirectory);
 public sealed record AnalyzedProfile(int SchemaVersion, string RunDirectory, string AnalysisFile);
 public sealed record ReplayProfileOptions(string BaselineDirectory, string CandidateDirectory,
@@ -104,6 +129,11 @@ internal partial interface IClientRpc
     [JsonRpcMethod("toolchains/inspectEnvironment")] Task<DeveloperEnvironmentSnapshot> ToolchainsInspectEnvironmentAsync(ToolchainInspectEnvironmentRequest request, CancellationToken ct);
 
     [JsonRpcMethod("profile/prepare")] Task<PreparedWorkflow> ProfilePrepareAsync(PrepareProfileOptions request, CancellationToken ct);
+    [JsonRpcMethod("benchmark/prepare")] Task<PreparedBenchmark> BenchmarkPrepareAsync(PrepareBenchmarkOptions request, CancellationToken ct);
+    [JsonRpcMethod("profileRecipe/prepare")] Task<PreparedRecipe> ProfileRecipePrepareAsync(PrepareProfileRecipeOptions request, CancellationToken ct);
+    [JsonRpcMethod("testMatrix/prepare")] Task<PreparedRecipe> TestMatrixPrepareAsync(PrepareTestMatrixOptions request, CancellationToken ct);
+    [JsonRpcMethod("buildMatrix/prepare")] Task<PreparedRecipe> BuildMatrixPrepareAsync(PrepareBuildMatrixOptions request, CancellationToken ct);
+    [JsonRpcMethod("benchmarkMatrix/prepare")] Task<PreparedRecipe> BenchmarkMatrixPrepareAsync(PrepareBenchmarkMatrixOptions request, CancellationToken ct);
     [JsonRpcMethod("profile/analyze")] Task<AnalyzedProfile> ProfileAnalyzeAsync(AnalyzeProfileOptions request, CancellationToken ct);
     [JsonRpcMethod("profile/replay")] Task<ReplayProfileResult> ProfileReplayAsync(ReplayProfileOptions request, CancellationToken ct);
     [JsonRpcMethod("target/prepare")] Task<PreparedWorkflow> TargetPrepareAsync(PrepareTargetOptions request, CancellationToken ct);
@@ -142,6 +172,22 @@ internal partial interface IClientRpc
 [JsonSerializable(typeof(ProfileVariantOptions))]
 [JsonSerializable(typeof(List<ProfileVariantOptions>))]
 [JsonSerializable(typeof(PrepareProfileOptions))]
+[JsonSerializable(typeof(BenchmarkRecipeV1))]
+[JsonSerializable(typeof(PrepareBenchmarkOptions))]
+[JsonSerializable(typeof(PreparedBenchmark))]
+[JsonSerializable(typeof(ProfileRecipeVariantV1))]
+[JsonSerializable(typeof(ProfileRecipeV1))]
+[JsonSerializable(typeof(TestMatrixGroupV1))]
+[JsonSerializable(typeof(TestMatrixRecipeV1))]
+[JsonSerializable(typeof(BuildVariantV1))]
+[JsonSerializable(typeof(BuildMatrixRecipeV1))]
+[JsonSerializable(typeof(BenchmarkAxisV1))]
+[JsonSerializable(typeof(BenchmarkMatrixRecipeV1))]
+[JsonSerializable(typeof(PrepareProfileRecipeOptions))]
+[JsonSerializable(typeof(PrepareTestMatrixOptions))]
+[JsonSerializable(typeof(PrepareBuildMatrixOptions))]
+[JsonSerializable(typeof(PrepareBenchmarkMatrixOptions))]
+[JsonSerializable(typeof(PreparedRecipe))]
 [JsonSerializable(typeof(AnalyzeProfileOptions))]
 [JsonSerializable(typeof(AnalyzedProfile))]
 [JsonSerializable(typeof(ReplayProfileOptions))]

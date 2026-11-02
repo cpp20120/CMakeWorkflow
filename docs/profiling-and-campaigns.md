@@ -139,3 +139,24 @@ Mutation/weak-memory сохраняют report и `campaign-completion.json`, и
 `Fuzz run: ...`; triage создаёт `triage.json`, merge — `merge.json`.
 Не считайте незавершённый report успешным и не обещайте rollback corpus или
 созданных файлов при отмене.
+
+## Качество анализа и perf counters
+
+Рецепт профилирования исполняется обычным workflow engine:
+
+```sh
+CMakeWorkflow workflow generate profile --build-dir out/build/release --target bench \
+  --config Release --repeats 3 --backend perf --mode cpu \
+  --output workflows/profile.json -- --case chain
+CMakeWorkflow workflow plan workflows/profile.json
+CMakeWorkflow workflow run workflows/profile.json --results-dir out/profile-results
+CMakeWorkflow profile analyze RUN_DIRECTORY
+```
+
+На Linux timing без инструментирования отделён от PMU-счётчиков `perf stat` и выборок стеков `perf record`. CPU capture запрашивает `cycles:u` и пользовательские call chains; он не меняет `perf_event_paranoid` и не требует kernel call chains. Для scheduler tracepoints нужны отдельные разрешения. Суффиксы `:u` и `:k` обозначают разные домены событий. Исходные имена сохраняются. IPC (`instructions / cycles`), cache MPKI (`1000 * cache-misses / instructions`) и branch MPKI (`1000 * branch-misses / instructions`) вычисляются только для совместимого домена. При multiplexing perf возвращает масштабированную оценку; отчёт сохраняет процент времени работы счётчика. Недоступное событие не считается нулём. Автоматической эквивалентности с ETW или Instruments нет.
+
+`traces/normalized/*.stacks.json` версии 2 содержит стеки в порядке от корня к листу, число выборок и разрешённых/неразрешённых кадров, статус `complete`, `partial` либо `no_samples`. `symbolizedSamples` означает хотя бы один разрешённый кадр, `fullyResolvedSamples` — все сохранённые кадры. `selfSamples` у горячей функции — число выборок с этой функцией в листе, не CPU-время и не inclusive overhead. Для улучшения символизации нужны debug symbols. `analysis.json` отдельно показывает `captureStatus` и `analysisStatus`, краткую сводку и ошибки декодирования. Если `perf script` выводит данные без распознаваемых заголовков samples, анализ возвращает ненулевой код, сохраняя исходный trace. Повторный анализ проверяет hash trace и атомарно обновляет аналитические результаты без новой сборки или запуска benchmark. Малое число выборок не даёт статистического заключения о регрессии.
+
+В схеме стеков v2 `samples` — число распознанных заголовков выборок, а `parsedSamples` — число выборок хотя бы с одним кадром. Анализатор сохраняет до 96 кадров на выборку и сообщает о сокращении стека. `droppedDistinctStacks` является нижней оценкой, если достигнут лимит различных стеков.
+
+Нормализатор CPU также поддерживает вариант `perf script`, где IP и символ листового кадра находятся в строке заголовка выборки. `analysis.json` содержит `reportedSamples` из `perf report`, `sampleCountMatchesReport` и `parsedSamples` в сводке. Несовпадение числа выборок получает статус `partial`, а ненулевая запись без разобранных стеков — `failed`. Ошибка самого `perf report` тоже отражается через `analysisStatus: failed`; исходный trace сохраняется. Если есть manifest захвата, но нет подтверждённого `.results.json`, анализ фиксирует `capture_incomplete` и статус из `runs.jsonl`, а не пропускает незавершённый захват. Частичный разбор сопровождается предупреждениями о качестве. После обновления CMakeWorkflow достаточно повторить `profile analyze RUN_DIRECTORY`, не перезапуская benchmark.

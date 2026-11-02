@@ -75,3 +75,24 @@ History imports successful, non-warmup raw samples under method `dagflow-harness
 | `dagflow fuzz merge` | Merge saved corpus/coverage evidence |
 
 Fuzz backends: `libfuzzer`, `aflpp`, `honggfuzz`; they must match the configured build tree. Fuzz duration range is **1–86,400 seconds**, input timeout **1–3,600 seconds**, max length **1–1,048,576 bytes**. Coverage merge can actually execute a fuzzer; it is not merely a file copy. Mutation and weak-memory reports use `campaign-completion.json` with a report SHA-256 to establish completeness. A partially written report is not a completed campaign; cancellation does not roll back created outputs or corpora. See [CampaignCommand](../../CMakeWorkflow.Campaigns/CampaignCommand.cs).
+
+## Analysis quality and perf counters
+
+A generated profile workflow can be inspected and replayed through the ordinary engine:
+
+```sh
+CMakeWorkflow workflow generate profile --build-dir out/build/release --target bench \
+  --config Release --repeats 3 --backend perf --mode cpu \
+  --output workflows/profile.json -- --case chain
+CMakeWorkflow workflow plan workflows/profile.json
+CMakeWorkflow workflow run workflows/profile.json --results-dir out/profile-results
+CMakeWorkflow profile analyze RUN_DIRECTORY
+```
+
+On Linux, uninstrumented timing is separate from `perf stat` PMU counters and `perf record` sampled stacks. CPU capture requests `cycles:u` with user call chains; it does not lower `perf_event_paranoid` or request privileged kernel call chains. Scheduler tracepoints have separate permission requirements. `:u` and `:k` identify user and kernel event domains. The counter report preserves those names and derives IPC (`instructions / cycles`), cache MPKI (`1000 * cache-misses / instructions`), and branch MPKI (`1000 * branch-misses / instructions`) only from matching domains. Multiplexed perf values are reported as scaled estimates with their running percentage; unsupported events are not zero. These metrics do not have automatic equivalence with ETW or Instruments.
+
+`traces/normalized/*.stacks.json` schema v2 stores root-to-leaf stacks, unweighted sample counts, resolved/unresolved frame counts, and a `complete`, `partial`, or `no_samples` analysis status. `symbolizedSamples` means at least one frame was resolved; `fullyResolvedSamples` means every retained frame was resolved. Hot-function `selfSamples` counts resolved leaf samples, not CPU time or inclusive overhead. Build with symbols for better attribution. `analysis.json` distinguishes `captureStatus` from `analysisStatus`, includes a compact summary, and records decode failures. If nonempty perf script output has no recognizable sample headers, analysis fails with a nonzero exit code while preserving the raw trace. Reanalysis verifies the saved trace hash and atomically replaces analytical outputs; it does not rebuild or execute the target. A small sample count is descriptive evidence, not a regression verdict.
+
+In stack schema v2, `samples` counts recognized sample headers, while `parsedSamples` counts those with one or more frames. The analyzer retains up to 96 frames per sample and records any truncation. `droppedDistinctStacks` is a lower bound if the distinct-stack limit is reached.
+
+The CPU normalizer also accepts `perf script` formats with an inline sampled leaf after the event header. For CPU captures, `analysis.json` reports `reportedSamples` from `perf report`, `sampleCountMatchesReport`, and `parsedSamples` in the summary. A mismatch is marked `partial`, not silently `complete`; a nonempty capture with no decoded stacks is a failed analysis. Errors from `perf report` itself are also recorded as `analysisStatus: failed`, while the original trace remains available. An interrupted capture with a manifest but no committed `.results.json` is recorded as `capture_incomplete` using its `runs.jsonl` status, instead of disappearing from analysis. Partial decoding lists concrete quality warnings. Re-run `profile analyze RUN_DIRECTORY` against an existing trace after updating CMakeWorkflow; no benchmark rerun is required.

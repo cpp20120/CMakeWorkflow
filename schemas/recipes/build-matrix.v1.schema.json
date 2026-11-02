@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cpp20120/CMakeWorkflow/schemas/recipes/build-matrix.v1.schema.json",
+  "title": "CMakeWorkflow BuildMatrixRecipeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "schemaVersion", "variants", "targets"],
+  "properties": {
+    "kind": { "const": "build-matrix" },
+    "schemaVersion": { "const": 1 },
+    "variants": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/variant" } },
+    "targets": { "type": "array", "minItems": 1, "maxItems": 512, "items": {
+      "type": "string", "pattern": "^[A-Za-z0-9_.+\\-]+$" } }
+  },
+  "$defs": { "variant": { "type": "object", "additionalProperties": false,
+    "required": ["name", "buildDirectory"], "properties": {
+      "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+      "buildDirectory": { "type": "string", "minLength": 1 },
+      "configuration": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.+\\-]+$" }
+    } } }
+}

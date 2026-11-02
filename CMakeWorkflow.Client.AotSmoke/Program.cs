@@ -30,7 +30,9 @@ try
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (!string.Equals(client.Host.WorkspaceDirectory, workspace, comparison))
             throw new InvalidOperationException("Host bound a different workspace.");
-        foreach (var capability in new[] { "workflow/plan", "workflow/start", "operations/get", "operations/find", "operations/cancel", "operations/events", "workflow/recoveryInspect" })
+        foreach (var capability in new[] { "workflow/plan", "workflow/start", "benchmark/prepare",
+            "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare",
+            "operations/get", "operations/find", "operations/cancel", "operations/events", "workflow/recoveryInspect" })
             if (!client.Host.Capabilities.Contains(capability, StringComparer.Ordinal))
                 throw new InvalidOperationException("Host lacks " + capability);
         Console.WriteLine($"PASS NativeAOT initialize: Host {hostPid}; workspace={workspace}");
@@ -39,6 +41,42 @@ try
         // Never execute a repository workflow. All fixtures belong to this smoke.
         var fixture = Path.Combine(workspace, "sdk-aot-smoke-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixture);
+        var benchmarkBuild = Directory.CreateDirectory(Path.Combine(fixture, "benchmark build")).FullName;
+        var benchmarkOptions = new PrepareBenchmarkOptions(Guid.NewGuid().ToString("N"),
+            Path.Combine(fixture, "benchmark.json"), new BenchmarkRecipeV1("benchmark", 1,
+                benchmarkBuild, "example", "Release", 2, 30, ["--case", "a b"]));
+        var benchmark = await client.Benchmarks.PrepareAsync(benchmarkOptions, ct);
+        if (benchmark.SchemaVersion != 1 || benchmark.Manifest != benchmarkOptions.OutputPath
+            || benchmark.ManifestSha256 != Convert.ToHexString(SHA256.HashData(
+                await File.ReadAllBytesAsync(benchmark.Manifest, ct)))
+            || benchmark != await client.Benchmarks.PrepareAsync(benchmarkOptions, ct))
+            throw new InvalidOperationException("NativeAOT Benchmark preparation or replay failed.");
+        Console.WriteLine("PASS NativeAOT typed benchmark preparation and exact manifest hash.");
+        var recipeVariant = new BuildVariantV1("main", benchmarkBuild, "Release");
+        var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+        var recipePreparations = new[]
+        {
+            await client.Recipes.PrepareProfileAsync(new(Guid.NewGuid().ToString("N"),
+                Path.Combine(fixture, "profile-recipe.json"), new ProfileRecipeV1("profile", 1,
+                    [new("main", benchmarkBuild)], "example", "Release", 1, 30, [],
+                    "auto", "cpu", platform)), ct),
+            await client.Recipes.PrepareTestMatrixAsync(new(Guid.NewGuid().ToString("N"),
+                Path.Combine(fixture, "test-matrix.json"), new TestMatrixRecipeV1("test-matrix", 1,
+                    benchmarkBuild, "example", "Release", [new("unit", LabelRegex: "unit")],
+                    "parallel", 30)), ct),
+            await client.Recipes.PrepareBuildMatrixAsync(new(Guid.NewGuid().ToString("N"),
+                Path.Combine(fixture, "build-matrix.json"), new BuildMatrixRecipeV1("build-matrix", 1,
+                    [recipeVariant], ["example"])), ct),
+            await client.Recipes.PrepareBenchmarkMatrixAsync(new(Guid.NewGuid().ToString("N"),
+                Path.Combine(fixture, "benchmark-matrix.json"), new BenchmarkMatrixRecipeV1(
+                    "benchmark-matrix", 1, [recipeVariant], "example", 2, 30, [],
+                    [new("case", "--case", ["chain"])], "round-robin")), ct)
+        };
+        foreach (var item in recipePreparations)
+            if (item.SchemaVersion != 1 || item.ManifestSha256 != Convert.ToHexString(
+                SHA256.HashData(await File.ReadAllBytesAsync(item.Manifest, ct))))
+                throw new InvalidOperationException("NativeAOT typed recipe response/hash mismatch.");
+        Console.WriteLine("PASS NativeAOT typed Profile, Test Matrix, Build Matrix and Benchmark Matrix preparation.");
         var manifest = Path.Combine(fixture, "workflow.json");
         var bytes = Encoding.UTF8.GetBytes("""
             {"schemaVersion":2,"contexts":{"probe":{"buildDirectory":"unconfigured","mode":"observe"}},

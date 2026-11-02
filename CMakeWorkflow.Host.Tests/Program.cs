@@ -38,6 +38,8 @@ try
         SetPrivateUnixDirectory(socketDirectory);
     }
     DurableAcceptanceTests.Run(root);
+    BenchmarkRecipeTests.Run(root);
+    TypedRecipeTests.Run(root);
     DurableRecoveryTests.Run(root);
     await ResumeReplayTests.RunAsync(root);
     await DurableExecutionProcessTests.RunAsync(root);
@@ -55,6 +57,77 @@ try
     await Reject<ArgumentException>(() => session.InitializeAsync(new(1, "relative"), default), "absolute workspace required");
     var hello = await session.InitializeAsync(new(1, root), default);
     Check(hello.ProtocolVersion == 1 && hello.Capabilities.Contains("tooling/doctor"), "handshake capabilities");
+    Check(hello.Capabilities.Contains("benchmark/prepare"), "Benchmark preparation capability missing");
+    var benchmarkOutput = Path.Combine(root, "benchmark definitions", "chain.json");
+    var benchmarkRequest = new BenchmarkPrepareRequest(Guid.NewGuid().ToString("N"),
+        benchmarkOutput, new CMakeWorkflow.BenchmarkRecipeV1("benchmark", 1,
+            Path.Combine(root, "unconfigured build"), "worker", "Release", 2, 30, ["a b"]));
+    var benchmarkPrepared = await session.BenchmarkPrepareAsync(benchmarkRequest, default);
+    Check(benchmarkPrepared.Manifest == benchmarkOutput
+        && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(benchmarkOutput)))
+        && await session.BenchmarkPrepareAsync(benchmarkRequest, default) == benchmarkPrepared,
+        "Direct Host Benchmark preparation is not persistent and idempotent");
+    await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkPrepareAsync(
+        benchmarkRequest with { Recipe = benchmarkRequest.Recipe with { Repeats = 3 } }, default),
+        "Benchmark request ID conflict not rejected");
+    await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkPrepareAsync(
+        benchmarkRequest with { RequestId = Guid.NewGuid().ToString("N"),
+            OutputPath = Path.Combine(Path.GetTempPath(), "outside-benchmark.json") }, default),
+        "Benchmark output escaped initialized workspace");
+    Console.WriteLine("Direct Host Benchmark preparation checks passed.");
+    var newCapabilities = new[] { "profileRecipe/prepare", "testMatrix/prepare",
+        "buildMatrix/prepare", "benchmarkMatrix/prepare" };
+    Check(newCapabilities.All(hello.Capabilities.Contains), "Typed recipe Host capability missing");
+    var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+    var profileRecipe = new CMakeWorkflow.Profiling.ProfileRecipeV1("profile", 1,
+        [new("main", benchmarkRequest.Recipe.BuildDirectory)], "worker", "Release", 1, 30,
+        ["literal argument"], "auto", "cpu", platform);
+    var profileOutput = Path.Combine(root, "profile-recipe.json");
+    var profileRecipeRequest = new ProfileRecipePrepareRequest(Guid.NewGuid().ToString("N"),
+        profileOutput, profileRecipe);
+    var profileRecipeReady = await session.ProfileRecipePrepareAsync(profileRecipeRequest, default);
+    Check(profileRecipeReady == await session.ProfileRecipePrepareAsync(profileRecipeRequest, default)
+        && profileRecipeReady.ManifestSha256 == Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(profileOutput))),
+        "Profile recipe Host prepare/hash/replay");
+    var testRecipe = new CMakeWorkflow.TestMatrixRecipeV1("test-matrix", 1,
+        benchmarkRequest.Recipe.BuildDirectory, "worker", "Release",
+        [new("unit", LabelRegex: "unit")], "parallel", 30);
+    var testOutput = Path.Combine(root, "test-matrix.json");
+    var testRequest = new TestMatrixPrepareRequest(Guid.NewGuid().ToString("N"), testOutput, testRecipe);
+    var testReady = await session.TestMatrixPrepareAsync(testRequest, default);
+    Check(testReady == await session.TestMatrixPrepareAsync(testRequest, default)
+        && testReady.ManifestSha256 == Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(testOutput))),
+        "Test Matrix Host prepare/hash/replay");
+    var variants = new[] { new CMakeWorkflow.BuildVariantV1("one", benchmarkRequest.Recipe.BuildDirectory, "Release") };
+    var buildRecipe = new CMakeWorkflow.BuildMatrixRecipeV1("build-matrix", 1, variants, ["worker"]);
+    var buildOutput = Path.Combine(root, "build-matrix.json");
+    var buildRequest = new BuildMatrixPrepareRequest(Guid.NewGuid().ToString("N"), buildOutput, buildRecipe);
+    var buildReady = await session.BuildMatrixPrepareAsync(buildRequest, default);
+    Check(buildReady == await session.BuildMatrixPrepareAsync(buildRequest, default)
+        && buildReady.ManifestSha256 == Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(buildOutput))),
+        "Build Matrix Host prepare/hash/replay");
+    var matrixRecipe = new CMakeWorkflow.BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
+        variants, "worker", 2, 30, ["a b"], [new("case", "--case", ["x", "y"])], "round-robin");
+    var matrixOutput = Path.Combine(root, "benchmark-matrix.json");
+    var matrixRequest = new BenchmarkMatrixPrepareRequest(Guid.NewGuid().ToString("N"),
+        matrixOutput, matrixRecipe);
+    var matrixReady = await session.BenchmarkMatrixPrepareAsync(matrixRequest, default);
+    Check(matrixReady == await session.BenchmarkMatrixPrepareAsync(matrixRequest, default)
+        && matrixReady.ManifestSha256 == Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(matrixOutput))),
+        "Benchmark Matrix Host prepare/hash/replay");
+    await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkMatrixPrepareAsync(
+        matrixRequest with { Recipe = matrixRecipe with { Repeats = 3 } }, default),
+        "Benchmark Matrix conflicting request ID was accepted");
+    await Reject<StreamJsonRpc.LocalRpcException>(() => session.TestMatrixPrepareAsync(
+        testRequest with { RequestId = Guid.NewGuid().ToString("N"),
+            OutputPath = Path.Combine(Path.GetTempPath(), "outside-test-matrix.json") }, default),
+        "Test Matrix output escaped workspace");
+    Console.WriteLine("Direct Host typed recipe preparation checks passed.");
     await Reject<InvalidOperationException>(() => session.InitializeAsync(new(1, Path.GetTempPath()), default), "session cannot change workspace");
     // Provisioning RPC contract: workspace confinement, plan hash and non-mutating apply.
     var environmentFile = Path.Combine(root, "host-environment.json");

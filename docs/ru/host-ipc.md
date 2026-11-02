@@ -16,9 +16,21 @@
 | Operations | `operations/find`, `operations/get`, `operations/cancel`, `operations/events`, `runs/get` |
 | History | `history/runs`, `history/show`, `history/metrics`, `history/query`, `history/compare`, `history/detect` |
 | Profiling | `profile/prepare`, `profile/analyze`; исполнение — через `workflow/start` |
+| Benchmark | `benchmark/prepare`; подготовка манифеста без запуска, исполнение — через `workflow/start` |
 | Environment | `environment/plan`, `environment/apply` |
 
 **Важно:** Doctor/Fix работают в рамках соединения, а durable workflow operations обладают собственной идентичностью и могут пережить разрыв соединения. Disconnect не означает отмену запущенного workflow. При переподключении нужно прочитать operation state или persisted report. Отмена запроса `$/cancelRequest` и явная отмена операции — разные контракты.
+
+### Benchmark-рецепт через общий workflow lifecycle
+
+Отдельный метод `benchmark/prepare` принимает типизированный версионированный
+Benchmark-рецепт и сохраняет обычный workflow manifest без запуска. Точный
+[контракт и пример](recipes.md#host-rpc). Полученный manifest/hash можно
+проверить через `workflow/plan`, затем явно передать в `workflow/start`.
+
+Новые типизированные рецепты используют `profileRecipe/prepare`,
+`testMatrix/prepare`, `buildMatrix/prepare` и `benchmarkMatrix/prepare`.
+Отдельные DTO, пути и семантика графа описаны в [рецептах](recipes.md#host-preparation).
 
 ### Profiling через общий workflow lifecycle
 

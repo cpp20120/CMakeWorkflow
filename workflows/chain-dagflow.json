@@ -1,0 +1,285 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "benchmark": {
+      "buildDirectory": "/home/cppshizoid/Code/dagcamke/DagFlow/out/build/release",
+      "configuration": "Release",
+      "configurePreset": null,
+      "sourceDirectory": null,
+      "mode": "adopt",
+      "generator": null,
+      "provenancePolicy": "allowUnverified",
+      "toolchain": null
+    }
+  },
+  "nodes": [
+    {
+      "id": "build",
+      "kind": "build",
+      "context": "benchmark",
+      "target": "dagflow_public_api_bench",
+      "from": null,
+      "dependsOn": [],
+      "arguments": [],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [],
+      "exclusive": false,
+      "timeoutSeconds": null
+    },
+    {
+      "id": "timing_001",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "build"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_002",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_001"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_003",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_002"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_004",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_003"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_005",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_004"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_006",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_005"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_007",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_006"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_008",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_007"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_009",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_008"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_010",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build",
+      "dependsOn": [
+        "timing_009"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    }
+  ]
+}

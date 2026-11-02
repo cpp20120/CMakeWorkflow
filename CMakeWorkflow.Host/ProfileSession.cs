@@ -85,6 +85,6 @@ public sealed partial class DoctorSession
         var actual = await File.ReadAllBytesAsync(path, cancellationToken);
         if (!actual.AsSpan().SequenceEqual(bytes))
             throw new ApplicationRefusal("request_id_conflict",
-                "A different profile preparation already exists for this RequestId.");
+                "A different preparation is already committed at this path or for this RequestId.");
     }
 }

@@ -27,6 +27,80 @@ try
             "perf script folded stack parsing or normalization failed.");
     }
     using (var script = new StringReader("""
+        dagflow-public- 1804384/1804384 835331.745025: 1 cycles:u:
+                    7f10 dagflow::TaskGraph::seal() (/tmp/dagflow_public_api_bench)
+                    7f11 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+
+        worker 101/102 835332.000001: 1 cpu-clock:u:
+                    0000000000400010 [unknown] (/tmp/dagflow_public_api_bench)
+                    7f11 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+
+        worker 101 [003] 835333.000001: 1 cycles:
+                    7f20 dagflow::TaskGraph::add_edge() (/tmp/dagflow_public_api_bench)
+
+        nonsense unsupported header
+        """))
+    {
+        var parsed = PerfStackAnalyzer.Parse(script, CancellationToken.None);
+        var stacks = parsed.ToJson("perf", "capture");
+        Check(stacks["samples"]!.GetValue<int>() == 3
+            && stacks["analysisStatus"]!.GetValue<string>() == "partial"
+            && stacks["unknownLeafFrames"]!.GetValue<int>() == 1
+            && stacks["resolvedFrames"]!.GetValue<int>() == 4,
+            "Real perf headers, mixed records, and frame quality were not parsed.");
+        var first = stacks["stacks"]!.AsArray().First(x =>
+            x!["frames"]!.AsArray().Any(f => f!.GetValue<string>().Contains("TaskGraph::seal")))!;
+        Check(first["frames"]!.AsArray()[0]!.GetValue<string>().Contains("worker_loop")
+            && first["frames"]!.AsArray()[0]!.GetValue<string>().Contains("libdagflow.so")
+            && first["frames"]!.AsArray()[1]!.GetValue<string>().Contains("TaskGraph::seal"),
+            "Call chain order or DSO attribution changed.");
+    }
+    // Some perf script -F formats place the sampled IP/symbol/DSO on the
+    // event header itself, followed by caller frames. The sampled leaf must
+    // remain in the stack and in the self-sample accounting.
+    using (var script = new StringReader("""
+        dagflow 123/124 [001] 456.123456: 42 cycles:u: 7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+                    7f456 std::thread::_M_run() (/usr/lib/libstdc++.so)
+
+        dagflow 123/124 [001] 456.123457: 42 cycles:u: 7f999 dagflow::TaskGraph::seal() (/tmp/libdagflow.so)
+
+        """))
+    {
+        var stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
+        Check(stacks["samples"]!.GetValue<int>() == 2
+            && stacks["parsedSamples"]!.GetValue<int>() == 2
+            && stacks["analysisStatus"]!.GetValue<string>() == "complete"
+            && stacks["resolvedFrames"]!.GetValue<int>() == 3,
+            "Inline perf script sample symbols were discarded or double-counted.");
+        var hot = stacks["hotFunctions"]!.AsArray();
+        Check(hot.Any(x => x!["frame"]!.GetValue<string>().Contains("Pool::worker_loop"))
+            && hot.Any(x => x!["frame"]!.GetValue<string>().Contains("TaskGraph::seal")),
+            "Inline sampled leaf was not counted as a hot function.");
+        var twoFrame = stacks["stacks"]!.AsArray().Single(x => x!["frames"]!.AsArray().Count == 2)!;
+        Check(twoFrame["frames"]!.AsArray()[0]!.GetValue<string>().Contains("std::thread")
+            && twoFrame["frames"]!.AsArray()[1]!.GetValue<string>().Contains("Pool::worker_loop"),
+            "Inline leaf and caller order is not root-to-leaf.");
+    }
+    using (var script = new StringReader("""
+        dagflow 123/124 456.123456: 42 cycles:u:
+
+        dagflow 123/124 456.123457: 42 cycles:u:
+                    7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+        """))
+    {
+        var stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
+        Check(stacks["analysisStatus"]!.GetValue<string>() == "partial"
+            && stacks["samples"]!.GetValue<int>() == 2
+            && stacks["parsedSamples"]!.GetValue<int>() == 1,
+            "Empty sampled call chains must not be claimed as complete.");
+    }
+    using (var script = new StringReader(""))
+        Check(PerfStackAnalyzer.Parse(script, CancellationToken.None).AnalysisStatus == "no_samples",
+            "Empty trace status changed.");
+    using (var script = new StringReader("unsupported header\n"))
+        Check(PerfStackAnalyzer.Parse(script, CancellationToken.None).AnalysisStatus == "unsupported_format",
+            "Unsupported nonempty trace was interpreted as empty.");
+    using (var script = new StringReader("""
         cmd 123 [003] 123.001234: sched:sched_wakeup: comm=worker pid=42 prio=120 target_cpu=003
         cmd 123 [003] 123.002345: sched:sched_switch: prev_comm=worker prev_pid=42 prev_prio=120 prev_state=S ==> next_comm=other next_pid=43 next_prio=120
         """))
@@ -44,6 +118,8 @@ try
     Check(perf.Calls.Count == 1 && perf.Calls[0].Executable == "perf"
         && perf.Calls[0].Args.Take(2).SequenceEqual(["record", "-o"])
         && perf.Calls[0].Args.Contains("--call-graph")
+        && perf.Calls[0].Args.Contains("--user-callchains")
+        && perf.Calls[0].Args.Contains("dwarf,16384")
         && perf.Calls[0].Args.TakeLast(3).SequenceEqual([executable, "--workers", "1"])
         && File.Exists(perfResult.RawTrace), "perf capture invocation or artifact");
     var counterResult = await new LinuxPerfBackend(perf).CaptureAsync(
@@ -286,8 +362,9 @@ try
         Check(variants[0].GetProperty("derived").GetProperty("ipc").GetProperty("value").GetDouble() == 2.5
             && variants[0].GetProperty("derived").GetProperty("cache_mpki").GetProperty("value").GetDouble() == 20,
             "Derived perf metrics must use the same capture and correct denominators.");
-        Check(variants[1].GetProperty("derived").GetProperty("ipc").GetProperty("ratioToBaseline").GetDouble() == 0.6,
-            "Derived ratio baseline mismatch.");
+        Check(variants[1].GetProperty("derived").GetProperty("ipc").GetProperty("ratioToBaseline").ValueKind
+            == System.Text.Json.JsonValueKind.Null,
+            "Unknown running fractions must not produce a counter comparison ratio.");
     }
     using (var comparison = System.Text.Json.JsonDocument.Parse(
         await File.ReadAllTextAsync(Path.Combine(analysis, "comparison.json"))))
@@ -297,6 +374,65 @@ try
             && variants[1].GetProperty("ratioToBaseline").GetDouble() == 0.5,
             "Profile timing comparison changed.");
     }
+    var modifiedCounters = Path.Combine(analysis, "traces", "raw", "counters.csv");
+    await File.WriteAllTextAsync(modifiedCounters,
+        "5899297,,cycles:u,4900589,100.00,,\n7634603,,instructions:u,4900589,100.00,,\n" +
+        "71172,,cache-misses:u,4900589,100.00,,\n22259,,branch-misses:u,4900589,100.00,,\n");
+    await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None);
+    using (var counters = System.Text.Json.JsonDocument.Parse(
+        await File.ReadAllTextAsync(Path.Combine(analysis, "counter-comparison.json"))))
+    {
+        var derived = counters.RootElement.GetProperty("variants")[0].GetProperty("derived");
+        Check(Math.Abs(derived.GetProperty("ipc").GetProperty("value").GetDouble() - 1.294) < .001
+            && Math.Abs(derived.GetProperty("cache_mpki").GetProperty("value").GetDouble() - 9.32) < .01
+            && Math.Abs(derived.GetProperty("branch_mpki").GetProperty("value").GetDouble() - 2.92) < .01
+            && derived.GetProperty("ipc").GetProperty("domain").GetString() == "user",
+            "Modified perf events did not yield compatible IPC and MPKI.");
+    }
+    await File.WriteAllTextAsync(modifiedCounters,
+        "100,,cycles:u,100,50.00,,\n200,,instructions:k,100,50.00,,\n" +
+        "<not supported>,,cache-misses:u,0,0.00,,\n");
+    await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None);
+    using (var counters = System.Text.Json.JsonDocument.Parse(
+        await File.ReadAllTextAsync(Path.Combine(analysis, "counter-comparison.json"))))
+        Check(!counters.RootElement.GetProperty("variants")[0].GetProperty("derived").TryGetProperty("ipc", out _),
+            "Mixed user/kernel counter domains produced misleading IPC.");
+    using (var analyzed = System.Text.Json.JsonDocument.Parse(
+        await File.ReadAllTextAsync(Path.Combine(analysis, "analysis.json"))))
+        Check(analyzed.RootElement.EnumerateArray().Any(x =>
+            x.GetProperty("captureId").GetString() == "counters_o3"
+            && x.GetProperty("analysisStatus").GetString() == "partial"
+            && x.GetProperty("analysisWarnings").GetArrayLength() > 0),
+            "Unsupported perf stat rows or incompatible domains were silently discarded.");
+    var failedCapture = Path.Combine(analysis, "capture_failed.results.json");
+    await File.WriteAllTextAsync(failedCapture,
+        """{"captureId":"capture_failed","backend":"perf","mode":"cpu","status":"failed"}""");
+    Check(await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None) == 1,
+        "Failed capture was reported as successful analysis.");
+    using (var analyzed = System.Text.Json.JsonDocument.Parse(
+        await File.ReadAllTextAsync(Path.Combine(analysis, "analysis.json"))))
+        Check(analyzed.RootElement.EnumerateArray().Any(x =>
+            x.GetProperty("captureId").GetString() == "capture_failed"
+            && x.GetProperty("analysisStatus").GetString() == "capture_failed"),
+            "Failed capture status was not preserved.");
+    File.Delete(failedCapture);
+    // A failed ProfileSession persists its manifest and journal entry, but
+    // deliberately does not commit a *.results.json capture record.
+    await File.WriteAllTextAsync(Path.Combine(analysis, "capture_interrupted.manifest.json"),
+        """{"captureId":"capture_interrupted","backend":"perf","mode":"cpu"}""");
+    await File.WriteAllTextAsync(Path.Combine(analysis, "runs.jsonl"),
+        """{"captureId":"capture_interrupted","status":"failed","error":"perf record denied"}""" + "\n");
+    Check(await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None) == 1,
+        "Manifest without capture results was reported as a successful analysis.");
+    using (var analyzed = System.Text.Json.JsonDocument.Parse(
+        await File.ReadAllTextAsync(Path.Combine(analysis, "analysis.json"))))
+        Check(analyzed.RootElement.EnumerateArray().Any(x =>
+            x.GetProperty("captureId").GetString() == "capture_interrupted"
+            && x.GetProperty("captureStatus").GetString() == "failed"
+            && x.GetProperty("analysisStatus").GetString() == "capture_incomplete"),
+            "Interrupted capture lost its failure evidence.");
+    File.Delete(Path.Combine(analysis, "capture_interrupted.manifest.json"));
+    File.Delete(Path.Combine(analysis, "runs.jsonl"));
     await File.WriteAllTextAsync(Path.Combine(analysis, "counters_o3.results.json"),
         """{"captureId":"counters_o3","backend":"perf","mode":"counters","rawTrace":"traces/raw/counters.csv","rawTraceSha256":"wrong","eventSource":"Linux PMU counters"}""");
     try

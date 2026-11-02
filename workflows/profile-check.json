@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "main": {
+      "buildDirectory": "/home/cppshizoid/Code/dagcamke/DagFlow/out/build/release",
+      "configuration": null,
+      "configurePreset": null,
+      "sourceDirectory": null,
+      "mode": "adopt",
+      "generator": null,
+      "provenancePolicy": "allowUnverified",
+      "toolchain": null
+    }
+  },
+  "nodes": [
+    {
+      "id": "build_main",
+      "kind": "build",
+      "context": "main",
+      "target": "dagflow_public_api_bench",
+      "from": null,
+      "dependsOn": [],
+      "arguments": [],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [],
+      "exclusive": false,
+      "timeoutSeconds": null
+    },
+    {
+      "id": "timing_main_1",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build_main",
+      "dependsOn": [
+        "build_main"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_main_2",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build_main",
+      "dependsOn": [
+        "timing_main_1"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "timing_main_3",
+      "kind": "run",
+      "context": null,
+      "target": null,
+      "from": "build_main",
+      "dependsOn": [
+        "timing_main_2"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {},
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": false,
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "counters_main",
+      "kind": "profile",
+      "context": null,
+      "target": null,
+      "from": "build_main",
+      "dependsOn": [
+        "timing_main_3"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {
+        "backend": "perf",
+        "mode": "counters",
+        "captureTimeoutSeconds": "300"
+      },
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": true,
+      "timeoutSeconds": 480
+    },
+    {
+      "id": "capture_main",
+      "kind": "profile",
+      "context": null,
+      "target": null,
+      "from": "build_main",
+      "dependsOn": [
+        "counters_main"
+      ],
+      "arguments": [
+        "--benchmark",
+        "chain"
+      ],
+      "workingDirectory": null,
+      "environment": {},
+      "options": {
+        "backend": "perf",
+        "mode": "cpu",
+        "captureTimeoutSeconds": "300"
+      },
+      "harnessDirectory": null,
+      "testRegex": null,
+      "labelRegex": null,
+      "resources": [
+        "measurement-host"
+      ],
+      "exclusive": true,
+      "timeoutSeconds": 480
+    }
+  ]
+}

@@ -113,14 +113,30 @@ public static class ProfileAnalyzer
         directory = Path.GetFullPath(directory);
         var captures = Directory.GetFiles(directory, "*.results.json")
             .Order(StringComparer.Ordinal).ToArray();
-        if (captures.Length == 0) throw new FileNotFoundException("No profile capture results found.", directory);
+        if (captures.Length == 0 && Directory.GetFiles(directory, "*.manifest.json").Length == 0)
+            throw new FileNotFoundException("No profile capture results or manifests found.", directory);
         var items = new JsonArray();
+        var analysisFailed = false;
         foreach (var capture in captures)
         {
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(capture, ct));
             var root = document.RootElement;
             var backend = root.GetProperty("backend").GetString()!;
             var mode = root.GetProperty("mode").GetString()!;
+            var recordedStatus = root.TryGetProperty("status", out var statusElement)
+                ? statusElement.GetString() : null;
+            if (recordedStatus is not null and not ("complete" or "succeeded"))
+            {
+                items.Add((JsonNode)new JsonObject
+                {
+                    ["captureId"] = root.GetProperty("captureId").GetString(),
+                    ["backend"] = backend, ["mode"] = mode,
+                    ["captureStatus"] = recordedStatus,
+                    ["analysisStatus"] = "capture_failed"
+                });
+                analysisFailed = true;
+                continue;
+            }
             var raw = Path.GetFullPath(Path.Combine(directory, root.GetProperty("rawTrace").GetString()!));
             if (!raw.StartsWith(directory + Path.DirectorySeparatorChar,
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
@@ -137,49 +153,135 @@ public static class ProfileAnalyzer
                 ["mode"] = mode,
                 ["rawTrace"] = Path.GetRelativePath(directory, raw),
                 ["eventSource"] = root.GetProperty("eventSource").GetString(),
+                ["captureStatus"] = root.TryGetProperty("status", out var captureStatus)
+                    ? captureStatus.GetString() : "unknown",
                 ["crossPlatformMetricEquivalence"] = false
             };
             if (backend == "perf" && mode == "counters")
             {
                 item["report"] = Path.GetRelativePath(directory, raw);
                 var counters = new JsonObject();
-                foreach (var (eventName, counter) in ReadPerfCounters(raw))
+                var counterWarnings = new List<string>();
+                var rawCounters = ReadPerfCounters(raw, counterWarnings);
+                foreach (var (eventName, counter) in rawCounters)
                     counters[eventName] = new JsonObject
                     {
                         ["value"] = JsonValue.Create(counter.Value, ProfileJson.Default.Double),
-                        ["unit"] = counter.Unit
+                        ["unit"] = counter.Unit,
+                        ["domain"] = counter.Domain,
+                        ["runningPercent"] = counter.RunningPercent is { } percent
+                            ? JsonValue.Create(percent, ProfileJson.Default.Double) : null
                     };
                 item["counters"] = counters;
+                var derived = new JsonObject();
+                foreach (var (metric, signal) in DeriveCounters(rawCounters))
+                    derived[metric] = new JsonObject
+                    {
+                        ["value"] = JsonValue.Create(signal.Value, ProfileJson.Default.Double),
+                        ["unit"] = signal.Unit, ["domain"] = signal.Domain,
+                        ["quality"] = signal.RunningPercent is null ? "running-fraction-unknown"
+                            : signal.RunningPercent < 100 ? "perf-scaled-multiplexed" : "reported-counts"
+                    };
+                item["derivedCounters"] = derived;
+                if (rawCounters.Count > 0 && derived.Count == 0)
+                    counterWarnings.Add("No compatible instructions/cycles event pair; derived PMU metrics unavailable.");
+                item["analysisStatus"] = counters.Count == 0 ? "no_supported_counters"
+                    : counterWarnings.Count > 0 ? "partial" : "complete";
+                if (counterWarnings.Count > 0)
+                {
+                    var warnings = new JsonArray();
+                    foreach (var warning in counterWarnings)
+                        warnings.Add((JsonNode?)JsonValue.Create(warning));
+                    item["analysisWarnings"] = warnings;
+                }
             }
             else if (backend == "perf")
             {
                 var report = Path.Combine(directory, item["captureId"]!.GetValue<string>() + ".perf-report.txt");
-                var result = await CommandExecution.RunAsync("perf",
-                    ["report", "-i", raw, "--stdio", "--no-children", "--sort", "symbol,dso"],
-                    directory, TimeSpan.FromMinutes(5), null, ct);
-                ProfileEnvironment.RequireSuccess(result, "perf report");
-                await File.WriteAllTextAsync(report, result.Output, ct);
-                item["report"] = Path.GetRelativePath(directory, report);
                 try
                 {
+                    var result = await CommandExecution.RunAsync("perf",
+                        ["report", "-i", raw, "--stdio", "--no-children", "--sort", "symbol,dso"],
+                        directory, TimeSpan.FromMinutes(5), null, ct);
+                    ProfileEnvironment.RequireSuccess(result, "perf report");
+                    await ProfileArtifactWriter.WriteTextAsync(report, result.Output, ct);
+                    item["report"] = Path.GetRelativePath(directory, report);
                     if (mode == "cpu")
                     {
                         var stacks = await PerfStackAnalyzer.AnalyzeAsync(raw, directory,
                             item["captureId"]!.GetValue<string>(), ct);
                         item["stacks"] = Path.GetRelativePath(directory, stacks);
+                        var normalized = JsonNode.Parse(await File.ReadAllTextAsync(stacks, ct))!.AsObject();
+                        var reportSamples = System.Text.RegularExpressions.Regex.Match(result.Output,
+                            @"(?m)^#\s*Samples:\s*(\d+)");
+                        var normalizedCount = normalized["samples"]!.GetValue<int>();
+                        var parsedCount = normalized["parsedSamples"]!.GetValue<int>();
+                        var status = normalized["analysisStatus"]!.GetValue<string>();
+                        if (reportSamples.Success && int.TryParse(reportSamples.Groups[1].Value, out var reported))
+                        {
+                            item["reportedSamples"] = reported;
+                            item["sampleCountMatchesReport"] = reported == normalizedCount;
+                            if (reported > 0 && (normalizedCount == 0 || parsedCount == 0))
+                                throw new InvalidDataException(
+                                    $"perf report contains {reported} samples, but perf script decoded " +
+                                    $"{normalizedCount} sample headers and {parsedCount} nonempty stacks.");
+                            if (reported != normalizedCount)
+                            {
+                                // The two perf interfaces can expose different subsets. Do not
+                                // silently claim complete analysis when the counts disagree.
+                                status = "partial";
+                                item["analysisWarnings"] = new JsonArray(
+                                    JsonValue.Create($"perf report counts {reported} samples, " +
+                                        $"but perf script parsed {normalizedCount}; verify event/field selection."));
+                            }
+                        }
+                        if (status == "partial")
+                        {
+                            var warnings = item["analysisWarnings"] as JsonArray ?? new JsonArray();
+                            foreach (var (field, description) in new[]
+                            {
+                                ("rejectedRecords", "unrecognized perf script lines"),
+                                ("truncatedFrames", "discarded stack frames"),
+                                ("emptyStackSamples", "samples with no stack frames"),
+                                ("droppedStackSamples", "samples dropped by distinct-stack limit")
+                            })
+                            {
+                                var count = normalized[field]?.GetValue<int>() ?? 0;
+                                if (count > 0)
+                                    warnings.Add(JsonValue.Create($"{count} {description}; check normalized stack quality."));
+                            }
+                            if (warnings.Count > 0) item["analysisWarnings"] = warnings;
+                        }
+                        item["analysisStatus"] = status;
+                        var hotFunctions = new JsonArray();
+                        foreach (var function in normalized["hotFunctions"]!.AsArray().Take(5))
+                            hotFunctions.Add((JsonNode?)function?.DeepClone());
+                        item["summary"] = new JsonObject
+                        {
+                            ["samples"] = normalized["samples"]!.DeepClone(),
+                            ["parsedSamples"] = normalized["parsedSamples"]!.DeepClone(),
+                            ["symbolizedSamples"] = normalized["symbolizedSamples"]!.DeepClone(),
+                            ["fullyResolvedSamples"] = normalized["fullyResolvedSamples"]!.DeepClone(),
+                            ["resolvedFrames"] = normalized["resolvedFrames"]!.DeepClone(),
+                            ["unresolvedFrames"] = normalized["unresolvedFrames"]!.DeepClone(),
+                            ["hotFunctions"] = hotFunctions
+                        };
                     }
                     else if (mode == "scheduler")
                     {
                         var timeline = await PerfSchedulerAnalyzer.AnalyzeAsync(raw, directory,
                             item["captureId"]!.GetValue<string>(), ct);
                         item["timeline"] = Path.GetRelativePath(directory, timeline);
+                        item["analysisStatus"] = "complete";
                     }
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
                 {
                     // Preserve raw perf.data when stack/scheduler decoding is
                     // unsupported by the perf version or event permissions.
-                    item["traceAnalysisWarning"] = error.Message;
+                    item["analysisStatus"] = "failed";
+                    item["analysisError"] = error.Message;
+                    analysisFailed = true;
                 }
             }
             else if (backend == "instruments")
@@ -231,13 +333,84 @@ public static class ProfileAnalyzer
             else item["report"] = null;
             items.Add((JsonNode?)item);
         }
+        // A failed or interrupted capture has a manifest and a runs.jsonl
+        // record, but intentionally has no *.results.json. Iterating only
+        // successful captures would falsely describe such a run as complete.
+        var captureJournal = ReadCaptureJournal(directory);
+        foreach (var manifestPath in Directory.GetFiles(directory, "*.manifest.json")
+            .Order(StringComparer.Ordinal))
+        {
+            using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath, ct));
+            var manifestRoot = manifest.RootElement;
+            // Use the observed basename for all local paths; never let an
+            // untrusted JSON field construct a relative result path.
+            const string suffix = ".manifest.json";
+            var fileName = Path.GetFileName(manifestPath);
+            var captureId = fileName[..^suffix.Length];
+            if (!manifestRoot.TryGetProperty("captureId", out var captureIdElement)) continue;
+            if (captureIdElement.ValueKind != JsonValueKind.String
+                || captureIdElement.GetString() != captureId)
+            {
+                items.Add(new JsonObject
+                {
+                    ["captureId"] = captureId,
+                    ["analysisStatus"] = "capture_incomplete",
+                    ["analysisError"] = "Capture manifest identity does not match its filename."
+                });
+                analysisFailed = true;
+                continue;
+            }
+            if (File.Exists(Path.Combine(directory, captureId + ".results.json"))) continue;
+            captureJournal.TryGetValue(captureId, out var failure);
+            items.Add(new JsonObject
+            {
+                ["captureId"] = captureId,
+                ["backend"] = manifestRoot.TryGetProperty("backend", out var backendValue)
+                    ? backendValue.GetString() : null,
+                ["mode"] = manifestRoot.TryGetProperty("mode", out var modeValue)
+                    ? modeValue.GetString() : null,
+                ["captureStatus"] = failure.Status ?? "missing_result",
+                ["analysisStatus"] = "capture_incomplete",
+                ["analysisError"] = failure.Error ?? "Capture has a manifest but no committed result."
+            });
+            analysisFailed = true;
+        }
         var resultFile = Path.Combine(directory, "analysis.json");
-        await File.WriteAllTextAsync(resultFile,
-            items.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
         await WriteTimingComparisonAsync(directory, ct);
         await WriteCounterComparisonAsync(directory, items, ct);
+        await ProfileArtifactWriter.WriteTextAsync(resultFile,
+            items.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
         if (emitResultPath) Console.WriteLine($"Profile analysis: {resultFile}");
-        return 0;
+        return analysisFailed ? 1 : 0;
+    }
+
+    private static Dictionary<string, (string? Status, string? Error)> ReadCaptureJournal(string directory)
+    {
+        var journal = new Dictionary<string, (string? Status, string? Error)>(StringComparer.Ordinal);
+        var path = Path.Combine(directory, "runs.jsonl");
+        if (!File.Exists(path)) return journal;
+        foreach (var line in File.ReadLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            try
+            {
+                using var record = JsonDocument.Parse(line);
+                var root = record.RootElement;
+                if (!root.TryGetProperty("captureId", out var id)
+                    || id.ValueKind != JsonValueKind.String
+                    || !root.TryGetProperty("status", out var status)
+                    || status.ValueKind != JsonValueKind.String) continue;
+                var error = root.TryGetProperty("error", out var message)
+                    && message.ValueKind == JsonValueKind.String ? message.GetString() : null;
+                journal[id.GetString()!] = (status.GetString(), error);
+            }
+            catch (JsonException)
+            {
+                // A torn journal line cannot authorize a successful capture.
+                // Manifest-without-result detection below still fails closed.
+            }
+        }
+        return journal;
     }
 
     private static async Task WriteTimingComparisonAsync(string directory, CancellationToken ct)
@@ -293,24 +466,46 @@ public static class ProfileAnalyzer
             ["variants"] = variants
         };
         var output = Path.Combine(directory, "comparison.json");
-        await File.WriteAllTextAsync(output, summary.ToJsonString(
+        await ProfileArtifactWriter.WriteTextAsync(output, summary.ToJsonString(
             new JsonSerializerOptions { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
     }
 
-    private sealed record Counter(double Value, string Unit);
+    private sealed record Counter(double Value, string Unit, string Domain,
+        double? RunningPercent);
 
-    private static Dictionary<string, Counter> ReadPerfCounters(string path)
+    private static string EventDomain(string name) => name.EndsWith(":u", StringComparison.Ordinal)
+        ? "user" : name.EndsWith(":k", StringComparison.Ordinal) ? "kernel"
+        : name.Contains(':') ? "other" : "unspecified";
+
+    private static Dictionary<string, Counter> ReadPerfCounters(string path,
+        List<string>? warnings = null)
     {
         var counters = new Dictionary<string, Counter>(StringComparer.Ordinal);
+        var lineNumber = 0;
         foreach (var line in File.ReadLines(path))
         {
+            lineNumber++;
             if (line.StartsWith('#') || string.IsNullOrWhiteSpace(line)) continue;
             var fields = line.Split(',');
             if (fields.Length < 3 || !double.TryParse(fields[0].Trim(),
-                NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) continue;
+                NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                || !double.IsFinite(value) || value < 0)
+            {
+                if (warnings is { Count: < 32 })
+                    warnings.Add($"Line {lineNumber}: unsupported or invalid perf stat measurement.");
+                continue;
+            }
             var eventName = fields[2].Trim();
-            if (eventName.Length == 0) continue;
-            counters[eventName] = new Counter(value, fields[1].Trim());
+            if (eventName.Length == 0)
+            {
+                if (warnings is { Count: < 32 }) warnings.Add($"Line {lineNumber}: missing event name.");
+                continue;
+            }
+            double? runningPercent = fields.Length > 4 && double.TryParse(fields[4].Trim(),
+                NumberStyles.Float, CultureInfo.InvariantCulture, out var percent)
+                && double.IsFinite(percent) && percent is >= 0 and <= 100 ? percent : null;
+            counters[eventName] = new Counter(value, fields[1].Trim(),
+                EventDomain(eventName), runningPercent);
         }
         return counters;
     }
@@ -320,17 +515,32 @@ public static class ProfileAnalyzer
     private static Dictionary<string, Counter> DeriveCounters(Dictionary<string, Counter> raw)
     {
         var result = new Dictionary<string, Counter>(StringComparer.Ordinal);
-        if (raw.TryGetValue("cycles", out var cycles) && cycles.Value > 0
-            && raw.TryGetValue("instructions", out var instructions) && instructions.Value > 0)
+        static double? MinimumRunning(Counter a, Counter b) =>
+            a.RunningPercent is { } x && b.RunningPercent is { } y ? Math.Min(x, y) : null;
+        // A ratio may use only counters captured in the same event domain.
+        // perf stat prints already scaled values for multiplexed events; retain
+        // that qualification in the result rather than treating a missing
+        // or unsupported event as zero.
+        var domains = new[] { (Suffix: "", Name: "unspecified"),
+            (Suffix: ":u", Name: "user"), (Suffix: ":k", Name: "kernel") };
+        var matching = domains.Where(d => raw.ContainsKey("instructions" + d.Suffix)
+            && raw.ContainsKey("cycles" + d.Suffix)).ToArray();
+        if (matching.Length != 1) return result;
+        var domain = matching[0];
+        var instructions = raw["instructions" + domain.Suffix];
+        var cycles = raw["cycles" + domain.Suffix];
+        if (cycles.Value > 0 && instructions.Value > 0)
         {
-            result["ipc"] = new Counter(instructions.Value / cycles.Value, "instructions/cycle");
-            if (raw.TryGetValue("cache-misses", out var misses) && misses.Value >= 0)
-                result["cache_mpki"] = new Counter(1000.0 * misses.Value / instructions.Value,
-                    "misses/kinstructions");
-            if (raw.TryGetValue("branch-misses", out var branchMisses) && branchMisses.Value >= 0)
-                result["branch_mpki"] = new Counter(1000.0 * branchMisses.Value / instructions.Value,
-                    "misses/kinstructions");
+            result["ipc"] = new Counter(instructions.Value / cycles.Value,
+                "instructions/cycle", domain.Name, MinimumRunning(instructions, cycles));
         }
+        if (instructions.Value <= 0) return result;
+        if (raw.TryGetValue("cache-misses" + domain.Suffix, out var misses))
+            result["cache_mpki"] = new Counter(1000.0 * misses.Value / instructions.Value,
+                "misses/kinstructions", domain.Name, MinimumRunning(instructions, misses));
+        if (raw.TryGetValue("branch-misses" + domain.Suffix, out var branchMisses))
+            result["branch_mpki"] = new Counter(1000.0 * branchMisses.Value / instructions.Value,
+                "misses/kinstructions", domain.Name, MinimumRunning(instructions, branchMisses));
         return result;
     }
 
@@ -365,11 +575,15 @@ public static class ProfileAnalyzer
             foreach (var (eventName, counter) in counters.OrderBy(x => x.Key, StringComparer.Ordinal))
             {
                 var compatible = baseline.Value.TryGetValue(eventName, out var reference)
-                    && reference.Unit == counter.Unit && reference.Value > 0;
+                    && reference.Unit == counter.Unit && reference.Value > 0
+                    && reference.RunningPercent == 100 && counter.RunningPercent == 100;
                 events[eventName] = new JsonObject
                 {
                     ["value"] = JsonValue.Create(counter.Value, ProfileJson.Default.Double),
                     ["unit"] = counter.Unit,
+                    ["domain"] = counter.Domain,
+                    ["runningPercent"] = counter.RunningPercent is { } percent
+                        ? JsonValue.Create(percent, ProfileJson.Default.Double) : null,
                     ["ratioToBaseline"] = compatible
                         ? JsonValue.Create(counter.Value / reference!.Value, ProfileJson.Default.Double) : null
                 };
@@ -379,11 +593,16 @@ public static class ProfileAnalyzer
             {
                 var reference = baselineDerived.GetValueOrDefault(metric);
                 var ratio = reference is not null && reference.Value > 0
-                    && reference.Unit == signal.Unit ? signal.Value / reference.Value : (double?)null;
+                    && reference.Unit == signal.Unit && reference.Domain == signal.Domain
+                    && reference.RunningPercent == 100 && signal.RunningPercent == 100
+                    ? signal.Value / reference.Value : (double?)null;
                 derived[metric] = new JsonObject
                 {
                     ["value"] = JsonValue.Create(signal.Value, ProfileJson.Default.Double),
                     ["unit"] = signal.Unit,
+                    ["domain"] = signal.Domain,
+                    ["quality"] = signal.RunningPercent is null ? "running-fraction-unknown"
+                        : signal.RunningPercent < 100 ? "perf-scaled-multiplexed" : "reported-counts",
                     ["ratioToBaseline"] = ratio is null ? null
                         : JsonValue.Create(ratio.Value, ProfileJson.Default.Double)
                 };
@@ -393,13 +612,13 @@ public static class ProfileAnalyzer
         }
         var report = new JsonObject
         {
-            ["schemaVersion"] = 1,
+            ["schemaVersion"] = 2,
             ["backend"] = "perf stat",
             ["baseline"] = baseline.Key,
-            ["comparability"] = "Ratios require the same event, unit and measurement host; no cross-backend equivalence.",
+            ["comparability"] = "Derived metrics require one common event domain. Cross-run ratios require matching domain and non-multiplexed counters; no cross-backend equivalence.",
             ["variants"] = rows
         };
-        await File.WriteAllTextAsync(Path.Combine(directory, "counter-comparison.json"),
+        await ProfileArtifactWriter.WriteTextAsync(Path.Combine(directory, "counter-comparison.json"),
             report.ToJsonString(new JsonSerializerOptions
             { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
     }

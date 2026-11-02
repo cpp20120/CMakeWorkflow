@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Tooling;
 using CMakeWorkflow.History;
+using CMakeWorkflow.Profiling;
 using PolyType;
 using StreamJsonRpc;
 
@@ -94,6 +95,21 @@ public partial interface IHostNotifications
 [JsonSerializable(typeof(WorkflowPlanRequest))]
 [JsonSerializable(typeof(ProfilePrepareRequest))]
 [JsonSerializable(typeof(ProfilePreparation))]
+[JsonSerializable(typeof(BenchmarkRecipeV1))]
+[JsonSerializable(typeof(BenchmarkPrepareRequest))]
+[JsonSerializable(typeof(BenchmarkPreparation))]
+[JsonSerializable(typeof(ProfileRecipeV1))]
+[JsonSerializable(typeof(ProfileRecipePrepareRequest))]
+[JsonSerializable(typeof(ProfileRecipePreparation))]
+[JsonSerializable(typeof(TestMatrixRecipeV1))]
+[JsonSerializable(typeof(TestMatrixPrepareRequest))]
+[JsonSerializable(typeof(TestMatrixPreparation))]
+[JsonSerializable(typeof(BuildMatrixRecipeV1))]
+[JsonSerializable(typeof(BuildMatrixPrepareRequest))]
+[JsonSerializable(typeof(BuildMatrixPreparation))]
+[JsonSerializable(typeof(BenchmarkMatrixRecipeV1))]
+[JsonSerializable(typeof(BenchmarkMatrixPrepareRequest))]
+[JsonSerializable(typeof(BenchmarkMatrixPreparation))]
 [JsonSerializable(typeof(ProfileAnalyzeRequest))]
 [JsonSerializable(typeof(ProfileAnalysis))]
 [JsonSerializable(typeof(TargetPrepareRequest))]

@@ -42,6 +42,8 @@ public static class Program
             }
             if (args.Length >= 2 && args[0] == "workflow" && args[1] == "reconcile")
                 return await WorkflowReconcileCommand.ExecuteAsync(args[2..], cts.Token);
+            if (args.Length >= 2 && args[0] == "workflow" && args[1] == "generate")
+                return await WorkflowRecipeGenerateCommand.ExecuteAsync(args[2..], cts.Token);
             if (args.Length >= 2 && args[0] == "workflow" && args[1] is "plan" or "run" or "resume")
             {
                 if (args[1] == "plan")
@@ -262,6 +264,8 @@ public static class Program
         "         [--controller-build-dir DIR] (only when invoked by a CMake build target)\n" +
         "  workflow sequence: build first, execute first, build second, execute second\n" +
         "       CMakeWorkflow workflow <plan|run> FILE [--only NODE]... [--jobs N] [--json] [--history-db PATH] [--no-history]\n" +
+        "       CMakeWorkflow workflow generate benchmark --build-dir DIR --target TARGET --repeats N --timeout-seconds N --output FILE [--config CONFIG] [-- PROGRAM_ARG...]\n" +
+        "       CMakeWorkflow workflow generate <profile|test-matrix|build-matrix|benchmark-matrix> [OPTIONS|--recipe FILE] --output FILE\n" +
         "       CMakeWorkflow workflow report RUN_DIRECTORY [--json]\n" +
         "       CMakeWorkflow workflow resume RUN_DIRECTORY\n" +
         "       CMakeWorkflow workflow reconcile RUN_DIRECTORY [--node ID] --decision succeeded|retry\n" +

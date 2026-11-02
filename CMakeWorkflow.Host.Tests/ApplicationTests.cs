@@ -70,7 +70,8 @@ internal static class ApplicationTests
             new("preinit", manifest, "0", 1, Path.Combine(root, "preinit-results")), ct), "not_initialized");
         var info = await client.InitializeAsync(new(1, root), ct);
         Check(info.Capabilities.Contains("workflow/plan") && info.Capabilities.Contains("history/detect")
-            && info.Capabilities.Contains("workflow/start") && info.Capabilities.Contains("profile/prepare"),
+            && info.Capabilities.Contains("workflow/start") && info.Capabilities.Contains("profile/prepare")
+            && info.Capabilities.Contains("benchmark/prepare"),
             "Capabilities omit implemented profile/workflow lifecycle");
         var prepareRequest = new ProfilePrepareRequest("0123456789abcdef0123456789abcdef",
             Path.Combine(root, "profile definitions"), "worker", [new("main", build)],
@@ -96,6 +97,110 @@ internal static class ApplicationTests
             "path_not_allowed");
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with { RequestId = "../escape" }, ct),
             "invalid_argument");
+        var benchmarkRecipe = new BenchmarkRecipeV1("benchmark", 1, build, "worker", "Debug",
+            10, 30, ["--case", "a b", ""]);
+        var benchmarkRequest = new BenchmarkPrepareRequest("abcdef0123456789abcdef0123456789",
+            Path.Combine(root, "benchmark definitions", "chain.json"), benchmarkRecipe);
+        var benchmarkPrepared = await client.BenchmarkPrepareAsync(benchmarkRequest, ct);
+        Check(benchmarkPrepared.SchemaVersion == 1 && benchmarkPrepared.Manifest == benchmarkRequest.OutputPath
+            && File.Exists(benchmarkPrepared.Manifest)
+            && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(benchmarkPrepared.Manifest))), "Benchmark preparation hash or path");
+        Check(benchmarkPrepared == await client.BenchmarkPrepareAsync(benchmarkRequest, ct),
+            "Benchmark preparation retry changed committed result");
+        var benchmarkPlan = await client.WorkflowPlanAsync(new(benchmarkPrepared.Manifest), ct);
+        Check(benchmarkPlan.Valid && benchmarkPlan.Nodes.Count == 11
+            && benchmarkPlan.Nodes.Count(n => n.Kind == "build") == 1,
+            "Prepared benchmark was not accepted by existing planner");
+        await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
+        { Recipe = benchmarkRecipe with { Repeats = 11 } }, ct), "request_id_conflict");
+        var conflictingOutput = Path.Combine(root, "other benchmark definitions", "chain.json");
+        await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
+        { OutputPath = conflictingOutput }, ct), "request_id_conflict");
+        Check(!File.Exists(conflictingOutput), "Conflicting Benchmark request created a manifest");
+        await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
+        { RequestId = Guid.NewGuid().ToString("N"), OutputPath = Path.Combine(outside, "outside.json") }, ct),
+            "path_not_allowed");
+        await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
+        { RequestId = Guid.NewGuid().ToString("N"), Recipe = benchmarkRecipe with
+            { BuildDirectory = outside } }, ct), "path_not_allowed");
+        await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
+        { RequestId = Guid.NewGuid().ToString("N"), Recipe = benchmarkRecipe with
+            { SchemaVersion = 2 } }, ct), "invalid_argument");
+        Check(!File.Exists(executable), "Benchmark preparation launched a native executable");
+        var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+        var recipeProfile = new CMakeWorkflow.Profiling.ProfileRecipeV1("profile", 1,
+            [new("main", build)], "worker", "Debug", 1, 30, ["a b"], "auto", "cpu", platform);
+        var profileRecipeRequest = new ProfileRecipePrepareRequest(Guid.NewGuid().ToString("N"),
+            Path.Combine(root, "recipe-profile.json"), recipeProfile);
+        var profileRecipeReady = await client.ProfileRecipePrepareAsync(profileRecipeRequest, ct);
+        Check(profileRecipeReady == await client.ProfileRecipePrepareAsync(profileRecipeRequest, ct)
+            && profileRecipeReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(profileRecipeReady.Manifest)))
+            && (await client.WorkflowPlanAsync(new(profileRecipeReady.Manifest), ct)).Valid,
+            "Profile recipe wire preparation/hash/plan");
+        var recipeTest = new TestMatrixRecipeV1("test-matrix", 1, build, "worker", "Debug",
+            [new("unit", LabelRegex: "unit")], "parallel", 30);
+        var testMatrixRequest = new TestMatrixPrepareRequest(Guid.NewGuid().ToString("N"),
+            Path.Combine(root, "recipe-test.json"), recipeTest);
+        var testMatrixReady = await client.TestMatrixPrepareAsync(testMatrixRequest, ct);
+        Check(testMatrixReady == await client.TestMatrixPrepareAsync(testMatrixRequest, ct)
+            && testMatrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(testMatrixReady.Manifest)))
+            && (await client.WorkflowPlanAsync(new(testMatrixReady.Manifest), ct)).Valid,
+            "Test Matrix wire preparation/hash/plan");
+        var recipeVariants = new[] { new BuildVariantV1("main", build, "Debug") };
+        var recipeBuild = new BuildMatrixRecipeV1("build-matrix", 1, recipeVariants, ["worker"]);
+        var buildMatrixRequest = new BuildMatrixPrepareRequest(Guid.NewGuid().ToString("N"),
+            Path.Combine(root, "recipe-build.json"), recipeBuild);
+        var buildMatrixReady = await client.BuildMatrixPrepareAsync(buildMatrixRequest, ct);
+        Check(buildMatrixReady == await client.BuildMatrixPrepareAsync(buildMatrixRequest, ct)
+            && buildMatrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(buildMatrixReady.Manifest)))
+            && (await client.WorkflowPlanAsync(new(buildMatrixReady.Manifest), ct)).Valid,
+            "Build Matrix wire preparation/hash/plan");
+        var recipeMatrix = new BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
+            recipeVariants, "worker", 2, 30, ["x"], [new("case", "--case", ["a", "b"])],
+            "round-robin");
+        var matrixRequest = new BenchmarkMatrixPrepareRequest(Guid.NewGuid().ToString("N"),
+            Path.Combine(root, "recipe-matrix.json"), recipeMatrix);
+        var matrixReady = await client.BenchmarkMatrixPrepareAsync(matrixRequest, ct);
+        Check(matrixReady == await client.BenchmarkMatrixPrepareAsync(matrixRequest, ct)
+            && matrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(matrixReady.Manifest)))
+            && (await client.WorkflowPlanAsync(new(matrixReady.Manifest), ct)).Valid,
+            "Benchmark Matrix wire preparation/hash/plan");
+        await Refused(() => client.BenchmarkMatrixPrepareAsync(matrixRequest with
+        { Recipe = recipeMatrix with { Repeats = 3 } }, ct), "request_id_conflict");
+        await Refused(() => client.BenchmarkMatrixPrepareAsync(matrixRequest with
+        { RequestId = Guid.NewGuid().ToString("N"), Recipe = recipeMatrix with { Repeats = 3 } }, ct),
+            "request_id_conflict");
+        var concurrentMatrix = matrixRequest with { RequestId = Guid.NewGuid().ToString("N"),
+            OutputPath = Path.Combine(root, "concurrent-matrix.json") };
+        var matrixReplays = await Task.WhenAll(Enumerable.Range(0, 4)
+            .Select(_ => client.BenchmarkMatrixPrepareAsync(concurrentMatrix, ct)));
+        Check(matrixReplays.All(p => p == matrixReplays[0]),
+            "Concurrent Benchmark Matrix preparation changed committed response");
+        await Refused(() => client.BuildMatrixPrepareAsync(buildMatrixRequest with
+        { RequestId = Guid.NewGuid().ToString("N"), Recipe = recipeBuild with
+            { Variants = [new("escape", outside)] } }, ct), "path_not_allowed");
+        Check(!File.Exists(executable), "Typed recipe preparation launched an executable");
+        var concurrentRequest = benchmarkRequest with
+        { RequestId = Guid.NewGuid().ToString("N"), OutputPath = Path.Combine(root, "concurrent", "chain.json") };
+        var concurrent = await Task.WhenAll(Enumerable.Range(0, 4)
+            .Select(_ => client.BenchmarkPrepareAsync(concurrentRequest, ct)));
+        Check(concurrent.All(x => x == concurrent[0])
+            && File.Exists(concurrent[0].Manifest), "Concurrent Benchmark preparation was not idempotent");
+        using (var retryWire = await LocalTransport.ConnectAsync(endpoint, ct))
+        using (var retryRpc = HostConnection.Create(retryWire))
+        {
+            var retryClient = retryRpc.Attach<IHostRpc>(); retryRpc.StartListening();
+            await retryClient.InitializeAsync(new(1, root), ct);
+            Check(await retryClient.BenchmarkPrepareAsync(benchmarkRequest, ct) == benchmarkPrepared,
+                "Lost response/reconnect changed Benchmark preparation");
+            Check(await retryClient.BenchmarkMatrixPrepareAsync(matrixRequest, ct) == matrixReady,
+                "Lost response/reconnect changed Benchmark Matrix preparation");
+        }
         var fixture = Directory.CreateDirectory(Path.Combine(root, "profile analysis fixture")).FullName;
         File.WriteAllText(Path.Combine(fixture, "raw.txt"), "raw fixture");
         File.WriteAllText(Path.Combine(fixture, "capture.results.json"),

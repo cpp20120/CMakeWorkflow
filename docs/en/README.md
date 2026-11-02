@@ -14,6 +14,7 @@ CMakeWorkflow is a standalone .NET 10 tool for **orchestrating work around CMake
 |---|---|
 | [Architecture](architecture.md) | Components, process boundaries, scheduler and provenance guarantees |
 | [Workflow manifests](workflows.md) | Contexts, node types, dependencies, resources and examples |
+| [Typed recipes](recipes.md) | Benchmark generation, independent recipe versions and Host preparation |
 | [CLI reference](cli.md) | Build/publish, commands and exit/JSON contracts |
 | [Results and History](results-and-history.md) | JSONL, `run.json`, SQLite, comparisons and regression detection |
 | [Recovery](recovery.md) | Unknown effects, explicit reconciliation, audit and durability |

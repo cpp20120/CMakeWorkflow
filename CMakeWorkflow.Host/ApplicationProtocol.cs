@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CMakeWorkflow;
 using CMakeWorkflow.History;
+using CMakeWorkflow.Profiling;
 using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host;
@@ -29,6 +30,17 @@ public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirec
     string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
 public sealed record ProfilePreparation(int SchemaVersion, string Manifest, string ManifestSha256,
     string ResultsDirectory);
+public sealed record BenchmarkPrepareRequest(string RequestId, string OutputPath,
+    BenchmarkRecipeV1 Recipe);
+public sealed record BenchmarkPreparation(int SchemaVersion, string Manifest, string ManifestSha256);
+public sealed record ProfileRecipePrepareRequest(string RequestId, string OutputPath, ProfileRecipeV1 Recipe);
+public sealed record ProfileRecipePreparation(int SchemaVersion, string Manifest, string ManifestSha256);
+public sealed record TestMatrixPrepareRequest(string RequestId, string OutputPath, TestMatrixRecipeV1 Recipe);
+public sealed record TestMatrixPreparation(int SchemaVersion, string Manifest, string ManifestSha256);
+public sealed record BuildMatrixPrepareRequest(string RequestId, string OutputPath, BuildMatrixRecipeV1 Recipe);
+public sealed record BuildMatrixPreparation(int SchemaVersion, string Manifest, string ManifestSha256);
+public sealed record BenchmarkMatrixPrepareRequest(string RequestId, string OutputPath, BenchmarkMatrixRecipeV1 Recipe);
+public sealed record BenchmarkMatrixPreparation(int SchemaVersion, string Manifest, string ManifestSha256);
 public sealed record ProfileAnalyzeRequest(string RunDirectory);
 public sealed record ProfileAnalysis(int SchemaVersion, string RunDirectory, string AnalysisFile);
 // Prepared native actions reuse the durable workflow engine and its operation API.
@@ -106,6 +118,16 @@ public partial interface IHostRpc
     Task<WorkflowPlanView> WorkflowPlanAsync(WorkflowPlanRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("profile/prepare")]
     Task<ProfilePreparation> ProfilePrepareAsync(ProfilePrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("benchmark/prepare")]
+    Task<BenchmarkPreparation> BenchmarkPrepareAsync(BenchmarkPrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("profileRecipe/prepare")]
+    Task<ProfileRecipePreparation> ProfileRecipePrepareAsync(ProfileRecipePrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("testMatrix/prepare")]
+    Task<TestMatrixPreparation> TestMatrixPrepareAsync(TestMatrixPrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("buildMatrix/prepare")]
+    Task<BuildMatrixPreparation> BuildMatrixPrepareAsync(BuildMatrixPrepareRequest request, CancellationToken cancellationToken);
+    [JsonRpcMethod("benchmarkMatrix/prepare")]
+    Task<BenchmarkMatrixPreparation> BenchmarkMatrixPrepareAsync(BenchmarkMatrixPrepareRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("profile/analyze")]
     Task<ProfileAnalysis> ProfileAnalyzeAsync(ProfileAnalyzeRequest request, CancellationToken cancellationToken);
     [JsonRpcMethod("target/prepare")]

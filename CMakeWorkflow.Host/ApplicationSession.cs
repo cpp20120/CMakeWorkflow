@@ -9,7 +9,7 @@ namespace CMakeWorkflow.Host;
 public sealed partial class DoctorSession
 {
     private static readonly string[] ReadCapabilities = ["context/inspect", "target/resolve", "workflow/plan", "runs/get",
-        "profile/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/import", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve", "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run", "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"];
+        "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/import", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve", "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run", "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"];
     private const int MeasurementLimit = 50000;
 
     // Operation lifetime belongs to Host, not to the RPC request or connection.

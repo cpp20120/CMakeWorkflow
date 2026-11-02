@@ -57,6 +57,7 @@ public static partial class PerfSchedulerAnalyzer
     {
         var file = Path.Combine(directory, "traces", "normalized", captureId + ".timeline.jsonl");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        var temp = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
         var start = new ProcessStartInfo("perf")
         {
             UseShellExecute = false, RedirectStandardOutput = true,
@@ -69,15 +70,29 @@ public static partial class PerfSchedulerAnalyzer
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
             catch (InvalidOperationException) { }
         });
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        var output = await Task.Run(() =>
+        var stderr = Task.Run(async () =>
         {
-            using var writer = new StreamWriter(file, false, new UTF8Encoding(false));
-            return Parse(process.StandardOutput, writer, ct);
+            var buffer = new char[4096]; var saved = new StringBuilder();
+            int read;
+            while ((read = await process.StandardError.ReadAsync(buffer, ct)) > 0)
+                if (saved.Length < 16384) saved.Append(buffer, 0, Math.Min(read, 16384 - saved.Length));
+            return saved.ToString();
         }, ct);
-        await process.WaitForExitAsync(ct);
-        var errors = await stderr;
-        if (process.ExitCode != 0) throw new IOException($"perf script scheduler decode failed: {errors[..Math.Min(errors.Length, 4096)]}");
-        return file;
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var writer = new StreamWriter(temp, false, new UTF8Encoding(false));
+                return Parse(process.StandardOutput, writer, ct);
+            }, ct);
+            await process.WaitForExitAsync(ct);
+            var errors = await stderr;
+            if (process.ExitCode != 0)
+                throw new IOException($"perf script scheduler decode failed: {errors[..Math.Min(errors.Length, 4096)]}");
+            ct.ThrowIfCancellationRequested();
+            File.Move(temp, file, overwrite: true);
+            return file;
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }

@@ -12,6 +12,7 @@
 |---|---|
 | [Архитектура](../architecture.md) | Границы CMake и runner, процессы, leases, provenance |
 | [Манифесты workflow](../workflows.md) | `contexts`, `nodes`, зависимости, ресурсы и `schemaVersion` |
+| [Типизированные рецепты](recipes.md) | Генерация Benchmark, версии рецептов и Host preparation |
 | [CLI](../cli.md) | Команды, ключи, коды возврата |
 | [Результаты и History](../results-and-history.md) | JSONL, `run.json`, SQLite, сравнения, статистика |
 | [Recovery](../recovery.md) | `outcome_unknown`, `reconcile`, аудит и durability |

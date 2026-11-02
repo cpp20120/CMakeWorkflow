@@ -23,13 +23,15 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
         transport = stream; rpc = connection; proxy = target; Host = identity;
         this.ownedHost = ownedHost; this.ownedSocketDirectory = ownedSocketDirectory;
         Workflows = new(this); Operations = new(this);
-        Profiles = new(this); Targets = new(this); Campaigns = new(this); History = new(this); Toolchains = new(this);
+        Profiles = new(this); Benchmarks = new(this); Recipes = new(this); Targets = new(this); Campaigns = new(this); History = new(this); Toolchains = new(this);
     }
 
     public HostIdentity Host { get; }
     public WorkflowService Workflows { get; }
     public OperationService Operations { get; }
     public ProfileService Profiles { get; }
+    public BenchmarkService Benchmarks { get; }
+    public RecipeService Recipes { get; }
     public TargetService Targets { get; }
     public CampaignService Campaigns { get; }
     public HistoryService History { get; }

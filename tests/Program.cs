@@ -27,6 +27,8 @@ internal static class Program
                 return 0;
             }
             ReportTests.Run();
+            BenchmarkRecipeTests.Run();
+            TypedRecipeIntegrationTests.Run();
             ProtocolTests.Run();
             WorkflowTests.Run();
             BoundaryTests.Run();

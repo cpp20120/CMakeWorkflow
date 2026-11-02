@@ -28,12 +28,21 @@ CMakeWorkflow target run --build-dir BUILD_DIR --target EXECUTABLE --config Rele
 ## Workflow
 
 ```sh
+CMakeWorkflow workflow generate benchmark --build-dir BUILD_DIR --target EXECUTABLE --config Release --repeats 10 --timeout-seconds 300 --output workflows/bench.json -- PROGRAM_ARG
 CMakeWorkflow workflow plan FILE --only NODE_A --only NODE_B --json
 CMakeWorkflow workflow run FILE --only NODE_A --jobs 2 --results-dir DIR --history-db CATALOG --json
 CMakeWorkflow workflow run FILE --no-history --json
 CMakeWorkflow workflow report RUN_DIRECTORY --json
 CMakeWorkflow workflow sequence --build-dir BUILD_DIR --first FIRST --second SECOND --config Release --first-arg ARG --second-arg ARG
 ```
+
+`workflow generate benchmark` only writes a normal v2 manifest and rejects an
+existing output. Relative `--build-dir` and `--output` resolve from CLI cwd;
+see the complete [recipe example](recipes.md).
+
+`workflow generate profile`, `test-matrix`, `build-matrix`, and
+`benchmark-matrix` use separate typed versioned inputs. Complex matrices use
+`--recipe FILE --output MANIFEST`; see [all recipe contracts](recipes.md).
 
 The default `--jobs` is 1. `--only` is repeatable and includes prerequisites. Without `--results-dir`, the runner creates a unique directory below `out/workflow-runs` beside the manifest; an explicitly relative results directory resolves from CLI cwd. Read the **actual** `runDirectory` from the event stream. `sequence` builds and executes the first target, then builds and executes the second; it is distinct from the journaled general workflow. `--controller-build-dir` is an internal safety constraint against recursive builds and should not be fabricated by an IDE.
 

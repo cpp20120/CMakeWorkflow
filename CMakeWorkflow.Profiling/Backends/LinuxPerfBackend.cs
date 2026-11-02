@@ -20,7 +20,11 @@ public sealed class LinuxPerfBackend(IProfileProcess process) : IProfilerBackend
             ? new List<string> { "stat", "-x", ",", "-o", path, "-e", "cycles,instructions,cache-misses,branch-misses" }
             : new List<string> { "record", "-o", path };
         if (request.Mode == "cpu")
-            args.AddRange(["-e", "cycles:u", "--call-graph", "dwarf,16384"]);
+             args.AddRange([
+                "-e", "cycles:u",
+                "--user-callchains",
+                "--call-graph", "dwarf,16384"
+            ]);
         else if (request.Mode == "scheduler")
             args.AddRange(["-e", "sched:sched_switch", "-e", "sched:sched_wakeup", "--call-graph", "dwarf,16384"]);
         args.Add("--");

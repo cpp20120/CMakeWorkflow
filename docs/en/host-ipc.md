@@ -8,9 +8,9 @@ and see the [Host operations](#additional-workflow-and-history-capabilities). In
 
 `CMakeWorkflow host serve` hosts the existing `ToolingService` over local
 JSON-RPC. Both the CLI client and the VS Code client can connect to the same
-process. Fix delegates installation to the existing ToolingService. Workflow execution,
-Some profiling and campaigns also expose typed Host entry points. There is no second scheduler, HTTP listener or new
-history store.
+process. Fix delegates installation to the existing ToolingService. Workflow
+execution, profiling and campaigns also expose typed Host entry points. There
+is no second scheduler, HTTP listener or new history store.
 
 ## Additional workflow and history capabilities
 
@@ -21,6 +21,18 @@ Besides Doctor and explicit Fix, newer Host builds negotiate a wider method set 
 `operations/get`, `operations/cancel`, `operations/events`, `history/runs`,
 `history/show`, `history/metrics`, `history/query`, `history/compare` and
 `history/detect`, along with environment planning/apply methods.
+
+### Benchmark recipes through the durable workflow API
+
+`benchmark/prepare` is a separate typed, versioned Benchmark recipe endpoint.
+It accepts `requestId`, `outputPath` and `recipe`, returns the committed
+`manifest` and `manifestSha256`, and never starts execution. See the exact
+[Benchmark contract](recipes.md#host-and-editor-contract). Its output can be
+planned and then explicitly submitted to the existing `workflow/start`.
+
+New typed recipes use `profileRecipe/prepare`, `testMatrix/prepare`,
+`buildMatrix/prepare`, and `benchmarkMatrix/prepare`. Their independent DTOs,
+path rules and graph semantics are in [the recipe guide](recipes.md#host-preparation-for-new-recipes).
 
 ### Profiling through the durable workflow API
 
@@ -40,8 +52,8 @@ initial execution and explicit recovery/resume. After a successful capture,
 RPC request is interrupted, inspect the artifacts before invoking it again.
 
 This is an explicit prepare → start → observe → analyze pipeline, not a second
-scheduler. `profile/replay` and project-specific campaigns do not yet have
-corresponding typed Host methods; their CLI entry points remain available.
+scheduler. `profile/replay` and project-specific campaigns have separate
+connection-scoped Host methods; their CLI entry points remain available.
 
 The application operation API uses durable operation identifiers and explicit
 cancellation/reconnection semantics. **Do not** treat connection loss as implicit
@@ -58,6 +70,7 @@ object in the JSON-RPC positional parameters array, as with existing methods):
 
 | Area | RPC methods | Lifetime |
 |---|---|---|
+| Benchmark recipe | `benchmark/prepare` | Commit-once manifest preparation; execute through durable `workflow/start` |
 | Profiling | `profile/prepare`, `profile/analyze`, `profile/replay` | `prepare` creates an immutable manifest; `analyze`/`replay` are connection-scoped |
 | Native targets | `target/prepare` (`build`, `invoke`, `run`, `sequence`) | Metadata-only; execute through durable `workflow/start` |
 | DagFlow campaigns | `dagflow/mutation/run`, `dagflow/weakMemory/run` | Connection-scoped |

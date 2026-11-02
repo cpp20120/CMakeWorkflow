@@ -91,6 +91,32 @@ internal static class ProfileWorkflowWireTests
         } while (true);
         if (targetState.State != "succeeded")
             throw new Exception("Typed target build/run did not complete: " + targetState.State);
+        var benchmarkRecipe = new CMakeWorkflow.BenchmarkRecipeV1("benchmark", 1, build, "worker", "Debug",
+            2, 5, ["one argument", ""]);
+        var benchmarkReady = await client.BenchmarkPrepareAsync(new(Guid.NewGuid().ToString("N"),
+            Path.Combine(workspace, "benchmark definitions", "benchmark.json"), benchmarkRecipe),
+            cancellationToken);
+        var benchmarkPlan = await client.WorkflowPlanAsync(new(benchmarkReady.Manifest), cancellationToken);
+        if (!benchmarkPlan.Valid || benchmarkPlan.Nodes.Count != 3)
+            throw new Exception("Typed Benchmark preparation did not produce the expected DAG.");
+        var benchmarkRun = Path.Combine(workspace, "benchmark-run");
+        var benchmarkAccepted = await client.WorkflowStartAsync(new(Guid.NewGuid().ToString("N"),
+            benchmarkReady.Manifest, benchmarkReady.ManifestSha256, 8, benchmarkRun), cancellationToken);
+        using var benchmarkDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        benchmarkDeadline.CancelAfter(TimeSpan.FromSeconds(20));
+        OperationReference benchmarkState;
+        do
+        {
+            benchmarkState = await client.OperationGetAsync(new(benchmarkAccepted.OperationId),
+                benchmarkDeadline.Token);
+            if (benchmarkState.State is "failed" or "succeeded" or "canceled") break;
+            await Task.Delay(50, benchmarkDeadline.Token);
+        } while (true);
+        var benchmarkReport = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(
+            Path.Combine(benchmarkRun, "run.json"), cancellationToken), WorkflowJson.Default.WorkflowReport)!;
+        if (benchmarkState.State != "succeeded" || benchmarkReport.Nodes.Count != 3
+            || benchmarkReport.Nodes.Count(n => n.Kind == "run" && n.Status == "succeeded") != 2)
+            throw new Exception("Prepared Benchmark did not execute through the durable workflow runner.");
         // The independently distributed .NET SDK uses its own source-generated
         // DTOs and must agree with the Host wire contract (including NativeAOT).
         await using (var sdk = await CMakeWorkflowClient.ConnectAsync(
@@ -103,6 +129,40 @@ internal static class ProfileWorkflowWireTests
                 || (await sdk.Workflows.PlanAsync(sdkReady.Manifest, cancellationToken))
                     .GetProperty("valid").ValueKind != JsonValueKind.True)
                 throw new Exception("Typed .NET SDK target preparation/plan mismatch.");
+            var sdkBenchmark = await sdk.Benchmarks.PrepareAsync(new PrepareBenchmarkOptions(
+                Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-benchmark.json"),
+                new CMakeWorkflow.Client.BenchmarkRecipeV1("benchmark", 1, build,
+                    "worker", "Debug", 2, 5, ["one argument", ""])), cancellationToken);
+            if (sdkBenchmark.ManifestSha256.Length != 64
+                || (await sdk.Workflows.PlanAsync(sdkBenchmark.Manifest, cancellationToken))
+                    .GetProperty("valid").ValueKind != JsonValueKind.True)
+                throw new Exception("Typed .NET SDK Benchmark preparation/plan mismatch.");
+            var sdkPlatform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+            var sdkProfileRecipe = await sdk.Recipes.PrepareProfileAsync(new PrepareProfileRecipeOptions(
+                Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-profile-recipe.json"),
+                new CMakeWorkflow.Client.ProfileRecipeV1("profile", 1,
+                    [new("main", build)], "worker", "Debug", 1, 5, [], "auto", "cpu", sdkPlatform)),
+                cancellationToken);
+            var sdkTestMatrix = await sdk.Recipes.PrepareTestMatrixAsync(new PrepareTestMatrixOptions(
+                Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-test-matrix.json"),
+                new CMakeWorkflow.Client.TestMatrixRecipeV1("test-matrix", 1, build, "worker", "Debug",
+                    [new("unit", TestRegex: "worker")], "parallel", 5)), cancellationToken);
+            var sdkVariants = new[] { new CMakeWorkflow.Client.BuildVariantV1("main", build, "Debug") };
+            var sdkBuildMatrix = await sdk.Recipes.PrepareBuildMatrixAsync(new PrepareBuildMatrixOptions(
+                Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-build-matrix.json"),
+                new CMakeWorkflow.Client.BuildMatrixRecipeV1("build-matrix", 1, sdkVariants,
+                    ["worker"])), cancellationToken);
+            var sdkBenchmarkMatrix = await sdk.Recipes.PrepareBenchmarkMatrixAsync(
+                new PrepareBenchmarkMatrixOptions(Guid.NewGuid().ToString("N"),
+                    Path.Combine(workspace, "sdk-benchmark-matrix.json"),
+                    new CMakeWorkflow.Client.BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
+                        sdkVariants, "worker", 2, 5, [], [new("case", "--case", ["x"])],
+                        "round-robin")), cancellationToken);
+            foreach (var preparedRecipe in new[] { sdkProfileRecipe, sdkTestMatrix, sdkBuildMatrix, sdkBenchmarkMatrix })
+                if (preparedRecipe.SchemaVersion != 1 || preparedRecipe.ManifestSha256.Length != 64
+                    || (await sdk.Workflows.PlanAsync(preparedRecipe.Manifest, cancellationToken))
+                        .GetProperty("valid").ValueKind != JsonValueKind.True)
+                    throw new Exception("Typed .NET SDK recipe preparation/plan mismatch.");
             var seed = await sdk.Campaigns.FuzzSeedAsync(new FuzzSeedCampaignOptions("exceptions",
                 Path.Combine(workspace, "sdk-seeds")), cancellationToken);
             if (seed.Status != "succeeded") throw new Exception("Typed .NET SDK campaign call failed.");

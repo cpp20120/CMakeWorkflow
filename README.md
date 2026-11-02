@@ -63,6 +63,8 @@ CMakeWorkflow target run --build-dir BUILD_DIR --target EXECUTABLE -- ARG...
 CMakeWorkflow target invoke --build-dir BUILD_DIR --target CUSTOM_TARGET
 CMakeWorkflow target resolve --build-dir BUILD_DIR --target EXECUTABLE
 CMakeWorkflow workflow plan FILE
+CMakeWorkflow workflow generate benchmark --build-dir DIR --target TARGET --repeats 10 --timeout-seconds 300 --output workflows/bench.json -- ARG...
+CMakeWorkflow workflow generate benchmark-matrix --recipe recipes/matrix.json --output workflows/matrix.json
 CMakeWorkflow workflow run FILE --results-dir DIR
 CMakeWorkflow workflow report RUN_DIRECTORY
 ```

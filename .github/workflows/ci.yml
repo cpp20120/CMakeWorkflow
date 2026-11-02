@@ -121,6 +121,8 @@ jobs:
           CLI: out/native/${{ matrix.executable }}
         run: |
           "$CLI" workflow plan examples/hello/workflow.json
+          "$CLI" workflow generate benchmark --build-dir out/hello --target hello --config Debug --repeats 1 --timeout-seconds 30 --output out/benchmark-smoke/workflow.json
+          "$CLI" workflow plan out/benchmark-smoke/workflow.json
           "$CLI" tooling list --json
           "$CLI" tooling plan cmake --pm none --json
           mkdir -p out/history-smoke/run
@@ -128,6 +130,10 @@ jobs:
           "$CLI" history import out/history-smoke/run --db out/history-smoke/history.sqlite
           "$CLI" history runs --db out/history-smoke/history.sqlite --json
           "$CLI" workflow run examples/hello/workflow.json --results-dir out/history-auto-smoke --history-db out/history-auto-smoke/history.sqlite
+          "$CLI" workflow generate test-matrix --build-dir out/hello --target hello --label smoke --output out/benchmark-smoke/test-matrix.json
+          "$CLI" workflow plan out/benchmark-smoke/test-matrix.json
+          "$CLI" workflow generate build-matrix --variant main=out/hello --target hello --output out/benchmark-smoke/build-matrix.json
+          "$CLI" workflow plan out/benchmark-smoke/build-matrix.json
           "$CLI" history runs --db out/history-auto-smoke/history.sqlite --json > out/smoke-logs/native-history.json
           grep -q '"workflow":"' out/smoke-logs/native-history.json
       - name: Prepare downloadable archives

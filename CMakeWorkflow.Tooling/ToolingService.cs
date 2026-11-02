@@ -122,8 +122,23 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                 if (result.ExitCode != 0 && command != "cl") continue;
                 var version = ExtractVersion(result.Output + "\n" + result.Error);
                 if (tool.MinimumVersion is null || version is not null && version >= tool.MinimumVersion)
+                {
+                    string? diagnostic = null;
+                    if (tool.Id == "perf" && runtime is SystemToolingRuntime
+                        && runtime.Platform == ToolPlatform.Linux)
+                    {
+                        string paranoid;
+                        try { paranoid = File.ReadAllText("/proc/sys/kernel/perf_event_paranoid").Trim(); }
+                        catch (IOException) { paranoid = "unavailable"; }
+                        catch (UnauthorizedAccessException) { paranoid = "unavailable"; }
+                        diagnostic = $"perf executable available; perf_event_paranoid={paranoid}. " +
+                            "PMU counters, sampling, user-space DWARF call chains and scheduler tracepoints " +
+                            "remain independently unverified. Run an explicit bounded profile capture; " +
+                            "scheduler mode may require additional tracepoint permissions.";
+                    }
                     return new(tool.Id, tool.DisplayName, true, resolved, version?.ToString(),
-                        tool.MinimumVersion?.ToString(), null);
+                        tool.MinimumVersion?.ToString(), diagnostic);
+                }
                 outdated = new(tool.Id, tool.DisplayName, false, resolved, version?.ToString(),
                     tool.MinimumVersion.ToString(), version is null
                         ? "Version could not be determined." : $"Requires >= {tool.MinimumVersion}.");
