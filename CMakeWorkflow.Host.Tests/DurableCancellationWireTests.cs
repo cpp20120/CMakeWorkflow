@@ -38,7 +38,14 @@ internal static class DurableCancellationWireTests
             Check(decision.Requested && decision.Revision == 1 && decision.State == "cancel_requested",
                 "Cancellation intent was not accepted with revision 1.");
             var retry = await client.OperationCancelAsync(new(operationId, 1), ct);
-            Check(retry.Revision == 1 && retry.Requested, "Cancellation intent was not idempotent.");
+            // The process may finalize between the two RPC calls. A repeated
+            // cancellation request remains idempotent both while pending and after
+            // the durable terminal outcome is committed; terminal cancellation
+            // returns Requested=false because it does not create a new intent.
+            Check(retry.Revision == 1 &&
+                (retry is { State: "cancel_requested", Requested: true } or
+                          { State: "canceled", Requested: false }),
+                "Cancellation intent was not idempotent across finalization.");
             var found = await client.OperationFindAsync(new(fixture.Request.ClientRequestId), ct);
             Check(found.OperationId == operationId && found.State is "cancel_requested" or "canceled",
                 "Cancellation was not visible through operations/find.");

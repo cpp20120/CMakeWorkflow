@@ -360,11 +360,15 @@ try
         "Required affinity was not inserted between profiler and target exec.");
     try
     {
+        // Select the native backend on each supported host. The test is for
+        // required capability admission, not platform rejection of Linux perf.
+        var hostBackend = OperatingSystem.IsLinux() ? "perf" :
+            OperatingSystem.IsWindows() ? "etw" : "instruments";
         await new ProfileWorkflowExecutor(perf).ExecuteAsync(new WorkflowOperationRequest(
             "profile", executable, [], root, new Dictionary<string, string>(),
-            new Dictionary<string, string> { ["backend"] = "perf", ["mode"] = "cpu" },
+            new Dictionary<string, string> { ["backend"] = "auto", ["mode"] = "cpu" },
             root, "mismatched-capability", RequiredProfiler: new WorkflowProfilerRequirement
-            { Backend = "perf", Mode = "cpu", EventSource = "unavailable" }), CancellationToken.None);
+            { Backend = hostBackend, Mode = "cpu", EventSource = "unavailable" }), CancellationToken.None);
         throw new Exception("Unsupported required profiler capability was accepted.");
     }
     catch (InvalidOperationException error) when (error.Message.Contains("Required profiler capabilities")) { }
