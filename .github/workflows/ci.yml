@@ -186,24 +186,48 @@ jobs:
       - name: Download tested platform distributions
         uses: actions/download-artifact@v4
         with:
-          pattern: CMakeWorkflow-*-${{ github.run_id }}-${{ github.run_attempt }}
+          # A rerun of only the release job increments run_attempt, while
+          # successful matrix jobs retain artifacts from previous attempts.
+          pattern: CMakeWorkflow-*-${{ github.run_id }}-*
           path: out/release-inputs
       - name: Verify and assemble release assets
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           mkdir -p out/release-assets
+          linux_source=""
           for rid in linux-x64 win-x64 osx-arm64; do
-            source="out/release-inputs/CMakeWorkflow-${rid}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            # Choose the latest successful upload of this RID in the same run.
+            # Uploads happen only after the complete smoke and package audit.
+            source=""
+            best_attempt=-1
+            for candidate in out/release-inputs/CMakeWorkflow-${rid}-${GITHUB_RUN_ID}-*; do
+              [[ -d "$candidate" ]] || continue
+              attempt="${candidate##*-}"
+              [[ "$attempt" =~ ^[0-9]+$ ]] || continue
+              if (( 10#$attempt > best_attempt )); then
+                best_attempt=$((10#$attempt))
+                source="$candidate"
+              fi
+            done
+            if [[ -z "$source" ]]; then
+              echo "Missing tested artifact for $rid in run $GITHUB_RUN_ID" >&2
+              exit 1
+            fi
             test -f "$source/SHA256SUMS"
             (cd "$source" && sha256sum --check SHA256SUMS)
+            # Never combine another commit/run's artifacts in one release.
+            jq -e --arg rid "$rid" --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+              '.rid == $rid and .commit == $sha and (.runId | tostring) == $run' \
+              "$source/build.json" > /dev/null
             cp "$source/CMakeWorkflow-${rid}.tar.gz" out/release-assets/
             cp "$source/build.json" "out/release-assets/build-${rid}.json"
+            if [[ "$rid" == linux-x64 ]]; then linux_source="$source"; fi
           done
           version="${GITHUB_REF_NAME#v}"
-          packages="out/release-inputs/CMakeWorkflow-linux-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           for id in CMakeWorkflow.Client CMakeWorkflow.Contracts; do
-            package="$packages/${id}.${version}.nupkg"
+            package="$linux_source/${id}.${version}.nupkg"
             test -f "$package"
             cp "$package" out/release-assets/
           done
