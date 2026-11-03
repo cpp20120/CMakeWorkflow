@@ -36,6 +36,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Use tagged release version for SDK and native binaries
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+            throw "Expected a SemVer tag such as v1.0.0 or v1.0.0-rc.1; got $env:GITHUB_REF_NAME"
+          }
+          "SDK_VERSION=$version" >> $env:GITHUB_ENV
       - name: Install Linux prerequisites
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev
@@ -92,7 +101,8 @@ jobs:
           }
           Write-Host 'Windows env plan JSON smoke passed (read-only).'
       - name: Publish NativeAOT CLI and Host
-        run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:TreatWarningsAsErrors=true
+        shell: pwsh
+        run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:Version=$env:SDK_VERSION -p:TreatWarningsAsErrors=true
       - name: Pack NuGet SDK
         shell: pwsh
         run: dotnet pack CMakeWorkflow.Client/CMakeWorkflow.Client.csproj -c Release -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
@@ -157,3 +167,46 @@ jobs:
           path: out/smoke-logs/
           if-no-files-found: ignore
           retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download tested platform distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: CMakeWorkflow-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/release-inputs
+      - name: Verify and assemble release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/release-assets
+          for rid in linux-x64 win-x64 osx-arm64; do
+            source="out/release-inputs/CMakeWorkflow-${rid}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            test -f "$source/SHA256SUMS"
+            (cd "$source" && sha256sum --check SHA256SUMS)
+            cp "$source/CMakeWorkflow-${rid}.tar.gz" out/release-assets/
+            cp "$source/build.json" "out/release-assets/build-${rid}.json"
+          done
+          version="${GITHUB_REF_NAME#v}"
+          package="out/release-inputs/CMakeWorkflow-linux-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/CMakeWorkflow.Client.${version}.nupkg"
+          test -f "$package"
+          cp "$package" out/release-assets/
+          (cd out/release-assets && sha256sum *.tar.gz *.nupkg *.json > SHA256SUMS)
+      - name: Create immutable tagged release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          options=(--verify-tag --generate-notes --title "CMakeWorkflow ${GITHUB_REF_NAME}")
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then options+=(--prerelease); fi
+          # Deliberately fail on an existing Release; a rerun must not silently replace assets.
+          gh release create "$GITHUB_REF_NAME" out/release-assets/* "${options[@]}"
