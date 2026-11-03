@@ -9,5 +9,6 @@
   <ItemGroup>
     <Compile Include="*.cs" />
     <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj" />
+    <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj" />
   </ItemGroup>
 </Project>
