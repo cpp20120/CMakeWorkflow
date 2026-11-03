@@ -8,17 +8,29 @@ namespace CMakeWorkflow.Host;
 
 public sealed partial class DoctorSession
 {
-    private static readonly string[] ReadCapabilities = ["context/inspect", "target/resolve", "workflow/plan", "runs/get",
-        "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel", "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute", "operations/events", "history/import", "history/runs", "history/show", "history/metrics", "history/query", "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve", "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run", "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"];
+    private static readonly string[] ReadCapabilities =
+    [
+        "context/inspect", "target/resolve", "workflow/plan", "runs/get",
+        "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
+        "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel",
+        "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
+        "operations/events", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
+        "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve",
+        "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
+        "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"
+    ];
+
     private const int MeasurementLimit = 50000;
 
     // Operation lifetime belongs to Host, not to the RPC request or connection.
-    public Task<OperationReference> WorkflowStartAsync(WorkflowStartRequest request, CancellationToken cancellationToken)
+    public Task<OperationReference> WorkflowStartAsync(WorkflowStartRequest request,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
-        if (workspace is null) throw new LocalRpcException("Call initialize first.")
-        { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        if (workspace is null)
+            throw new LocalRpcException("Call initialize first.")
+                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
         if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
         var paths = new WorkspaceReadPaths(workspace);
         var manifest = paths.Require(request.Manifest);
@@ -29,23 +41,27 @@ public sealed partial class DoctorSession
             request with { Manifest = manifest, ResultsDirectory = output }));
     }
 
-    public Task<OperationCancelResult> OperationCancelAsync(OperationCancelRequest request, CancellationToken cancellationToken)
+    public Task<OperationCancelResult> OperationCancelAsync(OperationCancelRequest request,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
-        if (workspace is null) throw new LocalRpcException("Call initialize first.")
-        { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        if (workspace is null)
+            throw new LocalRpcException("Call initialize first.")
+                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
         if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
         var paths = new WorkspaceReadPaths(workspace);
         var result = durableExecutions.Cancel(paths.WorkspaceDirectory, request.OperationId, request.ExpectedRevision);
-        return Task.FromResult(new OperationCancelResult(result.OperationId, result.State, result.Revision, result.Requested));
+        return Task.FromResult(new OperationCancelResult(result.OperationId, result.State, result.Revision,
+            result.Requested));
     }
 
     private static RecoveryInspectionView RecoveryView(DurableAcceptanceStore.RecoveryInspection i) =>
         new(i.OperationId, i.AcceptanceState, i.TerminalState, i.CancellationRequested,
             i.RunDirectory, i.CheckpointSha256, i.Decision, i.Revision, i.Note);
 
-    public Task<RecoveryInspectionView> RecoveryInspectAsync(RecoveryInspectRequest request, CancellationToken cancellationToken) =>
+    public Task<RecoveryInspectionView> RecoveryInspectAsync(RecoveryInspectRequest request,
+        CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
             ct.ThrowIfCancellationRequested();
@@ -55,12 +71,14 @@ public sealed partial class DoctorSession
             return Task.FromResult(RecoveryView(store.InspectRecovery(request.OperationId)));
         }, cancellationToken);
 
-    public Task<RecoveryInspectionView> RecoveryReconcileAsync(RecoveryReconcileRequest request, CancellationToken cancellationToken)
+    public Task<RecoveryInspectionView> RecoveryReconcileAsync(RecoveryReconcileRequest request,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
-        if (workspace is null) throw new LocalRpcException("Call initialize first.")
-        { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        if (workspace is null)
+            throw new LocalRpcException("Call initialize first.")
+                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
         if (!request.ConfirmedQuiescent)
             throw new ArgumentException("Operator must explicitly confirm external execution has stopped.");
         if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
@@ -83,12 +101,14 @@ public sealed partial class DoctorSession
             request.ExpectedRevision, request.Decision, request.Note)));
     }
 
-    public Task<RecoveryInspectionView> WorkflowResumeAsync(WorkflowResumeRequest request, CancellationToken cancellationToken)
+    public Task<RecoveryInspectionView> WorkflowResumeAsync(WorkflowResumeRequest request,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
-        if (workspace is null) throw new LocalRpcException("Call initialize first.")
-        { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        if (workspace is null)
+            throw new LocalRpcException("Call initialize first.")
+                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
         if (!request.ConfirmedQuiescent)
             throw new ArgumentException("Explicit quiescence confirmation is required.");
         if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
@@ -109,12 +129,14 @@ public sealed partial class DoctorSession
     // Execute an already admitted resume. Unlike workflow/resume, this is a mutation
     // that can launch external processes. The one-shot SQLite attempt claim is the
     // crash boundary; RPC cancellation must never cancel a committed dispatch.
-    public Task<RecoveryInspectionView> WorkflowResumeExecuteAsync(WorkflowResumeRequest request, CancellationToken cancellationToken)
+    public Task<RecoveryInspectionView> WorkflowResumeExecuteAsync(WorkflowResumeRequest request,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
-        if (workspace is null) throw new LocalRpcException("Call initialize first.")
-        { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        if (workspace is null)
+            throw new LocalRpcException("Call initialize first.")
+                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
         if (!request.ConfirmedQuiescent)
             throw new ArgumentException("Explicit quiescence confirmation is required.");
         if (request.ExpectedRevision != 2)
@@ -127,7 +149,7 @@ public sealed partial class DoctorSession
             inspected.TerminalState is not null || inspected.CancellationRequested)
             throw new InvalidOperationException("resume_not_admitted_or_bound");
         var binding = store.GetDispatchCheckpoint(request.OperationId)
-            ?? throw new InvalidOperationException("resume_checkpoint_missing");
+                      ?? throw new InvalidOperationException("resume_checkpoint_missing");
         paths.Require(Path.Combine(binding.RunDirectory, "run.json"));
         // The coordinator owns execution beyond this RPC connection. An already
         // active attempt is an idempotent retry, not a second dispatch.
@@ -135,16 +157,22 @@ public sealed partial class DoctorSession
         return Task.FromResult(RecoveryView(inspected));
     }
 
-    public Task<OperationEventsPage> OperationEventsAsync(OperationEventsRequest request, CancellationToken cancellationToken) =>
+    public Task<OperationEventsPage> OperationEventsAsync(OperationEventsRequest request,
+        CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) => OperationEventReplay.ReadAsync(paths, request, ct), cancellationToken);
 
-    public Task<OperationReference> OperationFindAsync(OperationFindRequest request, CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => LookupOperation(paths, request.ClientRequestId, byRequestId: true, ct), cancellationToken);
+    public Task<OperationReference> OperationFindAsync(OperationFindRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => LookupOperation(paths, request.ClientRequestId, byRequestId: true, ct),
+            cancellationToken);
 
-    public Task<OperationReference> OperationGetAsync(OperationGetRequest request, CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => LookupOperation(paths, request.OperationId, byRequestId: false, ct), cancellationToken);
+    public Task<OperationReference>
+        OperationGetAsync(OperationGetRequest request, CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => LookupOperation(paths, request.OperationId, byRequestId: false, ct),
+            cancellationToken);
 
-    private static Task<OperationReference> LookupOperation(WorkspaceReadPaths paths, string id, bool byRequestId, CancellationToken ct)
+    private static Task<OperationReference> LookupOperation(WorkspaceReadPaths paths, string id, bool byRequestId,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(id) || id.Length > 128)
@@ -157,15 +185,21 @@ public sealed partial class DoctorSession
         var accepted = byRequestId ? store.Find(id) : store.Get(id);
         if (accepted is null) throw new KeyNotFoundException("Unknown operation.");
         return Task.FromResult(new OperationReference(accepted.WorkspaceId, accepted.OperationId,
-            accepted.ClientRequestId, "workflow", accepted.State, accepted.ManifestSha256, accepted.ManifestBaseDirectory));
+            accepted.ClientRequestId, "workflow", accepted.State, accepted.ManifestSha256,
+            accepted.ManifestBaseDirectory));
     }
 
 
-    public Task<ObservedBuildContext> ContextInspectAsync(ContextInspectRequest request, CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => CMakeInspection.InspectAsync(paths.Require(request.BuildDirectory), ct, paths.Read), cancellationToken);
+    public Task<ObservedBuildContext> ContextInspectAsync(ContextInspectRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request,
+            (paths, ct) => CMakeInspection.InspectAsync(paths.Require(request.BuildDirectory), ct, paths.Read),
+            cancellationToken);
 
-    public Task<TargetResolutionView> TargetResolveAsync(TargetResolveRequest request, CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => WorkflowQueries.ResolveAsync(paths.Require(request.BuildDirectory), request.Target,
+    public Task<TargetResolutionView> TargetResolveAsync(TargetResolveRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => WorkflowQueries.ResolveAsync(paths.Require(request.BuildDirectory),
+            request.Target,
             request.Configuration, ct, paths.Read), cancellationToken);
 
     public Task<WorkflowPlanView> WorkflowPlanAsync(WorkflowPlanRequest request, CancellationToken cancellationToken) =>
@@ -182,9 +216,12 @@ public sealed partial class DoctorSession
         }, cancellationToken);
 
     public Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => WorkflowQueries.ReportAsync(paths.Require(request.RunDirectory), ct, paths.Read), cancellationToken);
+        ReadAsync(request,
+            (paths, ct) => WorkflowQueries.ReportAsync(paths.Require(request.RunDirectory), ct, paths.Read),
+            cancellationToken);
 
-    public Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request, CancellationToken cancellationToken) =>
+    public Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request,
+        CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, (paths, ct) =>
         {
             var database = paths.Require(request.DatabasePath);
@@ -222,12 +259,16 @@ public sealed partial class DoctorSession
             return Task.FromResult(Detail(db, request.RunId, paths, ct));
         }, cancellationToken);
 
-    public Task<List<HistoryMeasurement>> HistoryMetricsAsync(HistoryMetricsRequest request, CancellationToken cancellationToken) =>
+    public Task<List<HistoryMeasurement>> HistoryMetricsAsync(HistoryMetricsRequest request,
+        CancellationToken cancellationToken) =>
         MetricsAsync(request, false, cancellationToken);
-    public Task<List<HistoryMeasurement>> HistoryQueryAsync(HistoryMetricsRequest request, CancellationToken cancellationToken) =>
+
+    public Task<List<HistoryMeasurement>> HistoryQueryAsync(HistoryMetricsRequest request,
+        CancellationToken cancellationToken) =>
         MetricsAsync(request, true, cancellationToken);
 
-    private Task<List<HistoryMeasurement>> MetricsAsync(HistoryMetricsRequest request, bool query, CancellationToken cancellationToken) =>
+    private Task<List<HistoryMeasurement>> MetricsAsync(HistoryMetricsRequest request, bool query,
+        CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
             if (query ? string.IsNullOrWhiteSpace(request.Metric) : string.IsNullOrWhiteSpace(request.RunId))
@@ -238,7 +279,8 @@ public sealed partial class DoctorSession
                 paths.Contains, MeasurementLimit, ct));
         }, cancellationToken);
 
-    public Task<List<HistoryDifference>> HistoryCompareAsync(HistoryCompareRequest request, CancellationToken cancellationToken) =>
+    public Task<List<HistoryDifference>> HistoryCompareAsync(HistoryCompareRequest request,
+        CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
             using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
@@ -246,7 +288,8 @@ public sealed partial class DoctorSession
                 Detail(db, request.CandidateRunId, paths, ct)));
         }, cancellationToken);
 
-    public Task<HistoryDetectionReport> HistoryDetectAsync(HistoryDetectRequest request, CancellationToken cancellationToken) =>
+    public Task<HistoryDetectionReport> HistoryDetectAsync(HistoryDetectRequest request,
+        CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
             using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
@@ -260,18 +303,22 @@ public sealed partial class DoctorSession
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("runId is required.");
         return db.Show(id, path => paths.Require(path), MeasurementLimit, ct, paths.Contains);
     }
+
     private static string? Date(string? value)
     {
         if (value is null) return null;
-        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
+                out var parsed))
             throw new ArgumentException("History time filters require ISO timestamps.");
         return parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
     }
 
-    private Task<T> ReadAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct) =>
+    private Task<T> ReadAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query,
+        CancellationToken ct) =>
         ApplicationCallAsync(request, query, ct);
 
-    private async Task<T> ApplicationCallAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct)
+    private async Task<T> ApplicationCallAsync<T>(object request,
+        Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, disconnected);
         try
@@ -285,11 +332,18 @@ public sealed partial class DoctorSession
                 // run them on the RPC dispatch loop or change global cwd/env.
                 return await Task.Run(() => query(new(workspace), lifetime.Token), lifetime.Token);
             }
-            finally { gate.Release(); }
+            finally
+            {
+                gate.Release();
+            }
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception error) when (error is ApplicationRefusal or ArgumentException or IOException
-            or JsonException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException or SqliteException)
+                                          or JsonException or InvalidDataException or InvalidOperationException
+                                          or UnauthorizedAccessException or KeyNotFoundException or SqliteException)
         {
             var code = error switch
             {
@@ -301,7 +355,8 @@ public sealed partial class DoctorSession
                 InvalidOperationException => "invalid_context",
                 _ => "read_failed"
             };
-            throw new LocalRpcException(error.Message) { ErrorCode = 1001, ErrorData = new ApplicationError(code, error.Message) };
+            throw new LocalRpcException(error.Message)
+                { ErrorCode = 1001, ErrorData = new ApplicationError(code, error.Message) };
         }
     }
 }

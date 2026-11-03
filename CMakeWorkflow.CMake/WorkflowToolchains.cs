@@ -1,13 +1,25 @@
 namespace CMakeWorkflow;
 
 // Keep the environment in memory; never put inherited variables or tokens in run.json.
-public sealed record WorkflowToolchainRuntime(string CMake, string? Ninja, string Compiler,
-    string? Sdk, string? EnvironmentProfileId, string Generator, string Fingerprint,
+public sealed record WorkflowToolchainRuntime(
+    string CMake,
+    string? Ninja,
+    string Compiler,
+    string? Sdk,
+    string? EnvironmentProfileId,
+    string Generator,
+    string Fingerprint,
     IReadOnlyDictionary<string, string> Variables);
 
-public sealed record WorkflowToolchainIdentity(string BuildDirectory, string CMake,
-    string? Ninja, string Compiler, string? Sdk, string? EnvironmentProfileId,
-    string Generator, string Fingerprint);
+public sealed record WorkflowToolchainIdentity(
+    string BuildDirectory,
+    string CMake,
+    string? Ninja,
+    string Compiler,
+    string? Sdk,
+    string? EnvironmentProfileId,
+    string Generator,
+    string Fingerprint);
 
 public interface IWorkflowToolchainProvider
 {
@@ -24,20 +36,25 @@ public static class WorkflowToolchainAdmission
                      .GroupBy(n => n.Target.BuildDirectory, WorkflowPlanner.PathComparer))
         {
             if (provider is null)
-                throw new InvalidOperationException("An explicit toolchain requires a platform execution environment provider.");
+                throw new InvalidOperationException(
+                    "An explicit toolchain requires a platform execution environment provider.");
             var binding = tree.First().Toolchain!;
             if (tree.Any(x => x.Requested.ConfigurePreset is not null))
-                throw new InvalidOperationException("Selected toolchain cannot override configurePreset; use a separately configured tree.");
+                throw new InvalidOperationException(
+                    "Selected toolchain cannot override configurePreset; use a separately configured tree.");
             if (tree.Any(x => x.Toolchain != binding))
                 throw new InvalidDataException("One build tree has conflicting toolchain bindings.");
             ct.ThrowIfCancellationRequested();
             var resolved = await provider.ResolveAsync(binding, ct);
             if (resolved.Generator != binding.Generator || string.IsNullOrWhiteSpace(resolved.Fingerprint)
-                || !Path.IsPathFullyQualified(resolved.CMake) || !Path.IsPathFullyQualified(resolved.Compiler)
-                || resolved.Ninja is not null && !Path.IsPathFullyQualified(resolved.Ninja))
+                                                        || !Path.IsPathFullyQualified(resolved.CMake) ||
+                                                        !Path.IsPathFullyQualified(resolved.Compiler)
+                                                        || resolved.Ninja is not null &&
+                                                        !Path.IsPathFullyQualified(resolved.Ninja))
                 throw new InvalidDataException("Toolchain provider returned an invalid or incompatible selection.");
             selected.Add(tree.Key, resolved);
         }
+
         return selected;
     }
 
@@ -53,7 +70,8 @@ public static class WorkflowToolchainAdmission
     {
         var current = Identities(selected);
         if (recorded.Count != current.Count || recorded.Where((a, i) => a != current[i]).Any())
-            throw new InvalidDataException("Toolchain/environment changed since the checkpoint. Resume is unsafe; reconcile explicitly.");
+            throw new InvalidDataException(
+                "Toolchain/environment changed since the checkpoint. Resume is unsafe; reconcile explicitly.");
     }
 
     // An existing configured CMake tree cannot be silently rebound to a different compiler,
@@ -70,14 +88,19 @@ public static class WorkflowToolchainAdmission
             var colon = line.IndexOf(':');
             if (split > colon && colon > 0) properties[line[..colon]] = line[(split + 1)..];
         }
+
         if (properties.TryGetValue("CMAKE_GENERATOR", out var generator) && generator != selected.Generator)
             throw new InvalidOperationException("Configured generator differs from selected toolchain.");
+
         static bool EqualPath(string observed, string selected) =>
             WorkflowPlanner.PathComparer.Equals(Path.GetFullPath(observed), Path.GetFullPath(selected));
+
         if (properties.TryGetValue("CMAKE_CXX_COMPILER", out var compiler) && !EqualPath(compiler, selected.Compiler))
-            throw new InvalidOperationException("CMake cache compiler differs from selected toolchain; use a new build tree.");
+            throw new InvalidOperationException(
+                "CMake cache compiler differs from selected toolchain; use a new build tree.");
         if (selected.Ninja is not null && properties.TryGetValue("CMAKE_MAKE_PROGRAM", out var ninja)
-            && !EqualPath(ninja, selected.Ninja))
-            throw new InvalidOperationException("CMake cache build tool differs from selected Ninja; use a new build tree.");
+                                       && !EqualPath(ninja, selected.Ninja))
+            throw new InvalidOperationException(
+                "CMake cache build tool differs from selected Ninja; use a new build tree.");
     }
 }

@@ -16,9 +16,16 @@ public sealed class LinuxHostSettingsBackend : IHostSettingsBackend
     public string? Read(string path)
     {
         if (!OperatingSystem.IsLinux()) return null;
-        try { return File.ReadAllText(path).Trim(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        try
+        {
+            return File.ReadAllText(path).Trim();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
+
     public void Write(string path, string value)
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Linux host settings only.");
@@ -40,21 +47,28 @@ public static class HostSettingsProvisioner
         {
             var current = backend.Read(PerfPath);
             if (!int.TryParse(current, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
-                throw new InvalidOperationException("Cannot inspect perf_event_paranoid; global settings are not writable without verification.");
-            if (n > max) changes.Add(new("perf_event_paranoid", PerfPath, current, max.ToString(CultureInfo.InvariantCulture)));
+                throw new InvalidOperationException(
+                    "Cannot inspect perf_event_paranoid; global settings are not writable without verification.");
+            if (n > max)
+                changes.Add(new("perf_event_paranoid", PerfPath, current, max.ToString(CultureInfo.InvariantCulture)));
         }
+
         if (requirements.CpuGovernor is string expected)
         {
-            if (cpuPaths is null) throw new InvalidOperationException("CPU governor targets must be enumerated explicitly.");
+            if (cpuPaths is null)
+                throw new InvalidOperationException("CPU governor targets must be enumerated explicitly.");
             foreach (var path in cpuPaths.Order(StringComparer.Ordinal))
             {
                 ValidatePolicyPath(path);
-                var current = backend.Read(path) ?? throw new InvalidOperationException("Cannot inspect governor: " + path);
-                if (current is not ("performance" or "powersave" or "schedutil" or "ondemand" or "conservative" or "userspace"))
+                var current = backend.Read(path) ??
+                              throw new InvalidOperationException("Cannot inspect governor: " + path);
+                if (current is not ("performance" or "powersave" or "schedutil" or "ondemand" or "conservative"
+                    or "userspace"))
                     throw new InvalidOperationException("Unknown current governor: " + current);
                 if (current != expected) changes.Add(new("cpu_governor", path, current, expected));
             }
         }
+
         return changes;
     }
 
@@ -94,9 +108,11 @@ public static class HostSettingsProvisioner
                 change.Id == "cpu_governor" && change.Path == PerfPath ||
                 change.Id is not ("cpu_governor" or "perf_event_paranoid"))
                 throw new InvalidDataException("Unexpected system setting identifier.");
-            if (change.Before is null || !string.Equals(backend.Read(change.Path), change.Before, StringComparison.Ordinal))
+            if (change.Before is null ||
+                !string.Equals(backend.Read(change.Path), change.Before, StringComparison.Ordinal))
                 throw new InvalidOperationException("Host state changed since approval: " + change.Id);
         }
+
         foreach (var change in changes)
         {
             ct.ThrowIfCancellationRequested();

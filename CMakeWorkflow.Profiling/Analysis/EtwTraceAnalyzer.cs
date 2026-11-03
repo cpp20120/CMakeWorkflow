@@ -7,8 +7,13 @@ using System.Xml.Linq;
 
 namespace CMakeWorkflow.Profiling;
 
-public sealed record EtwAnalysisResult(string EventDump, string Summary, string Samples,
-    int CpuSamples, int ContextSwitchesIn, int ReadyEvents);
+public sealed record EtwAnalysisResult(
+    string EventDump,
+    string Summary,
+    string Samples,
+    int CpuSamples,
+    int ContextSwitchesIn,
+    int ReadyEvents);
 
 public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 {
@@ -60,17 +65,22 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         using (var sampleWriter = new StreamWriter(samplesPath, false, new UTF8Encoding(false)))
         using (var timelineWriter = new StreamWriter(timelinePath, false, new UTF8Encoding(false)))
         using (var reader = XmlReader.Create(dump, new XmlReaderSettings
-        {
-            DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null,
-            IgnoreComments = true,
-            IgnoreWhitespace = true
-        }))
+               {
+                   DtdProcessing = DtdProcessing.Prohibit,
+                   XmlResolver = null,
+                   IgnoreComments = true,
+                   IgnoreWhitespace = true
+               }))
         {
             void Timeline(DateTimeOffset? time, int tid, string state, int? processor)
             {
                 if (time is null) return;
-                if (timelineCount >= 10000) { timelineDropped++; return; }
+                if (timelineCount >= 10000)
+                {
+                    timelineDropped++;
+                    return;
+                }
+
                 timelineCount++;
                 timelineWriter.WriteLine(new JsonObject
                 {
@@ -78,6 +88,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     ["state"] = state, ["cpu"] = processor
                 }.ToJsonString());
             }
+
             while (!reader.EOF)
             {
                 if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "Event")
@@ -85,6 +96,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     if (!reader.Read()) break;
                     continue;
                 }
+
                 ct.ThrowIfCancellationRequested();
                 var record = (XElement)XNode.ReadFrom(reader);
                 totalEvents++;
@@ -96,17 +108,18 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 var timestampText = Attr(Child(system, "TimeCreated"), "SystemTime");
                 DateTimeOffset? timestamp = DateTimeOffset.TryParse(timestampText,
                     CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
-                    ? parsed : null;
+                    ? parsed
+                    : null;
                 var data = Child(record, "EventData")?.Elements()
-                    .Where(x => x.Name.LocalName == "Data")
-                    .GroupBy(x => Attr(x, "Name") ?? "", StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(x => x.Key, x => x.First().Value.Trim(),
-                        StringComparer.OrdinalIgnoreCase)
-                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                               .Where(x => x.Name.LocalName == "Data")
+                               .GroupBy(x => Attr(x, "Name") ?? "", StringComparer.OrdinalIgnoreCase)
+                               .ToDictionary(x => x.Key, x => x.First().Value.Trim(),
+                                   StringComparer.OrdinalIgnoreCase)
+                           ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 var rendering = Child(record, "RenderingInfo");
                 var eventName = Child(rendering, "EventName")?.Value.Trim() ?? "";
                 var opcode = Child(rendering, "Opcode")?.Value.Trim()
-                    ?? Child(system, "Opcode")?.Value.Trim() ?? "";
+                             ?? Child(system, "Opcode")?.Value.Trim() ?? "";
                 var normalizedName = new string(eventName.Where(char.IsLetterOrDigit)
                     .Select(char.ToLowerInvariant).ToArray());
                 var payloadPid = Value(data, "ProcessId", "ProcessID", "PID");
@@ -114,7 +127,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 var targetPid = targetProcessId;
 
                 if (normalizedName == "process" && (opcode.Equals("Start", StringComparison.OrdinalIgnoreCase)
-                    || opcode == "1") && payloadPid == targetPid)
+                                                    || opcode == "1") && payloadPid == targetPid)
                     imageName = data.GetValueOrDefault("ImageFileName");
 
                 if (normalizedName == "thread")
@@ -125,21 +138,25 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                             || opcode.Equals("DCStart", StringComparison.OrdinalIgnoreCase)
                             || opcode is "1" or "3") threadProcess[tid] = pid;
                         else if (opcode.Equals("End", StringComparison.OrdinalIgnoreCase)
-                            || opcode.Equals("DCEnd", StringComparison.OrdinalIgnoreCase)
-                            || opcode is "2" or "4")
+                                 || opcode.Equals("DCEnd", StringComparison.OrdinalIgnoreCase)
+                                 || opcode is "2" or "4")
                         {
                             threadProcess.Remove(tid);
                             readyAt.Remove(tid);
                             runningAt.Remove(tid);
                         }
                     }
+
                     continue;
                 }
+
                 if (targetPid is null || !WithinWindow(timestamp, targetStartedAt, targetFinishedAt)) continue;
                 var eventPid = payloadPid ?? headerPid;
                 var belongsToTarget = eventPid == targetPid
-                    || (headerTid is { } knownTid && threadProcess.GetValueOrDefault(knownTid) == targetPid)
-                    || (payloadTid is { } payloadThread && threadProcess.GetValueOrDefault(payloadThread) == targetPid);
+                                      || (headerTid is { } knownTid &&
+                                          threadProcess.GetValueOrDefault(knownTid) == targetPid)
+                                      || (payloadTid is { } payloadThread &&
+                                          threadProcess.GetValueOrDefault(payloadThread) == targetPid);
                 if (normalizedName is "sampledprofile" or "sampleprofile")
                 {
                     if (!belongsToTarget) continue;
@@ -147,23 +164,26 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     var thread = payloadTid ?? headerTid;
                     if (thread is { } sampleTid) Counts(threads, sampleTid).Samples++;
                     var stack = record.Descendants().FirstOrDefault(x =>
-                        x.Name.LocalName is "StackTrace" or "Stack")?.Value.Trim()
-                        ?? data.GetValueOrDefault("StackTrace")
-                        ?? data.GetValueOrDefault("Stack");
+                                    x.Name.LocalName is "StackTrace" or "Stack")?.Value.Trim()
+                                ?? data.GetValueOrDefault("StackTrace")
+                                ?? data.GetValueOrDefault("Stack");
                     if (!string.IsNullOrEmpty(stack))
                     {
                         rawStacks++;
                         // tracerpt may expose only raw addresses: these are
                         // explicitly marked unresolved, not fabricated symbols.
                         var frames = stack.Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries
-                            | StringSplitOptions.TrimEntries)
+                                                              | StringSplitOptions.TrimEntries)
                             .SelectMany(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                                ? x.Split(' ', StringSplitOptions.RemoveEmptyEntries) : [x])
+                                ? x.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                                : [x])
                             .Select(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                                ? "[unknown]" : x).ToArray();
+                                ? "[unknown]"
+                                : x).ToArray();
                         stacks.Add(frames);
                     }
                     else stacks.Add([]);
+
                     var sample = new JsonObject
                     {
                         ["timestamp"] = timestamp?.ToString("O"),
@@ -193,6 +213,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                             Timeline(timestamp, nextTid, "running", cpu);
                         }
                     }
+
                     if (previous is { } previousTid && threadProcess.GetValueOrDefault(previousTid) == targetPid)
                     {
                         switchesOut++;
@@ -218,6 +239,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 }
             }
         }
+
         var threadRows = new JsonArray();
         var readyLatencyCount = 0;
         var readyLatencyMilliseconds = 0.0;
@@ -243,6 +265,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     counts.RunningMilliseconds, ProfileJson.Default.Double)
             });
         }
+
         var summary = new JsonObject
         {
             ["schemaVersion"] = 1,
@@ -267,15 +290,17 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             ["samplesWithRawStacks"] = rawStacks,
             ["samplesFile"] = Path.GetRelativePath(outputDirectory, samplesPath),
             ["threads"] = threadRows,
-            ["measurementSemantics"] = "ETW event counts and observed scheduling intervals; CPU samples are statistical observations, not PMU cycles or elapsed time."
+            ["measurementSemantics"] =
+                "ETW event counts and observed scheduling intervals; CPU samples are statistical observations, not PMU cycles or elapsed time."
         };
         summary["timelineEventsRecorded"] = timelineCount;
         summary["timelineEventsDropped"] = timelineDropped;
-        summary["timelineSemantics"] = "Ready/running/offcpu transitions for known target threads; offcpu is not necessarily sleeping. Truncated timelines omit later events.";
+        summary["timelineSemantics"] =
+            "Ready/running/offcpu transitions for known target threads; offcpu is not necessarily sleeping. Truncated timelines omit later events.";
         File.WriteAllText(stackPath, stacks.ToJson("etw", captureId).ToJsonString() + "\n");
         File.WriteAllText(summaryPath,
             summary.ToJsonString(new JsonSerializerOptions
-            { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n");
+                { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n");
         return new EtwAnalysisResult(dump, summaryPath, samplesPath,
             cpuSamples, switchesIn, readyEvents);
     }
@@ -327,11 +352,13 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             && int.TryParse(value[2..], NumberStyles.HexNumber,
                 CultureInfo.InvariantCulture, out var hex)) return hex;
         return int.TryParse(value, NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out var decimalValue) ? decimalValue : null;
+            CultureInfo.InvariantCulture, out var decimalValue)
+            ? decimalValue
+            : null;
     }
 
     private static bool WithinWindow(DateTimeOffset? timestamp,
         DateTimeOffset? start, DateTimeOffset? end) =>
         timestamp is null || (start is null || timestamp >= start.Value.AddMilliseconds(-50))
-            && (end is null || timestamp <= end.Value.AddMilliseconds(50));
+        && (end is null || timestamp <= end.Value.AddMilliseconds(50));
 }

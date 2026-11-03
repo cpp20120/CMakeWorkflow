@@ -10,11 +10,16 @@ using StreamJsonRpc;
 internal static class ApplicationTests
 {
     private static void Check(bool condition, string message)
-    { if (!condition) throw new Exception(message); }
+    {
+        if (!condition) throw new Exception(message);
+    }
 
     private static async Task Refused(Func<Task> call, string code)
     {
-        try { await call(); }
+        try
+        {
+            await call();
+        }
         catch (RemoteInvocationException error)
         {
             Check(error.ErrorCode == 1001, "Stable application error code missing: " + error);
@@ -22,30 +27,36 @@ internal static class ApplicationTests
                 "Stable domain code missing: " + error.DeserializedErrorData);
             return;
         }
+
         throw new Exception("Expected refusal: " + code);
     }
 
     public static async Task RunAsync(string endpoint, string parent, CancellationToken ct)
     {
-        var root = BuildTreeOwnership.CanonicalPath(Directory.CreateDirectory(Path.Combine(parent, "application workspace")).FullName);        
+        var root = BuildTreeOwnership.CanonicalPath(Directory
+            .CreateDirectory(Path.Combine(parent, "application workspace")).FullName);
         var outside = Directory.CreateDirectory(Path.Combine(parent, "other application workspace")).FullName;
         var build = Directory.CreateDirectory(Path.Combine(root, "build space")).FullName;
-        File.WriteAllText(Path.Combine(build, "CMakeCache.txt"), $"CMAKE_HOME_DIRECTORY:INTERNAL={root}\nCMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Debug\n");
+        File.WriteAllText(Path.Combine(build, "CMakeCache.txt"),
+            $"CMAKE_HOME_DIRECTORY:INTERNAL={root}\nCMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Debug\n");
         var bridge = Directory.CreateDirectory(Path.Combine(build, "cmake-workflow", "targets", "Debug")).FullName;
         var executable = Path.Combine(build, "worker with spaces");
         File.WriteAllText(Path.Combine(bridge, "worker.json"),
             $$"""{"schemaVersion":1,"target":"worker","configuration":"Debug","executable":{{JsonSerializer.Serialize(executable)}}} """);
         var manifest = Path.Combine(root, "workflow.json");
         File.WriteAllText(manifest, """
-            {"schemaVersion":2,"contexts":{"x":{"buildDirectory":"build space","mode":"adopt"}},
-             "nodes":[{"id":"build","kind":"build","context":"x","target":"worker",
-                       "inputs":[{"path":"build space/CMakeCache.txt","snapshot":true}]},
-                      {"id":"run","kind":"run","from":"build",
-                       "outputs":[{"name":"example","root":"run","path":"example.json"}]}]}
-            """);
+                                    {"schemaVersion":2,"contexts":{"x":{"buildDirectory":"build space","mode":"adopt"}},
+                                     "nodes":[{"id":"build","kind":"build","context":"x","target":"worker",
+                                               "inputs":[{"path":"build space/CMakeCache.txt","snapshot":true}]},
+                                              {"id":"run","kind":"run","from":"build",
+                                               "outputs":[{"name":"example","root":"run","path":"example.json"}]}]}
+                                    """);
         var run = Directory.CreateDirectory(Path.Combine(root, "run directory")).FullName;
-        var report = new WorkflowReport { Workflow = manifest, Status = "failed", FinishedAt = DateTimeOffset.UtcNow,
-            Nodes = [new() { Id = "run", Kind = "run", Status = "failed" }] };
+        var report = new WorkflowReport
+        {
+            Workflow = manifest, Status = "failed", FinishedAt = DateTimeOffset.UtcNow,
+            Nodes = [new() { Id = "run", Kind = "run", Status = "failed" }]
+        };
         var raw = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
         File.WriteAllBytes(Path.Combine(run, "run.json"), raw);
         var otherRun = Directory.CreateDirectory(Path.Combine(outside, "run")).FullName;
@@ -54,48 +65,59 @@ internal static class ApplicationTests
         string ownId, otherId;
         using (var db = new HistoryStore(database))
         {
-            db.Import(run, false); db.Import(otherRun, false);
+            db.Import(run, false);
+            db.Import(otherRun, false);
             var runs = db.Runs(10, null, null, null, null, null);
             ownId = runs.Single(r => r.Directory == run).Id;
             otherId = runs.Single(r => r.Directory == otherRun).Id;
         }
-        report.Status = "outcome_unknown"; report.Nodes[0].Status = "outcome_unknown";
+
+        report.Status = "outcome_unknown";
+        report.Nodes[0].Status = "outcome_unknown";
         raw = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
         File.WriteAllBytes(Path.Combine(run, "run.json"), raw);
         var databaseBefore = File.ReadAllBytes(database);
         var cwd = Directory.GetCurrentDirectory();
         using var wire = await LocalTransport.ConnectAsync(endpoint, ct);
         using var rpc = HostConnection.Create(wire);
-        var client = rpc.Attach<IHostRpc>(); rpc.StartListening();
+        var client = rpc.Attach<IHostRpc>();
+        rpc.StartListening();
         await Refused(() => client.RunGetAsync(new(run), ct), "not_initialized");
         await Refused(() => client.WorkflowStartAsync(
             new("preinit", manifest, "0", 1, Path.Combine(root, "preinit-results")), ct), "not_initialized");
         var info = await client.InitializeAsync(new(1, root), ct);
         Check(info.Capabilities.Contains("workflow/plan") && info.Capabilities.Contains("history/detect")
-            && info.Capabilities.Contains("workflow/start") && info.Capabilities.Contains("profile/prepare")
-            && info.Capabilities.Contains("benchmark/prepare"),
+                                                          && info.Capabilities.Contains("workflow/start") &&
+                                                          info.Capabilities.Contains("profile/prepare")
+                                                          && info.Capabilities.Contains("benchmark/prepare"),
             "Capabilities omit implemented profile/workflow lifecycle");
         var prepareRequest = new ProfilePrepareRequest("0123456789abcdef0123456789abcdef",
             Path.Combine(root, "profile definitions"), "worker", [new("main", build)],
             Repeats: 1, Arguments: ["--case", "chain"]);
         var prepared = await client.ProfilePrepareAsync(prepareRequest, ct);
         Check(prepared.SchemaVersion == 1 && File.Exists(prepared.Manifest)
-            && prepared.ManifestSha256 == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(prepared.Manifest))),
+                                          && prepared.ManifestSha256 ==
+                                          Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(prepared.Manifest))),
             "Profile preparation missing versioned immutable manifest and digest");
         Check(prepared == await client.ProfilePrepareAsync(prepareRequest, ct),
             "Profile preparation must be idempotent with the same request ID and contents");
         var profilePlan = await client.WorkflowPlanAsync(new(prepared.Manifest), ct);
-        Check(profilePlan.Nodes.Any(node => node.Kind == "profile") && profilePlan.Nodes.Any(node => node.Kind == "run"),
+        Check(
+            profilePlan.Nodes.Any(node => node.Kind == "profile") && profilePlan.Nodes.Any(node => node.Kind == "run"),
             "Profile graph must include separate timing and instrumented capture nodes");
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with { Target = "other" }, ct),
             "request_id_conflict");
         var otherProfileDirectory = Path.Combine(root, "other profile definitions");
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with
-        { ResultsDirectory = otherProfileDirectory }, ct), "request_id_conflict");
+        {
+            ResultsDirectory = otherProfileDirectory
+        }, ct), "request_id_conflict");
         Check(!Directory.Exists(otherProfileDirectory),
             "Conflicting profile request created an alternate result directory");
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with
-        { RequestId = "11111111111111111111111111111111", Variants = [new("escape", outside)] }, ct),
+            {
+                RequestId = "11111111111111111111111111111111", Variants = [new("escape", outside)]
+            }, ct),
             "path_not_allowed");
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with { RequestId = "../escape" }, ct),
             "invalid_argument");
@@ -108,30 +130,46 @@ internal static class ApplicationTests
         // use /private/var even when the request uses /var on macOS.
         var benchmarkBytes = File.ReadAllBytes(benchmarkPrepared.Manifest);
         Check(benchmarkPrepared.SchemaVersion == 1 && File.Exists(benchmarkRequest.OutputPath)
-            && File.ReadAllBytes(benchmarkRequest.OutputPath).SequenceEqual(benchmarkBytes)
-            && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
-                benchmarkBytes)), "Benchmark preparation hash or path");
+                                                   && File.ReadAllBytes(benchmarkRequest.OutputPath)
+                                                       .SequenceEqual(benchmarkBytes)
+                                                   && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(
+                                                       SHA256.HashData(
+                                                           benchmarkBytes)), "Benchmark preparation hash or path");
         Check(benchmarkPrepared == await client.BenchmarkPrepareAsync(benchmarkRequest, ct),
             "Benchmark preparation retry changed committed result");
         var benchmarkPlan = await client.WorkflowPlanAsync(new(benchmarkPrepared.Manifest), ct);
         Check(benchmarkPlan.Valid && benchmarkPlan.Nodes.Count == 11
-            && benchmarkPlan.Nodes.Count(n => n.Kind == "build") == 1,
+                                  && benchmarkPlan.Nodes.Count(n => n.Kind == "build") == 1,
             "Prepared benchmark was not accepted by existing planner");
         await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
-        { Recipe = benchmarkRecipe with { Repeats = 11 } }, ct), "request_id_conflict");
+        {
+            Recipe = benchmarkRecipe with { Repeats = 11 }
+        }, ct), "request_id_conflict");
         var conflictingOutput = Path.Combine(root, "other benchmark definitions", "chain.json");
         await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
-        { OutputPath = conflictingOutput }, ct), "request_id_conflict");
+        {
+            OutputPath = conflictingOutput
+        }, ct), "request_id_conflict");
         Check(!File.Exists(conflictingOutput), "Conflicting Benchmark request created a manifest");
         await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
-        { RequestId = Guid.NewGuid().ToString("N"), OutputPath = Path.Combine(outside, "outside.json") }, ct),
+            {
+                RequestId = Guid.NewGuid().ToString("N"), OutputPath = Path.Combine(outside, "outside.json")
+            }, ct),
             "path_not_allowed");
         await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
-        { RequestId = Guid.NewGuid().ToString("N"), Recipe = benchmarkRecipe with
-            { BuildDirectory = outside } }, ct), "path_not_allowed");
+        {
+            RequestId = Guid.NewGuid().ToString("N"), Recipe = benchmarkRecipe with
+            {
+                BuildDirectory = outside
+            }
+        }, ct), "path_not_allowed");
         await Refused(() => client.BenchmarkPrepareAsync(benchmarkRequest with
-        { RequestId = Guid.NewGuid().ToString("N"), Recipe = benchmarkRecipe with
-            { SchemaVersion = 2 } }, ct), "invalid_argument");
+        {
+            RequestId = Guid.NewGuid().ToString("N"), Recipe = benchmarkRecipe with
+            {
+                SchemaVersion = 2
+            }
+        }, ct), "invalid_argument");
         Check(!File.Exists(executable), "Benchmark preparation launched a native executable");
         var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
         var recipeProfile = new CMakeWorkflow.Profiling.ProfileRecipeV1("profile", 1,
@@ -140,9 +178,9 @@ internal static class ApplicationTests
             Path.Combine(root, "recipe-profile.json"), recipeProfile);
         var profileRecipeReady = await client.ProfileRecipePrepareAsync(profileRecipeRequest, ct);
         Check(profileRecipeReady == await client.ProfileRecipePrepareAsync(profileRecipeRequest, ct)
-            && profileRecipeReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
-                File.ReadAllBytes(profileRecipeReady.Manifest)))
-            && (await client.WorkflowPlanAsync(new(profileRecipeReady.Manifest), ct)).Valid,
+              && profileRecipeReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                  File.ReadAllBytes(profileRecipeReady.Manifest)))
+              && (await client.WorkflowPlanAsync(new(profileRecipeReady.Manifest), ct)).Valid,
             "Profile recipe wire preparation/hash/plan");
         var recipeTest = new TestMatrixRecipeV1("test-matrix", 1, build, "worker", "Debug",
             [new("unit", LabelRegex: "unit")], "parallel", 30);
@@ -150,9 +188,9 @@ internal static class ApplicationTests
             Path.Combine(root, "recipe-test.json"), recipeTest);
         var testMatrixReady = await client.TestMatrixPrepareAsync(testMatrixRequest, ct);
         Check(testMatrixReady == await client.TestMatrixPrepareAsync(testMatrixRequest, ct)
-            && testMatrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
-                File.ReadAllBytes(testMatrixReady.Manifest)))
-            && (await client.WorkflowPlanAsync(new(testMatrixReady.Manifest), ct)).Valid,
+              && testMatrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                  File.ReadAllBytes(testMatrixReady.Manifest)))
+              && (await client.WorkflowPlanAsync(new(testMatrixReady.Manifest), ct)).Valid,
             "Test Matrix wire preparation/hash/plan");
         var recipeVariants = new[] { new BuildVariantV1("main", build, "Debug") };
         var recipeBuild = new BuildMatrixRecipeV1("build-matrix", 1, recipeVariants, ["worker"]);
@@ -160,9 +198,9 @@ internal static class ApplicationTests
             Path.Combine(root, "recipe-build.json"), recipeBuild);
         var buildMatrixReady = await client.BuildMatrixPrepareAsync(buildMatrixRequest, ct);
         Check(buildMatrixReady == await client.BuildMatrixPrepareAsync(buildMatrixRequest, ct)
-            && buildMatrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
-                File.ReadAllBytes(buildMatrixReady.Manifest)))
-            && (await client.WorkflowPlanAsync(new(buildMatrixReady.Manifest), ct)).Valid,
+              && buildMatrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                  File.ReadAllBytes(buildMatrixReady.Manifest)))
+              && (await client.WorkflowPlanAsync(new(buildMatrixReady.Manifest), ct)).Valid,
             "Build Matrix wire preparation/hash/plan");
         var recipeMatrix = new BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
             recipeVariants, "worker", 2, 30, ["x"], [new("case", "--case", ["a", "b"])],
@@ -171,48 +209,64 @@ internal static class ApplicationTests
             Path.Combine(root, "recipe-matrix.json"), recipeMatrix);
         var matrixReady = await client.BenchmarkMatrixPrepareAsync(matrixRequest, ct);
         Check(matrixReady == await client.BenchmarkMatrixPrepareAsync(matrixRequest, ct)
-            && matrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
-                File.ReadAllBytes(matrixReady.Manifest)))
-            && (await client.WorkflowPlanAsync(new(matrixReady.Manifest), ct)).Valid,
+              && matrixReady.ManifestSha256 == Convert.ToHexString(SHA256.HashData(
+                  File.ReadAllBytes(matrixReady.Manifest)))
+              && (await client.WorkflowPlanAsync(new(matrixReady.Manifest), ct)).Valid,
             "Benchmark Matrix wire preparation/hash/plan");
         await Refused(() => client.BenchmarkMatrixPrepareAsync(matrixRequest with
-        { Recipe = recipeMatrix with { Repeats = 3 } }, ct), "request_id_conflict");
+        {
+            Recipe = recipeMatrix with { Repeats = 3 }
+        }, ct), "request_id_conflict");
         await Refused(() => client.BenchmarkMatrixPrepareAsync(matrixRequest with
-        { RequestId = Guid.NewGuid().ToString("N"), Recipe = recipeMatrix with { Repeats = 3 } }, ct),
+            {
+                RequestId = Guid.NewGuid().ToString("N"), Recipe = recipeMatrix with { Repeats = 3 }
+            }, ct),
             "request_id_conflict");
-        var concurrentMatrix = matrixRequest with { RequestId = Guid.NewGuid().ToString("N"),
-            OutputPath = Path.Combine(root, "concurrent-matrix.json") };
+        var concurrentMatrix = matrixRequest with
+        {
+            RequestId = Guid.NewGuid().ToString("N"),
+            OutputPath = Path.Combine(root, "concurrent-matrix.json")
+        };
         var matrixReplays = await Task.WhenAll(Enumerable.Range(0, 4)
             .Select(_ => client.BenchmarkMatrixPrepareAsync(concurrentMatrix, ct)));
         Check(matrixReplays.All(p => p == matrixReplays[0]),
             "Concurrent Benchmark Matrix preparation changed committed response");
         await Refused(() => client.BuildMatrixPrepareAsync(buildMatrixRequest with
-        { RequestId = Guid.NewGuid().ToString("N"), Recipe = recipeBuild with
-            { Variants = [new("escape", outside)] } }, ct), "path_not_allowed");
+        {
+            RequestId = Guid.NewGuid().ToString("N"), Recipe = recipeBuild with
+            {
+                Variants = [new("escape", outside)]
+            }
+        }, ct), "path_not_allowed");
         Check(!File.Exists(executable), "Typed recipe preparation launched an executable");
         var concurrentRequest = benchmarkRequest with
-        { RequestId = Guid.NewGuid().ToString("N"), OutputPath = Path.Combine(root, "concurrent", "chain.json") };
+        {
+            RequestId = Guid.NewGuid().ToString("N"), OutputPath = Path.Combine(root, "concurrent", "chain.json")
+        };
         var concurrent = await Task.WhenAll(Enumerable.Range(0, 4)
             .Select(_ => client.BenchmarkPrepareAsync(concurrentRequest, ct)));
         Check(concurrent.All(x => x == concurrent[0])
-            && File.Exists(concurrent[0].Manifest), "Concurrent Benchmark preparation was not idempotent");
+              && File.Exists(concurrent[0].Manifest), "Concurrent Benchmark preparation was not idempotent");
         using (var retryWire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (var retryRpc = HostConnection.Create(retryWire))
         {
-            var retryClient = retryRpc.Attach<IHostRpc>(); retryRpc.StartListening();
+            var retryClient = retryRpc.Attach<IHostRpc>();
+            retryRpc.StartListening();
             await retryClient.InitializeAsync(new(1, root), ct);
             Check(await retryClient.BenchmarkPrepareAsync(benchmarkRequest, ct) == benchmarkPrepared,
                 "Lost response/reconnect changed Benchmark preparation");
             Check(await retryClient.BenchmarkMatrixPrepareAsync(matrixRequest, ct) == matrixReady,
                 "Lost response/reconnect changed Benchmark Matrix preparation");
         }
+
         var fixture = Directory.CreateDirectory(Path.Combine(root, "profile analysis fixture")).FullName;
         File.WriteAllText(Path.Combine(fixture, "raw.txt"), "raw fixture");
         File.WriteAllText(Path.Combine(fixture, "capture.results.json"),
             """{"captureId":"capture","backend":"fixture","mode":"cpu","eventSource":"test","rawTrace":"raw.txt"}""");
         var analyzed = await client.ProfileAnalyzeAsync(new(fixture), ct);
         Check(analyzed.SchemaVersion == 1 && analyzed.AnalysisFile == Path.Combine(fixture, "analysis.json")
-            && File.Exists(analyzed.AnalysisFile), "Profile analyze RPC must return the saved artifact path");
+                                          && File.Exists(analyzed.AnalysisFile),
+            "Profile analyze RPC must return the saved artifact path");
         await Refused(() => client.ProfileAnalyzeAsync(new(otherRun), ct), "path_not_allowed");
         // Recovery mutation and event replay must be real wire methods, not local-only helpers.
         var recoveryManifest = Path.Combine(root, "recovery-wire.json");
@@ -229,26 +283,37 @@ internal static class ApplicationTests
             durable.Reconcile(resumeId, 0, "needs_attention", "manual repair");
             durable.Reconcile(blockedId, 0, "outcome_unknown", "unresolved process outcome");
         }
+
         var admitted = await client.WorkflowResumeAsync(new(resumeId, 1, true), ct);
         Check(admitted.Revision == 2 && admitted.Decision == "needs_attention", "resume wire CAS admission");
         Check((await client.WorkflowResumeAsync(new(resumeId, 2, true), ct)).Revision == 2,
             "resume wire idempotence");
         var emptyFeed = await client.OperationEventsAsync(new(resumeId, 0, 10), ct);
         Check(emptyFeed.Events.Count == 0 && !emptyFeed.HasMore, "event wire empty feed");
-        try { await client.WorkflowResumeAsync(new(blockedId, 1, true), ct); throw new Exception("unknown resume allowed"); }
-        catch (RemoteInvocationException) { }
+        try
+        {
+            await client.WorkflowResumeAsync(new(blockedId, 1, true), ct);
+            throw new Exception("unknown resume allowed");
+        }
+        catch (RemoteInvocationException)
+        {
+        }
+
         // Baseline after the mutation fixture (reconciliation + SQLite) is created.
         // Only subsequent read-only calls are forbidden from changing files.
         var filesBefore = Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order().ToArray();
         var context = await client.ContextInspectAsync(new(build), ct);
-        Check(context.State == "ObservedLimited" && context.Configurations.SequenceEqual(["Debug"]), "Context wire result");
+        Check(context.State == "ObservedLimited" && context.Configurations.SequenceEqual(["Debug"]),
+            "Context wire result");
         var resolved = await client.TargetResolveAsync(new(build, "worker"), ct);
-        Check(resolved.Executable == executable && resolved.Configuration == "Debug", "Target resolution changed paths/configuration");
+        Check(resolved.Executable == executable && resolved.Configuration == "Debug",
+            "Target resolution changed paths/configuration");
         Check(!File.Exists(executable), "Read-only target resolution built an executable");
         var plan = await client.WorkflowPlanAsync(new(manifest), ct);
         var standalone = WorkflowQueries.PlanView(await WorkflowPlanner.LoadAsync(manifest, [], null, ct));
         Check(JsonSerializer.Serialize(plan, HostJson.Default.WorkflowPlanView)
-            == JsonSerializer.Serialize(standalone, HostJson.Default.WorkflowPlanView), "CLI/Host plan semantics differ");
+              == JsonSerializer.Serialize(standalone, HostJson.Default.WorkflowPlanView),
+            "CLI/Host plan semantics differ");
         Check(plan.Nodes[0].Inputs.Count == 1 && plan.Nodes[1].Outputs.Count == 1,
             "Host plan omitted typed artifact declarations.");
         var saved = await client.RunGetAsync(new(run), ct);
@@ -261,7 +326,8 @@ internal static class ApplicationTests
         Check(detail.Run.Id == ownId, "History detail wire result");
         await Refused(() => client.HistoryShowAsync(new(database, otherId), ct), "path_not_allowed");
         Check((await client.HistoryMetricsAsync(new(database, ownId), ct)).Count == 0, "Unexpected metrics");
-        Check((await client.HistoryQueryAsync(new(database, Metric: "duration"), ct)).Count == 0, "Unexpected query result");
+        Check((await client.HistoryQueryAsync(new(database, Metric: "duration"), ct)).Count == 0,
+            "Unexpected query result");
         var comparison = await client.HistoryCompareAsync(new(database, ownId, ownId), ct);
         Check(comparison.Single().Status == "missing", "History comparison invented measurements");
         var detection = await client.HistoryDetectAsync(new(database, ownId, ownId, "duration", "higher-worse", 5), ct);
@@ -271,9 +337,13 @@ internal static class ApplicationTests
         await Refused(() => client.HistoryRunsAsync(new(Path.Combine(root, "missing.sqlite")), ct), "not_found");
         await Refused(() => client.RunGetAsync(new(otherRun), ct), "path_not_allowed");
         await Refused(() => client.ContextInspectAsync(new("relative"), ct), "invalid_argument");
-        Check(File.ReadAllBytes(database).SequenceEqual(databaseBefore) && !File.Exists(Path.Combine(root, "missing.sqlite")),
+        Check(
+            File.ReadAllBytes(database).SequenceEqual(databaseBefore) &&
+            !File.Exists(Path.Combine(root, "missing.sqlite")),
             "History query mutated or created a database");
-        Check(Directory.GetCurrentDirectory() == cwd && filesBefore.SequenceEqual(Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order()),
+        Check(
+            Directory.GetCurrentDirectory() == cwd &&
+            filesBefore.SequenceEqual(Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order()),
             "Read APIs created files or changed global cwd");
 
         // Invalid plans are data, not a transport success masquerading as valid.
@@ -291,11 +361,19 @@ internal static class ApplicationTests
             File.Move(cache, Path.Combine(outside, "cache.txt"));
             File.CreateSymbolicLink(cache, Path.Combine(outside, "cache.txt"));
             await Refused(() => client.ContextInspectAsync(new(build), ct), "path_not_allowed");
-            File.Delete(cache); File.Move(Path.Combine(outside, "cache.txt"), cache);
+            File.Delete(cache);
+            File.Move(Path.Combine(outside, "cache.txt"), cache);
         }
+
         // Read-only API must refuse old schema rather than silently migrate it.
         using (var db = new SqliteConnection($"Data Source={database};Pooling=False"))
-        { db.Open(); using var command = db.CreateCommand(); command.CommandText = "PRAGMA user_version=3"; command.ExecuteNonQuery(); }
+        {
+            db.Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "PRAGMA user_version=3";
+            command.ExecuteNonQuery();
+        }
+
         var oldBytes = File.ReadAllBytes(database);
         await Refused(() => client.HistoryRunsAsync(new(database), ct), "invalid_data");
         Check(File.ReadAllBytes(database).SequenceEqual(oldBytes), "Read-only API migrated an old database");
@@ -314,10 +392,11 @@ internal static class ApplicationTests
             operationId = accepted.OperationId;
             acceptedWorkspaceId = accepted.WorkspaceId;
         }
+
         var found = await client.OperationFindAsync(new("stable-client-id"), ct);
         var byId = await client.OperationGetAsync(new(operationId), ct);
         Check(found == byId && found.OperationId == operationId && found.WorkspaceId == acceptedWorkspaceId
-            && found.State == "accepted_not_dispatched" && found.Kind == "workflow", "Operation read DTO mismatch");
+              && found.State == "accepted_not_dispatched" && found.Kind == "workflow", "Operation read DTO mismatch");
         await Refused(() => client.OperationGetAsync(new("missing"), ct), "not_found");
         await Refused(() => client.OperationFindAsync(new(""), ct), "invalid_argument");
         using (var secondWire = await LocalTransport.ConnectAsync(endpoint, ct))
@@ -330,7 +409,9 @@ internal static class ApplicationTests
             await Refused(() => second.OperationFindAsync(new("stable-client-id"), ct), "not_found");
             Check(!Directory.Exists(Path.Combine(outside, ".cmakeworkflow")), "Foreign query created store");
         }
-        Check(File.ReadAllBytes(Path.Combine(run, "run.json")).SequenceEqual(raw), "Operation lookup modified runner report");
+
+        Check(File.ReadAllBytes(Path.Combine(run, "run.json")).SequenceEqual(raw),
+            "Operation lookup modified runner report");
         // Domain RPCs are typed and confined to this initialized workspace.
         var targetRequest = new TargetPrepareRequest("acdcacdcacdcacdcacdcacdcacdcacdc",
             Path.Combine(root, "target-definitions"), "run", build, "worker", Arguments: ["--demo"]);
@@ -355,12 +436,17 @@ internal static class ApplicationTests
         await Refused(() => client.CampaignFuzzMergeAsync(new(otherRun), ct), "path_not_allowed");
         var seeded = await client.CampaignFuzzSeedAsync(new("exceptions", Path.Combine(root, "fuzz-seeds")), ct);
         Check(seeded.Status == "succeeded" && seeded.Kind == "fuzz-seed"
-            && Directory.Exists(seeded.ArtifactDirectory), "Typed fuzz seed RPC failed.");
+                                           && Directory.Exists(seeded.ArtifactDirectory),
+            "Typed fuzz seed RPC failed.");
         Check(info.Capabilities.Contains("target/prepare") && info.Capabilities.Contains("profile/replay")
-            && info.Capabilities.Contains("dagflow/weakMemory/run") && info.Capabilities.Contains("dagflow/fuzz/merge"),
+                                                           && info.Capabilities.Contains("dagflow/weakMemory/run") &&
+                                                           info.Capabilities.Contains("dagflow/fuzz/merge"),
             "Host capabilities do not match typed RPC contract.");
-        Console.WriteLine("Typed target/profile/campaign RPC checks passed: preparation, idempotence, isolation, seed.");
-        Console.WriteLine("Operation RPC wire checks passed: find/get, restart persistence, isolation and no dispatch.");
-        Console.WriteLine("Read API wire checks passed: plan/context/report/history, revisions, isolation, symlink policy, no mutations and refusals.");
+        Console.WriteLine(
+            "Typed target/profile/campaign RPC checks passed: preparation, idempotence, isolation, seed.");
+        Console.WriteLine(
+            "Operation RPC wire checks passed: find/get, restart persistence, isolation and no dispatch.");
+        Console.WriteLine(
+            "Read API wire checks passed: plan/context/report/history, revisions, isolation, symlink policy, no mutations and refusals.");
     }
 }

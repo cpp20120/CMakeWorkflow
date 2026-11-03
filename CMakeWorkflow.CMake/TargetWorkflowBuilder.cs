@@ -15,11 +15,14 @@ public static class TargetWorkflowBuilder
             throw new ArgumentException("Unsupported target action.");
         if (!Path.IsPathFullyQualified(buildDirectory))
             throw new ArgumentException("Build directory must be absolute.");
+
         static void Validate(string? name)
         {
-            if (string.IsNullOrWhiteSpace(name) || !Regex.IsMatch(name, @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
+            if (string.IsNullOrWhiteSpace(name) ||
+                !Regex.IsMatch(name, @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
                 throw new ArgumentException("Invalid CMake target name.");
         }
+
         Validate(target);
         if (action == "sequence") Validate(secondTarget);
         else if (secondTarget is not null || (secondArguments?.Count ?? 0) != 0)
@@ -34,22 +37,37 @@ public static class TargetWorkflowBuilder
         else
         {
             nodes.Add(new WorkflowNode { Id = "build_1", Kind = "build", Context = "build", Target = target });
-            nodes.Add(new WorkflowNode { Id = "run_1", Kind = "run", From = "build_1",
-                DependsOn = ["build_1"], Arguments = arguments?.ToList() ?? [] });
+            nodes.Add(new WorkflowNode
+            {
+                Id = "run_1", Kind = "run", From = "build_1",
+                DependsOn = ["build_1"], Arguments = arguments?.ToList() ?? []
+            });
             if (action == "sequence")
             {
-                nodes.Add(new WorkflowNode { Id = "build_2", Kind = "build", Context = "build", Target = secondTarget,
-                    DependsOn = ["run_1"] });
-                nodes.Add(new WorkflowNode { Id = "run_2", Kind = "run", From = "build_2",
-                    DependsOn = ["build_2"], Arguments = secondArguments?.ToList() ?? [] });
+                nodes.Add(new WorkflowNode
+                {
+                    Id = "build_2", Kind = "build", Context = "build", Target = secondTarget,
+                    DependsOn = ["run_1"]
+                });
+                nodes.Add(new WorkflowNode
+                {
+                    Id = "run_2", Kind = "run", From = "build_2",
+                    DependsOn = ["build_2"], Arguments = secondArguments?.ToList() ?? []
+                });
             }
         }
+
         return new WorkflowDocument
         {
             SchemaVersion = 2,
             Contexts = new Dictionary<string, WorkflowContext>(StringComparer.Ordinal)
-            { ["build"] = new() { BuildDirectory = buildDirectory, Configuration = configuration,
-                Mode = "adopt", ProvenancePolicy = "allowUnverified", Toolchain = toolchain } },
+            {
+                ["build"] = new()
+                {
+                    BuildDirectory = buildDirectory, Configuration = configuration,
+                    Mode = "adopt", ProvenancePolicy = "allowUnverified", Toolchain = toolchain
+                }
+            },
             Nodes = nodes
         };
     }

@@ -26,6 +26,7 @@ public static class TwoTargetWorkflow
                 default: throw new ArgumentException($"Invalid workflow sequence option: {args[i]}");
             }
         }
+
         if (string.IsNullOrWhiteSpace(buildDir) || string.IsNullOrWhiteSpace(first) ||
             string.IsNullOrWhiteSpace(second))
             throw new ArgumentException("workflow sequence requires --build-dir, --first and --second.");
@@ -78,7 +79,7 @@ public static class TwoTargetWorkflow
         }
 
         var root = Path.GetPathRoot(path)
-            ?? throw new ArgumentException($"Build directory has no root: {path}");
+                   ?? throw new ArgumentException($"Build directory has no root: {path}");
         var current = root;
         var pending = new LinkedList<string>(SplitComponents(path));
         var links = 0;

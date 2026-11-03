@@ -17,6 +17,7 @@ internal static class BenchmarkGenerateCommand
                 programArguments = args[(i + 1)..];
                 break;
             }
+
             var option = args[i];
             if (option is not ("--build-dir" or "--target" or "--config" or "--repeats"
                 or "--timeout-seconds" or "--output"))
@@ -26,13 +27,15 @@ internal static class BenchmarkGenerateCommand
             if (!options.TryAdd(option, args[i]))
                 throw new ArgumentException($"Duplicate benchmark generation option: {option}");
         }
+
         string Required(string name) => options.GetValueOrDefault(name)
-            ?? throw new ArgumentException($"workflow generate benchmark requires {name}.");
+                                        ?? throw new ArgumentException($"workflow generate benchmark requires {name}.");
+
         if (!int.TryParse(Required("--repeats"), NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out var repeats))
+                CultureInfo.InvariantCulture, out var repeats))
             throw new ArgumentException("--repeats must be an integer.");
         if (!double.TryParse(Required("--timeout-seconds"), NumberStyles.Float,
-            CultureInfo.InvariantCulture, out var timeout))
+                CultureInfo.InvariantCulture, out var timeout))
             throw new ArgumentException("--timeout-seconds must be a number.");
         var build = Path.GetFullPath(Required("--build-dir"));
         var output = Path.GetFullPath(Required("--output"));

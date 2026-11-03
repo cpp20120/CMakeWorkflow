@@ -6,6 +6,7 @@ namespace CMakeWorkflow.Host;
 public sealed class FixCoordinator(string? lockDirectory = null) : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+
     private readonly string directory = lockDirectory ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CMakeWorkflow", "host-fix");
 
@@ -17,21 +18,37 @@ public sealed class FixCoordinator(string? lockDirectory = null) : IDisposable
             if (OperatingSystem.IsWindows()) Directory.CreateDirectory(directory);
             else
             {
-                Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                Directory.CreateDirectory(directory,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 if (new DirectoryInfo(directory).LinkTarget is not null
                     || (File.GetUnixFileMode(directory) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
                     throw new IOException("Host fix lock directory must not be a symlink or writable by other users.");
             }
+
             var file = new FileStream(Path.Combine(directory, "installation.lock"), FileMode.OpenOrCreate,
                 FileAccess.ReadWrite, FileShare.None);
             return new Lease(file, gate);
         }
-        catch (IOException) { gate.Release(); return null; }
-        catch { gate.Release(); throw; }
+        catch (IOException)
+        {
+            gate.Release();
+            return null;
+        }
+        catch
+        {
+            gate.Release();
+            throw;
+        }
     }
+
     public void Dispose() => gate.Dispose();
+
     private sealed class Lease(FileStream file, SemaphoreSlim gate) : IDisposable
     {
-        public void Dispose() { file.Dispose(); gate.Release(); }
+        public void Dispose()
+        {
+            file.Dispose();
+            gate.Release();
+        }
     }
 }

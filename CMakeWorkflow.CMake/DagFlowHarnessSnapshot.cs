@@ -13,7 +13,8 @@ internal static class DagFlowHarnessSnapshot
         var root = BuildTreeOwnership.CanonicalPath(buildDirectory);
         var full = Path.GetFullPath(Path.Combine(root, relative));
         var rel = Path.GetRelativePath(root, full);
-        if (Path.IsPathRooted(rel) || rel == ".." || rel.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        if (Path.IsPathRooted(rel) || rel == ".." ||
+            rel.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new InvalidDataException("harnessDirectory escapes the build tree.");
         // Reject directory links below the canonical build root, including junctions on Windows.
         var at = root;
@@ -23,6 +24,7 @@ internal static class DagFlowHarnessSnapshot
             if (Directory.Exists(at) && (File.GetAttributes(at) & FileAttributes.ReparsePoint) != 0)
                 throw new InvalidDataException("harnessDirectory must not traverse a directory link.");
         }
+
         return full;
     }
 
@@ -32,7 +34,8 @@ internal static class DagFlowHarnessSnapshot
         // A reused campaign directory cannot establish that the following files belong
         // to this run. Require an empty/fresh destination rather than silently indexing stale data.
         if (Directory.Exists(source) && Directory.EnumerateFileSystemEntries(source).Any())
-            throw new InvalidOperationException($"Harness directory is not empty: {source}. Configure a unique output directory for every run.");
+            throw new InvalidOperationException(
+                $"Harness directory is not empty: {source}. Configure a unique output directory for every run.");
     }
 
     public static async Task<Dictionary<string, string>> CaptureAsync(string buildDirectory,
@@ -40,8 +43,10 @@ internal static class DagFlowHarnessSnapshot
     {
         var source = Source(buildDirectory, relative);
         var files = new[] { "manifest.json", "summary.json", "runs.jsonl" };
-        var destination = group is null ? Path.Combine(results, "harness", nodeId)
-            : Path.Combine(results, "harness", nodeId, group.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var destination = group is null
+            ? Path.Combine(results, "harness", nodeId)
+            : Path.Combine(results, "harness", nodeId,
+                group.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Directory.CreateDirectory(destination);
         var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var name in files)
@@ -60,8 +65,10 @@ internal static class DagFlowHarnessSnapshot
             before.Refresh();
             if (before.Length != length || before.LastWriteTimeUtc != modified || new FileInfo(copy).Length != length)
                 throw new InvalidDataException($"Harness output changed during snapshot: {original}");
-            outputs[group is null ? "dagflow-" + name : "dagflow-" + group.Value + "-" + name] = Path.GetRelativePath(results, copy);
+            outputs[group is null ? "dagflow-" + name : "dagflow-" + group.Value + "-" + name] =
+                Path.GetRelativePath(results, copy);
         }
+
         // A producer-side replayCases descriptor makes this harness eligible for
         // per-case native profiling. Preserve the *original* binary now: old
         // build-tree paths may be overwritten by the next benchmark campaign.
@@ -75,9 +82,9 @@ internal static class DagFlowHarnessSnapshot
                     && enabled.ValueKind == JsonValueKind.True))
             {
                 var binary = doc.RootElement.GetProperty("binary").GetString()
-                    ?? throw new InvalidDataException("Replay manifest has no native binary.");
+                             ?? throw new InvalidDataException("Replay manifest has no native binary.");
                 var expected = doc.RootElement.GetProperty("binary_sha256").GetString()
-                    ?? throw new InvalidDataException("Replay manifest has no binary hash.");
+                               ?? throw new InvalidDataException("Replay manifest has no binary hash.");
                 if (expected.Length != 64 || expected.Any(c => !Uri.IsHexDigit(c)))
                     throw new InvalidDataException("Replay manifest has an invalid binary hash.");
                 if (!Path.IsPathFullyQualified(binary))
@@ -97,17 +104,21 @@ internal static class DagFlowHarnessSnapshot
                         throw new InvalidDataException("Replay executable exceeds 512 MiB.");
                     await input.CopyToAsync(output, ct);
                 }
+
                 if (!OperatingSystem.IsWindows())
                     File.SetUnixFileMode(saved, File.GetUnixFileMode(original));
                 await using (var copy = File.OpenRead(saved))
                 {
                     var hash = Convert.ToHexString(await SHA256.HashDataAsync(copy, ct));
                     if (!hash.Equals(expected, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException("Replay executable hash differs from manifest; refusing stale/racy binary.");
+                        throw new InvalidDataException(
+                            "Replay executable hash differs from manifest; refusing stale/racy binary.");
                 }
+
                 outputs[group is null ? "dagflow-replay-binary" : "dagflow-" + group.Value + "-replay-binary"] =
                     Path.GetRelativePath(results, saved);
             }
+
         return outputs;
     }
 
@@ -143,8 +154,10 @@ internal static class DagFlowHarnessSnapshot
                 if (!File.Exists(file) || File.GetLastWriteTimeUtc(file) < startedAt.UtcDateTime)
                     throw new InvalidDataException($"DagFlow output was not produced by this invocation: {file}");
             }
+
             candidates.Add(relative);
         }
+
         var all = new Dictionary<string, string>(StringComparer.Ordinal);
         var ordered = candidates.Order(WorkflowPlanner.PathComparer).ToArray();
         for (var i = 0; i < ordered.Length; i++)
@@ -154,7 +167,7 @@ internal static class DagFlowHarnessSnapshot
                 ordered.Length == 1 ? null : i);
             foreach (var (key, value) in captured) all.Add(key, value);
         }
+
         return all;
     }
-
 }

@@ -1,0 +1,13 @@
+using System.Text.Json.Serialization;
+using CMakeWorkflow.Profiling;
+
+namespace CMakeWorkflow;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSerializable(typeof(BenchmarkRecipeV1))]
+[JsonSerializable(typeof(ProfileRecipeV1))]
+[JsonSerializable(typeof(TestMatrixRecipeV1))]
+[JsonSerializable(typeof(BuildMatrixRecipeV1))]
+[JsonSerializable(typeof(BenchmarkMatrixRecipeV1))]
+internal partial class RecipeJson : JsonSerializerContext;

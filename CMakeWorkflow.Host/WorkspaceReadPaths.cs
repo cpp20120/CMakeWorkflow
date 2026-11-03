@@ -19,24 +19,35 @@ internal sealed class WorkspaceReadPaths(string workspace)
         var full = Path.GetFullPath(path);
         // Resolve each component, including file symlinks and missing leaves.
         var current = Path.GetPathRoot(full)!;
-        foreach (var part in full[current.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var part in full[current.Length..]
+                     .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, part);
             FileSystemInfo entry = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
             if (entry.LinkTarget is not null)
                 current = entry.ResolveLinkTarget(true)?.FullName
-                    ?? throw new ApplicationRefusal("path_not_allowed", "Unresolved filesystem link.");
+                          ?? throw new ApplicationRefusal("path_not_allowed", "Unresolved filesystem link.");
         }
+
         var relative = Path.GetRelativePath(root, current);
-        if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        if (Path.IsPathRooted(relative) || relative == ".." ||
+            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new ApplicationRefusal("path_not_allowed", "Requested path is outside the initialized workspace.");
         return current;
     }
 
     public bool Contains(string path)
     {
-        try { Require(path); return true; }
-        catch (Exception error) when (error is ApplicationRefusal or IOException or UnauthorizedAccessException or ArgumentException) { return false; }
+        try
+        {
+            Require(path);
+            return true;
+        }
+        catch (Exception error) when (error is ApplicationRefusal or IOException or UnauthorizedAccessException
+                                          or ArgumentException)
+        {
+            return false;
+        }
     }
 
     public void Read(string path)
@@ -50,7 +61,9 @@ internal sealed class WorkspaceReadPaths(string workspace)
     {
         var full = Require(path);
         foreach (var suffix in new[] { "-wal", "-shm", "-journal" }) Require(full + suffix);
-        if (!File.Exists(full)) throw new ApplicationRefusal("not_found", "History database does not exist; import results explicitly with the CLI.");
+        if (!File.Exists(full))
+            throw new ApplicationRefusal("not_found",
+                "History database does not exist; import results explicitly with the CLI.");
         return full;
     }
 }

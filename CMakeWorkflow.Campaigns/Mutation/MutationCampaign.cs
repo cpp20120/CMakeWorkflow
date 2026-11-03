@@ -16,8 +16,8 @@ public static class MutationCampaign
         if (cases < 1 || steps < 1 || timeoutSeconds < 1)
             throw new ArgumentException("Mutation budgets must be positive.");
         using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream(
-            "CMakeWorkflow.Campaigns.Mutation.mutants.json")
-            ?? throw new IOException("Embedded mutation catalog is missing.");
+                                 "CMakeWorkflow.Campaigns.Mutation.mutants.json")
+                             ?? throw new IOException("Embedded mutation catalog is missing.");
         using var catalog = await JsonDocument.ParseAsync(resource, cancellationToken: ct);
         var root = catalog.RootElement;
         var runtime = root.GetProperty("runtime").EnumerateArray()
@@ -31,7 +31,7 @@ public static class MutationCampaign
                 x.Value.GetProperty("before").GetString()!,
                 x.Value.GetProperty("after").GetString()!)))
             .Where(x => suite == "all" || x.Name == suite || x.Name.StartsWith(suite + "-", StringComparison.Ordinal)
-                || x.Value.Model == suite)
+                        || x.Value.Model == suite)
             .ToArray();
         if (selected.Length == 0) throw new ArgumentException($"Unknown mutation suite or mutant: {suite}");
 
@@ -45,6 +45,7 @@ public static class MutationCampaign
             ["compiler"] = compiler, ["seed"] = seed, ["cases"] = cases,
             ["steps"] = steps, ["baseline"] = new JsonObject(), ["mutants"] = new JsonObject()
         };
+
         async Task Save() => await File.WriteAllTextAsync(reportPath,
             report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
 
@@ -52,9 +53,12 @@ public static class MutationCampaign
         Directory.CreateDirectory(temporary);
         try
         {
-            var flags = new[] { "-std=c++23", "-O0", "-g0", "-pthread", "-DDAGFLOW_STATIC",
+            var flags = new[]
+            {
+                "-std=c++23", "-O0", "-g0", "-pthread", "-DDAGFLOW_STATIC",
                 "-DDAGFLOW_FUZZ_HOOKS", "-I", Path.Combine(sourceRoot, "include"),
-                "-I", Path.Combine(sourceRoot, "tests") };
+                "-I", Path.Combine(sourceRoot, "tests")
+            };
             var objects = new Dictionary<string, string>();
             foreach (var name in runtime)
             {
@@ -62,6 +66,7 @@ public static class MutationCampaign
                 await Compile(Path.Combine(sourceRoot, "src", name + ".cpp"), obj, flags);
                 objects[name] = obj;
             }
+
             var tests = new Dictionary<string, string>();
             foreach (var model in selected.Select(x => x.Value.Model).Distinct())
             {
@@ -80,6 +85,7 @@ public static class MutationCampaign
                 Console.WriteLine($"baseline/{model}: {(passed ? "PASS" : status)}");
                 if (!passed) return 2;
             }
+
             foreach (var (name, mutant) in selected)
             {
                 var watch = Stopwatch.StartNew();
@@ -87,7 +93,8 @@ public static class MutationCampaign
                 try
                 {
                     var isHeader = mutant.Unit.StartsWith("include/", StringComparison.Ordinal);
-                    var path = isHeader ? Path.Combine(sourceRoot, mutant.Unit)
+                    var path = isHeader
+                        ? Path.Combine(sourceRoot, mutant.Unit)
                         : Path.Combine(sourceRoot, "src", mutant.Unit + ".cpp");
                     var changed = ReplaceOnce(await File.ReadAllTextAsync(path, ct), mutant.Before, mutant.After);
                     var changedObjects = new Dictionary<string, string>(objects);
@@ -105,6 +112,7 @@ public static class MutationCampaign
                             await Compile(Path.Combine(sourceRoot, "src", unit + ".cpp"), obj, overlayFlags);
                             changedObjects[unit] = obj;
                         }
+
                         test = Path.Combine(overlay, "test.o");
                         await Compile(Path.Combine(sourceRoot, "tests", models[mutant.Model]), test, overlayFlags);
                     }
@@ -116,6 +124,7 @@ public static class MutationCampaign
                         await Compile(changedPath, obj, flags);
                         changedObjects[mutant.Unit] = obj;
                     }
+
                     var binary = Path.Combine(temporary, "run-" + name);
                     await Link(changedObjects.Values, test, binary);
                     (status, output) = await Execute(binary);
@@ -125,6 +134,7 @@ public static class MutationCampaign
                     status = "BUILD_ERROR";
                     output = error.Message;
                 }
+
                 ((JsonObject)report["mutants"]!)[name] = new JsonObject
                 {
                     ["status"] = status, ["model"] = mutant.Model, ["source"] = mutant.Unit,
@@ -133,9 +143,11 @@ public static class MutationCampaign
                 await Save();
                 Console.WriteLine($"{name}: {status}");
             }
+
             var detected = ((JsonObject)report["mutants"]!).Count(x =>
                 x.Value?["status"]?.GetValue<string>().StartsWith("KILLED(", StringComparison.Ordinal) == true);
-            Console.WriteLine($"Protocol mutations: {detected}/{selected.Length} assertion-detected. Report: {reportPath}");
+            Console.WriteLine(
+                $"Protocol mutations: {detected}/{selected.Length} assertion-detected. Report: {reportPath}");
             return detected == selected.Length ? 0 : 1;
 
             async Task Compile(string source, string output, IEnumerable<string> options)
@@ -146,6 +158,7 @@ public static class MutationCampaign
                 if (result.TimedOut || result.ExitCode != 0)
                     throw new InvalidOperationException($"Compiling {source}: {Tail(result.Output, 3500)}");
             }
+
             async Task Link(IEnumerable<string> units, string test, string output)
             {
                 var result = await CommandExecution.RunAsync(compiler,
@@ -154,6 +167,7 @@ public static class MutationCampaign
                 if (result.TimedOut || result.ExitCode != 0)
                     throw new InvalidOperationException($"Linking {output}: {Tail(result.Output, 3000)}");
             }
+
             async Task<(string, string)> Execute(string binary)
             {
                 var env = new Dictionary<string, string?>
@@ -184,7 +198,8 @@ public static class MutationCampaign
     {
         var first = source.IndexOf(before, StringComparison.Ordinal);
         if (first < 0 || source.IndexOf(before, first + before.Length, StringComparison.Ordinal) >= 0)
-            throw new InvalidOperationException($"Expected unique mutation anchor: {before[..Math.Min(90, before.Length)]}");
+            throw new InvalidOperationException(
+                $"Expected unique mutation anchor: {before[..Math.Min(90, before.Length)]}");
         return source[..first] + after + source[(first + before.Length)..];
     }
 

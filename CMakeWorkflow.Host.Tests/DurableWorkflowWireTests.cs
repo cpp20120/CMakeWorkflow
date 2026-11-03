@@ -33,9 +33,9 @@ internal static class DurableWorkflowWireTests
         await ConfigureAsync(source, build, ct);
 
         var document = JsonNode.Parse("""
-            {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-             "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-            """)!;
+                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                      """)!;
         document["contexts"]!["w"]!["buildDirectory"] = build;
         var manifest = Path.Combine(workspace, "workflow.json");
         var bytes = Encoding.UTF8.GetBytes(document.ToJsonString());
@@ -60,6 +60,7 @@ internal static class DurableWorkflowWireTests
             {
                 await Task.Delay(25, wait.Token);
             }
+
             Check(!File.ReadAllText(marker).Contains("finished", StringComparison.Ordinal),
                 "Workflow completed before initiator disconnected; test is not exercising detached execution.");
         }
@@ -85,22 +86,27 @@ internal static class DurableWorkflowWireTests
                     "Unexpected nonterminal state: " + current.State);
                 await Task.Delay(50, wait.Token);
             } while (true);
+
             var found = await client.OperationFindAsync(new(request.ClientRequestId), ct);
             var terminalRetry = await client.WorkflowStartAsync(request, ct);
             Check(found.State == "succeeded" && terminalRetry.State == "succeeded"
-                && terminalRetry.OperationId == operationId, "Terminal RPC retry/lookup inconsistency.");
+                                             && terminalRetry.OperationId == operationId,
+                "Terminal RPC retry/lookup inconsistency.");
         }
 
         var lines = File.ReadAllLines(marker);
-        Check(lines.SequenceEqual(["started", "finished"]), "Detached execution duplicated or lost the external effect.");
+        Check(lines.SequenceEqual(["started", "finished"]),
+            "Detached execution duplicated or lost the external effect.");
         Check(File.Exists(Path.Combine(output, "run.json")), "Terminal runner report missing.");
         using (var store = new DurableAcceptanceStore(workspace, readOnly: true))
         {
             Check(store.Get(operationId)?.State == "succeeded" &&
-                store.GetFinalization(operationId) is { State: "succeeded", ExitCode: 0 },
+                  store.GetFinalization(operationId) is { State: "succeeded", ExitCode: 0 },
                 "RPC terminal state was not durable.");
         }
-        Console.WriteLine("Workflow/start JSON-RPC lifecycle checks passed: disconnect, reconnect, terminal lookup and single dispatch.");
+
+        Console.WriteLine(
+            "Workflow/start JSON-RPC lifecycle checks passed: disconnect, reconnect, terminal lookup and single dispatch.");
     }
 
     private static async Task ConfigureAsync(string source, string build, CancellationToken ct)

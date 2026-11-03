@@ -7,8 +7,11 @@ public static class ToolCatalog
 
     public static IReadOnlyList<ToolProfile> AllProfiles => Profiles.Values.OrderBy(x => x.Id,
         StringComparer.Ordinal).ToArray();
+
     public static ToolDefinition GetTool(string id) => Tools.TryGetValue(id, out var value)
-        ? value : throw new ArgumentException($"Unknown tool '{id}'.");
+        ? value
+        : throw new ArgumentException($"Unknown tool '{id}'.");
+
     public static IReadOnlyList<ToolDefinition> ResolveProfiles(IEnumerable<string> profileIds,
         ToolPlatform platform)
     {
@@ -18,11 +21,18 @@ public static class ToolCatalog
         foreach (var id in ids)
         {
             if (!Profiles.TryGetValue(id, out var profile))
-                throw new ArgumentException($"Unknown tooling profile '{id}'. Available: {string.Join(", ", Profiles.Keys.Order(StringComparer.Ordinal))}.");
-            foreach (var tool in profile.Tools) tools.Add(tool == "native-profiler"
-                ? platform switch { ToolPlatform.Linux => "perf", ToolPlatform.Windows => "wpr",
-                    _ => "xctrace" } : tool);
+                throw new ArgumentException(
+                    $"Unknown tooling profile '{id}'. Available: {string.Join(", ", Profiles.Keys.Order(StringComparer.Ordinal))}.");
+            foreach (var tool in profile.Tools)
+                tools.Add(tool == "native-profiler"
+                    ? platform switch
+                    {
+                        ToolPlatform.Linux => "perf", ToolPlatform.Windows => "wpr",
+                        _ => "xctrace"
+                    }
+                    : tool);
         }
+
         return tools.Order(StringComparer.Ordinal).Select(GetTool).ToArray();
     }
 
@@ -56,17 +66,19 @@ public static class ToolCatalog
             if (winget is not null) result.Add(PackageManagerKind.Winget, [winget]);
             return result;
         }
+
         return new[]
         {
-            new ToolDefinition("cmake", "CMake >= 3.26", ["cmake"], ["--version"], new(3,26),
+            new ToolDefinition("cmake", "CMake >= 3.26", ["cmake"], ["--version"], new(3, 26),
                 Packages("cmake", "cmake", "cmake", "cmake", "Kitware.CMake"), true),
-            new ToolDefinition("ctest", "CTest >= 3.26", ["ctest"], ["--version"], new(3,26),
+            new ToolDefinition("ctest", "CTest >= 3.26", ["ctest"], ["--version"], new(3, 26),
                 Packages("cmake", "cmake", "cmake", "cmake", "Kitware.CMake"), true),
             new ToolDefinition("ninja", "Ninja", ["ninja", "ninja-build"], ["--version"], null,
                 Packages("ninja-build", "ninja", "ninja-build", "ninja", "Ninja-build.Ninja")),
             new ToolDefinition("cxx", "C++ compiler", ["c++", "g++", "clang++", "cl"],
                 ["--version"], null, Packages("g++", "gcc", "gcc-c++", null, null),
-                ManualHint: "Select a C++ toolchain for the chosen generator (Xcode CLT on macOS, MSVC/Windows SDK or standalone compiler on Windows). Use toolchains/discover to locate Visual Studio toolsets."),
+                ManualHint:
+                "Select a C++ toolchain for the chosen generator (Xcode CLT on macOS, MSVC/Windows SDK or standalone compiler on Windows). Use toolchains/discover to locate Visual Studio toolsets."),
             new ToolDefinition("clangxx", "Clang C++ compiler", ["clang++"], ["--version"], null,
                 Packages("clang", "clang", "clang", "llvm", "LLVM.LLVM")),
             new ToolDefinition("perf", "Linux perf", ["perf"], ["--version"], null,
@@ -77,7 +89,7 @@ public static class ToolCatalog
             new ToolDefinition("xctrace", "Instruments xctrace", ["xcrun"],
                 ["xctrace", "version"], null, Packages(),
                 ManualHint: "Install Xcode and select its developer directory with xcode-select."),
-            new ToolDefinition("dotnet", ".NET 10 SDK", ["dotnet"], ["--version"], new(10,0),
+            new ToolDefinition("dotnet", ".NET 10 SDK", ["dotnet"], ["--version"], new(10, 0),
                 Packages("dotnet-sdk-10.0", "dotnet-sdk", "dotnet-sdk-10.0", "dotnet-sdk", "Microsoft.DotNet.SDK.10"))
         }.ToDictionary(x => x.Id, StringComparer.Ordinal);
     }

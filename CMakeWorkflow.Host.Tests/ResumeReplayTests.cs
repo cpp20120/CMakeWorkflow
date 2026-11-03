@@ -7,7 +7,9 @@ using CMakeWorkflow.Host;
 internal static class ResumeReplayTests
 {
     private static void Check(bool valid, string why)
-    { if (!valid) throw new Exception(why); }
+    {
+        if (!valid) throw new Exception(why);
+    }
 
     public static async Task RunAsync(string parent)
     {
@@ -25,18 +27,44 @@ internal static class ResumeReplayTests
             store.AuthorizeDispatch(unknown);
             store.Reconcile(needs, 0, "needs_attention", "repair completed");
             store.Reconcile(unknown, 0, "outcome_unknown", "dispatch result unknown");
-            try { store.AdmitResume(unknown, 1); throw new Exception("unknown admitted"); }
-            catch (InvalidOperationException e) when (e.Message == "outcome_unknown_requires_resolution") { }
-            try { store.AdmitResume(needs, 0); throw new Exception("stale CAS admitted"); }
-            catch (InvalidOperationException e) when (e.Message == "operation_revision_conflict") { }
+            try
+            {
+                store.AdmitResume(unknown, 1);
+                throw new Exception("unknown admitted");
+            }
+            catch (InvalidOperationException e) when (e.Message == "outcome_unknown_requires_resolution")
+            {
+            }
+
+            try
+            {
+                store.AdmitResume(needs, 0);
+                throw new Exception("stale CAS admitted");
+            }
+            catch (InvalidOperationException e) when (e.Message == "operation_revision_conflict")
+            {
+            }
+
             Check(store.AdmitResume(needs, 1).Revision == 2, "resume admission revision");
             Check(store.AdmitResume(needs, 2).Revision == 2, "resume retry");
         }
+
         using (var store = new DurableAcceptanceStore(root, readOnly: true))
             Check(store.InspectRecovery(needs).Revision == 2, "resume admission restart");
-        try { using var store = new DurableAcceptanceStore(root); store.ClaimResumeAttempt(needs, root); throw new Exception("missing checkpoint accepted"); }
-        catch (FileNotFoundException) { }
-        catch (InvalidOperationException e) when (e.Message is "resume_checkpoint_not_safe" or "resume_not_admitted_or_bound") { }
+        try
+        {
+            using var store = new DurableAcceptanceStore(root);
+            store.ClaimResumeAttempt(needs, root);
+            throw new Exception("missing checkpoint accepted");
+        }
+        catch (FileNotFoundException)
+        {
+        }
+        catch (InvalidOperationException e) when (e.Message is "resume_checkpoint_not_safe"
+                                                      or "resume_not_admitted_or_bound")
+        {
+        }
+
         var run = Directory.CreateDirectory(Path.Combine(root, "run")).FullName;
         // A real runner checkpoint must be bound before an attempt can be claimed.
         var checkpoint = new WorkflowReport
@@ -57,14 +85,28 @@ internal static class ResumeReplayTests
         {
             attempt = store.ClaimResumeAttempt(needs, run);
             Check(attempt.Length == 32, "attempt identity");
-            try { store.ClaimResumeAttempt(needs, run); throw new Exception("attempt repeated"); }
-            catch (InvalidOperationException e) when (e.Message == "resume_attempt_already_claimed") { }
+            try
+            {
+                store.ClaimResumeAttempt(needs, run);
+                throw new Exception("attempt repeated");
+            }
+            catch (InvalidOperationException e) when (e.Message == "resume_attempt_already_claimed")
+            {
+            }
         }
+
         using (var restarted = new DurableAcceptanceStore(root))
         {
-            try { restarted.ClaimResumeAttempt(needs, run); throw new Exception("restart repeated attempt"); }
-            catch (InvalidOperationException e) when (e.Message == "resume_attempt_already_claimed") { }
+            try
+            {
+                restarted.ClaimResumeAttempt(needs, run);
+                throw new Exception("restart repeated attempt");
+            }
+            catch (InvalidOperationException e) when (e.Message == "resume_attempt_already_claimed")
+            {
+            }
         }
+
         var events = new List<WorkflowEvent>();
         for (var i = 1; i <= 3; i++)
             events.Add(new WorkflowEvent(1, i, DateTimeOffset.UtcNow, "node_finished", run,

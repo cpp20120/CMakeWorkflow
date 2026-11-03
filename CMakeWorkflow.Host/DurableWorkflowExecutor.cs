@@ -26,10 +26,11 @@ public static class DurableWorkflowExecutor
         using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
         var accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
         var bound = store.GetDispatchCheckpoint(operationId)
-            ?? throw new InvalidOperationException("resume_checkpoint_missing");
+                    ?? throw new InvalidOperationException("resume_checkpoint_missing");
         var output = paths.Require(bound.RunDirectory);
         var checkpointPath = paths.Require(Path.Combine(output, "run.json"));
-        var saved = System.Text.Json.JsonSerializer.Deserialize(await File.ReadAllBytesAsync(checkpointPath, cancellationToken),
+        var saved = System.Text.Json.JsonSerializer.Deserialize(
+            await File.ReadAllBytesAsync(checkpointPath, cancellationToken),
             WorkflowJson.Default.WorkflowReport) ?? throw new InvalidDataException("Invalid checkpoint.");
         var manifest = paths.Require(saved.Workflow);
         var plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, store.GetSnapshot(operationId), [], null,
@@ -72,7 +73,8 @@ public static class DurableWorkflowExecutor
         using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
         var existing = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
         if (existing.State != "accepted_not_dispatched")
-            throw new InvalidOperationException("operation_already_authorized: inspect checkpoint/reconcile; never start again implicitly");
+            throw new InvalidOperationException(
+                "operation_already_authorized: inspect checkpoint/reconcile; never start again implicitly");
         // A repeat cannot replace accepted parameters. Accept compares the original
         // request digest BEFORE reading the current manifest, including after edits.
         var verified = store.Accept(clientRequestId, manifest, expectedManifestHash, jobs, output);

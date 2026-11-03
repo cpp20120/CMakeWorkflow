@@ -21,6 +21,7 @@ public static class BuildMatrixWorkflowBuilder
             RecipeRules.Configuration(variant.Configuration);
             if (!names.Add(variant.Name)) throw new ArgumentException($"Duplicate build variant: {variant.Name}.");
         }
+
         RecipeRules.DistinctDirectories(recipe.Variants.Select(v => v.BuildDirectory), "Build variants");
         var targets = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in recipe.Targets)
@@ -28,6 +29,7 @@ public static class BuildMatrixWorkflowBuilder
             RecipeRules.Name(target, "target");
             if (!targets.Add(target)) throw new ArgumentException($"Duplicate build target: {target}.");
         }
+
         var count = checked((long)recipe.Variants.Length * recipe.Targets.Length);
         if (count > MaxNodes)
             throw new ArgumentException($"Build matrix expands to {count} nodes; limit is {MaxNodes}.");
@@ -37,9 +39,13 @@ public static class BuildMatrixWorkflowBuilder
         {
             contexts.Add(variant.Name, RecipeRules.Adopted(variant.BuildDirectory, variant.Configuration));
             for (var targetIndex = 0; targetIndex < recipe.Targets.Length; targetIndex++)
-                nodes.Add(new WorkflowNode { Id = $"build_{variant.Name}_{targetIndex + 1:D3}",
-                    Kind = "build", Context = variant.Name, Target = recipe.Targets[targetIndex] });
+                nodes.Add(new WorkflowNode
+                {
+                    Id = $"build_{variant.Name}_{targetIndex + 1:D3}",
+                    Kind = "build", Context = variant.Name, Target = recipe.Targets[targetIndex]
+                });
         }
+
         return new WorkflowDocument { SchemaVersion = 2, Contexts = contexts, Nodes = nodes };
     }
 }

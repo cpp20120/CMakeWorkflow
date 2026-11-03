@@ -15,10 +15,12 @@ if (args.Length != 2 && !inFlight)
     Console.Error.WriteLine("usage: CMakeWorkflow.Client.AotSmoke ENDPOINT WORKSPACE [--inflight]");
     return 2;
 }
+
 try
 {
     var workspace = Path.GetFullPath(args[1]);
-    if (!Directory.Exists(workspace)) throw new DirectoryNotFoundException("Smoke workspace must already exist: " + workspace);
+    if (!Directory.Exists(workspace))
+        throw new DirectoryNotFoundException("Smoke workspace must already exist: " + workspace);
     if (JsonSerializer.IsReflectionEnabledByDefault)
         throw new InvalidOperationException("Smoke must run with reflection-based JSON serialization disabled.");
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -32,9 +34,13 @@ try
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (!string.Equals(client.Host.WorkspaceDirectory, workspace, comparison))
             throw new InvalidOperationException("Host bound a different workspace.");
-        foreach (var capability in new[] { "workflow/plan", "workflow/start", "benchmark/prepare",
-            "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare",
-            "operations/get", "operations/find", "operations/cancel", "operations/events", "workflow/recoveryInspect" })
+        foreach (var capability in new[]
+                 {
+                     "workflow/plan", "workflow/start", "benchmark/prepare",
+                     "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare",
+                     "operations/get", "operations/find", "operations/cancel", "operations/events",
+                     "workflow/recoveryInspect"
+                 })
             if (!client.Host.Capabilities.Contains(capability, StringComparer.Ordinal))
                 throw new InvalidOperationException("Host lacks " + capability);
         Console.WriteLine($"PASS NativeAOT initialize: Host {hostPid}; workspace={workspace}");
@@ -53,8 +59,9 @@ try
         var requestedBytes = await File.ReadAllBytesAsync(benchmarkOptions.OutputPath, ct);
         var committedBytes = await File.ReadAllBytesAsync(benchmark.Manifest, ct);
         if (benchmark.SchemaVersion != 1 || !requestedBytes.SequenceEqual(committedBytes)
-            || benchmark.ManifestSha256 != Convert.ToHexString(SHA256.HashData(committedBytes))
-            || benchmark != await client.Benchmarks.PrepareAsync(benchmarkOptions, ct))
+                                         || benchmark.ManifestSha256 !=
+                                         Convert.ToHexString(SHA256.HashData(committedBytes))
+                                         || benchmark != await client.Benchmarks.PrepareAsync(benchmarkOptions, ct))
             throw new InvalidOperationException("NativeAOT Benchmark preparation or replay failed.");
         Console.WriteLine("PASS NativeAOT typed benchmark preparation and exact manifest hash.");
         var recipeVariant = new BuildVariantV1("main", benchmarkBuild, "Release");
@@ -79,14 +86,14 @@ try
         };
         foreach (var item in recipePreparations)
             if (item.SchemaVersion != 1 || item.ManifestSha256 != Convert.ToHexString(
-                SHA256.HashData(await File.ReadAllBytesAsync(item.Manifest, ct))))
+                    SHA256.HashData(await File.ReadAllBytesAsync(item.Manifest, ct))))
                 throw new InvalidOperationException("NativeAOT typed recipe response/hash mismatch.");
         Console.WriteLine("PASS NativeAOT typed Profile, Test Matrix, Build Matrix and Benchmark Matrix preparation.");
         var manifest = Path.Combine(fixture, "workflow.json");
         var bytes = Encoding.UTF8.GetBytes("""
-            {"schemaVersion":2,"contexts":{"probe":{"buildDirectory":"unconfigured","mode":"observe"}},
-             "nodes":[{"id":"inspect","kind":"inspect","context":"probe"}]}
-            """);
+                                           {"schemaVersion":2,"contexts":{"probe":{"buildDirectory":"unconfigured","mode":"observe"}},
+                                            "nodes":[{"id":"inspect","kind":"inspect","context":"probe"}]}
+                                           """);
         await File.WriteAllBytesAsync(manifest, bytes, ct);
         var plan = await client.Workflows.PlanAsync(manifest, ct);
         if (!plan.GetProperty("valid").GetBoolean() || plan.GetProperty("nodes").GetArrayLength() != 1)
@@ -96,12 +103,14 @@ try
         var options = new StartWorkflowOptions(requestId, manifest, hash, 1, Path.Combine(fixture, "results"));
         var operation = await client.Workflows.StartAsync(options, ct);
         var repeated = await client.Workflows.StartAsync(options, ct);
-        if (repeated.OperationId != operation.OperationId) throw new InvalidOperationException("Repeated request created another operation.");
+        if (repeated.OperationId != operation.OperationId)
+            throw new InvalidOperationException("Repeated request created another operation.");
         var terminal = await operation.WaitForCompletionAsync(ct: ct);
-        if (terminal.State != "succeeded") throw new InvalidOperationException("Inspect operation finished as " + terminal.State);
+        if (terminal.State != "succeeded")
+            throw new InvalidOperationException("Inspect operation finished as " + terminal.State);
         var found = await client.Operations.FindAsync(requestId, ct);
         if (found.OperationId != operation.OperationId || found.ClientRequestId != requestId
-            || found.ManifestSha256 != hash || found.State != "succeeded")
+                                                       || found.ManifestSha256 != hash || found.State != "succeeded")
             throw new InvalidOperationException("Typed OperationSnapshot did not round-trip.");
         Console.WriteLine($"PASS NativeAOT typed start/get/find: operation={found.OperationId}; state={found.State}");
         var page = await operation.ReadEventsAsync(0, 100, ct);
@@ -112,7 +121,8 @@ try
         var recovery = await operation.InspectRecoveryAsync(ct);
         if (recovery.OperationId != found.OperationId || recovery.TerminalState != "succeeded")
             throw new InvalidOperationException("Typed RecoverySnapshot did not round-trip.");
-        Console.WriteLine($"PASS NativeAOT typed events/recovery: events={page.Events.Count}; revision={recovery.Revision}");
+        Console.WriteLine(
+            $"PASS NativeAOT typed events/recovery: events={page.Events.Count}; revision={recovery.Revision}");
 
         try
         {
@@ -122,9 +132,12 @@ try
         catch (RemoteInvocationException error)
         {
             if (error.ErrorCode != 1001 || error.DeserializedErrorData is not RpcErrorData
-                { Code: "not_found", Message.Length: > 0 })
+                {
+                    Code: "not_found", Message.Length: > 0
+                })
                 throw new InvalidOperationException("ApplicationError did not deserialize into RpcErrorData.", error);
         }
+
         // An application error must not tear down the connection.
         if ((await operation.GetSnapshotAsync(ct)).State != "succeeded")
             throw new InvalidOperationException("Connection did not survive ApplicationError.");
@@ -138,18 +151,24 @@ try
                 await operation.GetSnapshotAsync(canceled.Token);
                 throw new InvalidOperationException("Pre-canceled request completed successfully.");
             }
-            catch (OperationCanceledException) when (canceled.IsCancellationRequested) { }
+            catch (OperationCanceledException) when (canceled.IsCancellationRequested)
+            {
+            }
         }
+
         var lateCancel = await operation.RequestCancellationAsync(recovery.Revision, ct);
         if (lateCancel.OperationId != operation.OperationId || lateCancel.Requested
-            || lateCancel.State != "succeeded" || lateCancel.Revision != recovery.Revision)
+                                                            || lateCancel.State != "succeeded" ||
+                                                            lateCancel.Revision != recovery.Revision)
             throw new InvalidOperationException("Late cancellation changed a terminal outcome.");
         Console.WriteLine("PASS NativeAOT request cancellation and terminal cancel no-op.");
         await CancellationSmoke.RunAsync(client, fixture, ct);
     }
+
     // ConnectAsync must not stop a foreign Host when the consumer disconnects.
     await using var reconnected = await CMakeWorkflowClient.ConnectAsync(new(args[0], workspace), ct);
-    if (reconnected.Host.ProcessId != hostPid) throw new InvalidOperationException("Host ownership changed on disconnect.");
+    if (reconnected.Host.ProcessId != hostPid)
+        throw new InvalidOperationException("Host ownership changed on disconnect.");
     Console.WriteLine("PASS NativeAOT SDK smoke: source-generated RPC, reconnect; JSON reflection disabled.");
     return 0;
 }

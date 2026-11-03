@@ -35,9 +35,9 @@ internal static class DurableExecutionProcessTests
         var manifest = Path.Combine(workspace, "workflow.json");
         // Absolute build directory avoids platform-specific JSON escaping.
         var document = JsonNode.Parse("""
-            {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-             "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-            """)!;
+                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                      """)!;
         document["contexts"]!["w"]!["buildDirectory"] = build;
         var json = document.ToJsonString();
         var original = Encoding.UTF8.GetBytes(json);
@@ -60,6 +60,7 @@ internal static class DurableExecutionProcessTests
             if (after.OperationId != id || after.State != "succeeded")
                 throw new Exception("Host-owned retry did not return existing admitted operation.");
         }
+
         if (!File.Exists(marker) || File.ReadAllLines(marker).Length != 1)
             throw new Exception("Durable executor did not run CMake target exactly once.");
         if (!File.Exists(Path.Combine(output, "run.json")))
@@ -71,6 +72,7 @@ internal static class DurableExecutionProcessTests
                 reopened.GetFinalization(id) is not { State: "succeeded", ExitCode: 0 })
                 throw new Exception("Durable checkpoint binding missing after real dispatch.");
         }
+
         using (var completion = new DurableAcceptanceStore(workspace))
         {
             var repeated = completion.FinalizeExecution(id, output, 0);
@@ -78,13 +80,18 @@ internal static class DurableExecutionProcessTests
                 repeated.ReportSha256.Length != 64)
                 throw new Exception("Finalization not idempotent after restart.");
         }
+
         try
         {
             await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, id, "one", manifest,
                 digest, 1, output, CancellationToken.None);
             throw new Exception("Duplicate external dispatch succeeded.");
         }
-        catch (InvalidOperationException e) when (e.Message.StartsWith("operation_already_authorized", StringComparison.Ordinal)) { }
+        catch (InvalidOperationException e) when (e.Message.StartsWith("operation_already_authorized",
+                                                      StringComparison.Ordinal))
+        {
+        }
+
         if (File.ReadAllLines(marker).Length != 1)
             throw new Exception("Repeat changed external state.");
         // Two distinct accepted requests may target the same directory, but only
@@ -99,8 +106,11 @@ internal static class DurableExecutionProcessTests
                 store.ReserveResultsDirectory(other, output);
                 throw new Exception("Second operation stole the results directory.");
             }
-            catch (InvalidOperationException e) when (e.Message == "results_directory_reserved") { }
+            catch (InvalidOperationException e) when (e.Message == "results_directory_reserved")
+            {
+            }
         }
+
         using (var reopened = new DurableAcceptanceStore(workspace))
         {
             reopened.ReserveResultsDirectory(id, output); // idempotent
@@ -109,23 +119,36 @@ internal static class DurableExecutionProcessTests
                 reopened.ReserveResultsDirectory(other, output);
                 throw new Exception("Reservation disappeared after restart.");
             }
-            catch (InvalidOperationException e) when (e.Message == "results_directory_reserved") { }
+            catch (InvalidOperationException e) when (e.Message == "results_directory_reserved")
+            {
+            }
         }
+
         Console.WriteLine("Durable finalization checks passed: terminal report, restart, idempotence and lookup.");
         Console.WriteLine("Durable result ownership checks passed: collision, idempotence and restart.");
-        Console.WriteLine("Durable executor real-process checks passed: snapshot, CMake invocation, checkpoint and no duplicate dispatch.");
+        Console.WriteLine(
+            "Durable executor real-process checks passed: snapshot, CMake invocation, checkpoint and no duplicate dispatch.");
     }
 
     private static async Task ProcessOk(string executable, IEnumerable<string> args)
     {
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo(executable)
+            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in args) start.ArgumentList.Add(arg);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("CMake could not start.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        try { await process.WaitForExitAsync(limit.Token); }
-        catch (OperationCanceledException) { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
+        try
+        {
+            await process.WaitForExitAsync(limit.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw;
+        }
+
         if (process.ExitCode != 0)
             throw new Exception($"CMake configure failed: {await stdout} {await stderr}");
         await Task.WhenAll(stdout, stderr);

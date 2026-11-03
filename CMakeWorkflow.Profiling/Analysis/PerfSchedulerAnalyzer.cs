@@ -12,6 +12,7 @@ public static partial class PerfSchedulerAnalyzer
 {
     [GeneratedRegex(@"\[\s*(?<cpu>\d+)\]\s+(?<time>\d+\.\d+):\s+sched:sched_(?<kind>switch|wakeup):\s+(?<data>.+)")]
     private static partial Regex Header();
+
     [GeneratedRegex(@"(?:^|\s)(?<key>prev_pid|next_pid|pid)=(?<pid>\d+)(?:\s|$)")]
     private static partial Regex Pid();
 
@@ -21,7 +22,8 @@ public static partial class PerfSchedulerAnalyzer
 
     public static int Parse(TextReader reader, TextWriter writer, CancellationToken ct)
     {
-        var lines = 0; var emitted = 0;
+        var lines = 0;
+        var emitted = 0;
         string? line;
         while ((line = reader.ReadLine()) is not null)
         {
@@ -34,15 +36,20 @@ public static partial class PerfSchedulerAnalyzer
             var time = DateTimeOffset.UnixEpoch.AddSeconds(seconds).ToString("O");
             var cpu = int.Parse(match.Groups["cpu"].Value, CultureInfo.InvariantCulture);
             var data = match.Groups["data"].Value;
+
             void Event(string? pid, string state)
             {
                 if (pid is null || emitted >= 10000) return;
                 if (!int.TryParse(pid, out var threadId)) return;
-                writer.WriteLine(new JsonObject { ["timestamp"] = time, ["threadId"] = threadId,
+                writer.WriteLine(new JsonObject
+                {
+                    ["timestamp"] = time, ["threadId"] = threadId,
                     ["cpu"] = cpu, ["state"] = state,
-                    ["clock"] = "perf-relative", ["attribution"] = "recorded tracepoint only" }.ToJsonString());
+                    ["clock"] = "perf-relative", ["attribution"] = "recorded tracepoint only"
+                }.ToJsonString());
                 emitted++;
             }
+
             if (match.Groups["kind"].Value == "switch")
             {
                 Event(Field(data, "prev_pid"), "offcpu");
@@ -50,6 +57,7 @@ public static partial class PerfSchedulerAnalyzer
             }
             else Event(Field(data, "pid"), "ready");
         }
+
         return emitted;
     }
 
@@ -67,15 +75,22 @@ public static partial class PerfSchedulerAnalyzer
         using var process = Process.Start(start) ?? throw new IOException("Could not start perf script.");
         using var registration = ct.Register(() =>
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+            }
         });
         var stderr = Task.Run(async () =>
         {
-            var buffer = new char[4096]; var saved = new StringBuilder();
+            var buffer = new char[4096];
+            var saved = new StringBuilder();
             int read;
             while ((read = await process.StandardError.ReadAsync(buffer, ct)) > 0)
-                if (saved.Length < 16384) saved.Append(buffer, 0, Math.Min(read, 16384 - saved.Length));
+                if (saved.Length < 16384)
+                    saved.Append(buffer, 0, Math.Min(read, 16384 - saved.Length));
             return saved.ToString();
         }, ct);
         try
@@ -88,11 +103,15 @@ public static partial class PerfSchedulerAnalyzer
             await process.WaitForExitAsync(ct);
             var errors = await stderr;
             if (process.ExitCode != 0)
-                throw new IOException($"perf script scheduler decode failed: {errors[..Math.Min(errors.Length, 4096)]}");
+                throw new IOException(
+                    $"perf script scheduler decode failed: {errors[..Math.Min(errors.Length, 4096)]}");
             ct.ThrowIfCancellationRequested();
             File.Move(temp, file, overwrite: true);
             return file;
         }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 }

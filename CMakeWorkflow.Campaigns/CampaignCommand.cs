@@ -8,17 +8,27 @@ public static class CampaignCommand
 {
     public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
-        if (args.Length < 2) throw new ArgumentException(
-            "Usage: CMakeWorkflow dagflow <mutation run|weak-memory run|fuzz seed|fuzz run|fuzz triage|fuzz merge> ...");
+        if (args.Length < 2)
+            throw new ArgumentException(
+                "Usage: CMakeWorkflow dagflow <mutation run|weak-memory run|fuzz seed|fuzz run|fuzz triage|fuzz merge> ...");
         var allowed = (args[0], args[1]) switch
         {
-            ("mutation", "run") => new[] { "--source-dir", "--suite", "--cxx", "--seed",
-                "--cases", "--steps", "--timeout", "--report" },
-            ("weak-memory", "run") => new[] { "--source-dir", "--protocol", "--relacy",
-                "--cxx", "--timeout", "--report", "--mutant" },
+            ("mutation", "run") => new[]
+            {
+                "--source-dir", "--suite", "--cxx", "--seed",
+                "--cases", "--steps", "--timeout", "--report"
+            },
+            ("weak-memory", "run") => new[]
+            {
+                "--source-dir", "--protocol", "--relacy",
+                "--cxx", "--timeout", "--report", "--mutant"
+            },
             ("fuzz", "seed") => new[] { "--source-dir", "--layer", "--output" },
-            ("fuzz", "run") => new[] { "--build-dir", "--layer", "--backend", "--duration",
-                "--timeout", "--corpus", "--results-dir", "--config", "--max-len", "--replay-only" },
+            ("fuzz", "run") => new[]
+            {
+                "--build-dir", "--layer", "--backend", "--duration",
+                "--timeout", "--corpus", "--results-dir", "--config", "--max-len", "--replay-only"
+            },
             ("fuzz", "triage") => new[] { "--run-dir" },
             ("fuzz", "merge") => new[] { "--run-dir", "--output", "--coverage" },
             _ => throw new ArgumentException($"Unknown DagFlow campaign: {args[0]} {args[1]}")
@@ -32,6 +42,7 @@ public static class CampaignCommand
                 throw new ArgumentException($"{option} requires a value.");
             index++;
         }
+
         var source = Option(args, "--source-dir") ?? Directory.GetCurrentDirectory();
         source = Path.GetFullPath(source);
         return (args[0], args[1]) switch
@@ -104,8 +115,11 @@ public static class CampaignCommand
     }
 
     private static int Integer(string[] args, string name, int fallback) =>
-        Option(args, name) is { } text ? int.TryParse(text, out var value) ? value
-            : throw new ArgumentException($"{name} must be an integer.") : fallback;
+        Option(args, name) is { } text
+            ? int.TryParse(text, out var value)
+                ? value
+                : throw new ArgumentException($"{name} must be an integer.")
+            : fallback;
 
     private static string? Option(string[] args, string name)
     {
@@ -117,12 +131,19 @@ public static class CampaignCommand
                 throw new ArgumentException($"{name} requires a value.");
             result = args[index + 1];
         }
+
         return result;
     }
 }
 
-internal sealed record CampaignCompletion(int SchemaVersion, string Campaign, string Report,
-    string ReportSha256, DateTimeOffset StartedAt, DateTimeOffset FinishedAt, string Status);
+internal sealed record CampaignCompletion(
+    int SchemaVersion,
+    string Campaign,
+    string Report,
+    string ReportSha256,
+    DateTimeOffset StartedAt,
+    DateTimeOffset FinishedAt,
+    string Status);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CampaignCompletion))]

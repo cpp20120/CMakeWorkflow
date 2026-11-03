@@ -13,12 +13,12 @@ internal static class TypedRecipeIntegrationTests
         CopyFixture("workflow", source);
         File.AppendAllText(Path.Combine(source, "CMakeLists.txt"), """
 
-            add_executable(third first.cpp)
-            add_test(NAME unit_case COMMAND "${CMAKE_COMMAND}" -E echo UNIT_MARKER)
-            set_tests_properties(unit_case PROPERTIES LABELS unit)
-            add_test(NAME integration_case COMMAND "${CMAKE_COMMAND}" -E echo INTEGRATION_MARKER)
-            set_tests_properties(integration_case PROPERTIES LABELS integration)
-            """);
+                                                                   add_executable(third first.cpp)
+                                                                   add_test(NAME unit_case COMMAND "${CMAKE_COMMAND}" -E echo UNIT_MARKER)
+                                                                   set_tests_properties(unit_case PROPERTIES LABELS unit)
+                                                                   add_test(NAME integration_case COMMAND "${CMAKE_COMMAND}" -E echo INTEGRATION_MARKER)
+                                                                   set_tests_properties(integration_case PROPERTIES LABELS integration)
+                                                                   """);
         var firstBuild = Path.Combine(temp.Path, "variant one");
         var secondBuild = Path.Combine(temp.Path, "variant two");
         Configure(source, firstBuild);
@@ -37,11 +37,11 @@ internal static class TypedRecipeIntegrationTests
             name: "test-matrix", options: ["--jobs", "8"]);
         AllSucceeded(tests);
         Check(Log(tests, testDirectory, "ctest_unit").Contains("unit_case", StringComparison.Ordinal)
-            && !Log(tests, testDirectory, "ctest_unit").Contains("integration_case", StringComparison.Ordinal)
-            && Log(tests, testDirectory, "ctest_integration").Contains("integration_case", StringComparison.Ordinal),
+              && !Log(tests, testDirectory, "ctest_unit").Contains("integration_case", StringComparison.Ordinal)
+              && Log(tests, testDirectory, "ctest_integration").Contains("integration_case", StringComparison.Ordinal),
             "CTest groups selected the wrong tests");
         Check(DateTimeOffset.Parse(S(Item(tests, "ctest_unit")["finishedAt"]))
-            <= DateTimeOffset.Parse(S(Item(tests, "ctest_integration")["startedAt"])),
+              <= DateTimeOffset.Parse(S(Item(tests, "ctest_integration")["startedAt"])),
             "Serialized CTest groups overlapped");
 
         var buildManifest = Path.Combine(temp.Path, "build-matrix.json");
@@ -56,11 +56,12 @@ internal static class TypedRecipeIntegrationTests
             "Build Matrix manifest rejected by planner");
         var manifestContexts = J(File.ReadAllText(buildManifest))["contexts"]!;
         Check(S(manifestContexts["one"]?["buildDirectory"]) == firstBuild
-            && S(manifestContexts["two"]?["buildDirectory"]) == secondBuild,
+              && S(manifestContexts["two"]?["buildDirectory"]) == secondBuild,
             "Build Matrix recipe did not preserve input build directories");
         string PlannedDirectory(string id) => S(planned.Single(n => S(n?["id"]) == id)?["buildDirectory"]);
         var pathComparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
         var firstPlannedDirectory = PlannedDirectory("build_one_001");
         var secondPlannedDirectory = PlannedDirectory("build_two_001");
         var (builds, _) = Workflow(temp.Path, J(File.ReadAllText(buildManifest)),
@@ -68,9 +69,9 @@ internal static class TypedRecipeIntegrationTests
         AllSucceeded(builds);
         var actualNodes = builds["nodes"]!.AsArray();
         Check(actualNodes.Count == 4
-            && !pathComparer.Equals(firstPlannedDirectory, secondPlannedDirectory)
-            && actualNodes.All(n => pathComparer.Equals(
-                S(n?["buildDirectory"]), PlannedDirectory(S(n?["id"])))),
+              && !pathComparer.Equals(firstPlannedDirectory, secondPlannedDirectory)
+              && actualNodes.All(n => pathComparer.Equals(
+                  S(n?["buildDirectory"]), PlannedDirectory(S(n?["id"])))),
             "Build Matrix mixed build contexts: plan and run disagree on canonical build directories");
 
         var testRecipeFile = Path.Combine(definitions, "tests.json");
@@ -85,26 +86,44 @@ internal static class TypedRecipeIntegrationTests
         RunCli("workflow", "generate", "test-matrix", "--recipe", testRecipeFile,
             "--output", testFromFile);
         Check(S(J(File.ReadAllText(testFromFile))["contexts"]?["tests"]?["buildDirectory"])
-            == firstBuild, "Test Matrix recipe-file path policy");
+              == firstBuild, "Test Matrix recipe-file path policy");
         var buildRecipeFile = Path.Combine(definitions, "builds.json");
         File.WriteAllText(buildRecipeFile, JsonSerializer.Serialize(new
         {
             kind = "build-matrix", schemaVersion = 1,
-            variants = new[] { new { name = "one", buildDirectory = Path.GetRelativePath(definitions, firstBuild),
-                configuration = "Debug" } }, targets = new[] { "first" }
+            variants = new[]
+            {
+                new
+                {
+                    name = "one", buildDirectory = Path.GetRelativePath(definitions, firstBuild),
+                    configuration = "Debug"
+                }
+            },
+            targets = new[] { "first" }
         }));
         var buildFromFile = Path.Combine(temp.Path, "build-from-file.json");
         RunCli("workflow", "generate", "build-matrix", "--recipe", buildRecipeFile,
             "--output", buildFromFile);
         Check(S(J(File.ReadAllText(buildFromFile))["contexts"]?["one"]?["buildDirectory"])
-            == firstBuild, "Build Matrix recipe-file path policy");
+              == firstBuild, "Build Matrix recipe-file path policy");
 
         var matrixRecipe = Path.Combine(definitions, "benchmark-matrix.json");
         File.WriteAllText(matrixRecipe, JsonSerializer.Serialize(new
         {
             kind = "benchmark-matrix", schemaVersion = 1,
-            variants = new[] { new { name = "one", buildDirectory = Path.GetRelativePath(definitions, firstBuild), configuration = "Debug" },
-                new { name = "two", buildDirectory = Path.GetRelativePath(definitions, secondBuild), configuration = "Debug" } },
+            variants = new[]
+            {
+                new
+                {
+                    name = "one", buildDirectory = Path.GetRelativePath(definitions, firstBuild),
+                    configuration = "Debug"
+                },
+                new
+                {
+                    name = "two", buildDirectory = Path.GetRelativePath(definitions, secondBuild),
+                    configuration = "Debug"
+                }
+            },
             target = "first", repeats = 2, timeoutSeconds = 30,
             fixedArguments = new[] { "sleep", "40" },
             axes = new[] { new { name = "case", flag = "--case", values = new[] { "chain", "noop" } } },
@@ -115,7 +134,7 @@ internal static class TypedRecipeIntegrationTests
             "--output", matrixManifest);
         var matrixDocument = J(File.ReadAllText(matrixManifest));
         Check(S(matrixDocument["contexts"]?["one"]?["buildDirectory"]) == firstBuild
-            && matrixDocument["nodes"]!.AsArray().Count == 10,
+              && matrixDocument["nodes"]!.AsArray().Count == 10,
             "Benchmark Matrix recipe-relative paths or expansion changed");
         Check(RunCli("workflow", "plan", matrixManifest, "--json").Contains("timing_two_0002_002",
             StringComparison.Ordinal), "Benchmark Matrix manifest rejected by planner");
@@ -124,11 +143,11 @@ internal static class TypedRecipeIntegrationTests
         AllSucceeded(matrix);
         var timings = matrix["nodes"]!.AsArray().Where(n => S(n?["kind"]) == "run").ToArray();
         Check(timings.Length == 8 && File.ReadAllLines(Path.Combine(firstBuild, "sleep-invocations.txt")).Length == 4
-            && File.ReadAllLines(Path.Combine(secondBuild, "sleep-invocations.txt")).Length == 4,
+                                  && File.ReadAllLines(Path.Combine(secondBuild, "sleep-invocations.txt")).Length == 4,
             "Benchmark Matrix invocation count changed");
         for (var i = 1; i < timings.Length; i++)
             Check(DateTimeOffset.Parse(S(timings[i - 1]?["finishedAt"]))
-                <= DateTimeOffset.Parse(S(timings[i]?["startedAt"])),
+                  <= DateTimeOffset.Parse(S(timings[i]?["startedAt"])),
                 "Benchmark Matrix timing executions overlapped with --jobs 8");
         var invalid = Path.Combine(temp.Path, "oversized.json");
         File.WriteAllText(invalid, JsonSerializer.Serialize(new
@@ -136,19 +155,26 @@ internal static class TypedRecipeIntegrationTests
             kind = "benchmark-matrix", schemaVersion = 1,
             variants = new[] { new { name = "one", buildDirectory = firstBuild } },
             target = "first", repeats = 1000, timeoutSeconds = 30, fixedArguments = Array.Empty<string>(),
-            axes = new[] { new { name = "huge", flag = "--huge", values = Enumerable.Range(0, 32)
-                .Select(i => i.ToString()).ToArray() } }, executionOrder = "sequential"
+            axes = new[]
+            {
+                new
+                {
+                    name = "huge", flag = "--huge", values = Enumerable.Range(0, 32)
+                        .Select(i => i.ToString()).ToArray()
+                }
+            },
+            executionOrder = "sequential"
         }));
         var rejectedOutput = Path.Combine(temp.Path, "rejected-matrix.json");
         Check(RunCli(1, "workflow", "generate", "benchmark-matrix", "--recipe", invalid,
-            "--output", rejectedOutput).Contains("expands to", StringComparison.Ordinal)
-            && !File.Exists(rejectedOutput), "Oversized matrix left an output file");
+                  "--output", rejectedOutput).Contains("expands to", StringComparison.Ordinal)
+              && !File.Exists(rejectedOutput), "Oversized matrix left an output file");
         var malformed = Path.Combine(temp.Path, "malformed-recipe.json");
         File.WriteAllText(malformed, """
-            {"kind":"test-matrix","schemaVersion":2,"buildDirectory":"x","target":"first",
-             "groups":[{"name":"unit","labelRegex":"unit"}],"executionOrder":"parallel",
-             "timeoutSeconds":30,"unknown":true}
-            """);
+                                     {"kind":"test-matrix","schemaVersion":2,"buildDirectory":"x","target":"first",
+                                      "groups":[{"name":"unit","labelRegex":"unit"}],"executionOrder":"parallel",
+                                      "timeoutSeconds":30,"unknown":true}
+                                     """);
         var malformedOutput = Path.Combine(temp.Path, "malformed-output.json");
         RunCli(1, "workflow", "generate", "test-matrix", "--recipe", malformed,
             "--output", malformedOutput);
@@ -172,7 +198,7 @@ internal static class TypedRecipeIntegrationTests
         RunCli("workflow", "generate", "profile", "--recipe", profileRecipeFile,
             "--output", profileFromFile);
         Check(S(J(File.ReadAllText(profileFromFile))["contexts"]?["main"]?["buildDirectory"])
-            == firstBuild, "Profile recipe-file path policy");
+              == firstBuild, "Profile recipe-file path policy");
         var profileManifest = Path.Combine(temp.Path, "profile.json");
         RunCli("workflow", "generate", "profile", "--build-dir", firstBuild,
             "--target", "first", "--config", "Debug", "--platform", incompatiblePlatform,
@@ -184,15 +210,15 @@ internal static class TypedRecipeIntegrationTests
         var (profile, _) = Workflow(temp.Path, J(File.ReadAllText(profileManifest)),
             expected: 1, name: "profile-recipe", options: ["--jobs", "8"]);
         Check(Status(profile, "build_main") == "succeeded"
-            && Status(profile, "timing_main_1") == "succeeded"
-            && Status(profile, "capture_main") == "failed",
+              && Status(profile, "timing_main_1") == "succeeded"
+              && Status(profile, "capture_main") == "failed",
             "Profile capture failure did not preserve timing/report semantics");
         File.AppendAllText(Path.Combine(source, "first.cpp"), "\nthis_is_intentionally_invalid_cpp\n");
         var (blocked, _) = Workflow(temp.Path, J(File.ReadAllText(testManifest)),
             expected: 1, name: "test-matrix-failed-build", options: ["--jobs", "8"]);
         Check(Status(blocked, "build_tests") == "failed"
-            && Status(blocked, "ctest_unit") != "succeeded"
-            && Status(blocked, "ctest_integration") != "succeeded",
+              && Status(blocked, "ctest_unit") != "succeeded"
+              && Status(blocked, "ctest_integration") != "succeeded",
             "Failed build did not block generated CTest groups");
         Pass("typed Profile, Test Matrix, Build Matrix and Benchmark Matrix generation and execution");
     }

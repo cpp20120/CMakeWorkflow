@@ -4,26 +4,107 @@
   "title": "CMakeWorkflow TestMatrixRecipeV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "schemaVersion", "buildDirectory", "target", "groups", "executionOrder", "timeoutSeconds"],
+  "required": [
+    "kind",
+    "schemaVersion",
+    "buildDirectory",
+    "target",
+    "groups",
+    "executionOrder",
+    "timeoutSeconds"
+  ],
   "properties": {
-    "kind": { "const": "test-matrix" },
-    "schemaVersion": { "const": 1 },
-    "buildDirectory": { "type": "string", "minLength": 1 },
-    "target": { "type": "string", "pattern": "^[A-Za-z0-9_.+\\-]+$" },
-    "configuration": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.+\\-]+$" },
-    "groups": { "type": "array", "minItems": 1, "maxItems": 64, "items": {
-      "type": "object", "additionalProperties": false,
-      "required": ["name"], "properties": {
-        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-        "testRegex": { "type": ["string", "null"], "minLength": 1 },
-        "labelRegex": { "type": ["string", "null"], "minLength": 1 }
-      },
-      "oneOf": [
-        { "required": ["testRegex"], "properties": { "testRegex": { "type": "string" }, "labelRegex": { "type": "null" } } },
-        { "required": ["labelRegex"], "properties": { "labelRegex": { "type": "string" }, "testRegex": { "type": "null" } } }
+    "kind": {
+      "const": "test-matrix"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "buildDirectory": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.+\\-]+$"
+    },
+    "configuration": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9_.+\\-]+$"
+    },
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "testRegex": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "labelRegex": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "testRegex"
+            ],
+            "properties": {
+              "testRegex": {
+                "type": "string"
+              },
+              "labelRegex": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "required": [
+              "labelRegex"
+            ],
+            "properties": {
+              "labelRegex": {
+                "type": "string"
+              },
+              "testRegex": {
+                "type": "null"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "executionOrder": {
+      "enum": [
+        "parallel",
+        "sequential"
       ]
-    } },
-    "executionOrder": { "enum": ["parallel", "sequential"] },
-    "timeoutSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 86400 }
+    },
+    "timeoutSeconds": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 86400
+    }
   }
 }

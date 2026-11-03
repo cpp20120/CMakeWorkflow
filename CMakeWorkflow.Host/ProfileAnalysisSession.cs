@@ -28,15 +28,19 @@ public sealed partial class DoctorSession
                 var captureId = item.GetProperty("captureId").GetString();
                 var raw = item.GetProperty("rawTrace").GetString();
                 if (captureId is null || !Regex.IsMatch(captureId, "^[a-zA-Z0-9_-]{1,80}$",
-                    RegexOptions.CultureInvariant) || string.IsNullOrWhiteSpace(raw))
+                        RegexOptions.CultureInvariant) || string.IsNullOrWhiteSpace(raw))
                     throw new ApplicationRefusal("invalid_data", "Invalid profile capture identity.");
                 paths.Require(Path.Combine(root, raw));
                 foreach (var suffix in new[] { ".perf-report.txt", ".toc.xml", ".manifest.json", ".events.xml" })
                     paths.Require(Path.Combine(root, captureId + suffix));
-                foreach (var suffix in new[] { ".json", ".stacks.json", ".timeline.jsonl",
-                    ".etw.json", ".etw-samples.jsonl" })
+                foreach (var suffix in new[]
+                         {
+                             ".json", ".stacks.json", ".timeline.jsonl",
+                             ".etw.json", ".etw-samples.jsonl"
+                         })
                     paths.Require(Path.Combine(root, "traces", "normalized", captureId + suffix));
             }
+
             foreach (var artifact in new[] { "analysis.json", "comparison.json", "counter-comparison.json" })
                 paths.Require(Path.Combine(root, artifact));
             await ProfileAnalyzer.AnalyzeAsync(root, ct, emitResultPath: false);

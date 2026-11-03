@@ -5,6 +5,7 @@ using System.Text.Json;
 namespace CMakeWorkflow;
 
 public sealed record CMakeTargetRef(string BuildDirectory, string Target, string? Configuration);
+
 public sealed record BuiltArtifact(CMakeTargetRef TargetRef, string ExecutablePath);
 
 // Shared invocation for executable and utility targets. Resolving an executable
@@ -14,7 +15,8 @@ public sealed record CMakeBuildCommand(IReadOnlyList<string> Arguments, string W
     public static CMakeBuildCommand Create(CMakeTargetRef target)
     {
         if (string.IsNullOrWhiteSpace(target.Target) || target.Target.StartsWith('-') || target.Target.Contains('\0'))
-            throw new ArgumentException("A literal native target name is required; build options are not target names.");
+            throw new ArgumentException(
+                "A literal native target name is required; build options are not target names.");
         target = CMakeConfiguration.Resolve(target);
         var args = new List<string> { "--build", target.BuildDirectory, "--target", target.Target };
         if (!string.IsNullOrWhiteSpace(target.Configuration))
@@ -34,10 +36,12 @@ public sealed class ExternalCMakeBuildContext : ICMakeBuildContext
     public async Task<BuiltArtifact> EnsureBuiltAsync(CMakeTargetRef target, CancellationToken ct)
     {
         var observed = await CMakeInspection.InspectAsync(target.BuildDirectory, ct);
-        target = CMakeInspection.Resolve(new RequestedBuildContext(target.BuildDirectory, target.Configuration), observed, target.Target);
+        target = CMakeInspection.Resolve(new RequestedBuildContext(target.BuildDirectory, target.Configuration),
+            observed, target.Target);
         CMakeInspection.RequireTarget(observed, target, executableOnly: true);
         var command = CMakeBuildCommand.Create(target);
-        await ProcessRunner.RunAsync(observed.CMakeExecutable ?? "cmake", command.Arguments, command.WorkingDirectory, ct);
+        await ProcessRunner.RunAsync(observed.CMakeExecutable ?? "cmake", command.Arguments, command.WorkingDirectory,
+            ct);
         return await CMakeFileApi.ResolveExecutableAsync(target, ct);
     }
 }
@@ -76,17 +80,20 @@ public static class CMakeFileApi
         Action<string>? readGuard = null)
     {
         var observed = await CMakeInspection.InspectAsync(target.BuildDirectory, ct, readGuard);
-        target = CMakeInspection.Resolve(new RequestedBuildContext(target.BuildDirectory, target.Configuration), observed, target.Target);
+        target = CMakeInspection.Resolve(new RequestedBuildContext(target.BuildDirectory, target.Configuration),
+            observed, target.Target);
         var item = CMakeInspection.RequireTarget(observed, target, executableOnly: true);
         if (item.Executable is null)
-            throw new InvalidOperationException($"Executable artifact for '{target.Target}' is Unknown/ambiguous; no filename is guessed.");
+            throw new InvalidOperationException(
+                $"Executable artifact for '{target.Target}' is Unknown/ambiguous; no filename is guessed.");
         return new BuiltArtifact(target, item.Executable);
     }
 }
 
 public static class ProcessRunner
 {
-    public static async Task RunAsync(string file, IReadOnlyList<string> args, string workingDirectory, CancellationToken ct)
+    public static async Task RunAsync(string file, IReadOnlyList<string> args, string workingDirectory,
+        CancellationToken ct)
     {
         var info = new ProcessStartInfo(file)
         {
@@ -102,10 +109,16 @@ public static class ProcessRunner
         BuildTreeOwnership.PropagateTo(info);
 
         Process started;
-        try { started = Process.Start(info)
-            ?? throw new MissingWorkflowToolException(file, new IOException("Process.Start returned null.")); }
+        try
+        {
+            started = Process.Start(info)
+                      ?? throw new MissingWorkflowToolException(file, new IOException("Process.Start returned null."));
+        }
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3)
-        { throw new MissingWorkflowToolException(file, error); }
+        {
+            throw new MissingWorkflowToolException(file, error);
+        }
+
         using var process = started;
         try
         {
@@ -118,10 +131,11 @@ public static class ProcessRunner
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(CancellationToken.None);
             }
+
             throw;
         }
+
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"Process '{file}' failed with exit code {process.ExitCode}.");
     }
 }
-

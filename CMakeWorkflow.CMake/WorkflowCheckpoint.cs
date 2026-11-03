@@ -11,7 +11,7 @@ internal static class WorkflowCheckpoint
     {
         var path = Path.Combine(directory, "run.json");
         var faultNode = report.Nodes.FirstOrDefault(n => n.Status == "running")?.Id
-            ?? report.Reconciliations.LastOrDefault()?.NodeId;
+                        ?? report.Reconciliations.LastOrDefault()?.NodeId;
         var bytes = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
         return WriteDurableBytesAsync(path, bytes, ct, faultNode, injectRecoveryFaults: true);
     }
@@ -31,6 +31,7 @@ internal static class WorkflowCheckpoint
             stream.Flush(flushToDisk: true);
             if (OperatingSystem.IsMacOS()) FullSync(stream);
         }
+
         if (injectRecoveryFaults)
             await RecoveryFaults.HitAsync("checkpoint-flushed", faultNode, ct);
         ct.ThrowIfCancellationRequested();
@@ -47,8 +48,10 @@ internal static class WorkflowCheckpoint
                 await RecoveryFaults.HitAsync("checkpoint-replaced", faultNode, ct);
                 await RecoveryFaults.HitAsync("checkpoint-directory-sync", faultNode, ct);
             }
-            for (string? parent = Path.GetDirectoryName(path); parent is not null;
-                parent = Path.GetDirectoryName(parent))
+
+            for (string? parent = Path.GetDirectoryName(path);
+                 parent is not null;
+                 parent = Path.GetDirectoryName(parent))
                 SyncDirectory(parent);
             if (OperatingSystem.IsMacOS())
             {
@@ -56,8 +59,9 @@ internal static class WorkflowCheckpoint
                 FullSync(committed);
             }
         }
-        else throw new PlatformNotSupportedException(
-            "Durable workflow checkpoints require Linux, macOS or Windows.");
+        else
+            throw new PlatformNotSupportedException(
+                "Durable workflow checkpoints require Linux, macOS or Windows.");
     }
 
     private static string WindowsPath(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path
@@ -77,25 +81,43 @@ internal static class WorkflowCheckpoint
         try
         {
             int result;
-            do { result = Fsync(fd); } while (result != 0 && Marshal.GetLastPInvokeError() == 4); // EINTR
+            do
+            {
+                result = Fsync(fd);
+            } while (result != 0 && Marshal.GetLastPInvokeError() == 4); // EINTR
+
             if (result != 0) throw NativeError("Sync checkpoint directory");
         }
-        finally { Close(fd); }
+        finally
+        {
+            Close(fd);
+        }
     }
 
     private static void FullSync(FileStream stream)
     {
         int result;
-        do { result = Fcntl(stream.SafeFileHandle.DangerousGetHandle().ToInt32(), 51); } // F_FULLFSYNC
+        do
+        {
+            result = Fcntl(stream.SafeFileHandle.DangerousGetHandle().ToInt32(), 51);
+        } // F_FULLFSYNC
         while (result != 0 && Marshal.GetLastPInvokeError() == 4);
+
         if (result != 0) throw NativeError("Full sync checkpoint");
     }
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-    [DllImport("libc", EntryPoint = "fsync", SetLastError = true)] private static extern int Fsync(int fd);
-    [DllImport("libc", EntryPoint = "close")] private static extern int Close(int fd);
-    [DllImport("libc", EntryPoint = "fcntl", SetLastError = true)] private static extern int Fcntl(int fd, int command);
+
+    [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    private static extern int Fsync(int fd);
+
+    [DllImport("libc", EntryPoint = "close")]
+    private static extern int Close(int fd);
+
+    [DllImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static extern int Fcntl(int fd, int command);
+
     [DllImport("kernel32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool MoveFileExW(string source, string target, uint flags);

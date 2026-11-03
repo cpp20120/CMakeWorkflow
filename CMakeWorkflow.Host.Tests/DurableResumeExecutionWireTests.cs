@@ -9,7 +9,9 @@ using CMakeWorkflow.Host;
 internal static class DurableResumeExecutionWireTests
 {
     private static void Check(bool ok, string message)
-    { if (!ok) throw new Exception(message); }
+    {
+        if (!ok) throw new Exception(message);
+    }
 
     public static async Task RunAsync(string endpoint, string parent, CancellationToken ct)
     {
@@ -29,8 +31,11 @@ internal static class DurableResumeExecutionWireTests
         var query = Path.Combine(build, ".cmake", "api", "v1", "query");
         Directory.CreateDirectory(query);
         File.WriteAllText(Path.Combine(query, "codemodel-v2"), "");
-        var psi = new ProcessStartInfo("cmake") { UseShellExecute = false,
-            RedirectStandardError = true, RedirectStandardOutput = true };
+        var psi = new ProcessStartInfo("cmake")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true, RedirectStandardOutput = true
+        };
         foreach (var arg in new[] { "-S", source, "-B", build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Debug" })
             psi.ArgumentList.Add(arg);
         using (var configure = Process.Start(psi) ?? throw new Exception("Cannot configure CMake fixture"))
@@ -40,11 +45,12 @@ internal static class DurableResumeExecutionWireTests
             await configure.WaitForExitAsync(ct);
             Check(configure.ExitCode == 0, "CMake configure failed: " + await stderr + await stdout);
         }
+
         var doc = JsonNode.Parse("""
-            {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-             "nodes":[{"id":"a","kind":"invoke","context":"w","target":"a"},
-                      {"id":"b","kind":"invoke","context":"w","target":"b","dependsOn":["a"]}]}
-            """)!;
+                                 {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                  "nodes":[{"id":"a","kind":"invoke","context":"w","target":"a"},
+                                           {"id":"b","kind":"invoke","context":"w","target":"b","dependsOn":["a"]}]}
+                                 """)!;
         doc["contexts"]!["w"]!["buildDirectory"] = build;
         var manifest = Path.Combine(root, "workflow.json");
         var content = Encoding.UTF8.GetBytes(doc.ToJsonString());
@@ -102,6 +108,7 @@ internal static class DurableResumeExecutionWireTests
             Check(store.Reconcile(operationId, 0, "needs_attention", "Verified B had no external effect").Revision == 1,
                 "Reconcile failed");
         }
+
         using (var wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (var rpc = HostConnection.Create(wire))
         {
@@ -114,6 +121,7 @@ internal static class DurableResumeExecutionWireTests
                 "Resume execution RPC rejected admitted operation");
             // Retry over the same connection while running must not re-dispatch.
         }
+
         using (var wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (var rpc = HostConnection.Create(wire))
         {
@@ -130,15 +138,24 @@ internal static class DurableResumeExecutionWireTests
                 await Task.Delay(50, timeout.Token);
             }
         }
+
         Check(File.ReadAllLines(marker).SequenceEqual(["a", "b"]),
             "Resume duplicated completed A or lost B");
         using (var store = new DurableAcceptanceStore(root))
         {
             Check(store.GetFinalization(operationId) is { State: "succeeded", ExitCode: 0 },
                 "Resume terminal report not durable");
-            try { store.ClaimResumeAttempt(operationId, run); throw new Exception("A second resume attempt was accepted"); }
-            catch (InvalidOperationException) { }
+            try
+            {
+                store.ClaimResumeAttempt(operationId, run);
+                throw new Exception("A second resume attempt was accepted");
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }
-        Console.WriteLine("Workflow/resumeExecute E2E passed: partial DAG, reconnect, single attempt, completed-node skip and terminal finalization.");
+
+        Console.WriteLine(
+            "Workflow/resumeExecute E2E passed: partial DAG, reconnect, single attempt, completed-node skip and terminal finalization.");
     }
 }

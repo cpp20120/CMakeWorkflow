@@ -16,7 +16,7 @@ internal static class SdkSmokeTests
         // Connect must not acquire ownership of an existing Host process.
         int hostPid;
         await using (var client = await CMakeWorkflowClient.ConnectAsync(
-            new ClientOptions(endpoint, workspace), cancellationToken))
+                         new ClientOptions(endpoint, workspace), cancellationToken))
         {
             hostPid = client.Host.ProcessId;
             Check(client.Host.ProtocolVersion == 1, "protocol version");
@@ -25,8 +25,9 @@ internal static class SdkSmokeTests
             var absent = client.Operations.GetHandle(Guid.NewGuid().ToString("N"));
             Check(absent.OperationId.Length == 32, "lightweight operation reference");
         }
+
         await using (var other = await CMakeWorkflowClient.ConnectAsync(
-            new ClientOptions(endpoint, workspace), cancellationToken))
+                         new ClientOptions(endpoint, workspace), cancellationToken))
         {
             Check(other.Host.ProcessId == hostPid, "ConnectAsync disposed a foreign Host");
         }
@@ -42,17 +43,21 @@ internal static class SdkSmokeTests
                     OperatingSystem.IsWindows() ? "CMakeWorkflow.exe" : "CMakeWorkflow");
                 break;
             }
+
             current = current.Parent;
         }
-        Check(executable is not null && File.Exists(executable), "CLI apphost is missing; build the solution in Release");
+
+        Check(executable is not null && File.Exists(executable),
+            "CLI apphost is missing; build the solution in Release");
         int ownedPid;
         await using (var launched = await CMakeWorkflowClient.LaunchAsync(
-            new LaunchOptions(executable!, workspace), cancellationToken))
+                         new LaunchOptions(executable!, workspace), cancellationToken))
         {
             ownedPid = launched.Host.ProcessId;
             Check(ownedPid != hostPid, "LaunchAsync attached instead of spawning a private Host");
             Check(launched.Host.WorkspaceDirectory == workspace, "owned Host workspace");
         }
+
         try
         {
             using var process = System.Diagnostics.Process.GetProcessById(ownedPid);
@@ -62,6 +67,7 @@ internal static class SdkSmokeTests
         {
             // The OS has already reaped this process.
         }
+
         await VerifyLifecycleAsync(endpoint, workspace, cancellationToken);
         Console.WriteLine("SDK transport checks passed: connect, foreign ownership, launch and owned shutdown.");
     }
@@ -94,13 +100,15 @@ internal static class SdkSmokeTests
             var stdout = process.StandardOutput.ReadToEndAsync(ct);
             var stderr = process.StandardError.ReadToEndAsync(ct);
             await process.WaitForExitAsync(ct);
-            if (process.ExitCode != 0) throw new Exception("SDK fixture configure failed: " + await stdout + await stderr);
+            if (process.ExitCode != 0)
+                throw new Exception("SDK fixture configure failed: " + await stdout + await stderr);
             await Task.WhenAll(stdout, stderr);
         }
+
         var document = JsonNode.Parse("""
-            {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-             "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-            """)!;
+                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                      """)!;
         document["contexts"]!["w"]!["buildDirectory"] = build;
         var manifest = Path.Combine(workspace, "workflow.json");
         var bytes = Encoding.UTF8.GetBytes(document.ToJsonString());

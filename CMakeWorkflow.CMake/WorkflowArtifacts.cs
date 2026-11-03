@@ -3,8 +3,13 @@ using System.Text;
 
 namespace CMakeWorkflow;
 
-public sealed record WorkflowArtifactEvidence(string Name, string Path, string Sha256,
-    string Role, string? From = null, string? SnapshotPath = null);
+public sealed record WorkflowArtifactEvidence(
+    string Name,
+    string Path,
+    string Sha256,
+    string Role,
+    string? From = null,
+    string? SnapshotPath = null);
 
 internal static class WorkflowArtifacts
 {
@@ -14,7 +19,8 @@ internal static class WorkflowArtifacts
         Path.IsPathFullyQualified(path) ? path : Path.Combine(directory, path));
 
     internal static string OutputPath(string manifest, string run, WorkflowArtifactOutput output) =>
-        output.Root == "run" ? Path.GetFullPath(Path.Combine(run, output.Path))
+        output.Root == "run"
+            ? Path.GetFullPath(Path.Combine(run, output.Path))
             : ManifestPath(Path.GetDirectoryName(manifest)!, output.Path);
 
     internal static async Task<string> HashAsync(string path, CancellationToken ct)
@@ -25,6 +31,7 @@ internal static class WorkflowArtifacts
             await using var stream = File.OpenRead(path);
             return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
         }
+
         if (!Directory.Exists(path)) throw new FileNotFoundException("Declared artifact is missing.", path);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var file in Files(path))
@@ -34,6 +41,7 @@ internal static class WorkflowArtifacts
             var fileHash = await HashAsync(file, ct);
             hash.AppendData(Encoding.UTF8.GetBytes(relative + "\0" + fileHash + "\n"));
         }
+
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
@@ -50,6 +58,7 @@ internal static class WorkflowArtifacts
             await input.CopyToAsync(output, ct);
             return;
         }
+
         if (!Directory.Exists(source)) throw new FileNotFoundException("Snapshot input is missing.", source);
         Directory.CreateDirectory(destination);
         foreach (var file in Files(source))
@@ -78,6 +87,7 @@ internal static class WorkflowArtifacts
                 else files.Add(entry);
             }
         }
+
         files.Sort(StringComparer.Ordinal);
         return files;
     }

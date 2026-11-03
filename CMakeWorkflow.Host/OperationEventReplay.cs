@@ -43,8 +43,15 @@ public static class OperationEventReplay
             ct.ThrowIfCancellationRequested();
             if (line.Length > 1024 * 1024) throw new InvalidDataException("Oversized journal entry.");
             WorkflowEvent? entry;
-            try { entry = JsonSerializer.Deserialize(line, WorkflowProtocolJson.Default.WorkflowEvent); }
-            catch (JsonException) when (nextLine is null) { break; } // interrupted final append
+            try
+            {
+                entry = JsonSerializer.Deserialize(line, WorkflowProtocolJson.Default.WorkflowEvent);
+            }
+            catch (JsonException) when (nextLine is null)
+            {
+                break;
+            } // interrupted final append
+
             if (entry is null || entry.Sequence <= previous)
                 throw new InvalidDataException("Invalid or non-monotonic event sequence.");
             previous = entry.Sequence;
@@ -53,6 +60,7 @@ public static class OperationEventReplay
                 return new(operationId, afterSequence, items[^1].Sequence, true, items);
             items.Add(entry);
         }
+
         return new(operationId, afterSequence,
             items.Count == 0 ? afterSequence : items[^1].Sequence, false, items);
     }

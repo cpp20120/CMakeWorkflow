@@ -34,73 +34,84 @@ public sealed partial class DoctorSession
 
     public Task<ProfileRecipePreparation> ProfileRecipePrepareAsync(ProfileRecipePrepareRequest request,
         CancellationToken cancellationToken) => ApplicationCallAsync(request, async (paths, ct) =>
+    {
+        ValidateRecipeRequest(request.RequestId);
+        if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
+            throw new ArgumentException("Profile recipe variants are required.");
+        var manifest = paths.Require(request.OutputPath);
+        var recipe = request.Recipe with
         {
-            ValidateRecipeRequest(request.RequestId);
-            if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
-                throw new ArgumentException("Profile recipe variants are required.");
-            var manifest = paths.Require(request.OutputPath);
-            var recipe = request.Recipe with
+            Variants = request.Recipe.Variants.Select(v => v with
             {
-                Variants = request.Recipe.Variants.Select(v => v with
-                { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray(),
-                SourceDirectory = request.Recipe.SourceDirectory is null ? null
-                    : paths.Require(request.Recipe.SourceDirectory)
-            };
-            var document = ProfileRecipeBuilder.Build(recipe);
-            var prepared = new ProfileRecipePreparation(1, manifest, Hash(document));
-            await CommitRecipeAsync(paths, "profile-recipe", request.RequestId, manifest,
-                document, JsonSerializer.SerializeToUtf8Bytes(prepared,
-                    HostJson.Default.ProfileRecipePreparation), ct);
-            return prepared;
-        }, cancellationToken);
+                BuildDirectory = paths.Require(v.BuildDirectory)
+            }).ToArray(),
+            SourceDirectory = request.Recipe.SourceDirectory is null
+                ? null
+                : paths.Require(request.Recipe.SourceDirectory)
+        };
+        var document = ProfileRecipeBuilder.Build(recipe);
+        var prepared = new ProfileRecipePreparation(1, manifest, Hash(document));
+        await CommitRecipeAsync(paths, "profile-recipe", request.RequestId, manifest,
+            document, JsonSerializer.SerializeToUtf8Bytes(prepared,
+                HostJson.Default.ProfileRecipePreparation), ct);
+        return prepared;
+    }, cancellationToken);
 
     public Task<TestMatrixPreparation> TestMatrixPrepareAsync(TestMatrixPrepareRequest request,
         CancellationToken cancellationToken) => ApplicationCallAsync(request, async (paths, ct) =>
+    {
+        ValidateRecipeRequest(request.RequestId);
+        if (request.Recipe is null) throw new ArgumentException("Test Matrix recipe is required.");
+        var manifest = paths.Require(request.OutputPath);
+        var recipe = request.Recipe with
         {
-            ValidateRecipeRequest(request.RequestId);
-            if (request.Recipe is null) throw new ArgumentException("Test Matrix recipe is required.");
-            var manifest = paths.Require(request.OutputPath);
-            var recipe = request.Recipe with
-            { BuildDirectory = paths.Require(request.Recipe.BuildDirectory) };
-            var document = TestMatrixWorkflowBuilder.Build(recipe);
-            var prepared = new TestMatrixPreparation(1, manifest, Hash(document));
-            await CommitRecipeAsync(paths, "test-matrix", request.RequestId, manifest,
-                document, JsonSerializer.SerializeToUtf8Bytes(prepared,
-                    HostJson.Default.TestMatrixPreparation), ct);
-            return prepared;
-        }, cancellationToken);
+            BuildDirectory = paths.Require(request.Recipe.BuildDirectory)
+        };
+        var document = TestMatrixWorkflowBuilder.Build(recipe);
+        var prepared = new TestMatrixPreparation(1, manifest, Hash(document));
+        await CommitRecipeAsync(paths, "test-matrix", request.RequestId, manifest,
+            document, JsonSerializer.SerializeToUtf8Bytes(prepared,
+                HostJson.Default.TestMatrixPreparation), ct);
+        return prepared;
+    }, cancellationToken);
 
     public Task<BuildMatrixPreparation> BuildMatrixPrepareAsync(BuildMatrixPrepareRequest request,
         CancellationToken cancellationToken) => ApplicationCallAsync(request, async (paths, ct) =>
+    {
+        ValidateRecipeRequest(request.RequestId);
+        if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
+            throw new ArgumentException("Build Matrix variants are required.");
+        var manifest = paths.Require(request.OutputPath);
+        var recipe = request.Recipe with
         {
-            ValidateRecipeRequest(request.RequestId);
-            if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
-                throw new ArgumentException("Build Matrix variants are required.");
-            var manifest = paths.Require(request.OutputPath);
-            var recipe = request.Recipe with { Variants = request.Recipe.Variants.Select(v =>
-                v with { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray() };
-            var document = BuildMatrixWorkflowBuilder.Build(recipe);
-            var prepared = new BuildMatrixPreparation(1, manifest, Hash(document));
-            await CommitRecipeAsync(paths, "build-matrix", request.RequestId, manifest,
-                document, JsonSerializer.SerializeToUtf8Bytes(prepared,
-                    HostJson.Default.BuildMatrixPreparation), ct);
-            return prepared;
-        }, cancellationToken);
+            Variants = request.Recipe.Variants.Select(v =>
+                v with { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray()
+        };
+        var document = BuildMatrixWorkflowBuilder.Build(recipe);
+        var prepared = new BuildMatrixPreparation(1, manifest, Hash(document));
+        await CommitRecipeAsync(paths, "build-matrix", request.RequestId, manifest,
+            document, JsonSerializer.SerializeToUtf8Bytes(prepared,
+                HostJson.Default.BuildMatrixPreparation), ct);
+        return prepared;
+    }, cancellationToken);
 
     public Task<BenchmarkMatrixPreparation> BenchmarkMatrixPrepareAsync(BenchmarkMatrixPrepareRequest request,
         CancellationToken cancellationToken) => ApplicationCallAsync(request, async (paths, ct) =>
+    {
+        ValidateRecipeRequest(request.RequestId);
+        if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
+            throw new ArgumentException("Benchmark Matrix variants are required.");
+        var manifest = paths.Require(request.OutputPath);
+        var recipe = request.Recipe with
         {
-            ValidateRecipeRequest(request.RequestId);
-            if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
-                throw new ArgumentException("Benchmark Matrix variants are required.");
-            var manifest = paths.Require(request.OutputPath);
-            var recipe = request.Recipe with { Variants = request.Recipe.Variants.Select(v =>
-                v with { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray() };
-            var document = BenchmarkMatrixWorkflowBuilder.Build(recipe);
-            var prepared = new BenchmarkMatrixPreparation(1, manifest, Hash(document));
-            await CommitRecipeAsync(paths, "benchmark-matrix", request.RequestId, manifest,
-                document, JsonSerializer.SerializeToUtf8Bytes(prepared,
-                    HostJson.Default.BenchmarkMatrixPreparation), ct);
-            return prepared;
-        }, cancellationToken);
+            Variants = request.Recipe.Variants.Select(v =>
+                v with { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray()
+        };
+        var document = BenchmarkMatrixWorkflowBuilder.Build(recipe);
+        var prepared = new BenchmarkMatrixPreparation(1, manifest, Hash(document));
+        await CommitRecipeAsync(paths, "benchmark-matrix", request.RequestId, manifest,
+            document, JsonSerializer.SerializeToUtf8Bytes(prepared,
+                HostJson.Default.BenchmarkMatrixPreparation), ct);
+        return prepared;
+    }, cancellationToken);
 }

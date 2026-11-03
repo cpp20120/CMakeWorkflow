@@ -18,10 +18,11 @@ public static class WorkflowReportCommand
                 Console.WriteLine($"Checkpoint SHA256: {snapshot.Revision}");
                 Write(report, directory);
             }
+
             return 0;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException
-            or JsonException or InvalidDataException or ArgumentException)
+                                          or JsonException or InvalidDataException or ArgumentException)
         {
             Console.Error.WriteLine($"[CMakeWorkflow] Cannot read workflow report: {error.Message}");
             return 1;
@@ -34,7 +35,7 @@ public static class WorkflowReportCommand
         Console.WriteLine($"Status: {report.Status.ToUpperInvariant()}");
         foreach (var decision in report.Reconciliations)
             Console.WriteLine($"Reconciliation: {decision.Timestamp:O} {decision.Actor}@{decision.Host} " +
-                $"{decision.NodeId ?? "run"} -> {decision.Decision}; reason: {decision.Reason}; prior checkpoint: {decision.CheckpointSha256}");
+                              $"{decision.NodeId ?? "run"} -> {decision.Decision}; reason: {decision.Reason}; prior checkpoint: {decision.CheckpointSha256}");
         Console.WriteLine();
         Console.WriteLine("Nodes:");
         foreach (var node in report.Nodes)
@@ -44,13 +45,15 @@ public static class WorkflowReportCommand
             if (node.ExitCode is { } exitCode)
                 Console.WriteLine($"    exit code: {exitCode}");
             if (node.BuildVerification is { } build)
-                Console.WriteLine($"    native build verification: {build.Verification} ({build.Target.Target}, {build.Target.Configuration ?? "default"})");
+                Console.WriteLine(
+                    $"    native build verification: {build.Verification} ({build.Target.Target}, {build.Target.Configuration ?? "default"})");
             if (node.Artifact is { } artifact)
                 Console.WriteLine($"    artifact: {artifact.Executable} [{artifact.Materialization}]");
             if (node.ExperimentResult != "NotRun")
                 Console.WriteLine($"    experiment result: {node.ExperimentResult}");
             if (node.DeclaredArtifacts.Count != 0)
-                Console.WriteLine($"    declared artifacts: {node.DeclaredArtifacts.Count} verified records (see run.json)");
+                Console.WriteLine(
+                    $"    declared artifacts: {node.DeclaredArtifacts.Count} verified records (see run.json)");
             if (node.ExecutionConditions.TryGetValue("cpuSetRequested", out var cpus))
                 Console.WriteLine($"    required CPU set: {cpus} (taskset admission)");
             if (node.ExecutionConditions.TryGetValue("profilerBackend", out var backend))
@@ -82,6 +85,7 @@ public static class WorkflowReportCommand
             foreach (var diagnostic in observed?.Diagnostics ?? [])
                 Console.WriteLine($"  Unverified/unknown: {diagnostic}");
         }
+
         if (!string.IsNullOrWhiteSpace(report.Error))
         {
             Console.WriteLine();

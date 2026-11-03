@@ -36,6 +36,7 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
                     await Task.Delay(100, ct);
                 }
             }
+
             // A unique WPR instance name means cleanup cannot stop an unrelated
             // recording. The mutex coordinates our own capture processes.
             var status = await process.RunAsync("wpr", ["-status", "-instancename", session],
@@ -80,6 +81,7 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
                     Console.Error.WriteLine($"[CMakeWorkflow] WPR cleanup for {session} failed: {error.Message}");
                 }
             }
+
             lease?.Dispose();
         }
     }

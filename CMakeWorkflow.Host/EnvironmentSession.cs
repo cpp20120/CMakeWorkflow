@@ -16,12 +16,15 @@ public sealed partial class DoctorSession
             throw new ArgumentException("Requirements must be within the workspace.");
         if (!File.Exists(full)) throw new FileNotFoundException("Requirements not found.", full);
         // Avoid opening attacker-controlled symlinks escaping the workspace.
-        for (var current = new FileInfo(full).Directory; current is not null &&
-             current.FullName.Length >= workspace.Length; current = current.Parent)
+        for (var current = new FileInfo(full).Directory;
+             current is not null &&
+             current.FullName.Length >= workspace.Length;
+             current = current.Parent)
         {
             if (current.LinkTarget is not null)
                 throw new ArgumentException("Symlinked requirements directories are forbidden.");
         }
+
         if (new FileInfo(full).LinkTarget is not null)
             throw new ArgumentException("Symlinked requirements files are forbidden.");
         return full;
@@ -37,7 +40,10 @@ public sealed partial class DoctorSession
             return await HostPreparation.InspectAsync(GetEnvironmentRequirementsPath(request.RequirementsPath),
                 createTooling(workspace!), PackageManagerKind.Auto, null, lifetime.Token);
         }
-        finally { gate.Release(); }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<HostPreparationResult> EnvironmentApplyAsync(EnvironmentApplyRequest request,
@@ -57,6 +63,9 @@ public sealed partial class DoctorSession
             return await HostPreparation.ApplyAsync(plan, service, PackageManagerKind.Auto, null,
                 lifetime.Token, request.AllowSystemChanges, auditDirectory: workspace);
         }
-        finally { gate.Release(); }
+        finally
+        {
+            gate.Release();
+        }
     }
 }

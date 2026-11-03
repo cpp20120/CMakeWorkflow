@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using CMakeWorkflow.Profiling;
 
 namespace CMakeWorkflow;
@@ -15,7 +14,7 @@ internal static class WorkflowRecipeGenerateCommand
             throw new ArgumentException($"Unsupported workflow recipe kind: {kind}.");
         var delimiter = Array.IndexOf(args, "--");
         if (kind == "benchmark" && !args[..(delimiter < 0 ? args.Length : delimiter)]
-            .Contains("--recipe", StringComparer.Ordinal))
+                .Contains("--recipe", StringComparer.Ordinal))
             return await BenchmarkGenerateCommand.ExecuteAsync(args, ct);
 
         var options = new List<(string Name, string Value)>();
@@ -27,19 +26,24 @@ internal static class WorkflowRecipeGenerateCommand
                 programArguments = args[(i + 1)..];
                 break;
             }
+
             if (!args[i].StartsWith("--", StringComparison.Ordinal) || i + 1 >= args.Length
-                || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                                                                    || args[i + 1].StartsWith("--",
+                                                                        StringComparison.Ordinal))
                 throw new ArgumentException($"Invalid {kind} option: {args[i]}.");
             options.Add((args[i], args[++i]));
         }
+
         string? Single(string name)
         {
             var values = options.Where(x => x.Name == name).Select(x => x.Value).ToArray();
             if (values.Length > 1) throw new ArgumentException($"Duplicate {kind} option: {name}.");
             return values.Length == 0 ? null : values[0];
         }
+
         string Required(string name) => Single(name)
-            ?? throw new ArgumentException($"{kind} requires {name}.");
+                                        ?? throw new ArgumentException($"{kind} requires {name}.");
+
         string[] Many(string name) => options.Where(x => x.Name == name).Select(x => x.Value).ToArray();
         var output = Path.GetFullPath(Required("--output"));
         var recipeFile = Single("--recipe");
@@ -65,10 +69,16 @@ internal static class WorkflowRecipeGenerateCommand
         {
             var allowed = kind switch
             {
-                "profile" => new[] { "--build-dir", "--variant", "--target", "--config", "--repeats",
-                    "--timeout-seconds", "--backend", "--mode", "--platform", "--source-dir", "--preset", "--output" },
-                "test-matrix" => ["--build-dir", "--target", "--config", "--label", "--test",
-                    "--order", "--timeout-seconds", "--output"],
+                "profile" => new[]
+                {
+                    "--build-dir", "--variant", "--target", "--config", "--repeats",
+                    "--timeout-seconds", "--backend", "--mode", "--platform", "--source-dir", "--preset", "--output"
+                },
+                "test-matrix" =>
+                [
+                    "--build-dir", "--target", "--config", "--label", "--test",
+                    "--order", "--timeout-seconds", "--output"
+                ],
                 "build-matrix" => ["--variant", "--target", "--config", "--output"],
                 _ => ["--output"]
             };
@@ -85,6 +95,7 @@ internal static class WorkflowRecipeGenerateCommand
                 _ => throw new ArgumentException("benchmark-matrix requires --recipe JSON input.")
             };
         }
+
         await WorkflowManifestBytes.WriteNewAsync(output, document, ct);
         Console.WriteLine(output);
         return 0;
@@ -93,7 +104,7 @@ internal static class WorkflowRecipeGenerateCommand
     private static WorkflowDocument FromBenchmarkFile(byte[] bytes, Func<string, string> resolve)
     {
         var recipe = JsonSerializer.Deserialize(bytes, RecipeJson.Default.BenchmarkRecipeV1)
-            ?? throw new JsonException("Empty Benchmark recipe.");
+                     ?? throw new JsonException("Empty Benchmark recipe.");
         if (recipe.BuildDirectory is null)
             throw new ArgumentException("Benchmark buildDirectory is required.");
         return BenchmarkWorkflowBuilder.Build(recipe with { BuildDirectory = resolve(recipe.BuildDirectory) });
@@ -102,7 +113,7 @@ internal static class WorkflowRecipeGenerateCommand
     private static WorkflowDocument FromProfileFile(byte[] bytes, Func<string, string> resolve)
     {
         var recipe = JsonSerializer.Deserialize(bytes, RecipeJson.Default.ProfileRecipeV1)
-            ?? throw new JsonException("Empty Profile recipe.");
+                     ?? throw new JsonException("Empty Profile recipe.");
         if (recipe.Variants is null || recipe.Variants.Any(v => v is null || v.BuildDirectory is null))
             throw new ArgumentException("Profile variants require buildDirectory.");
         return ProfileRecipeBuilder.Build(recipe with
@@ -115,29 +126,37 @@ internal static class WorkflowRecipeGenerateCommand
     private static WorkflowDocument FromTestFile(byte[] bytes, Func<string, string> resolve)
     {
         var recipe = JsonSerializer.Deserialize(bytes, RecipeJson.Default.TestMatrixRecipeV1)
-            ?? throw new JsonException("Empty Test Matrix recipe.");
+                     ?? throw new JsonException("Empty Test Matrix recipe.");
         return TestMatrixWorkflowBuilder.Build(recipe with
-        { BuildDirectory = resolve(recipe.BuildDirectory) });
+        {
+            BuildDirectory = resolve(recipe.BuildDirectory)
+        });
     }
 
     private static WorkflowDocument FromBuildFile(byte[] bytes, Func<string, string> resolve)
     {
         var recipe = JsonSerializer.Deserialize(bytes, RecipeJson.Default.BuildMatrixRecipeV1)
-            ?? throw new JsonException("Empty Build Matrix recipe.");
+                     ?? throw new JsonException("Empty Build Matrix recipe.");
         if (recipe.Variants is null || recipe.Variants.Any(v => v is null || v.BuildDirectory is null))
             throw new ArgumentException("Build variants require buildDirectory.");
-        return BuildMatrixWorkflowBuilder.Build(recipe with { Variants = recipe.Variants.Select(v =>
-            v with { BuildDirectory = resolve(v.BuildDirectory) }).ToArray() });
+        return BuildMatrixWorkflowBuilder.Build(recipe with
+        {
+            Variants = recipe.Variants.Select(v =>
+                v with { BuildDirectory = resolve(v.BuildDirectory) }).ToArray()
+        });
     }
 
     private static WorkflowDocument FromBenchmarkMatrixFile(byte[] bytes, Func<string, string> resolve)
     {
         var recipe = JsonSerializer.Deserialize(bytes, RecipeJson.Default.BenchmarkMatrixRecipeV1)
-            ?? throw new JsonException("Empty Benchmark Matrix recipe.");
+                     ?? throw new JsonException("Empty Benchmark Matrix recipe.");
         if (recipe.Variants is null || recipe.Variants.Any(v => v is null || v.BuildDirectory is null))
             throw new ArgumentException("Benchmark variants require buildDirectory.");
-        return BenchmarkMatrixWorkflowBuilder.Build(recipe with { Variants = recipe.Variants.Select(v =>
-            v with { BuildDirectory = resolve(v.BuildDirectory) }).ToArray() });
+        return BenchmarkMatrixWorkflowBuilder.Build(recipe with
+        {
+            Variants = recipe.Variants.Select(v =>
+                v with { BuildDirectory = resolve(v.BuildDirectory) }).ToArray()
+        });
     }
 
     private static WorkflowDocument DirectProfile(Func<string, string> required,
@@ -174,6 +193,7 @@ internal static class WorkflowRecipeGenerateCommand
                 groups.Add(new(pair.Name, TestRegex: pair.Value));
             }
         }
+
         return TestMatrixWorkflowBuilder.Build(new TestMatrixRecipeV1("test-matrix", 1,
             Path.GetFullPath(required("--build-dir")), required("--target"), single("--config"),
             groups.ToArray(), single("--order") ?? "parallel",
@@ -202,19 +222,12 @@ internal static class WorkflowRecipeGenerateCommand
     }
 
     private static int Integer(string value, string option) => int.TryParse(value,
-        NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed
+        NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+        ? parsed
         : throw new ArgumentException($"{option} must be an integer.");
 
     private static double Number(string value, string option) => double.TryParse(value,
-        NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed
+        NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+        ? parsed
         : throw new ArgumentException($"{option} must be a number.");
 }
-
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
-[JsonSerializable(typeof(BenchmarkRecipeV1))]
-[JsonSerializable(typeof(ProfileRecipeV1))]
-[JsonSerializable(typeof(TestMatrixRecipeV1))]
-[JsonSerializable(typeof(BuildMatrixRecipeV1))]
-[JsonSerializable(typeof(BenchmarkMatrixRecipeV1))]
-internal partial class RecipeJson : JsonSerializerContext;

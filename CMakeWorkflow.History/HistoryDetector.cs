@@ -33,8 +33,8 @@ public static class HistoryDetector
 
         var results = new List<HistoryDetection>();
         foreach (var difference in HistoryComparison.Compare(baseline, candidate)
-            .Where(x => x.Metric == metric && (variant is null || x.Variant == variant)
-                && (scenario is null || x.Scenario == scenario)))
+                     .Where(x => x.Metric == metric && (variant is null || x.Variant == variant)
+                                                    && (scenario is null || x.Scenario == scenario)))
         {
             ct.ThrowIfCancellationRequested();
             var status = difference.Status;
@@ -45,9 +45,15 @@ public static class HistoryDetector
             if (status == "compatible")
             {
                 if (baseline.Run.Status != "succeeded" || candidate.Run.Status != "succeeded")
-                { status = "unverified"; reason = "Both runs must have succeeded."; }
+                {
+                    status = "unverified";
+                    reason = "Both runs must have succeeded.";
+                }
                 else if (!baseline.Run.SourceAvailable || !candidate.Run.SourceAvailable)
-                { status = "unverified"; reason = "An authoritative run directory is missing."; }
+                {
+                    status = "unverified";
+                    reason = "An authoritative run directory is missing.";
+                }
                 else
                 {
                     var left = Samples(baseline, difference);
@@ -58,7 +64,7 @@ public static class HistoryDetector
                         reason = $"At least {MinimumSamples} individual samples per run are required.";
                     }
                     else if (left.Select(x => x.SampleIndex).Distinct().Count() != left.Count
-                        || right.Select(x => x.SampleIndex).Distinct().Count() != right.Count)
+                             || right.Select(x => x.SampleIndex).Distinct().Count() != right.Count)
                     {
                         status = "unverified";
                         reason = "Individual sample indices are duplicated.";
@@ -81,11 +87,13 @@ public static class HistoryDetector
                     }
                 }
             }
+
             results.Add(new(difference.Metric, difference.Unit, difference.Variant,
                 difference.Scenario, difference.Method, status, reason,
                 difference.Baseline, difference.Candidate, difference.AbsoluteChange,
                 difference.PercentChange, p, null, permutations, exact));
         }
+
         if (results.Count == 0)
             results.Add(new(metric, "", variant, scenario, "", "missing",
                 "Neither run contains this metric/variant/scenario selection.", null, null, null, null,
@@ -114,6 +122,7 @@ public static class HistoryDetector
                     : "Evidence has not met both the adjusted p-value and minimum effect requirements."
             };
         }
+
         return new(1, baseline.Run.Id, candidate.Run.Id, metric, direction,
             minimumEffectPercent, alpha, "one-sided permutation test of median difference; Holm correction",
             results);
@@ -121,7 +130,8 @@ public static class HistoryDetector
 
     private static List<HistoryMeasurement> Samples(HistoryDetail run, HistoryDifference key) =>
         run.Measurements.Where(x => x.Metric == key.Metric && x.Variant == key.Variant
-            && x.Scenario == key.Scenario).OrderBy(x => x.SampleIndex).ToList();
+                                                           && x.Scenario == key.Scenario).OrderBy(x => x.SampleIndex)
+            .ToList();
 
     private static int Seed(string baseline, string candidate, HistoryDifference key)
     {
@@ -148,9 +158,11 @@ public static class HistoryDetector
                 if ((count & 1023) == 0) ct.ThrowIfCancellationRequested();
                 Array.Clear(mask);
                 foreach (var index in chosen) mask[index] = true;
-                var li = 0; var ri = 0;
+                var li = 0;
+                var ri = 0;
                 for (var i = 0; i < pooled.Length; i++)
-                    if (mask[i]) left[li++] = pooled[i]; else right[ri++] = pooled[i];
+                    if (mask[i]) left[li++] = pooled[i];
+                    else right[ri++] = pooled[i];
                 if (sign * (Median(right) - Median(left)) >= observed) extreme++;
                 count++;
                 var position = chosen.Length - 1;
@@ -161,8 +173,10 @@ public static class HistoryDetector
                 for (var i = position + 1; i < chosen.Length; i++)
                     chosen[i] = chosen[i - 1] + 1;
             }
+
             return ((double)extreme / count, count, true);
         }
+
         var random = new Random(seed);
         var shuffled = (double[])pooled.Clone();
         for (var iteration = 0; iteration < MonteCarloPermutations; iteration++)
@@ -173,10 +187,12 @@ public static class HistoryDetector
                 var swap = random.Next(i + 1);
                 (shuffled[i], shuffled[swap]) = (shuffled[swap], shuffled[i]);
             }
+
             Array.Copy(shuffled, 0, left, 0, left.Length);
             Array.Copy(shuffled, left.Length, right, 0, right.Length);
             if (sign * (Median(right) - Median(left)) >= observed) extreme++;
         }
+
         return ((double)(extreme + 1) / (MonteCarloPermutations + 1),
             MonteCarloPermutations, false);
     }
@@ -190,6 +206,7 @@ public static class HistoryDetector
             count *= (total - selected + i) / (double)i;
             if (count > MaximumExactPermutations) return count;
         }
+
         return count;
     }
 

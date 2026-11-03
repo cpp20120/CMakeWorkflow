@@ -3,9 +3,13 @@ using CMakeWorkflow.Tooling;
 namespace CMakeWorkflow.Host;
 
 // One instance per connection. Never changes process-wide cwd or environment.
-public sealed partial class DoctorSession(Func<string, ToolingService> createTooling,
-    Func<DoctorProgress, Task> progress, CancellationToken disconnected,
-    FixCoordinator fixes, Func<FixProgress, Task> fixProgress, TimeProvider? timeProvider = null,
+public sealed partial class DoctorSession(
+    Func<string, ToolingService> createTooling,
+    Func<DoctorProgress, Task> progress,
+    CancellationToken disconnected,
+    FixCoordinator fixes,
+    Func<FixProgress, Task> fixProgress,
+    TimeProvider? timeProvider = null,
     DurableExecutionCoordinator? durableExecutions = null) : IHostRpc
 {
     private string? workspace;
@@ -33,7 +37,10 @@ public sealed partial class DoctorSession(Func<string, ToolingService> createToo
             throw new InvalidOperationException("Reconnect to select a different workspace.");
         directory = previous ?? directory;
         return Task.FromResult(new HostInfo(1, Environment.ProcessId, directory,
-            ["tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress", "environment/plan", "environment/apply", "request-cancellation", .. ReadCapabilities],
+            [
+                "tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress",
+                "environment/plan", "environment/apply", "request-cancellation", .. ReadCapabilities
+            ],
             ToolCatalog.AllProfiles.Select(p => new ToolingProfileView(p.Id, p.Description, p.Tools)).ToList()));
     }
 
@@ -41,8 +48,8 @@ public sealed partial class DoctorSession(Func<string, ToolingService> createToo
     {
         if (workspace is null) throw new InvalidOperationException("Call initialize first.");
         if (string.IsNullOrWhiteSpace(request.OperationId) || request.OperationId.Length > 128
-            || request.Profiles is null || request.Profiles.Length > 32
-            || request.Profiles.Any(string.IsNullOrWhiteSpace))
+                                                           || request.Profiles is null || request.Profiles.Length > 32
+                                                           || request.Profiles.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("Invalid Doctor request.");
         if (request.InstallDirectory is not null && !Path.IsPathFullyQualified(request.InstallDirectory))
             throw new ArgumentException("installDirectory must be absolute.");
@@ -59,6 +66,9 @@ public sealed partial class DoctorSession(Func<string, ToolingService> createToo
             await progress(new(request.OperationId, ++sequence, "finished", null));
             return plan;
         }
-        finally { gate.Release(); }
+        finally
+        {
+            gate.Release();
+        }
     }
 }

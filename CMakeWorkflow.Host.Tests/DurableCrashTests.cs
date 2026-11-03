@@ -37,6 +37,7 @@ internal static class DurableCrashTests
             Console.WriteLine("Durable SIGKILL checks skipped (Linux only).");
             return;
         }
+
         foreach (var stage in new[] { "authorized", "checkpoint", "effect" })
         {
             var workspace = Path.Combine(parent, "durable-sigkill-" + stage + "-" + Guid.NewGuid().ToString("N"));
@@ -58,9 +59,9 @@ internal static class DurableCrashTests
             await ProcessOk("cmake", ["-S", source, "-B", build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Debug"]);
             var manifest = Path.Combine(workspace, "workflow.json");
             var doc = JsonNode.Parse("""
-                {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                 "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                """)!;
+                                     {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                      "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                     """)!;
             doc["contexts"]!["w"]!["buildDirectory"] = build;
             var bytes = Encoding.UTF8.GetBytes(doc.ToJsonString());
             await File.WriteAllBytesAsync(manifest, bytes);
@@ -77,8 +78,11 @@ internal static class DurableCrashTests
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            foreach (var arg in new[] { testAssembly, "--durable-fault-worker", workspace, operationId,
-                requestId, manifest, hash, output, stage, signal }) psi.ArgumentList.Add(arg);
+            foreach (var arg in new[]
+                     {
+                         testAssembly, "--durable-fault-worker", workspace, operationId,
+                         requestId, manifest, hash, output, stage, signal
+                     }) psi.ArgumentList.Add(arg);
             using var child = Process.Start(psi) ?? throw new Exception("Cannot start fault worker.");
             try
             {
@@ -86,9 +90,11 @@ internal static class DurableCrashTests
                 while (!File.Exists(signal))
                 {
                     if (child.HasExited)
-                        throw new Exception($"Fault worker exited {child.ExitCode}: {await child.StandardError.ReadToEndAsync()}");
+                        throw new Exception(
+                            $"Fault worker exited {child.ExitCode}: {await child.StandardError.ReadToEndAsync()}");
                     await Task.Delay(25, deadline.Token);
                 }
+
                 if (stage != "effect" && await File.ReadAllTextAsync(signal) != stage)
                     throw new Exception("Wrong fault boundary reached.");
                 child.Kill(entireProcessTree: true); // SIGKILL on Linux, no graceful disposal
@@ -103,35 +109,56 @@ internal static class DurableCrashTests
                     if (reopened.Find(requestId)?.OperationId != operationId)
                         throw new Exception("Crash lost deduplication identity.");
                 }
-                if (File.Exists(marker) != (stage == "effect")) throw new Exception("Unexpected external effect at fault boundary.");
+
+                if (File.Exists(marker) != (stage == "effect"))
+                    throw new Exception("Unexpected external effect at fault boundary.");
                 try
                 {
                     await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, operationId, requestId,
                         manifest, hash, 1, output, CancellationToken.None);
                     throw new Exception("Restart caused duplicate dispatch.");
                 }
-                catch (InvalidOperationException e) when (e.Message.StartsWith("operation_already_authorized", StringComparison.Ordinal)) { }
+                catch (InvalidOperationException e) when (e.Message.StartsWith("operation_already_authorized",
+                                                              StringComparison.Ordinal))
+                {
+                }
+
                 if (stage == "effect" ? File.ReadAllLines(marker).Length != 1 : File.Exists(marker))
                     throw new Exception("Retry executed external effect.");
             }
             finally
             {
-                if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(); }
+                if (!child.HasExited)
+                {
+                    child.Kill(entireProcessTree: true);
+                    await child.WaitForExitAsync();
+                }
             }
         }
-        Console.WriteLine("Durable SIGKILL checks passed: authorization/checkpoint/external-effect crash, persistence, deduplication and no implicit redispatch.");
+
+        Console.WriteLine(
+            "Durable SIGKILL checks passed: authorization/checkpoint/external-effect crash, persistence, deduplication and no implicit redispatch.");
     }
 
     private static async Task ProcessOk(string executable, string[] args)
     {
-        var psi = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var psi = new ProcessStartInfo(executable)
+            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in args) psi.ArgumentList.Add(arg);
         using var child = Process.Start(psi) ?? throw new Exception("Unable to configure fixture.");
         var stdout = child.StandardOutput.ReadToEndAsync();
         var stderr = child.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try { await child.WaitForExitAsync(timeout.Token); }
-        catch { if (!child.HasExited) child.Kill(entireProcessTree: true); throw; }
+        try
+        {
+            await child.WaitForExitAsync(timeout.Token);
+        }
+        catch
+        {
+            if (!child.HasExited) child.Kill(entireProcessTree: true);
+            throw;
+        }
+
         if (child.ExitCode != 0) throw new Exception($"Configure failed: {await stdout} {await stderr}");
         await Task.WhenAll(stdout, stderr);
     }

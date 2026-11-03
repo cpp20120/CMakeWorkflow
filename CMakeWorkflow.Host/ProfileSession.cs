@@ -23,7 +23,8 @@ public sealed partial class DoctorSession
         if (request.Variants is not { Count: > 0 and <= 32 })
             throw new ApplicationRefusal("invalid_argument", "Profile requires 1..32 variants.");
         if (request.Variants.Any(v => v is null) || request.Arguments?.Any(a => a is null) == true)
-            throw new ApplicationRefusal("invalid_argument", "Profile variants and arguments cannot contain null entries.");
+            throw new ApplicationRefusal("invalid_argument",
+                "Profile variants and arguments cannot contain null entries.");
 
         var output = paths.Require(request.ResultsDirectory);
         var manifest = paths.Require(Path.Combine(output,
@@ -68,19 +69,30 @@ public sealed partial class DoctorSession
 
     private static async Task CommitOnceAsync(string path, byte[] bytes, CancellationToken cancellationToken)
     {
-        var temp = Path.Combine(Path.GetDirectoryName(path)!, ".profile-workflow-" + Guid.NewGuid().ToString("N") + ".tmp");
+        var temp = Path.Combine(Path.GetDirectoryName(path)!,
+            ".profile-workflow-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
             await using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write,
-                FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                             FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
                 await stream.WriteAsync(bytes, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
-            try { File.Move(temp, path); }
-            catch (IOException) when (File.Exists(path)) { /* Compare committed contents. */ }
+
+            try
+            {
+                File.Move(temp, path);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                /* Compare committed contents. */
+            }
         }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
 
         var actual = await File.ReadAllBytesAsync(path, cancellationToken);
         if (!actual.AsSpan().SequenceEqual(bytes))

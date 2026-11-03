@@ -11,19 +11,23 @@ public sealed class BuildTreeOwnership : IDisposable
     private readonly List<string> paths = [];
     private static readonly HashSet<string> owned = new(WorkflowPlanner.PathComparer);
 
-    public static string CanonicalPath(string path) => TwoTargetWorkflow.CanonicalExistingDirectory(path, allowMissing: true);
+    public static string CanonicalPath(string path) =>
+        TwoTargetWorkflow.CanonicalExistingDirectory(path, allowMissing: true);
 
     public static void RejectController(string tree, string? controller)
     {
         controller ??= Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_CONTROLLER_BUILD_DIR");
-        if (controller is not null && WorkflowPlanner.PathComparer.Equals(CanonicalPath(tree), CanonicalPath(controller)))
-            throw new InvalidOperationException("Unsafe nested build: worker and controller build directories are identical. Launch externally or use an independent worker tree.");
+        if (controller is not null &&
+            WorkflowPlanner.PathComparer.Equals(CanonicalPath(tree), CanonicalPath(controller)))
+            throw new InvalidOperationException(
+                "Unsafe nested build: worker and controller build directories are identical. Launch externally or use an independent worker tree.");
         if (Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_OWNED_TREES") is { } inherited)
         {
             using var json = JsonDocument.Parse(inherited);
             foreach (var parentTree in json.RootElement.EnumerateArray())
                 if (WorkflowPlanner.PathComparer.Equals(CanonicalPath(tree), CanonicalPath(parentTree.GetString()!)))
-                    throw new InvalidOperationException("Unsafe nested build: this tree is already owned by the parent CMakeWorkflow invocation.");
+                    throw new InvalidOperationException(
+                        "Unsafe nested build: this tree is already owned by the parent CMakeWorkflow invocation.");
         }
     }
 
@@ -35,9 +39,11 @@ public sealed class BuildTreeOwnership : IDisposable
             using var json = JsonDocument.Parse(value);
             inherited.AddRange(json.RootElement.EnumerateArray().Select(p => p.GetString()!));
         }
+
         lock (owned)
             info.Environment["CMAKE_WORKFLOW_OWNED_TREES"] = JsonSerializer.Serialize(
-                inherited.Concat(owned).Distinct(WorkflowPlanner.PathComparer).ToList(), WorkflowJson.Default.ListString);
+                inherited.Concat(owned).Distinct(WorkflowPlanner.PathComparer).ToList(),
+                WorkflowJson.Default.ListString);
     }
 
     public static async Task<BuildTreeOwnership> AcquireAsync(IEnumerable<string> trees, CancellationToken ct)
@@ -49,7 +55,8 @@ public sealed class BuildTreeOwnership : IDisposable
             // Store locks outside build trees so an unconfigured context is not mutated.
             var lockRoot = Path.Combine(Path.GetTempPath(), "cmake-workflow-build-locks");
             Directory.CreateDirectory(lockRoot);
-            foreach (var tree in trees.Select(CanonicalPath).Distinct(WorkflowPlanner.PathComparer).Order(WorkflowPlanner.PathComparer))
+            foreach (var tree in trees.Select(CanonicalPath).Distinct(WorkflowPlanner.PathComparer)
+                         .Order(WorkflowPlanner.PathComparer))
             {
                 RejectController(tree, null);
                 var key = OperatingSystem.IsWindows() ? tree.ToUpperInvariant() : tree;
@@ -73,16 +80,22 @@ public sealed class BuildTreeOwnership : IDisposable
                     }
                 }
             }
+
             return owner;
         }
-        catch { owner.Dispose(); throw; }
+        catch
+        {
+            owner.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
     {
         foreach (var lease in leases) lease.Dispose();
         lock (owned)
-            foreach (var path in paths) owned.Remove(path);
+            foreach (var path in paths)
+                owned.Remove(path);
         paths.Clear();
         leases.Clear();
     }

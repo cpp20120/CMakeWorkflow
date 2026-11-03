@@ -33,7 +33,12 @@ public sealed class DurableExecutionCoordinator : IDisposable
         var key = accepted.WorkspaceId + ":" + accepted.OperationId;
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var tokenSource = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
-        if (!active.TryAdd(key, tcs.Task)) { tokenSource.Dispose(); return reference; }
+        if (!active.TryAdd(key, tcs.Task))
+        {
+            tokenSource.Dispose();
+            return reference;
+        }
+
         cancellation[key] = tokenSource;
         // A cancellation may have committed after Accept but before task registration.
         if (store.Get(accepted.OperationId)?.State == "cancel_requested") tokenSource.Cancel();
@@ -56,7 +61,12 @@ public sealed class DurableExecutionCoordinator : IDisposable
                 tcs.TrySetException(error);
                 // The task is observed below, so a background failure cannot crash the Host.
             }
-            finally { active.TryRemove(key, out _); cancellation.TryRemove(key, out _); tokenSource.Dispose(); }
+            finally
+            {
+                active.TryRemove(key, out _);
+                cancellation.TryRemove(key, out _);
+                tokenSource.Dispose();
+            }
         });
         _ = tcs.Task.ContinueWith(task => _ = task.Exception,
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
@@ -81,6 +91,7 @@ public sealed class DurableExecutionCoordinator : IDisposable
             linked.Dispose();
             return;
         }
+
         cancellation[key] = linked;
         _ = Task.Run(async () =>
         {
@@ -90,7 +101,9 @@ public sealed class DurableExecutionCoordinator : IDisposable
                 completion.TrySetResult();
             }
             catch (OperationCanceledException) when (linked.IsCancellationRequested)
-            { completion.TrySetCanceled(linked.Token); }
+            {
+                completion.TrySetCanceled(linked.Token);
+            }
             catch (Exception error)
             {
                 Console.Error.WriteLine($"[Host resume:{operationId}] {error}");
@@ -107,7 +120,8 @@ public sealed class DurableExecutionCoordinator : IDisposable
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
-    public DurableAcceptanceStore.CancellationDecision Cancel(string workspace, string operationId, long expectedRevision)
+    public DurableAcceptanceStore.CancellationDecision Cancel(string workspace, string operationId,
+        long expectedRevision)
     {
         if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)
             throw new InvalidOperationException("host_shutting_down");
@@ -115,9 +129,16 @@ public sealed class DurableExecutionCoordinator : IDisposable
         var decision = store.RequestCancellation(operationId, expectedRevision);
         if (decision.Requested && cancellation.TryGetValue(store.WorkspaceId + ":" + operationId, out var token))
         {
-            try { token.Cancel(); }
-            catch (ObjectDisposedException) { /* Executor completed while cancellation was committing. */ }
+            try
+            {
+                token.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                /* Executor completed while cancellation was committing. */
+            }
         }
+
         return decision;
     }
 

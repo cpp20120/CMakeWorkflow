@@ -1,27 +1,27 @@
 <Solution>
-  <Configurations>
-    <Platform Name="Any CPU" />
-    <Platform Name="x64" />
-    <Platform Name="x86" />
-  </Configurations>
-  <Folder Name="/tests/">
-    <Project Path="tests/CMakeWorkflow.IntegrationTests.csproj" />
-  </Folder>
-  <Project Path="CMakeWorkflow.Campaigns.Tests/CMakeWorkflow.Campaigns.Tests.csproj" />
-  <Project Path="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj" />
-  <Project Path="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj" />
-  <Project Path="CMakeWorkflow.Client/CMakeWorkflow.Client.csproj" />
-  <Project Path="CMakeWorkflow.Client.AotSmoke/CMakeWorkflow.Client.AotSmoke.csproj" />
-  <Project Path="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj" />
-  <Project Path="CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj" />
-  <Project Path="CMakeWorkflow.Contracts.Tests/CMakeWorkflow.Contracts.Tests.csproj" />
-  <Project Path="CMakeWorkflow.History/CMakeWorkflow.History.csproj" />
-  <Project Path="CMakeWorkflow.History.Tests/CMakeWorkflow.History.Tests.csproj" />
-  <Project Path="CMakeWorkflow.csproj" />
-  <Project Path="CMakeWorkflow.Host/CMakeWorkflow.Host.csproj" />
-  <Project Path="CMakeWorkflow.Host.Tests/CMakeWorkflow.Host.Tests.csproj" />
-  <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj" />
-  <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj" />
-  <Project Path="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj" />
-  <Project Path="CMakeWorkflow.Tooling.Tests/CMakeWorkflow.Tooling.Tests.csproj" />
+    <Configurations>
+        <Platform Name="Any CPU"/>
+        <Platform Name="x64"/>
+        <Platform Name="x86"/>
+    </Configurations>
+    <Folder Name="/tests/">
+        <Project Path="tests/CMakeWorkflow.IntegrationTests.csproj"/>
+    </Folder>
+    <Project Path="CMakeWorkflow.Campaigns.Tests/CMakeWorkflow.Campaigns.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>
+    <Project Path="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
+    <Project Path="CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
+    <Project Path="CMakeWorkflow.Client.AotSmoke/CMakeWorkflow.Client.AotSmoke.csproj"/>
+    <Project Path="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
+    <Project Path="CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
+    <Project Path="CMakeWorkflow.Contracts.Tests/CMakeWorkflow.Contracts.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.History/CMakeWorkflow.History.csproj"/>
+    <Project Path="CMakeWorkflow.History.Tests/CMakeWorkflow.History.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.csproj"/>
+    <Project Path="CMakeWorkflow.Host/CMakeWorkflow.Host.csproj"/>
+    <Project Path="CMakeWorkflow.Host.Tests/CMakeWorkflow.Host.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj"/>
+    <Project Path="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj"/>
+    <Project Path="CMakeWorkflow.Tooling.Tests/CMakeWorkflow.Tooling.Tests.csproj"/>
 </Solution>

@@ -24,8 +24,8 @@ internal sealed class HistoricalProgress : IDisposable
         this.interactive = interactive ?? !Console.IsErrorRedirected;
         total = TotalOperations(timingTrials, statTrials);
         this.output.WriteLine($"[CMakeWorkflow] Historical profile: {total} command operations" +
-            (resume ? "; verifying saved operations on resume" : "") +
-            ". Progress counts operations, not estimated runtime.");
+                              (resume ? "; verifying saved operations on resume" : "") +
+                              ". Progress counts operations, not estimated runtime.");
     }
 
     internal static int TotalOperations(int timingTrials, int statTrials) =>
@@ -42,6 +42,7 @@ internal sealed class HistoricalProgress : IDisposable
                 completed.Add(item.Label);
                 if (active == item.Label) active = "";
             }
+
             if (item.Type == "stopped" && active == item.Label) active = "";
             var stageChanged = stage != currentStage;
             stage = currentStage;
@@ -65,7 +66,7 @@ internal sealed class HistoricalProgress : IDisposable
                 : item.Type == "stopped" ? $" stopped {item.Label}"
                 : "";
             var line = $"[CMakeWorkflow] [{completed.Count}/{total} ops; {100.0 * completed.Count / total:0}%] " +
-                $"{stage}; elapsed {elapsed}{current}";
+                       $"{stage}; elapsed {elapsed}{current}";
             if (interactive)
             {
                 // Keep updates on one terminal row even with long scenario IDs.
@@ -75,13 +76,18 @@ internal sealed class HistoricalProgress : IDisposable
                     if (width > 10 && line.Length > width)
                         line = line[..(width - 1)] + "…";
                 }
-                catch (IOException) { /* Terminal dimensions are advisory. */ }
+                catch (IOException)
+                {
+                    /* Terminal dimensions are advisory. */
+                }
+
                 output.Write("\r\u001b[2K" + line);
                 activeLine = true;
                 if (item.Type == "stopped" || completed.Count == total)
                     FinishLine();
             }
             else output.WriteLine(line);
+
             lastLog = now;
         }
     }
@@ -102,7 +108,11 @@ internal sealed class HistoricalProgress : IDisposable
 
     private void FinishLine()
     {
-        if (activeLine) { output.WriteLine(); activeLine = false; }
+        if (activeLine)
+        {
+            output.WriteLine();
+            activeLine = false;
+        }
     }
 
     private static string FormatElapsed(TimeSpan elapsed) =>

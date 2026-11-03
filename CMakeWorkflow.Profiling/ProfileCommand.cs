@@ -17,37 +17,49 @@ public static class ProfileCommand
             await DagFlowHistoricalFlamegraph.DecodeAsync(args[1], args[2], ct);
             return 0;
         }
+
         if (args[0] == "render-historical")
         {
             if (args.Length != 2) throw new ArgumentException("profile render-historical DIRECTORY");
             return await DagFlowHistoricalReport.RenderAsync(args[1], ct);
         }
+
         if (args[0] == "run-historical")
         {
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             var resume = false;
             for (var i = 1; i < args.Length; i++)
             {
-                if (args[i] == "--resume") { resume = true; continue; }
+                if (args[i] == "--resume")
+                {
+                    resume = true;
+                    continue;
+                }
+
                 if (args[i] is not ("--source-dir" or "--output" or "--trials"
-                    or "--stat-trials" or "--jobs") || i + 1 >= args.Length
-                    || !values.TryAdd(args[i], args[++i]))
+                        or "--stat-trials" or "--jobs") || i + 1 >= args.Length
+                                                        || !values.TryAdd(args[i], args[++i]))
                     throw new ArgumentException("Invalid historical profile option.");
             }
+
             int Count(string name, int fallback) => values.TryGetValue(name, out var text)
-                ? int.TryParse(text, out var parsed) ? parsed
+                ? int.TryParse(text, out var parsed)
+                    ? parsed
                     : throw new ArgumentException(name + " must be an integer.")
                 : fallback;
+
             return await DagFlowHistoricalCapture.RunAsync(new DagFlowHistoricalOptions(
                 values.GetValueOrDefault("--source-dir", Directory.GetCurrentDirectory()),
                 values.GetValueOrDefault("--output") ?? throw new ArgumentException("--output is required."),
                 Count("--trials", 5), Count("--stat-trials", 3), Count("--jobs", 4), resume), ct);
         }
+
         if (args[0] == "analyze")
         {
             if (args.Length != 2) throw new ArgumentException("profile analyze RUN_DIRECTORY");
             return await ProfileAnalyzer.AnalyzeAsync(args[1], ct);
         }
+
         if (args[0] != "run") throw new ArgumentException("Usage: profile <run|analyze> ...");
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
         var variants = new List<(string Name, string BuildDirectory)>();
@@ -59,8 +71,9 @@ public static class ProfileCommand
                 targetArgs.AddRange(args[(i + 1)..]);
                 break;
             }
+
             if (i + 1 >= args.Length || !args[i].StartsWith("--", StringComparison.Ordinal)
-                || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                                     || args[i + 1].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException($"Invalid profile option: {args[i]}");
             if (args[i] is not ("--build-dir" or "--target" or "--backend" or "--mode"
                 or "--results-dir" or "--source-dir" or "--preset" or "--config" or "--timeout-seconds"
@@ -71,18 +84,21 @@ public static class ProfileCommand
             {
                 var pair = args[i + 1].Split('=', 2);
                 if (pair.Length != 2 || !System.Text.RegularExpressions.Regex.IsMatch(pair[0], "^[a-z][a-z0-9_]*$")
-                    || string.IsNullOrWhiteSpace(pair[1]))
+                                     || string.IsNullOrWhiteSpace(pair[1]))
                     throw new ArgumentException("--variant requires name=BUILD_DIR (lowercase name).");
                 variants.Add((pair[0], Path.GetFullPath(pair[1])));
                 i++;
                 continue;
             }
+
             if (!options.TryAdd(args[i], args[i + 1]))
                 throw new ArgumentException($"Duplicate profile option: {args[i]}");
             i++;
         }
+
         string Required(string key) => options.GetValueOrDefault(key)
-            ?? throw new ArgumentException($"{key} is required.");
+                                       ?? throw new ArgumentException($"{key} is required.");
+
         if (options.TryGetValue("--campaign", out var campaign))
         {
             if (campaign != "main-o3-lto" || variants.Count != 0 || options.ContainsKey("--build-dir"))
@@ -93,12 +109,13 @@ public static class ProfileCommand
         else if (variants.Count == 0)
             variants.Add(("main", Path.GetFullPath(Required("--build-dir"))));
         else if (options.ContainsKey("--build-dir") || options.ContainsKey("--o3-build-dir")
-            || options.ContainsKey("--lto-build-dir"))
+                                                    || options.ContainsKey("--lto-build-dir"))
             throw new ArgumentException("Use --variant or --build-dir, not both.");
+
         if (variants.Select(x => x.Name).Distinct(StringComparer.Ordinal).Count() != variants.Count)
             throw new ArgumentException("Profile variant names must be unique.");
         if (variants.Select(x => Path.GetFullPath(x.BuildDirectory))
-            .Distinct(WorkflowPlanner.PathComparer).Count() != variants.Count)
+                .Distinct(WorkflowPlanner.PathComparer).Count() != variants.Count)
             throw new ArgumentException("Profile variants require distinct build directories.");
         var target = options.TryGetValue("--target", out var targetOption) ? targetOption
             : campaign is not null ? "dagflow_stress_bench"
@@ -109,7 +126,8 @@ public static class ProfileCommand
         if (!int.TryParse(repeatsText, out var repeats) || repeats is < 1 or > 100)
             throw new ArgumentException("--repeats must be between 1 and 100.");
         var source = options.TryGetValue("--source-dir", out var sourceOption)
-            ? Path.GetFullPath(sourceOption) : null;
+            ? Path.GetFullPath(sourceOption)
+            : null;
         var timeout = options.GetValueOrDefault("--timeout-seconds", "300");
         if (!double.TryParse(timeout, out var seconds) || seconds <= 0 || seconds > 86400)
             throw new ArgumentException("--timeout-seconds must be positive and at most one day.");
@@ -130,11 +148,13 @@ public static class ProfileCommand
         string? runDirectory = null;
         var result = await WorkflowCommand.ExecuteAsync("run", [manifest, "--results-dir", output], ct,
             new ProfileWorkflowExecutor(), directory =>
-            { runDirectory = directory; onRunDirectory?.Invoke(directory); });
+            {
+                runDirectory = directory;
+                onRunDirectory?.Invoke(directory);
+            });
         if (result != 0 || runDirectory is null) return result;
         return await ProfileAnalyzer.AnalyzeAsync(runDirectory, ct);
     }
-
 }
 
 public static class ProfileAnalyzer
@@ -156,7 +176,8 @@ public static class ProfileAnalyzer
             var backend = root.GetProperty("backend").GetString()!;
             var mode = root.GetProperty("mode").GetString()!;
             var recordedStatus = root.TryGetProperty("status", out var statusElement)
-                ? statusElement.GetString() : null;
+                ? statusElement.GetString()
+                : null;
             if (recordedStatus is not null and not ("complete" or "succeeded"))
             {
                 items.Add((JsonNode)new JsonObject
@@ -169,9 +190,10 @@ public static class ProfileAnalyzer
                 analysisFailed = true;
                 continue;
             }
+
             var raw = Path.GetFullPath(Path.Combine(directory, root.GetProperty("rawTrace").GetString()!));
             if (!raw.StartsWith(directory + Path.DirectorySeparatorChar,
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new IOException($"Profile trace path escapes the run directory: {raw}");
             if (!File.Exists(raw) && !Directory.Exists(raw))
                 throw new FileNotFoundException("Profile trace is missing.", raw);
@@ -186,7 +208,8 @@ public static class ProfileAnalyzer
                 ["rawTrace"] = Path.GetRelativePath(directory, raw),
                 ["eventSource"] = root.GetProperty("eventSource").GetString(),
                 ["captureStatus"] = root.TryGetProperty("status", out var captureStatus)
-                    ? captureStatus.GetString() : "unknown",
+                    ? captureStatus.GetString()
+                    : "unknown",
                 ["crossPlatformMetricEquivalence"] = false
             };
             if (backend == "perf" && mode == "counters")
@@ -202,7 +225,8 @@ public static class ProfileAnalyzer
                         ["unit"] = counter.Unit,
                         ["domain"] = counter.Domain,
                         ["runningPercent"] = counter.RunningPercent is { } percent
-                            ? JsonValue.Create(percent, ProfileJson.Default.Double) : null
+                            ? JsonValue.Create(percent, ProfileJson.Default.Double)
+                            : null
                     };
                 item["counters"] = counters;
                 var derived = new JsonObject();
@@ -216,7 +240,8 @@ public static class ProfileAnalyzer
                     };
                 item["derivedCounters"] = derived;
                 if (rawCounters.Count > 0 && derived.Count == 0)
-                    counterWarnings.Add("No compatible instructions/cycles event pair; derived PMU metrics unavailable.");
+                    counterWarnings.Add(
+                        "No compatible instructions/cycles event pair; derived PMU metrics unavailable.");
                 item["analysisStatus"] = counters.Count == 0 ? "no_supported_counters"
                     : counterWarnings.Count > 0 ? "partial" : "complete";
                 if (counterWarnings.Count > 0)
@@ -264,26 +289,31 @@ public static class ProfileAnalyzer
                                 status = "partial";
                                 item["analysisWarnings"] = new JsonArray(
                                     JsonValue.Create($"perf report counts {reported} samples, " +
-                                        $"but perf script parsed {normalizedCount}; verify event/field selection."));
+                                                     $"but perf script parsed {normalizedCount}; verify event/field selection."));
                             }
                         }
+
                         if (status == "partial")
                         {
                             var warnings = item["analysisWarnings"] as JsonArray ?? new JsonArray();
                             foreach (var (field, description) in new[]
-                            {
-                                ("rejectedRecords", "unrecognized perf script lines"),
-                                ("truncatedFrames", "discarded stack frames"),
-                                ("emptyStackSamples", "samples with no stack frames"),
-                                ("droppedStackSamples", "samples dropped by distinct-stack limit")
-                            })
+                                     {
+                                         ("rejectedRecords", "unrecognized perf script lines"),
+                                         ("truncatedFrames", "discarded stack frames"),
+                                         ("emptyStackSamples", "samples with no stack frames"),
+                                         ("droppedStackSamples", "samples dropped by distinct-stack limit")
+                                     })
                             {
                                 var count = normalized[field]?.GetValue<int>() ?? 0;
                                 if (count > 0)
-                                    warnings.Add((JsonNode?)JsonValue.Create($"{count} {description}; check normalized stack quality."));
+                                    warnings.Add(
+                                        (JsonNode?)JsonValue.Create(
+                                            $"{count} {description}; check normalized stack quality."));
                             }
+
                             if (warnings.Count > 0) item["analysisWarnings"] = warnings;
                         }
+
                         item["analysisStatus"] = status;
                         var hotFunctions = new JsonArray();
                         foreach (var function in normalized["hotFunctions"]!.AsArray().Take(5))
@@ -332,10 +362,17 @@ public static class ProfileAnalyzer
                 using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(captureManifest, ct));
                 var executable = manifest.RootElement.GetProperty("executable").GetString()!;
                 var pid = root.TryGetProperty("targetProcessId", out var pidElement)
-                    && pidElement.ValueKind == JsonValueKind.Number ? pidElement.GetInt32() : (int?)null;
+                          && pidElement.ValueKind == JsonValueKind.Number
+                    ? pidElement.GetInt32()
+                    : (int?)null;
+
                 static DateTimeOffset? Timestamp(JsonElement record, string key) =>
                     record.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
-                        && DateTimeOffset.TryParse(value.GetString(), out var time) ? time : null;
+                                                              && DateTimeOffset.TryParse(value.GetString(),
+                                                                  out var time)
+                        ? time
+                        : null;
+
                 var analyzed = await new EtwTraceAnalyzer().AnalyzeAsync(raw, directory,
                     captureId, executable, pid,
                     Timestamp(root, "targetStartedAt"), Timestamp(root, "targetFinishedAt"), ct);
@@ -363,14 +400,16 @@ public static class ProfileAnalyzer
                 item["analysisStatus"] = "ETL conversion requires Windows";
             }
             else item["report"] = null;
+
             items.Add((JsonNode?)item);
         }
+
         // A failed or interrupted capture has a manifest and a runs.jsonl
         // record, but intentionally has no *.results.json. Iterating only
         // successful captures would falsely describe such a run as complete.
         var captureJournal = ReadCaptureJournal(directory);
         foreach (var manifestPath in Directory.GetFiles(directory, "*.manifest.json")
-            .Order(StringComparer.Ordinal))
+                     .Order(StringComparer.Ordinal))
         {
             using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath, ct));
             var manifestRoot = manifest.RootElement;
@@ -392,21 +431,25 @@ public static class ProfileAnalyzer
                 analysisFailed = true;
                 continue;
             }
+
             if (File.Exists(Path.Combine(directory, captureId + ".results.json"))) continue;
             captureJournal.TryGetValue(captureId, out var failure);
             items.Add((JsonNode?)new JsonObject
             {
                 ["captureId"] = captureId,
                 ["backend"] = manifestRoot.TryGetProperty("backend", out var backendValue)
-                    ? backendValue.GetString() : null,
+                    ? backendValue.GetString()
+                    : null,
                 ["mode"] = manifestRoot.TryGetProperty("mode", out var modeValue)
-                    ? modeValue.GetString() : null,
+                    ? modeValue.GetString()
+                    : null,
                 ["captureStatus"] = failure.Status ?? "missing_result",
                 ["analysisStatus"] = "capture_incomplete",
                 ["analysisError"] = failure.Error ?? "Capture has a manifest but no committed result."
             });
             analysisFailed = true;
         }
+
         var resultFile = Path.Combine(directory, "analysis.json");
         await WriteTimingComparisonAsync(directory, ct);
         await WriteCounterComparisonAsync(directory, items, ct);
@@ -433,7 +476,9 @@ public static class ProfileAnalyzer
                     || !root.TryGetProperty("status", out var status)
                     || status.ValueKind != JsonValueKind.String) continue;
                 var error = root.TryGetProperty("error", out var message)
-                    && message.ValueKind == JsonValueKind.String ? message.GetString() : null;
+                            && message.ValueKind == JsonValueKind.String
+                    ? message.GetString()
+                    : null;
                 journal[id.GetString()!] = (status.GetString(), error);
             }
             catch (JsonException)
@@ -442,6 +487,7 @@ public static class ProfileAnalyzer
                 // Manifest-without-result detection below still fails closed.
             }
         }
+
         return journal;
     }
 
@@ -465,8 +511,10 @@ public static class ProfileAnalyzer
             if (!groups.TryGetValue(name, out var values)) groups[name] = values = [];
             values.Add(duration.GetDouble());
         }
+
         if (groups.Count == 0) return;
         var baseline = groups.First();
+
         static double Median(IReadOnlyList<double> values)
         {
             var sorted = values.Order().ToArray();
@@ -474,6 +522,7 @@ public static class ProfileAnalyzer
                 ? (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2
                 : sorted[sorted.Length / 2];
         }
+
         var variants = new JsonArray();
         foreach (var group in groups)
         {
@@ -490,6 +539,7 @@ public static class ProfileAnalyzer
                     : null
             });
         }
+
         var summary = new JsonObject
         {
             ["schemaVersion"] = 1,
@@ -502,12 +552,19 @@ public static class ProfileAnalyzer
             new JsonSerializerOptions { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
     }
 
-    private sealed record Counter(double Value, string Unit, string Domain,
+    private sealed record Counter(
+        double Value,
+        string Unit,
+        string Domain,
         double? RunningPercent);
 
     private static string EventDomain(string name) => name.EndsWith(":u", StringComparison.Ordinal)
-        ? "user" : name.EndsWith(":k", StringComparison.Ordinal) ? "kernel"
-        : name.Contains(':') ? "other" : "unspecified";
+        ? "user"
+        : name.EndsWith(":k", StringComparison.Ordinal)
+            ? "kernel"
+            : name.Contains(':')
+                ? "other"
+                : "unspecified";
 
     private static Dictionary<string, Counter> ReadPerfCounters(string path,
         List<string>? warnings = null)
@@ -520,25 +577,31 @@ public static class ProfileAnalyzer
             if (line.StartsWith('#') || string.IsNullOrWhiteSpace(line)) continue;
             var fields = line.Split(',');
             if (fields.Length < 3 || !double.TryParse(fields[0].Trim(),
-                NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
-                || !double.IsFinite(value) || value < 0)
+                                      NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                                  || !double.IsFinite(value) || value < 0)
             {
                 if (warnings is { Count: < 32 })
                     warnings.Add($"Line {lineNumber}: unsupported or invalid perf stat measurement.");
                 continue;
             }
+
             var eventName = fields[2].Trim();
             if (eventName.Length == 0)
             {
                 if (warnings is { Count: < 32 }) warnings.Add($"Line {lineNumber}: missing event name.");
                 continue;
             }
+
             double? runningPercent = fields.Length > 4 && double.TryParse(fields[4].Trim(),
-                NumberStyles.Float, CultureInfo.InvariantCulture, out var percent)
-                && double.IsFinite(percent) && percent is >= 0 and <= 100 ? percent : null;
+                                                           NumberStyles.Float, CultureInfo.InvariantCulture,
+                                                           out var percent)
+                                                       && double.IsFinite(percent) && percent is >= 0 and <= 100
+                ? percent
+                : null;
             counters[eventName] = new Counter(value, fields[1].Trim(),
                 EventDomain(eventName), runningPercent);
         }
+
         return counters;
     }
 
@@ -547,16 +610,21 @@ public static class ProfileAnalyzer
     private static Dictionary<string, Counter> DeriveCounters(Dictionary<string, Counter> raw)
     {
         var result = new Dictionary<string, Counter>(StringComparer.Ordinal);
+
         static double? MinimumRunning(Counter a, Counter b) =>
             a.RunningPercent is { } x && b.RunningPercent is { } y ? Math.Min(x, y) : null;
+
         // A ratio may use only counters captured in the same event domain.
         // perf stat prints already scaled values for multiplexed events; retain
         // that qualification in the result rather than treating a missing
         // or unsupported event as zero.
-        var domains = new[] { (Suffix: "", Name: "unspecified"),
-            (Suffix: ":u", Name: "user"), (Suffix: ":k", Name: "kernel") };
+        var domains = new[]
+        {
+            (Suffix: "", Name: "unspecified"),
+            (Suffix: ":u", Name: "user"), (Suffix: ":k", Name: "kernel")
+        };
         var matching = domains.Where(d => raw.ContainsKey("instructions" + d.Suffix)
-            && raw.ContainsKey("cycles" + d.Suffix)).ToArray();
+                                          && raw.ContainsKey("cycles" + d.Suffix)).ToArray();
         if (matching.Length != 1) return result;
         var domain = matching[0];
         var instructions = raw["instructions" + domain.Suffix];
@@ -566,6 +634,7 @@ public static class ProfileAnalyzer
             result["ipc"] = new Counter(instructions.Value / cycles.Value,
                 "instructions/cycle", domain.Name, MinimumRunning(instructions, cycles));
         }
+
         if (instructions.Value <= 0) return result;
         if (raw.TryGetValue("cache-misses" + domain.Suffix, out var misses))
             result["cache_mpki"] = new Counter(1000.0 * misses.Value / instructions.Value,
@@ -589,10 +658,13 @@ public static class ProfileAnalyzer
             var raw = Path.Combine(directory, item["rawTrace"]!.GetValue<string>());
             variants[name] = ReadPerfCounters(raw);
         }
+
         if (variants.Count == 0) return;
         var orderedNames = ReadBuildVariantOrder(directory);
         var baselineName = orderedNames.FirstOrDefault(variants.ContainsKey)
-            ?? (variants.ContainsKey("before") ? "before" : variants.Keys.Order(StringComparer.Ordinal).First());
+                           ?? (variants.ContainsKey("before")
+                               ? "before"
+                               : variants.Keys.Order(StringComparer.Ordinal).First());
         var baseline = new KeyValuePair<string, Dictionary<string, Counter>>(
             baselineName, variants[baselineName]);
         var rows = new JsonArray();
@@ -607,27 +679,31 @@ public static class ProfileAnalyzer
             foreach (var (eventName, counter) in counters.OrderBy(x => x.Key, StringComparer.Ordinal))
             {
                 var compatible = baseline.Value.TryGetValue(eventName, out var reference)
-                    && reference.Unit == counter.Unit && reference.Value > 0
-                    && reference.RunningPercent == 100 && counter.RunningPercent == 100;
+                                 && reference.Unit == counter.Unit && reference.Value > 0
+                                 && reference.RunningPercent == 100 && counter.RunningPercent == 100;
                 events[eventName] = new JsonObject
                 {
                     ["value"] = JsonValue.Create(counter.Value, ProfileJson.Default.Double),
                     ["unit"] = counter.Unit,
                     ["domain"] = counter.Domain,
                     ["runningPercent"] = counter.RunningPercent is { } percent
-                        ? JsonValue.Create(percent, ProfileJson.Default.Double) : null,
+                        ? JsonValue.Create(percent, ProfileJson.Default.Double)
+                        : null,
                     ["ratioToBaseline"] = compatible
-                        ? JsonValue.Create(counter.Value / reference!.Value, ProfileJson.Default.Double) : null
+                        ? JsonValue.Create(counter.Value / reference!.Value, ProfileJson.Default.Double)
+                        : null
                 };
             }
+
             var derived = new JsonObject();
             foreach (var (metric, signal) in DeriveCounters(counters))
             {
                 var reference = baselineDerived.GetValueOrDefault(metric);
                 var ratio = reference is not null && reference.Value > 0
-                    && reference.Unit == signal.Unit && reference.Domain == signal.Domain
-                    && reference.RunningPercent == 100 && signal.RunningPercent == 100
-                    ? signal.Value / reference.Value : (double?)null;
+                                                  && reference.Unit == signal.Unit && reference.Domain == signal.Domain
+                                                  && reference.RunningPercent == 100 && signal.RunningPercent == 100
+                    ? signal.Value / reference.Value
+                    : (double?)null;
                 derived[metric] = new JsonObject
                 {
                     ["value"] = JsonValue.Create(signal.Value, ProfileJson.Default.Double),
@@ -635,24 +711,31 @@ public static class ProfileAnalyzer
                     ["domain"] = signal.Domain,
                     ["quality"] = signal.RunningPercent is null ? "running-fraction-unknown"
                         : signal.RunningPercent < 100 ? "perf-scaled-multiplexed" : "reported-counts",
-                    ["ratioToBaseline"] = ratio is null ? null
+                    ["ratioToBaseline"] = ratio is null
+                        ? null
                         : JsonValue.Create(ratio.Value, ProfileJson.Default.Double)
                 };
             }
-            rows.Add((JsonNode?)new JsonObject { ["name"] = name, ["events"] = events,
-                ["derived"] = derived });
+
+            rows.Add((JsonNode?)new JsonObject
+            {
+                ["name"] = name, ["events"] = events,
+                ["derived"] = derived
+            });
         }
+
         var report = new JsonObject
         {
             ["schemaVersion"] = 2,
             ["backend"] = "perf stat",
             ["baseline"] = baseline.Key,
-            ["comparability"] = "Derived metrics require one common event domain. Cross-run ratios require matching domain and non-multiplexed counters; no cross-backend equivalence.",
+            ["comparability"] =
+                "Derived metrics require one common event domain. Cross-run ratios require matching domain and non-multiplexed counters; no cross-backend equivalence.",
             ["variants"] = rows
         };
         await ProfileArtifactWriter.WriteTextAsync(Path.Combine(directory, "counter-comparison.json"),
             report.ToJsonString(new JsonSerializerOptions
-            { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
+                { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
     }
 
     private static List<string> ReadBuildVariantOrder(string directory)

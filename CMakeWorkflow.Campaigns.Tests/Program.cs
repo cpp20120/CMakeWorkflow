@@ -22,18 +22,22 @@ try
         await FuzzSeedCampaign.RunAsync("ranges", root, CancellationToken.None);
         throw new Exception("Changed seed was silently overwritten.");
     }
-    catch (IOException) { }
+    catch (IOException)
+    {
+    }
+
     var assembly = typeof(FuzzSeedCampaign).Assembly;
     using (var catalog = assembly.GetManifestResourceStream("CMakeWorkflow.Campaigns.Mutation.mutants.json")
-        ?? throw new Exception("Mutation catalog missing from assembly."))
+                         ?? throw new Exception("Mutation catalog missing from assembly."))
     using (var document = await JsonDocument.ParseAsync(catalog))
     {
         if (!document.RootElement.GetProperty("mutants").TryGetProperty("graph-drop-last-token", out _))
             throw new Exception("Graph mutation missing from catalog.");
     }
+
     using (var catalog = typeof(Program).Assembly.GetManifestResourceStream(
-        "CMakeWorkflow.Campaigns.Tests.weak-memory-catalog.json.gz")
-        ?? throw new Exception("Weak-memory catalog missing from assembly."))
+                             "CMakeWorkflow.Campaigns.Tests.weak-memory-catalog.json.gz")
+                         ?? throw new Exception("Weak-memory catalog missing from assembly."))
     using (var compressed = new GZipStream(catalog, CompressionMode.Decompress))
     using (var document = await JsonDocument.ParseAsync(compressed))
     {
@@ -61,10 +65,13 @@ try
                         var first = Enumerable.Range(0, Math.Min(actual.Length, frozen.Length))
                             .FirstOrDefault(index => actual[index] != frozen[index], -1);
                         throw new Exception("Source-derived adapter differs from frozen catalog: "
-                            + protocol.Name + "/" + generated[i].Name + " at " + first
-                            + " actual=" + actual[Math.Max(0, first - 35)..Math.Min(actual.Length, first + 60)]
-                            + " frozen=" + frozen[Math.Max(0, first - 35)..Math.Min(frozen.Length, first + 60)]);
+                                            + protocol.Name + "/" + generated[i].Name + " at " + first
+                                            + " actual=" +
+                                            actual[Math.Max(0, first - 35)..Math.Min(actual.Length, first + 60)]
+                                            + " frozen=" +
+                                            frozen[Math.Max(0, first - 35)..Math.Min(frozen.Length, first + 60)]);
                     }
+
                     var expectedSuites = expected[i].GetProperty("suites").EnumerateArray().ToArray();
                     if (generated[i].Suites.Length != expectedSuites.Length)
                         throw new Exception("Source-derived suite count changed: " + protocol.Name);
@@ -74,11 +81,12 @@ try
                                 expectedSuites[suite].GetProperty("expected").EnumerateArray()
                                     .Select(x => x.GetString()!)))
                             throw new Exception("Source-derived expectation changed: "
-                                + protocol.Name + "/" + generated[i].Name);
+                                                + protocol.Name + "/" + generated[i].Name);
                 }
             }
         }
     }
+
     var run = Path.Combine(root, "run");
     var runCorpus = Path.Combine(run, "corpus");
     var merged = Path.Combine(root, "merged");
@@ -108,7 +116,10 @@ try
         await FuzzRunCampaign.MergeAsync(run, merged, CancellationToken.None);
         throw new Exception("Changed fuzz corpus was merged.");
     }
-    catch (IOException) { }
+    catch (IOException)
+    {
+    }
+
     Console.WriteLine("Campaign checks passed.");
     return 0;
 }

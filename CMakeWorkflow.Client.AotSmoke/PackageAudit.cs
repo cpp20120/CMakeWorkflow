@@ -28,10 +28,12 @@ internal static class PackageAudit
                     if (!seenContracts.Add(entry.FullName))
                         throw new InvalidDataException("Duplicate Contracts package asset: " + entry.FullName);
                     if (!requiredContracts.Contains(entry.FullName) &&
-                        !(entry.FullName.StartsWith("package/services/metadata/core-properties/", StringComparison.Ordinal)
+                        !(entry.FullName.StartsWith("package/services/metadata/core-properties/",
+                              StringComparison.Ordinal)
                           && entry.FullName.EndsWith(".psmdcp", StringComparison.Ordinal)))
                         throw new InvalidDataException("Unexpected Contracts package asset: " + entry.FullName);
                 }
+
                 if (!requiredContracts.IsSubsetOf(seenContracts))
                     throw new InvalidDataException("Contracts package is missing required assets.");
                 using var contractsNuspec = contractsArchive.GetEntry("CMakeWorkflow.Contracts.nuspec")!.Open();
@@ -42,9 +44,11 @@ internal static class PackageAudit
                     || (string?)contractsMetadata.Element(contractsNs + "version") != version)
                     throw new InvalidDataException("Unexpected Contracts package identity.");
                 if (contractsMetadata.Element(contractsNs + "dependencies") is not null &&
-                    contractsMetadata.Element(contractsNs + "dependencies")!.Descendants(contractsNs + "dependency").Any())
+                    contractsMetadata.Element(contractsNs + "dependencies")!.Descendants(contractsNs + "dependency")
+                        .Any())
                     throw new InvalidDataException("Contracts package must have no package dependencies.");
             }
+
             using var packageStream = File.OpenRead(packagePath);
             var hash = Convert.ToBase64String(SHA512.HashData(packageStream));
             packageStream.Position = 0;
@@ -59,10 +63,12 @@ internal static class PackageAudit
             {
                 var name = entry.FullName;
                 if (!seen.Add(name)) throw new InvalidDataException("Duplicate package asset: " + name);
-                if (!required.Contains(name) && !(name.StartsWith("package/services/metadata/core-properties/", StringComparison.Ordinal)
-                    && name.EndsWith(".psmdcp", StringComparison.Ordinal)))
+                if (!required.Contains(name) && !(name.StartsWith("package/services/metadata/core-properties/",
+                                                      StringComparison.Ordinal)
+                                                  && name.EndsWith(".psmdcp", StringComparison.Ordinal)))
                     throw new InvalidDataException("Unexpected package asset: " + name);
             }
+
             if (!required.IsSubsetOf(seen)) throw new InvalidDataException("Package is missing required assets.");
             using var nuspecStream = archive.GetEntry("CMakeWorkflow.Client.nuspec")!.Open();
             var document = XDocument.Load(nuspecStream);
@@ -77,9 +83,9 @@ internal static class PackageAudit
             var dependencies = groups[0].Elements(ns + "dependency").ToArray();
             if (dependencies.Length != 2 ||
                 !dependencies.Any(d => (string?)d.Attribute("id") == "StreamJsonRpc"
-                    && (string?)d.Attribute("version") == "2.26.150") ||
+                                       && (string?)d.Attribute("version") == "2.26.150") ||
                 !dependencies.Any(d => (string?)d.Attribute("id") == "CMakeWorkflow.Contracts"
-                    && (string?)d.Attribute("version") == version))
+                                       && (string?)d.Attribute("version") == version))
                 throw new InvalidDataException("Unexpected SDK dependencies; expected Contracts and StreamJsonRpc.");
 
             using var assets = JsonDocument.Parse(File.ReadAllBytes(assetsPath));
@@ -103,6 +109,7 @@ internal static class PackageAudit
                     if (entries.Length != 1 || entries[0].Name != "lib/net10.0/CMakeWorkflow.Contracts.dll")
                         throw new InvalidDataException("Unexpected Contracts " + kind + " assets.");
                 }
+
                 var resolved = target.Value.GetProperty("CMakeWorkflow.Client/" + version);
                 foreach (var kind in new[] { "compile", "runtime" })
                 {
@@ -111,7 +118,9 @@ internal static class PackageAudit
                         throw new InvalidDataException("Unexpected SDK " + kind + " assets.");
                 }
             }
-            Console.WriteLine("PASS NuGet audit: Client + Contracts DLLs; StreamJsonRpc dependency; both package SHA512 match consumer; no source projects.");
+
+            Console.WriteLine(
+                "PASS NuGet audit: Client + Contracts DLLs; StreamJsonRpc dependency; both package SHA512 match consumer; no source projects.");
             return 0;
         }
         catch (Exception error)

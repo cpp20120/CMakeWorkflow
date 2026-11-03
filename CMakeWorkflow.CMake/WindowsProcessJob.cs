@@ -28,8 +28,14 @@ internal sealed class WindowsProcessJob : IDisposable
         catch
         {
             // Fail closed: a process we cannot supervise must not keep running.
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) when (process.HasExited) { }
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) when (process.HasExited)
+            {
+            }
+
             job.Dispose();
             throw;
         }
@@ -46,7 +52,7 @@ internal sealed class WindowsProcessJob : IDisposable
             while (true)
             {
                 if (!QueryInformationJobObject(handle, 1, out var info,
-                    (uint)Marshal.SizeOf<BasicAccounting>(), out _))
+                        (uint)Marshal.SizeOf<BasicAccounting>(), out _))
                     throw new Win32Exception(Marshal.GetLastPInvokeError(),
                         $"QueryInformationJobObject failed (class=1, size={Marshal.SizeOf<BasicAccounting>()}).");
                 if (info.ActiveProcesses == 0) return;
@@ -80,16 +86,20 @@ internal sealed class WindowsProcessJob : IDisposable
 
     [DllImport("kernel32.dll", EntryPoint = "CreateJobObjectW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateJobObjectW(IntPtr attributes, string? name);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool QueryInformationJobObject(IntPtr job, int informationClass,
         out BasicAccounting information, uint length, out uint returnedLength);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);

@@ -48,25 +48,33 @@ public sealed class WorkflowCommandDispatcher
             if (previous is not null)
             {
                 if (previous["returncode"] is null || previous["timed_out"]?.GetValue<bool>() == true)
-                    throw new InvalidDataException($"Cannot resume '{label}': prior execution outcome is unknown or timed out. Use a fresh output directory.");
+                    throw new InvalidDataException(
+                        $"Cannot resume '{label}': prior execution outcome is unknown or timed out. Use a fresh output directory.");
                 if (previous["returncode"]!.GetValue<int>() != 0)
-                    throw new InvalidDataException($"Cannot resume '{label}': previous invocation failed. Use a fresh output directory.");
+                    throw new InvalidDataException(
+                        $"Cannot resume '{label}': previous invocation failed. Use a fresh output directory.");
                 if (previous["argv"]?.AsArray().Select(x => x!.GetValue<string>())
                         .SequenceEqual(new[] { executable }.Concat(argv)) != true
                     || !File.Exists(stdoutPath) || !File.Exists(stderrPath))
-                    throw new InvalidDataException($"Cannot resume '{label}': command identity or captured logs changed.");
-                foreach (var (path, key) in new[] { (stdoutPath, "stdout_sha256"),
-                    (stderrPath, "stderr_sha256") })
+                    throw new InvalidDataException(
+                        $"Cannot resume '{label}': command identity or captured logs changed.");
+                foreach (var (path, key) in new[]
+                         {
+                             (stdoutPath, "stdout_sha256"),
+                             (stderrPath, "stderr_sha256")
+                         })
                     if (previous[key] is null || await CommandExecution.Sha256Async(path, ct)
                         != previous[key]!.GetValue<string>())
                         throw new InvalidDataException($"Cannot resume '{label}': captured log changed: {path}");
                 if (declaredOutput is not null)
                 {
                     if (!File.Exists(declaredOutput) || previous["external_output_sha256"] is null
-                        || await CommandExecution.Sha256Async(declaredOutput, ct)
-                            != previous["external_output_sha256"]!.GetValue<string>())
-                        throw new InvalidDataException($"Cannot resume '{label}': generated output changed: {declaredOutput}");
+                                                     || await CommandExecution.Sha256Async(declaredOutput, ct)
+                                                     != previous["external_output_sha256"]!.GetValue<string>())
+                        throw new InvalidDataException(
+                            $"Cannot resume '{label}': generated output changed: {declaredOutput}");
                 }
+
                 Notify(new WorkflowDispatchEvent("verified", label, TimeSpan.Zero));
                 return await File.ReadAllTextAsync(stdoutPath, ct);
             }
@@ -109,11 +117,12 @@ public sealed class WorkflowCommandDispatcher
                     throw new InvalidDataException($"{label}: successful command did not produce {declaredOutput}.");
                 entry["external_output_sha256"] = await CommandExecution.Sha256Async(declaredOutput, ct);
             }
+
             entry["returncode"] = exitCode;
             entry["timed_out"] = false;
             if (exitCode != 0)
                 throw new IOException($"{label} failed ({exitCode}): "
-                    + (stdout + stderr)[^Math.Min(3000, stdout.Length + stderr.Length)..]);
+                                      + (stdout + stderr)[^Math.Min(3000, stdout.Length + stderr.Length)..]);
             return stdout;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline.IsCancellationRequested)
@@ -129,7 +138,8 @@ public sealed class WorkflowCommandDispatcher
             await PersistAsync();
             Notify(new WorkflowDispatchEvent(
                 entry["returncode"]?.GetValue<int>() == 0 && entry["timed_out"]?.GetValue<bool>() != true
-                    ? "succeeded" : "stopped", label, DateTimeOffset.UtcNow - start));
+                    ? "succeeded"
+                    : "stopped", label, DateTimeOffset.UtcNow - start));
         }
     }
 
@@ -137,9 +147,16 @@ public sealed class WorkflowCommandDispatcher
     {
         // Progress is observational; a closed terminal must not invalidate an
         // otherwise successful external operation or change its durable outcome.
-        try { observer?.Invoke(item); }
-        catch (IOException) { }
-        catch (ObjectDisposedException) { }
+        try
+        {
+            observer?.Invoke(item);
+        }
+        catch (IOException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private Task PersistAsync() => WorkflowCheckpoint.WriteDurableBytesAsync(

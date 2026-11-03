@@ -13,21 +13,22 @@ internal static class RecipeRules
     internal static void Name(string? value, string field)
     {
         if (string.IsNullOrWhiteSpace(value) || !Regex.IsMatch(value,
-            @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
+                @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
             throw new ArgumentException($"{field} must be a nonempty CMake identifier.");
     }
 
     internal static void Id(string? value, string field)
     {
         if (string.IsNullOrWhiteSpace(value) || !Regex.IsMatch(value,
-            @"^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant))
-            throw new ArgumentException($"{field} must start with a lowercase letter and contain only lowercase letters, digits or underscores.");
+                @"^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant))
+            throw new ArgumentException(
+                $"{field} must start with a lowercase letter and contain only lowercase letters, digits or underscores.");
     }
 
     internal static void Directory(string? value, string field)
     {
         if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value)
-            || value.Contains('\0'))
+                                             || value.Contains('\0'))
             throw new ArgumentException($"{field} must be an absolute path.");
     }
 
@@ -56,6 +57,9 @@ internal static class RecipeRules
     }
 
     internal static WorkflowContext Adopted(string directory, string? configuration) =>
-        new() { BuildDirectory = directory, Configuration = configuration,
-            Mode = "adopt", ProvenancePolicy = "allowUnverified" };
+        new()
+        {
+            BuildDirectory = directory, Configuration = configuration,
+            Mode = "adopt", ProvenancePolicy = "allowUnverified"
+        };
 }

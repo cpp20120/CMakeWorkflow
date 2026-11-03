@@ -31,10 +31,11 @@ public static class ProfileWorkflowBuilder
         if (configurePreset is not null && (variants.Count != 1 || sourceDirectory is null))
             throw new ArgumentException("A configured profile requires one variant and a source directory.");
         if (variants.Any(v => !Regex.IsMatch(v.Name, "^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant)
-            || !Path.IsPathFullyQualified(v.BuildDirectory)))
+                              || !Path.IsPathFullyQualified(v.BuildDirectory)))
             throw new ArgumentException("Profile variants require lowercase names and absolute build directories.");
         if (variants.Select(v => v.Name).Distinct(StringComparer.Ordinal).Count() != variants.Count
-            || variants.Select(v => Path.GetFullPath(v.BuildDirectory)).Distinct(WorkflowPlanner.PathComparer).Count() != variants.Count)
+            || variants.Select(v => Path.GetFullPath(v.BuildDirectory)).Distinct(WorkflowPlanner.PathComparer)
+                .Count() != variants.Count)
             throw new ArgumentException("Profile variants require unique names and build directories.");
         var timeout = timeoutSeconds.ToString(CultureInfo.InvariantCulture);
         var contexts = new Dictionary<string, WorkflowContext>(StringComparer.Ordinal);
@@ -50,10 +51,14 @@ public static class ProfileWorkflowBuilder
             };
             if (configurePreset is not null)
                 nodes.Add(new WorkflowNode { Id = "configure", Kind = "configure", Context = variant.Name });
-            nodes.Add(new WorkflowNode { Id = "build_" + variant.Name, Kind = "build",
+            nodes.Add(new WorkflowNode
+            {
+                Id = "build_" + variant.Name, Kind = "build",
                 Context = variant.Name, Target = target,
-                DependsOn = configurePreset is null ? [] : ["configure"] });
+                DependsOn = configurePreset is null ? [] : ["configure"]
+            });
         }
+
         var allBuilds = nodes.Where(x => x.Kind == "build").Select(x => x.Id).ToList();
         var previous = nodes.Last().Id;
         var firstTiming = true;
@@ -65,14 +70,18 @@ public static class ProfileWorkflowBuilder
             {
                 var buildId = "build_" + variant.Name;
                 var id = $"timing_{variant.Name}_{repeat}";
-                nodes.Add(new WorkflowNode { Id = id, Kind = "run", From = buildId,
+                nodes.Add(new WorkflowNode
+                {
+                    Id = id, Kind = "run", From = buildId,
                     DependsOn = firstTiming ? allBuilds.ToList() : [previous],
                     Arguments = arguments.ToList(),
-                    TimeoutSeconds = timeoutSeconds, Resources = ["measurement-host"] });
+                    TimeoutSeconds = timeoutSeconds, Resources = ["measurement-host"]
+                });
                 previous = id;
                 firstTiming = false;
             }
         }
+
         var diagnostic = mode == "diagnostic";
         var linux = capturePlatform is null ? OperatingSystem.IsLinux() : capturePlatform == "linux";
         var windows = capturePlatform is null ? OperatingSystem.IsWindows() : capturePlatform == "windows";
@@ -86,6 +95,7 @@ public static class ProfileWorkflowBuilder
                 previous = id;
             }
         }
+
         foreach (var variant in variants)
         {
             var buildId = "build_" + variant.Name;
@@ -101,14 +111,21 @@ public static class ProfileWorkflowBuilder
                 previous = schedulerId;
             }
         }
+
         return new WorkflowDocument { SchemaVersion = 2, Contexts = contexts, Nodes = nodes };
     }
 
     private static WorkflowNode ProfileNode(string id, string buildId, string after,
         IReadOnlyList<string> arguments, double seconds, string timeout, string backend, string mode) =>
-        new() { Id = id, Kind = "profile", From = buildId, DependsOn = [after],
+        new()
+        {
+            Id = id, Kind = "profile", From = buildId, DependsOn = [after],
             Arguments = arguments.ToList(), TimeoutSeconds = seconds + 180,
             Exclusive = true, Resources = ["measurement-host"],
-            Options = new Dictionary<string, string> { ["backend"] = backend,
-                ["mode"] = mode, ["captureTimeoutSeconds"] = timeout } };
+            Options = new Dictionary<string, string>
+            {
+                ["backend"] = backend,
+                ["mode"] = mode, ["captureTimeoutSeconds"] = timeout
+            }
+        };
 }

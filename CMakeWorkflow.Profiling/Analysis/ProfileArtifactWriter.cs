@@ -12,6 +12,9 @@ internal static class ProfileArtifactWriter
             ct.ThrowIfCancellationRequested();
             File.Move(temp, path, overwrite: true);
         }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 }

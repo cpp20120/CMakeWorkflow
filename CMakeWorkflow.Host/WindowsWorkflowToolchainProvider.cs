@@ -24,11 +24,12 @@ public sealed class WindowsWorkflowToolchainProvider : IWorkflowToolchainProvide
             binding.SdkCandidateId, binding.EnvironmentProfileId, binding.Generator));
         if (selected.Status != "resolved" || selected.CMake is null || selected.Compiler is null)
             throw new InvalidOperationException("Cannot activate requested toolchain: " +
-                string.Join("; ", selected.Diagnostics));
+                                                string.Join("; ", selected.Diagnostics));
         // This execution adapter supports Ninja. VS generators also need an
         // instance/architecture-specific project-system binding, not just PATH.
         if (binding.Generator is not ("Ninja" or "Ninja Multi-Config"))
-            throw new NotSupportedException("Visual Studio generator execution binding is not yet supported; use Ninja.");
+            throw new NotSupportedException(
+                "Visual Studio generator execution binding is not yet supported; use Ninja.");
         var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (selected.EnvironmentProfileId is not null)
         {
@@ -59,12 +60,16 @@ public sealed class WindowsWorkflowToolchainProvider : IWorkflowToolchainProvide
 
         // Select exact executables. CMake is invoked by absolute path; selected
         // Ninja and compiler directories take precedence over ambient PATH.
-        var dirs = new[] { Path.GetDirectoryName(selected.Compiler.Path),
-            selected.Ninja is null ? null : Path.GetDirectoryName(selected.Ninja.Path),
-            Path.GetDirectoryName(selected.CMake.Path) }
+        var dirs = new[]
+            {
+                Path.GetDirectoryName(selected.Compiler.Path),
+                selected.Ninja is null ? null : Path.GetDirectoryName(selected.Ninja.Path),
+                Path.GetDirectoryName(selected.CMake.Path)
+            }
             .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase);
         var inheritedPath = variables.TryGetValue("PATH", out var activatedPath)
-            ? activatedPath : Environment.GetEnvironmentVariable("PATH") ?? "";
+            ? activatedPath
+            : Environment.GetEnvironmentVariable("PATH") ?? "";
         variables["PATH"] = string.Join(Path.PathSeparator.ToString(), dirs.Append(inheritedPath));
         foreach (var executable in new[] { selected.CMake.Path, selected.Compiler.Path, selected.Ninja?.Path })
             if (executable is not null && !File.Exists(executable))

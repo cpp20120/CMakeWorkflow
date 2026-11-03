@@ -3,8 +3,13 @@ using System.Security.Cryptography;
 
 namespace CMakeWorkflow;
 
-public sealed record CommandResult(int ExitCode, string Output, bool TimedOut, int? ProcessId = null,
-    string? Stdout = null, string? Stderr = null);
+public sealed record CommandResult(
+    int ExitCode,
+    string Output,
+    bool TimedOut,
+    int? ProcessId = null,
+    string? Stdout = null,
+    string? Stderr = null);
 
 public static class CommandExecution
 {
@@ -27,7 +32,7 @@ public static class CommandExecution
             foreach (var (key, value) in environment)
                 start.Environment[key] = value;
         using var process = Process.Start(start)
-            ?? throw new IOException($"Could not start {executable}.");
+                            ?? throw new IOException($"Could not start {executable}.");
         var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
         var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
         try
@@ -41,12 +46,14 @@ public static class CommandExecution
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(CancellationToken.None);
             }
+
             if (cancellationToken.IsCancellationRequested) throw;
             var outText = await stdout;
             var errText = await stderr;
             return new CommandResult(process.ExitCode, outText + errText, true, process.Id,
                 outText, errText);
         }
+
         var standardOutput = await stdout;
         var standardError = await stderr;
         return new CommandResult(process.ExitCode, standardOutput + standardError, false,

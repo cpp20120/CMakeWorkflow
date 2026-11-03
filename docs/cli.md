@@ -2,9 +2,8 @@
 
 > **Язык / Language:** [Русский](cli.md) · [English](en/cli.md) · [Documentation index](README.md)
 
-Командный контракт определяется [Program.cs](../Program.cs) и обработчиками
-семейств команд. Команды ниже существуют в текущих исходниках. Для локальной
-разработки заменяйте `CMakeWorkflow` на
+Командный контракт определяется [Program.cs](../Program.cs) и обработчиками семейств команд. Команды ниже существуют в
+текущих исходниках. Для локальной разработки заменяйте `CMakeWorkflow` на
 `dotnet bin/Release/net10.0/CMakeWorkflow.dll`.
 
 ## Сборка и публикация
@@ -14,10 +13,9 @@ dotnet build CMakeWorkflow.slnx -c Release
 dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -o out/native
 ```
 
-RID в publish — пример для Linux x64; выбирайте RID и NativeAOT prerequisites
-своего хоста. На Windows имя native executable имеет суффикс `.exe`. Разработка
-через DLL требует .NET runtime, сборка — SDK. NativeAOT executable запускается
-самостоятельно, а нужные CMake/compiler/profiler tools остаются внешними.
+RID в publish — пример для Linux x64; выбирайте RID и NativeAOT prerequisites своего хоста. На Windows имя native
+executable имеет суффикс `.exe`. Разработка через DLL требует .NET runtime, сборка — SDK. NativeAOT executable
+запускается самостоятельно, а нужные CMake/compiler/profiler tools остаются внешними.
 
 ## CMake contexts и targets
 
@@ -29,9 +27,8 @@ CMakeWorkflow target invoke --build-dir BUILD_DIR --target CUSTOM_TARGET --confi
 CMakeWorkflow target run --build-dir BUILD_DIR --target EXECUTABLE --config Release -- ARGUMENT_1 "argument with spaces"
 ```
 
-`inspect` читает существующие данные, `resolve` использует File API для поиска
-executable. `build` допускает native executable/library targets. `invoke` явно
-разрешает исполнение custom/utility target. `run` запрашивает build, а затем
+`inspect` читает существующие данные, `resolve` использует File API для поиска executable. `build` допускает native
+executable/library targets. `invoke` явно разрешает исполнение custom/utility target. `run` запрашивает build, а затем
 выполняет executable; всё после `--` передаётся программе.
 
 `--prepared` у build/run — специальный путь для CMake bridge с уже выраженным
@@ -49,24 +46,22 @@ CMakeWorkflow workflow report RUN_DIRECTORY --json
 CMakeWorkflow workflow sequence --build-dir BUILD_DIR --first FIRST --second SECOND --config Release --first-arg ARG --second-arg ARG
 ```
 
-`workflow generate benchmark` только записывает обычный манифест v2 и не
-перезаписывает существующий файл. Относительные `--build-dir` и `--output`
+`workflow generate benchmark` только записывает обычный манифест v2 и не перезаписывает существующий файл. Относительные
+`--build-dir` и `--output`
 считаются от cwd CLI. Полный пример — в [рецептах](ru/recipes.md).
 
 `workflow generate profile`, `test-matrix`, `build-matrix` и
-`benchmark-matrix` используют отдельные типизированные контракты. Сложные
-матрицы передаются через `--recipe FILE --output MANIFEST`;
-см. [описание рецептов](ru/recipes.md).
+`benchmark-matrix` используют отдельные типизированные контракты. Сложные матрицы передаются через
+`--recipe FILE --output MANIFEST`; см. [описание рецептов](ru/recipes.md).
 
-`--jobs` по умолчанию 1. `--only` повторяемый. Без `--results-dir` workflow run
-использует `out/workflow-runs` рядом с manifest и создаёт внутри отдельный run.
-Явный относительный `--results-dir` разрешается от cwd CLI. Читайте фактический
+`--jobs` по умолчанию 1. `--only` повторяемый. Без `--results-dir` workflow run использует `out/workflow-runs` рядом с
+manifest и создаёт внутри отдельный run. Явный относительный `--results-dir` разрешается от cwd CLI. Читайте фактический
 путь из протокола, не воспроизводите алгоритм имени каталога в клиенте.
 
-`sequence` выполняет build первого target → его executable → build второго →
-его executable. Аргументы задаются повторяемыми `--first-arg` и `--second-arg`.
-`--controller-build-dir` относится к защите от небезопасного вложенного build;
-обычная интеграция IDE не должна подставлять его произвольно.
+`sequence` выполняет build первого target → его executable → build второго → его executable. Аргументы задаются
+повторяемыми `--first-arg` и `--second-arg`.
+`--controller-build-dir` относится к защите от небезопасного вложенного build; обычная интеграция IDE не должна
+подставлять его произвольно.
 
 ## History
 
@@ -81,13 +76,12 @@ CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric process_wall_time
 ```
 
 `runs` поддерживает также `--since`, `--until` с ISO timestamps, `--workflow`
-и `--variant`. В `metrics` обязателен `--run`, в `query` — `--metric`;
-они принимают фильтры `--variant` и `--scenario`. `detect` также позволяет
-сузить семейство проверок через `--variant`/`--scenario`.
+и `--variant`. В `metrics` обязателен `--run`, в `query` — `--metric`; они принимают фильтры `--variant` и `--scenario`.
+`detect` также позволяет сузить семейство проверок через `--variant`/`--scenario`.
 
-У query-команд путь каталога задаётся `--db`. У workflow/profile run и profile
-replay — `--history-db` либо `--no-history`. Одновременная передача этих двух
-run-options запрещена. `CMAKEWORKFLOW_HISTORY_DB` задаёт общий default catalog.
+У query-команд путь каталога задаётся `--db`. У workflow/profile run и profile replay — `--history-db` либо
+`--no-history`. Одновременная передача этих двух run-options запрещена. `CMAKEWORKFLOW_HISTORY_DB` задаёт общий default
+catalog.
 
 ## Profiling и DagFlow
 
@@ -105,10 +99,9 @@ CMakeWorkflow dagflow fuzz triage --run-dir RUN_DIRECTORY
 CMakeWorkflow dagflow fuzz merge --run-dir RUN_DIRECTORY --output CORPUS_DIRECTORY
 ```
 
-`dagflow profile` маршрутизируется в тот же profiling handler. Для прямого
-run-узла в `profile replay` не передавайте `--case`. Это пути run-каталогов,
-тогда как History compare/detect принимают run IDs.
-Детали и ограничения — в [profiling and campaigns](profiling-and-campaigns.md).
+`dagflow profile` маршрутизируется в тот же profiling handler. Для прямого run-узла в `profile replay` не передавайте
+`--case`. Это пути run-каталогов, тогда как History compare/detect принимают run IDs. Детали и ограничения —
+в [profiling and campaigns](profiling-and-campaigns.md).
 
 ## Tooling
 
@@ -120,21 +113,18 @@ CMakeWorkflow tooling setup --profile native --dry-run --json
 CMakeWorkflow tooling setup --profile native --yes
 ```
 
-`--pm`: `auto`, `none`, `apt`, `pacman`, `dnf`, `brew`, `winget`.
-Дополнительно: `--install-dir PATH`, `--no-fallback`. Alias `setup` направляет
-в `tooling setup`. Подробности в [provisioning](integrations.md#provisioning).
+`--pm`: `auto`, `none`, `apt`, `pacman`, `dnf`, `brew`, `winget`. Дополнительно: `--install-dir PATH`, `--no-fallback`.
+Alias `setup` направляет в `tooling setup`. Подробности в [provisioning](integrations.md#provisioning).
 
 ## Выход и ошибки
 
-Для workflow run: 0 — succeeded, 1 — failed, 130 — пользовательская отмена.
-Общий entry point также использует 2 для некоторых ошибок выбора команды.
-У tooling doctor код 2 означает неготовность инструментов; setup может вернуть
-2 при неудачной установке. Не переносите интерпретацию кода 2 на все команды.
+Для workflow run: 0 — succeeded, 1 — failed, 130 — пользовательская отмена. Общий entry point также использует 2 для
+некоторых ошибок выбора команды. У tooling doctor код 2 означает неготовность инструментов; setup может вернуть 2 при
+неудачной установке. Не переносите интерпретацию кода 2 на все команды.
 
-`workflow report` с кодом 0 означает успешное чтение отчёта, а не успешность
-сохранённого workflow: проверяйте `status` в данных. `history detect` может
-успешно вернуть `regression`; такой результат читается из JSON, а не из exit code.
+`workflow report` с кодом 0 означает успешное чтение отчёта, а не успешность сохранённого workflow: проверяйте `status`
+в данных. `history detect` может успешно вернуть `regression`; такой результат читается из JSON, а не из exit code.
 
 Разделяйте stdout, stderr, spawn error, exit code и termination signal.
-`--json` поддерживается только соответствующими обработчиками; у profile
-run/analyze/replay и DagFlow campaigns нет общего JSONL-протокола завершения.
+`--json` поддерживается только соответствующими обработчиками; у profile run/analyze/replay и DagFlow campaigns нет
+общего JSONL-протокола завершения.

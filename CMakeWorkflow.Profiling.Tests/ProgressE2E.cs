@@ -21,7 +21,8 @@ internal static class ProgressE2E
         {
             await SilentProcessAndResumeAsync(Path.Combine(root, "silent"));
             await CancellationAndNoReplayAsync(Path.Combine(root, "cancel"));
-            Console.WriteLine("PASS progress E2E: silent heartbeat, journal replay, cancellation, child cleanup, unknown-effect refusal");
+            Console.WriteLine(
+                "PASS progress E2E: silent heartbeat, journal replay, cancellation, child cleanup, unknown-effect refusal");
         }
         finally
         {
@@ -40,6 +41,7 @@ internal static class ProgressE2E
         using var terminalTranscript = new StringWriter(CultureInfo.InvariantCulture);
         using var terminalProgress = new HistoricalProgress(1, 1, false,
             TextWriter.Synchronized(terminalTranscript), interactive: true);
+
         void Observe(WorkflowDispatchEvent update)
         {
             events.Enqueue(update);
@@ -68,11 +70,11 @@ internal static class ProgressE2E
         // edge. Validate the TTY redraw protocol and stage; the redirected
         // output above checks the complete untruncated operation identity.
         Require(terminalTranscript.ToString().Contains("\r\u001b[2K", StringComparison.Ordinal) &&
-            terminalTranscript.ToString().Contains("Hardware counters", StringComparison.Ordinal),
+                terminalTranscript.ToString().Contains("Hardware counters", StringComparison.Ordinal),
             "Interactive progress did not redraw the active stage.");
         Require(await execution == "silent-process-finished", "Successful command stdout was lost.");
         Require(await File.ReadAllTextAsync(Path.Combine(directory, "logs", "stat-e2e-silent.stdout"))
-            == "silent-process-finished", "Process stdout capture was incomplete.");
+                == "silent-process-finished", "Process stdout capture was incomplete.");
         Require(events.Any(x => x.Type == "succeeded"), "Success event missing.");
 
         var saved = JsonNode.Parse(await File.ReadAllTextAsync(
@@ -84,14 +86,15 @@ internal static class ProgressE2E
             new Dictionary<string, string>(), replayEvents.Enqueue);
         var replayClock = Stopwatch.StartNew();
         Require(await replay.RunAsync("stat-e2e-silent", "/bin/sh", argv, null, 30,
-                    CancellationToken.None) == "silent-process-finished",
+                CancellationToken.None) == "silent-process-finished",
             "Resume did not reuse the successful recorded output.");
         Require(replayClock.Elapsed < TimeSpan.FromSeconds(6),
             "Resume appears to have rerun the 14-second external process.");
         Require(saved.Count == 1 && replayEvents.Any(x => x.Type == "verified") &&
-            !replayEvents.Any(x => x.Type == "started"),
+                !replayEvents.Any(x => x.Type == "started"),
             "Resume dispatched instead of verifying the recorded command.");
-        Console.WriteLine($"PASS silent heartbeat: observed before completion; elapsed {clock.Elapsed.TotalSeconds:F1}s; replay verified without dispatch");
+        Console.WriteLine(
+            $"PASS silent heartbeat: observed before completion; elapsed {clock.Elapsed.TotalSeconds:F1}s; replay verified without dispatch");
     }
 
     private static async Task CancellationAndNoReplayAsync(string directory)
@@ -126,8 +129,12 @@ internal static class ProgressE2E
                 await operation.WaitAsync(TimeSpan.FromSeconds(12));
                 throw new Exception("Cancellation incorrectly completed successfully.");
             }
-            catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
-            catch (IOException) when (cancel.IsCancellationRequested) { }
+            catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+            {
+            }
+            catch (IOException) when (cancel.IsCancellationRequested)
+            {
+            }
 
             await UntilAsync(() => !IsRunning(pids.parent) && !IsRunning(pids.child),
                 TimeSpan.FromSeconds(8), "Cancellation left a running child or parent process.");
@@ -145,26 +152,44 @@ internal static class ProgressE2E
                     CancellationToken.None);
                 throw new Exception("Resume replayed a canceled operation with unknown outcome.");
             }
-            catch (InvalidDataException ex) when (ex.Message.Contains("outcome is unknown", StringComparison.Ordinal)) { }
-            Console.WriteLine("PASS cancellation E2E: real parent/child terminated; journal outcome unknown; resume refused");
+            catch (InvalidDataException ex) when (ex.Message.Contains("outcome is unknown", StringComparison.Ordinal))
+            {
+            }
+
+            Console.WriteLine(
+                "PASS cancellation E2E: real parent/child terminated; journal outcome unknown; resume refused");
         }
         finally
         {
             cancel.Cancel();
             // Cleanup is best-effort only if an assertion fails. Avoid leaving a
             // fixture process running after a failed test.
-            try { await operation.WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch { /* failure is reported by the preceding assertions */ }
+            try
+            {
+                await operation.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch
+            {
+                /* failure is reported by the preceding assertions */
+            }
+
             if (File.Exists(pidPath))
             {
                 foreach (var text in File.ReadAllText(pidPath).Split((char[]?)null,
-                    StringSplitOptions.RemoveEmptyEntries))
+                             StringSplitOptions.RemoveEmptyEntries))
                 {
                     if (int.TryParse(text, out var pid) && IsRunning(pid))
                     {
-                        try { Process.GetProcessById(pid).Kill(); }
-                        catch (ArgumentException) { }
-                        catch (InvalidOperationException) { }
+                        try
+                        {
+                            Process.GetProcessById(pid).Kill();
+                        }
+                        catch (ArgumentException)
+                        {
+                        }
+                        catch (InvalidOperationException)
+                        {
+                        }
                     }
                 }
             }
@@ -181,8 +206,14 @@ internal static class ProgressE2E
             var close = stat.LastIndexOf(')');
             return close >= 0 && close + 2 < stat.Length && stat[close + 2] is not ('Z' or 'X' or 'x');
         }
-        catch (FileNotFoundException) { return false; }
-        catch (DirectoryNotFoundException) { return false; }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
     }
 
     private static async Task UntilAsync(Func<bool> ready, TimeSpan timeout, string failure)

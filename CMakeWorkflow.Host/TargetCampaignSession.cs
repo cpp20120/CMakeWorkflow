@@ -46,9 +46,9 @@ public sealed partial class DoctorSession
         ApplicationCallAsync(request, async (paths, ct) =>
         {
             var result = await ProfileReplayCommand.ReplayAsync(new ProfileReplayOptions(
-                paths.Require(request.BaselineDirectory), paths.Require(request.CandidateDirectory),
-                request.NodeId, request.CaseName, request.HarnessIndex, request.Backend,
-                paths.Require(request.ResultsDirectory), request.TimeoutSeconds), ct,
+                    paths.Require(request.BaselineDirectory), paths.Require(request.CandidateDirectory),
+                    request.NodeId, request.CaseName, request.HarnessIndex, request.Backend,
+                    paths.Require(request.ResultsDirectory), request.TimeoutSeconds), ct,
                 pathGuard: path => { paths.Require(path); });
             return new ProfileReplayResponse(result.SchemaVersion,
                 paths.Require(result.RunDirectory), paths.Require(result.AnalysisFile));
@@ -106,8 +106,8 @@ public sealed partial class DoctorSession
             var corpus = request.CorpusDirectory is null ? null : paths.Require(request.CorpusDirectory);
             string? run = null;
             var code = await CampaignService.FuzzRunAsync(new FuzzRunOptions(build, request.Layer,
-                request.Backend, corpus, output, request.Configuration, request.DurationSeconds,
-                request.InputTimeoutSeconds, request.MaxLength, request.ReplayOnly), ct,
+                    request.Backend, corpus, output, request.Configuration, request.DurationSeconds,
+                    request.InputTimeoutSeconds, request.MaxLength, request.ReplayOnly), ct,
                 directory => run = paths.Require(directory),
                 path => { paths.Require(path); });
             return Result("fuzz-run", code, run);

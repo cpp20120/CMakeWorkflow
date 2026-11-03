@@ -14,16 +14,20 @@ public sealed class MacInstrumentsBackend(IProfileProcess process) : IProfilerBa
         var template = request.Mode switch
         {
             "cpu" => "Time Profiler", "scheduler" => "System Trace",
-            "allocations" => "Allocations", _ => throw new ArgumentException($"Unsupported Instruments mode: {request.Mode}")
+            "allocations" => "Allocations",
+            _ => throw new ArgumentException($"Unsupported Instruments mode: {request.Mode}")
         };
         var raw = Path.Combine(request.OutputDirectory, "traces", "raw", request.CaptureId);
         Directory.CreateDirectory(raw);
         var path = Path.Combine(raw, "run.trace");
         var targetOutput = Path.Combine(request.OutputDirectory, request.CaptureId + ".target.stdout.log");
-        var args = new List<string> { "xctrace", "record", "--template", template,
+        var args = new List<string>
+        {
+            "xctrace", "record", "--template", template,
             "--output", path, "--no-prompt", "--time-limit",
             $"{Math.Max(1, (int)Math.Ceiling(request.Timeout.TotalSeconds))}s",
-            "--target-stdout", targetOutput };
+            "--target-stdout", targetOutput
+        };
         foreach (var (key, value) in request.Environment)
             args.AddRange(["--env", key + "=" + value]);
         args.AddRange(["--launch", "--", request.Executable]);

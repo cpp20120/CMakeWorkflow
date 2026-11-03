@@ -17,7 +17,7 @@ public static class BenchmarkWorkflowBuilder
             || !Regex.IsMatch(recipe.Target, @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
             throw new ArgumentException("Benchmark target must be a valid CMake target name.");
         if (recipe.Configuration is not null && !Regex.IsMatch(recipe.Configuration,
-            @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
+                @"^[A-Za-z0-9_.+\-]+$", RegexOptions.CultureInvariant))
             throw new ArgumentException("Benchmark configuration is invalid.");
         if (recipe.Repeats is < 1 or > 1000)
             throw new ArgumentException("Benchmark repeats must be between 1 and 1000.");
@@ -40,6 +40,7 @@ public static class BenchmarkWorkflowBuilder
                 Resources = ["measurement-host"]
             });
         }
+
         return new WorkflowDocument
         {
             SchemaVersion = 2,

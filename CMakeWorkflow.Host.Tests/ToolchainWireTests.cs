@@ -15,6 +15,7 @@ internal static class ToolchainWireTests
     private sealed class FakeToolchainProvider(WorkflowToolchainRuntime runtime) : IWorkflowToolchainProvider
     {
         public int Calls { get; private set; }
+
         public Task<WorkflowToolchainRuntime> ResolveAsync(WorkflowToolchainBinding binding, CancellationToken ct)
         {
             Calls++;
@@ -39,15 +40,15 @@ internal static class ToolchainWireTests
             // Raw multiline literals may already contain CRLF after Windows checkout.
             // Normalize before converting to batch CRLF; avoid producing CRCRLF.
             await File.WriteAllTextAsync(script, """
-                @echo off
-                rem cmd.exe treats '=' as a separator in positional batch arguments.
-                rem %~2 therefore contains '-arch', not '-arch=x64'. Capture
-                rem %* instead: it preserves the original option syntax.
-                > "%~dp0received-arguments.txt" echo %*
-                set "VSCMD_VER=smoke"
-                set "VCToolsInstallDir=C:\Fake\MSVC\"
-                exit /b 0
-                """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
+                                                 @echo off
+                                                 rem cmd.exe treats '=' as a separator in positional batch arguments.
+                                                 rem %~2 therefore contains '-arch', not '-arch=x64'. Capture
+                                                 rem %* instead: it preserves the original option syntax.
+                                                 > "%~dp0received-arguments.txt" echo %*
+                                                 set "VSCMD_VER=smoke"
+                                                 set "VCToolsInstallDir=C:\Fake\MSVC\"
+                                                 exit /b 0
+                                                 """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
             var snapshot = await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
             const string expectedArguments =
                 "-no_logo -arch=x64 -host_arch=x64 -winsdk=10.0.26100.0 -vcvars_ver=14.51.36231";
@@ -55,15 +56,15 @@ internal static class ToolchainWireTests
             Check(string.Equals(capturedArguments, expectedArguments, StringComparison.Ordinal),
                 $"cmd.exe changed VsDevCmd arguments: received [{capturedArguments}]; expected [{expectedArguments}].");
             Check(snapshot.VisibleVariables.GetValueOrDefault("VSCMD_VER") == "smoke"
-                && snapshot.VisibleVariables.GetValueOrDefault("VCToolsInstallDir") == @"C:\Fake\MSVC\"
-                && !string.IsNullOrWhiteSpace(snapshot.Fingerprint),
+                  && snapshot.VisibleVariables.GetValueOrDefault("VCToolsInstallDir") == @"C:\Fake\MSVC\"
+                  && !string.IsNullOrWhiteSpace(snapshot.Fingerprint),
                 "cmd.exe quoted VsDevCmd activation did not return to `set` or lost pinned versions.");
 
             await File.WriteAllTextAsync(script, """
-                @echo off
-                echo [ERROR:smoke] Expected diagnostic from failing batch 1>&2
-                exit /b 19
-                """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
+                                                 @echo off
+                                                 echo [ERROR:smoke] Expected diagnostic from failing batch 1>&2
+                                                 exit /b 19
+                                                 """.Replace("\r\n", "\n").Replace("\n", "\r\n"), ct);
             try
             {
                 await WindowsToolchains.InspectEnvironmentAsync(inventory, request, ct);
@@ -72,8 +73,8 @@ internal static class ToolchainWireTests
             catch (InvalidOperationException error)
             {
                 Check(error.Message.Contains("exit 19", StringComparison.Ordinal)
-                    && error.Message.Contains("[ERROR:smoke]", StringComparison.Ordinal)
-                    && !error.Message.Contains("PATH=", StringComparison.OrdinalIgnoreCase),
+                      && error.Message.Contains("[ERROR:smoke]", StringComparison.Ordinal)
+                      && !error.Message.Contains("PATH=", StringComparison.OrdinalIgnoreCase),
                     "VsDevCmd failure lost diagnostics or exposed environment variables.");
             }
         }
@@ -98,7 +99,7 @@ internal static class ToolchainWireTests
         var chosen = WindowsToolchains.Resolve(inventory, new(CompilerCandidateId: compiler.Id,
             SdkCandidateId: sdk.Id));
         Check(chosen.Status == "resolved" && chosen.EnvironmentProfileId == "vs:one"
-            && chosen.CMake?.Provider == "path" && chosen.Ninja?.Provider == "path",
+                                          && chosen.CMake?.Provider == "path" && chosen.Ninja?.Provider == "path",
             "Resolver must combine standalone tools with MSVC developer environment.");
         // PATH order must not promote MinGW or an unconfigured LLVM install
         // ahead of an MSVC installation with a known developer environment.
@@ -115,9 +116,10 @@ internal static class ToolchainWireTests
             "GNU-only Windows PATH must not satisfy automatic toolchain resolution.");
         var explicitGnu = WindowsToolchains.Resolve(mixed, new(CompilerCandidateId: mingw.Id));
         Check(explicitGnu.Status == "resolved" && explicitGnu.Compiler?.Id == mingw.Id
-            && explicitGnu.Sdk is null && explicitGnu.EnvironmentProfileId is null,
+                                               && explicitGnu.Sdk is null && explicitGnu.EnvironmentProfileId is null,
             "Explicit GNU toolchain must remain separate from VS/Windows SDK.");
-        var bareClang = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, looseClang, sdk] }, new());
+        var bareClang =
+            WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, looseClang, sdk] }, new());
         Check(bareClang.Status == "incomplete", "Unactivated Windows clang++ must not be treated as configured.");
         var missingSdk = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, compiler] },
             new(CompilerCandidateId: compiler.Id));
@@ -128,14 +130,22 @@ internal static class ToolchainWireTests
                 EnvironmentProfileId: "vs:two"));
             throw new Exception("Mixed VS instances were accepted.");
         }
-        catch (ArgumentException) { }
+        catch (ArgumentException)
+        {
+        }
+
         try
         {
             WindowsToolchains.Resolve(inventory, new(CompilerCandidateId: "arbitrary-client-path"));
             throw new Exception("Arbitrary candidate ID was accepted.");
         }
-        catch (ArgumentException) { }
-        var visible = WindowsToolchains.ParseVisibleEnvironment("SECRET_TOKEN=abc\r\nVSCMD_VER=17.0\r\nINCLUDE=C:\\include\r\nPATH=C:\\bin\r\n");
+        catch (ArgumentException)
+        {
+        }
+
+        var visible =
+            WindowsToolchains.ParseVisibleEnvironment(
+                "SECRET_TOKEN=abc\r\nVSCMD_VER=17.0\r\nINCLUDE=C:\\include\r\nPATH=C:\\bin\r\n");
         Check(!visible.ContainsKey("SECRET_TOKEN") && visible.Count == 3,
             "Environment inspection exposed inherited secrets.");
         Check(WindowsToolchains.CandidateId("cmake", @"C:\Tools\CMake.exe") ==
@@ -149,7 +159,7 @@ internal static class ToolchainWireTests
         var fromManifest = JsonSerializer.Deserialize(selectionJson,
             WorkflowJson.Default.WorkflowToolchainBinding);
         Check(fromManifest?.CMakeCandidateId == cmake.Id &&
-            fromManifest.CompilerCandidateId == compiler.Id,
+              fromManifest.CompilerCandidateId == compiler.Id,
             "Documented workflow cmakeCandidateId was rejected by strict JSON deserializer.");
         Check(JsonSerializer.Serialize(fromManifest, WorkflowJson.Default.WorkflowToolchainBinding)
                 .Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
@@ -165,7 +175,7 @@ internal static class ToolchainWireTests
             new WorkflowToolchainBinding(CMakeCandidateId: cmake.Id),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         Check(clientSelection.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal) &&
-            clientPreparation.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
+              clientPreparation.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
             "Client SDK must use documented cmakeCandidateId for discovery and preparation.");
 
         // A selected toolchain is part of the manifest and checkpoint identity,
@@ -174,9 +184,12 @@ internal static class ToolchainWireTests
             CMakeCandidateId: cmake.Id, NinjaCandidateId: ninja.Id,
             CompilerCandidateId: compiler.Id, SdkCandidateId: sdk.Id,
             EnvironmentProfileId: "vs:one");
-        var manifest = new WorkflowDocument { SchemaVersion = 2, Contexts =
-            { ["main"] = new WorkflowContext { BuildDirectory = workspace, Toolchain = bound } },
-            Nodes = [new WorkflowNode { Id = "inspect", Kind = "inspect", Context = "main" }] };
+        var manifest = new WorkflowDocument
+        {
+            SchemaVersion = 2, Contexts =
+                { ["main"] = new WorkflowContext { BuildDirectory = workspace, Toolchain = bound } },
+            Nodes = [new WorkflowNode { Id = "inspect", Kind = "inspect", Context = "main" }]
+        };
         var roundtrip = JsonSerializer.Deserialize(
             JsonSerializer.Serialize(manifest, WorkflowJson.Default.WorkflowDocument),
             WorkflowJson.Default.WorkflowDocument);
@@ -210,16 +223,21 @@ internal static class ToolchainWireTests
             "One physical build tree created multiple toolchain environments.");
         var identities = WorkflowToolchainAdmission.Identities(resolved);
         Check(identities.Single().Fingerprint == runtime.Fingerprint &&
-            !JsonSerializer.Serialize(identities).Contains("secret-not-in-persisted-identity", StringComparison.Ordinal),
+              !JsonSerializer.Serialize(identities)
+                  .Contains("secret-not-in-persisted-identity", StringComparison.Ordinal),
             "Execution identity leaked environment variables.");
         WorkflowToolchainAdmission.RequireSameIdentity(identities, resolved);
         try
         {
             WorkflowToolchainAdmission.RequireSameIdentity(identities,
-                new Dictionary<string, WorkflowToolchainRuntime> { [workspace] = runtime with { Fingerprint = "changed" } });
+                new Dictionary<string, WorkflowToolchainRuntime>
+                    { [workspace] = runtime with { Fingerprint = "changed" } });
             throw new Exception("Resume accepted changed toolchain fingerprint.");
         }
-        catch (InvalidDataException) { }
+        catch (InvalidDataException)
+        {
+        }
+
         var oldCache = Path.Combine(workspace, "toolchain-verification-build");
         Directory.CreateDirectory(oldCache);
         File.WriteAllText(Path.Combine(oldCache, "CMakeCache.txt"),
@@ -231,14 +249,17 @@ internal static class ToolchainWireTests
                 runtime with { Compiler = Path.Combine(oldCache, "other-compiler.exe") });
             throw new Exception("Configured build tree was silently rebound to another compiler.");
         }
-        catch (InvalidOperationException) { }
+        catch (InvalidOperationException)
+        {
+        }
 
         if (OperatingSystem.IsWindows())
             await CheckWindowsDeveloperCommandAsync(workspace, ct);
 
         using var wire = await LocalTransport.ConnectAsync(endpoint, ct);
         using var rpc = HostConnection.Create(wire);
-        var host = rpc.Attach<IHostRpc>(); rpc.StartListening();
+        var host = rpc.Attach<IHostRpc>();
+        rpc.StartListening();
         var hello = await host.InitializeAsync(new(1, workspace), ct);
         Check(hello.Capabilities.Contains("toolchains/discover") &&
               hello.Capabilities.Contains("toolchains/resolve") &&
@@ -246,7 +267,8 @@ internal static class ToolchainWireTests
         var discovered = await host.ToolchainsDiscoverAsync(new(), ct);
         Check(discovered.SchemaVersion == 1, "Invalid inventory schema.");
         Check(discovered.Candidates.All(x => !string.IsNullOrWhiteSpace(x.Id) &&
-            System.IO.Path.IsPathFullyQualified(x.Path)), "Discovery returned unqualified candidates.");
+                                             System.IO.Path.IsPathFullyQualified(x.Path)),
+            "Discovery returned unqualified candidates.");
         var resolution = await host.ToolchainsResolveAsync(new(new()), ct);
         Check(resolution.SchemaVersion == 1, "Invalid resolution schema.");
         if (!OperatingSystem.IsWindows())
@@ -261,9 +283,10 @@ internal static class ToolchainWireTests
             catch (RemoteInvocationException ex)
             {
                 Check(ex.ErrorCode == 1001 && ex.DeserializedErrorData is ApplicationError a
-                    && a.Code == "unsupported_platform", "Missing stable refusal code.");
+                                           && a.Code == "unsupported_platform", "Missing stable refusal code.");
             }
         }
+
         await using var sdkClient = await ClientSdk.CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct);
         var sdkInventory = await sdkClient.Toolchains.DiscoverAsync(ct);
         Check(sdkInventory.Candidates.Count == discovered.Candidates.Count, "SDK discovery differs from Host.");

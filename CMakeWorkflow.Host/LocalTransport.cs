@@ -26,10 +26,13 @@ public static class LocalTransport
         // Caller creates a dedicated private directory. Never chmod a user's
         // existing directory, and never unlink a stale or unrelated socket.
         if (!Directory.Exists(directory) || new DirectoryInfo(directory).LinkTarget is not null
-            || (File.GetUnixFileMode(directory) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite
-                | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite
-                | UnixFileMode.OtherExecute)) != 0)
-            throw new ArgumentException("Unix socket parent must be an existing private directory (mode 0700), not a symlink.");
+                                         || (File.GetUnixFileMode(directory) & (UnixFileMode.GroupRead |
+                                             UnixFileMode.GroupWrite
+                                             | UnixFileMode.GroupExecute | UnixFileMode.OtherRead |
+                                             UnixFileMode.OtherWrite
+                                             | UnixFileMode.OtherExecute)) != 0)
+            throw new ArgumentException(
+                "Unix socket parent must be an existing private directory (mode 0700), not a symlink.");
     }
 
     public static async Task<Stream> ConnectAsync(string endpoint, CancellationToken ct)
@@ -38,12 +41,29 @@ public static class LocalTransport
         {
             var pipe = new NamedPipeClientStream(".", PipeName(endpoint), PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            try { await pipe.ConnectAsync(ct); return pipe; }
-            catch { pipe.Dispose(); throw; }
+            try
+            {
+                await pipe.ConnectAsync(ct);
+                return pipe;
+            }
+            catch
+            {
+                pipe.Dispose();
+                throw;
+            }
         }
+
         ValidateUnixEndpoint(endpoint);
         var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        try { await socket.ConnectAsync(new UnixDomainSocketEndPoint(endpoint), ct); return new NetworkStream(socket, ownsSocket: true); }
-        catch { socket.Dispose(); throw; }
+        try
+        {
+            await socket.ConnectAsync(new UnixDomainSocketEndPoint(endpoint), ct);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 }

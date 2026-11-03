@@ -43,8 +43,8 @@ internal static class DurableCancellationWireTests
             // the durable terminal outcome is committed; terminal cancellation
             // returns Requested=false because it does not create a new intent.
             Check(retry.Revision == 1 &&
-                (retry is { State: "cancel_requested", Requested: true } or
-                          { State: "canceled", Requested: false }),
+                  (retry is { State: "cancel_requested", Requested: true } or
+                      { State: "canceled", Requested: false }),
                 "Cancellation intent was not idempotent across finalization.");
             var found = await client.OperationFindAsync(new(fixture.Request.ClientRequestId), ct);
             Check(found.OperationId == operationId && found.State is "cancel_requested" or "canceled",
@@ -59,7 +59,7 @@ internal static class DurableCancellationWireTests
             rpc.StartListening();
             await client.InitializeAsync(new(1, fixture.Workspace), ct);
             await WaitForAsync(async () =>
-                (await client.OperationGetAsync(new(operationId), ct)).State == "canceled",
+                    (await client.OperationGetAsync(new(operationId), ct)).State == "canceled",
                 TimeSpan.FromSeconds(20), ct);
             var terminal = await client.OperationGetAsync(new(operationId), ct);
             Check(terminal.State == "canceled", "External process did not reach terminal canceled.");
@@ -70,15 +70,17 @@ internal static class DurableCancellationWireTests
             Check(replay.OperationId == operationId && replay.State == "canceled",
                 "Retry after cancellation created an execution or hid terminal state.");
         }
+
         var before = fixture.Lines();
         Check(before.SequenceEqual(["started"]),
             "Cancellation did not terminate the external effect before its finished marker.");
         using (var store = new DurableAcceptanceStore(fixture.Workspace, readOnly: true))
         {
             Check(store.Get(operationId)?.State == "canceled" &&
-                store.GetFinalization(operationId) is { State: "canceled", ExitCode: 130 },
+                  store.GetFinalization(operationId) is { State: "canceled", ExitCode: 130 },
                 "Canceled report and durable finalization diverged.");
         }
+
         await Task.Delay(250, ct);
         Check(fixture.Lines().SequenceEqual(before), "Process continued producing effects after terminal cancel.");
 
@@ -106,7 +108,7 @@ internal static class DurableCancellationWireTests
             using var store = new DurableAcceptanceStore(race.Workspace, readOnly: true);
             var finalization = store.GetFinalization(accepted.OperationId);
             Check(finalization is not null && finalization.State == terminal.State &&
-                (terminal.State == "succeeded" ? finalization.ExitCode == 0 : finalization.ExitCode == 130),
+                  (terminal.State == "succeeded" ? finalization.ExitCode == 0 : finalization.ExitCode == 130),
                 "Cancellation/finalization race has inconsistent terminal report.");
             var again = await client.OperationCancelAsync(new(accepted.OperationId, decision.Revision), ct);
             Check(!again.Requested && again.State == terminal.State,
@@ -125,7 +127,7 @@ internal static class DurableCancellationWireTests
             await client.InitializeAsync(new(1, success.Workspace), ct);
             var accepted = await client.WorkflowStartAsync(success.Request, ct);
             await WaitForAsync(async () =>
-                (await client.OperationGetAsync(new(accepted.OperationId), ct)).State == "succeeded",
+                    (await client.OperationGetAsync(new(accepted.OperationId), ct)).State == "succeeded",
                 TimeSpan.FromSeconds(15), ct);
             var noOp = await client.OperationCancelAsync(new(accepted.OperationId, 0), ct);
             Check(noOp.State == "succeeded" && noOp.Revision == 0 && !noOp.Requested,
@@ -133,7 +135,9 @@ internal static class DurableCancellationWireTests
             Check(success.Lines().SequenceEqual(["started", "finished"]),
                 "Completed workflow effects changed after cancel.");
         }
-        Console.WriteLine("Operations/cancel JSON-RPC suite passed: live process termination, reconnect, CAS retry, durable canceled, finalization race and terminal no-op.");
+
+        Console.WriteLine(
+            "Operations/cancel JSON-RPC suite passed: live process termination, reconnect, CAS retry, durable canceled, finalization race and terminal no-op.");
     }
 
     private static async Task WaitForAsync(Func<bool> predicate, TimeSpan timeout, CancellationToken ct)
@@ -166,7 +170,7 @@ internal static class DurableCancellationWireTests
             // writer may briefly deny readers even though the file exists.
             // Retrying only sharing/lock violations preserves all assertions
             // about post-cancellation effects and exactly-once dispatch.
-            for (var attempt = 0; ; attempt++)
+            for (var attempt = 0;; attempt++)
             {
                 try
                 {
@@ -176,16 +180,20 @@ internal static class DurableCancellationWireTests
                     return reader.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries)
                         .Select(line => line.TrimEnd('\r')).ToArray();
                 }
-                catch (FileNotFoundException) { return []; }
+                catch (FileNotFoundException)
+                {
+                    return [];
+                }
                 catch (IOException error) when (OperatingSystem.IsWindows()
-                    && ((error.HResult & 0xffff) is 32 or 33) && attempt < 25)
+                                                && ((error.HResult & 0xffff) is 32 or 33) && attempt < 25)
                 {
                     Thread.Sleep(20);
                 }
             }
         }
 
-        public static async Task<Fixture> CreateAsync(string parent, string name, int delaySeconds, CancellationToken ct)
+        public static async Task<Fixture> CreateAsync(string parent, string name, int delaySeconds,
+            CancellationToken ct)
         {
             var workspace = Path.Combine(parent, "cancel wire " + name + " " + Guid.NewGuid().ToString("N"));
             var source = Path.Combine(workspace, "source");
@@ -220,10 +228,11 @@ internal static class DurableCancellationWireTests
                     throw new Exception("Cancellation fixture configuration failed: " + await stdout + await stderr);
                 await Task.WhenAll(stdout, stderr);
             }
+
             var document = JsonNode.Parse("""
-                {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                 "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                """)!;
+                                          {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                           "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                          """)!;
             document["contexts"]!["w"]!["buildDirectory"] = build;
             var manifest = Path.Combine(workspace, "workflow.json");
             var bytes = Encoding.UTF8.GetBytes(document.ToJsonString());

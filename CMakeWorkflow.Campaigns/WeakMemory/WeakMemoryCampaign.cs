@@ -27,8 +27,10 @@ public static class WeakMemoryCampaign
             ["execution_depth_limit"] = 200,
             ["sources"] = new JsonObject(), ["checks"] = new JsonObject()
         };
+
         async Task Save() => await File.WriteAllTextAsync(reportPath,
             report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
+
         var temporary = Path.Combine(Path.GetTempPath(), "dagflow-weak-memory-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
         try
@@ -43,7 +45,7 @@ public static class WeakMemoryCampaign
             var variants = chosen.ToDictionary(name => name, name => generator.Generate(name),
                 StringComparer.Ordinal);
             if (mutant is not null && !variants.Values.SelectMany(items => items)
-                .Any(item => item.Name == mutant && mutant != "baseline"))
+                    .Any(item => item.Name == mutant && mutant != "baseline"))
                 throw new ArgumentException($"Unknown mutant for protocol '{protocol}': {mutant}");
             foreach (var protocolName in chosen)
             {
@@ -54,8 +56,11 @@ public static class WeakMemoryCampaign
                 {
                     "parking" => ["tests/weak_memory/parking_fixture.hpp"],
                     "idle_accounting" => ["tests/weak_memory/idle_accounting_fixture.hpp"],
-                    "shutdown" => ["tests/weak_memory/idle_accounting_fixture.hpp",
-                        "tests/weak_memory/shutdown_fixture.hpp"],
+                    "shutdown" =>
+                    [
+                        "tests/weak_memory/idle_accounting_fixture.hpp",
+                        "tests/weak_memory/shutdown_fixture.hpp"
+                    ],
                     _ => Array.Empty<string>()
                 }).Distinct(StringComparer.Ordinal);
                 foreach (var source in sourceFiles)
@@ -63,6 +68,7 @@ public static class WeakMemoryCampaign
                     var current = await CommandExecution.Sha256Async(Path.Combine(sourceRoot, source), ct);
                     ((JsonObject)report["sources"]!)[source] = current;
                 }
+
                 await Save();
                 foreach (var variant in variants[protocolName])
                 {
@@ -76,9 +82,11 @@ public static class WeakMemoryCampaign
                     var binary = Path.Combine(temporary, protocolName + "-" + name);
                     var test = Path.Combine(sourceRoot, "tests/weak_memory", protocolName + "_relacy_tests.cpp");
                     var build = await CommandExecution.RunAsync(compiler,
-                        ["-std=c++23", "-O2", "-pthread", "-I", relacyRoot, "-I", temporary,
-                         "-I", Path.Combine(sourceRoot, "include"), "-I",
-                         Path.Combine(sourceRoot, "tests/weak_memory"), test, "-o", binary],
+                        [
+                            "-std=c++23", "-O2", "-pthread", "-I", relacyRoot, "-I", temporary,
+                            "-I", Path.Combine(sourceRoot, "include"), "-I",
+                            Path.Combine(sourceRoot, "tests/weak_memory"), test, "-o", binary
+                        ],
                         sourceRoot, TimeSpan.FromSeconds(timeoutSeconds), null, ct);
                     if (build.TimedOut || build.ExitCode != 0)
                     {
@@ -90,6 +98,7 @@ public static class WeakMemoryCampaign
                         await Save();
                         return 2;
                     }
+
                     foreach (var suite in variant.Suites)
                     {
                         var suiteName = suite.Name;
@@ -109,13 +118,18 @@ public static class WeakMemoryCampaign
                             "DEADLOCK" => 87, _ => -1
                         };
                         var passed = !result.TimedOut && config.Success && expected.Contains(status)
-                            && result.ExitCode == code;
-                        var kind = name == "baseline" ? "baseline" : expected.SequenceEqual(["SUCCESS"])
-                            ? "survivor-control" : "counterexample";
+                                     && result.ExitCode == code;
+                        var kind = name == "baseline"
+                            ? "baseline"
+                            : expected.SequenceEqual(["SUCCESS"])
+                                ? "survivor-control"
+                                : "counterexample";
                         ((JsonObject)report["checks"]!)[$"{protocolName}/{name}/{suiteName}"] = new JsonObject
                         {
                             ["kind"] = kind, ["matched_expectation"] = passed,
-                            ["status"] = status, ["expected"] = new JsonArray(expected.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()),
+                            ["status"] = status,
+                            ["expected"] =
+                                new JsonArray(expected.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()),
                             ["exit_code"] = result.ExitCode,
                             ["executions"] = match.Success ? int.Parse(match.Groups[2].Value) : null,
                             ["search"] = config.Success ? config.Groups[1].Value : null,
@@ -124,11 +138,13 @@ public static class WeakMemoryCampaign
                             ["adapter"] = Path.GetFileName(artifact), ["output"] = result.Output
                         };
                         await Save();
-                        Console.WriteLine($"{protocolName}/{name}/{suiteName}: {(passed ? "PASS" : "FAIL")} ({kind}: {status})");
+                        Console.WriteLine(
+                            $"{protocolName}/{name}/{suiteName}: {(passed ? "PASS" : "FAIL")} ({kind}: {status})");
                         if (!passed) return 1;
                     }
                 }
             }
+
             Console.WriteLine($"Report: {reportPath}");
             return 0;
         }

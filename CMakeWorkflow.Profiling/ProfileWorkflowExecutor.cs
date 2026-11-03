@@ -20,16 +20,21 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : I
         var mode = operation.Options.GetValueOrDefault("mode", "cpu");
         var timeout = TimeSpan.FromSeconds(double.TryParse(
             operation.Options.GetValueOrDefault("captureTimeoutSeconds"), out var seconds) && seconds > 0
-            ? seconds : 300);
+            ? seconds
+            : 300);
         var backend = SelectBackend(backendName);
         if (!backend.Capabilities.Modes.Contains(mode))
-            throw new InvalidOperationException($"Backend {backend.Capabilities.Backend} does not support mode {mode}.");
+            throw new InvalidOperationException(
+                $"Backend {backend.Capabilities.Backend} does not support mode {mode}.");
         if (operation.RequiredProfiler is { } required
             && (required.Backend != backend.Capabilities.Backend || required.Mode != mode
-                || required.EventSource is { } eventSource && eventSource != backend.Capabilities.EventSource))
+                                                                 || required.EventSource is { } eventSource &&
+                                                                 eventSource != backend.Capabilities.EventSource))
             throw new InvalidOperationException("Required profiler capabilities are unavailable on this host.");
-        if (operation.CpuSet is not null && (backend.Capabilities.Backend != "perf" || operation.CpuAffinityLauncher is null))
-            throw new InvalidOperationException("Required CPU affinity cannot be guaranteed for this profiler backend.");
+        if (operation.CpuSet is not null &&
+            (backend.Capabilities.Backend != "perf" || operation.CpuAffinityLauncher is null))
+            throw new InvalidOperationException(
+                "Required CPU affinity cannot be guaranteed for this profiler backend.");
         var request = new ProfileRequest(operation.Executable, operation.Arguments,
             operation.WorkingDirectory, operation.Environment, operation.OutputDirectory,
             operation.NodeId, mode, timeout, operation.CpuSet, operation.CpuAffinityLauncher);
@@ -90,7 +95,8 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
             ["requiredCpuSet"] = request.CpuSet,
             ["cpuAffinityLauncher"] = request.CpuAffinityLauncher,
             ["startedAt"] = startedAt.ToString("O"),
-            ["metricComparability"] = "Backend-specific units and attribution; no cross-platform equivalence is asserted."
+            ["metricComparability"] =
+                "Backend-specific units and attribution; no cross-platform equivalence is asserted."
         };
         await File.WriteAllTextAsync(Path.Combine(outputDirectory, captureId + ".manifest.json"),
             manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
@@ -154,13 +160,14 @@ public static class ProfileArtifactHash
         if (!Directory.Exists(path)) throw new FileNotFoundException("Profile artifact is missing.", path);
         using var tree = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories)
-            .Order(StringComparer.Ordinal))
+                     .Order(StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
             var relative = Path.GetRelativePath(path, file).Replace('\\', '/');
             var fileHash = await CommandExecution.Sha256Async(file, ct);
             tree.AppendData(Encoding.UTF8.GetBytes(relative + "\0" + fileHash + "\n"));
         }
+
         return Convert.ToHexString(tree.GetHashAndReset()).ToLowerInvariant();
     }
 }

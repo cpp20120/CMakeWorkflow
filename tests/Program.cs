@@ -6,13 +6,16 @@ internal static class Program
     {
         if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] != "--recovery")
         {
-            Console.Error.WriteLine("Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery]");
+            Console.Error.WriteLine(
+                "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery]");
             return 2;
         }
+
         TestHarness.Cli = Path.GetFullPath(args[0]);
         var directory = Directory.GetCurrentDirectory();
         while (!File.Exists(Path.Combine(directory, "CMakeWorkflow.csproj")))
-            directory = Directory.GetParent(directory)?.FullName ?? throw new Exception("Run tests inside the standalone project tree.");
+            directory = Directory.GetParent(directory)?.FullName ??
+                        throw new Exception("Run tests inside the standalone project tree.");
         TestHarness.Root = directory;
         var previousHistory = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB");
         var historyDatabase = Path.Combine(Path.GetTempPath(),
@@ -26,6 +29,7 @@ internal static class Program
                 Console.WriteLine("All recovery fault-injection checks passed.");
                 return 0;
             }
+
             ReportTests.Run();
             BenchmarkRecipeTests.Run();
             TypedRecipeIntegrationTests.Run();

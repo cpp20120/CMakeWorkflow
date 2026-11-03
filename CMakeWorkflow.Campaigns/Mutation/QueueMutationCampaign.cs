@@ -25,8 +25,11 @@ public static class QueueMutationCampaign
         var source = await File.ReadAllTextAsync(header, ct);
         var variants = new[] { ("baseline", source) }.Concat(Mutants.Select(x =>
             (x.Name, Mutate(source, x.Name, x.Before, x.After))));
-        var report = new JsonObject { ["compiler"] = compiler, ["seed"] = seed,
-            ["cases"] = cases, ["steps"] = steps, ["results"] = new JsonObject() };
+        var report = new JsonObject
+        {
+            ["compiler"] = compiler, ["seed"] = seed,
+            ["cases"] = cases, ["steps"] = steps, ["results"] = new JsonObject()
+        };
         var temporary = Path.Combine(Path.GetTempPath(), "dagflow-queue-mutations-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
         try
@@ -38,15 +41,18 @@ public static class QueueMutationCampaign
                 await File.WriteAllTextAsync(Path.Combine(overlay, "ring_mpmc.hpp"), text, ct);
                 var binary = Path.Combine(temporary, name, "history_tests");
                 var build = await CommandExecution.RunAsync(compiler,
-                    ["-std=c++23", "-O0", "-pthread", "-I", Path.Combine(temporary, name, "include"),
-                     "-I", Path.Combine(sourceRoot, "include"), "-I", Path.Combine(sourceRoot, "tests"),
-                     Path.Combine(sourceRoot, "tests/concurrent_history_property_tests.cpp"), "-o", binary],
+                    [
+                        "-std=c++23", "-O0", "-pthread", "-I", Path.Combine(temporary, name, "include"),
+                        "-I", Path.Combine(sourceRoot, "include"), "-I", Path.Combine(sourceRoot, "tests"),
+                        Path.Combine(sourceRoot, "tests/concurrent_history_property_tests.cpp"), "-o", binary
+                    ],
                     sourceRoot, TimeSpan.FromSeconds(90), null, ct);
                 if (build.TimedOut || build.ExitCode != 0)
                 {
                     Console.Error.WriteLine($"{name}: COMPILE_ERROR\n{build.Output}");
                     return 2;
                 }
+
                 var result = await CommandExecution.RunAsync(binary, [], sourceRoot,
                     TimeSpan.FromSeconds(timeoutSeconds), new Dictionary<string, string?>
                     {
@@ -63,6 +69,7 @@ public static class QueueMutationCampaign
                 Console.WriteLine($"{name}: {status}");
                 if (name == "baseline" && status != "PASS") return 2;
             }
+
             var outcomes = (JsonObject)report["results"]!;
             var killed = Mutants.Count(x => outcomes[x.Name]?["status"]?.GetValue<string>() == "KILLED(assertion)");
             return outcomes["baseline"]?["status"]?.GetValue<string>() == "PASS" && killed == Mutants.Length ? 0 : 1;

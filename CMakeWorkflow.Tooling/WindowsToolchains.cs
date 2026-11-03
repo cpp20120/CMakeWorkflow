@@ -9,27 +9,64 @@ namespace CMakeWorkflow.Tooling;
 
 // Discovery is evidence, not a promise that a particular compiler/SDK ABI works.
 // Candidate IDs derive from role + canonical location; they are not client-supplied paths.
-public sealed record ToolchainCandidate(string Id, string Role, string Flavor, string Provider,
-    string Path, string? Version = null, string? VisualStudioInstanceId = null,
+public sealed record ToolchainCandidate(
+    string Id,
+    string Role,
+    string Flavor,
+    string Provider,
+    string Path,
+    string? Version = null,
+    string? VisualStudioInstanceId = null,
     string? EnvironmentProfileId = null);
-public sealed record VisualStudioInstance(string Id, string Name, string Version,
-    string InstallationPath, string? DeveloperCommandPath);
-public sealed record ToolchainInventory(int SchemaVersion, string Platform,
-    List<VisualStudioInstance> VisualStudio, List<ToolchainCandidate> Candidates,
+
+public sealed record VisualStudioInstance(
+    string Id,
+    string Name,
+    string Version,
+    string InstallationPath,
+    string? DeveloperCommandPath);
+
+public sealed record ToolchainInventory(
+    int SchemaVersion,
+    string Platform,
+    List<VisualStudioInstance> VisualStudio,
+    List<ToolchainCandidate> Candidates,
     List<string> Diagnostics);
+
 public sealed record ToolchainSelection(
-    [property: JsonPropertyName("cmakeCandidateId")] string? CMakeCandidateId = null,
+    [property: JsonPropertyName("cmakeCandidateId")]
+    string? CMakeCandidateId = null,
     string? NinjaCandidateId = null,
-    string? CompilerCandidateId = null, string? SdkCandidateId = null,
-    string? EnvironmentProfileId = null, string Generator = "Ninja");
-public sealed record ToolchainResolution(int SchemaVersion, string Status,
-    ToolchainCandidate? CMake, ToolchainCandidate? Ninja, ToolchainCandidate? Compiler,
-    ToolchainCandidate? Sdk, string? EnvironmentProfileId, List<string> Diagnostics);
-public sealed record DeveloperEnvironmentRequest(string EnvironmentProfileId, string HostArchitecture = "x64",
-    string TargetArchitecture = "x64", string? WindowsSdkVersion = null, string? ToolsetVersion = null);
-public sealed record DeveloperEnvironmentSnapshot(int SchemaVersion, string EnvironmentProfileId,
-    string HostArchitecture, string TargetArchitecture, string Fingerprint,
-    Dictionary<string, string> VisibleVariables, List<string> Diagnostics);
+    string? CompilerCandidateId = null,
+    string? SdkCandidateId = null,
+    string? EnvironmentProfileId = null,
+    string Generator = "Ninja");
+
+public sealed record ToolchainResolution(
+    int SchemaVersion,
+    string Status,
+    ToolchainCandidate? CMake,
+    ToolchainCandidate? Ninja,
+    ToolchainCandidate? Compiler,
+    ToolchainCandidate? Sdk,
+    string? EnvironmentProfileId,
+    List<string> Diagnostics);
+
+public sealed record DeveloperEnvironmentRequest(
+    string EnvironmentProfileId,
+    string HostArchitecture = "x64",
+    string TargetArchitecture = "x64",
+    string? WindowsSdkVersion = null,
+    string? ToolsetVersion = null);
+
+public sealed record DeveloperEnvironmentSnapshot(
+    int SchemaVersion,
+    string EnvironmentProfileId,
+    string HostArchitecture,
+    string TargetArchitecture,
+    string Fingerprint,
+    Dictionary<string, string> VisibleVariables,
+    List<string> Diagnostics);
 
 public static class WindowsToolchains
 {
@@ -50,8 +87,12 @@ public static class WindowsToolchains
         foreach (var item in document.RootElement.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object) continue;
+
             static string? Property(JsonElement item, string key) => item.TryGetProperty(key, out var value)
-                && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+                                                                     && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+
             var id = Property(item, "instanceId");
             var path = Property(item, "installationPath");
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
@@ -62,6 +103,7 @@ public static class WindowsToolchains
                 Property(item, "installationVersion") ?? "unknown", full,
                 File.Exists(devcmd) ? devcmd : null));
         }
+
         return result.OrderBy(x => x.Id, StringComparer.Ordinal).ToList();
     }
 
@@ -75,7 +117,9 @@ public static class WindowsToolchains
             inventory.Diagnostics.Add("Windows toolchain discovery is only available on Windows.");
             return inventory;
         }
+
         var seen = new HashSet<string>(Paths);
+
         void Add(string role, string flavor, string provider, string path, string? version = null,
             string? instanceId = null, string? environment = null)
         {
@@ -86,6 +130,7 @@ public static class WindowsToolchains
             inventory.Candidates.Add(new(CandidateId(role, full), role, flavor, provider, full,
                 version, instanceId, environment));
         }
+
         var commandMap = new (string Role, string Flavor, string Name)[]
         {
             ("cmake", "cmake", "cmake.exe"), ("ninja", "ninja", "ninja.exe"),
@@ -100,12 +145,21 @@ public static class WindowsToolchains
             ct.ThrowIfCancellationRequested();
             foreach (var (role, flavor, name) in commandMap)
             {
-                try { Add(role, flavor, "path", System.IO.Path.Combine(folder.Trim('"'), name)); }
-                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
+                try
+                {
+                    Add(role, flavor, "path", System.IO.Path.Combine(folder.Trim('"'), name));
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                }
             }
         }
-        var roots = new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) }
+
+        var roots = new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+            }
             .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(Paths);
         foreach (var root in roots)
         {
@@ -113,6 +167,7 @@ public static class WindowsToolchains
             Add("compiler", "clang-cl", "standalone", Path.Combine(root, "LLVM", "bin", "clang-cl.exe"));
             Add("cmake", "cmake", "standalone", Path.Combine(root, "CMake", "bin", "cmake.exe"));
         }
+
         var locators = roots.Select(root => Path.Combine(root, "Microsoft Visual Studio", "Installer", "vswhere.exe"))
             .Concat(pathEntries.Select(path => Path.Combine(path.Trim('"'), "vswhere.exe")))
             .Distinct(Paths);
@@ -129,13 +184,18 @@ public static class WindowsToolchains
                     inventory.Diagnostics.Add("vswhere failed (exit " + result.ExitCode + ").");
                     continue;
                 }
+
                 inventory.VisualStudio.AddRange(ParseVsWhere(result.Output));
                 break;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException
-                or InvalidDataException or System.ComponentModel.Win32Exception or TimeoutException)
-            { inventory.Diagnostics.Add("vswhere discovery failed: " + error.GetType().Name); }
+                                              or InvalidDataException or System.ComponentModel.Win32Exception
+                                              or TimeoutException)
+            {
+                inventory.Diagnostics.Add("vswhere discovery failed: " + error.GetType().Name);
+            }
         }
+
         foreach (var vs in inventory.VisualStudio)
         {
             ct.ThrowIfCancellationRequested();
@@ -153,7 +213,8 @@ public static class WindowsToolchains
                 instanceId: vs.Id);
             var vc = Path.Combine(vs.InstallationPath, "VC", "Tools", "MSVC");
             if (Directory.Exists(vc))
-                foreach (var version in Directory.EnumerateDirectories(vc).OrderByDescending(x => x, StringComparer.Ordinal))
+                foreach (var version in Directory.EnumerateDirectories(vc)
+                             .OrderByDescending(x => x, StringComparer.Ordinal))
                     Add("compiler", "msvc", "visual-studio", Path.Combine(version, "bin", "Hostx64", "x64", "cl.exe"),
                         Path.GetFileName(version), vs.Id, profile);
             var llvm = Path.Combine(vs.InstallationPath, "VC", "Tools", "Llvm", "bin");
@@ -167,6 +228,7 @@ public static class WindowsToolchains
             Add("compiler", "clang", "visual-studio", Path.Combine(llvm64, "clang++.exe"),
                 instanceId: vs.Id, environment: profile);
         }
+
         if (OperatingSystem.IsWindows())
         {
             try
@@ -177,16 +239,21 @@ public static class WindowsToolchains
                     var include = Path.Combine(kitsRoot, "Include");
                     if (Directory.Exists(include))
                         foreach (var version in Directory.EnumerateDirectories(include)
-                            .OrderByDescending(x => x, StringComparer.Ordinal))
+                                     .OrderByDescending(x => x, StringComparer.Ordinal))
                             if (Directory.Exists(Path.Combine(version, "um"))
                                 && Directory.Exists(Path.Combine(version, "ucrt"))
-                                && File.Exists(Path.Combine(kitsRoot, "Lib", Path.GetFileName(version), "um", "x64", "kernel32.lib")))
+                                && File.Exists(Path.Combine(kitsRoot, "Lib", Path.GetFileName(version), "um", "x64",
+                                    "kernel32.lib")))
                                 Add("sdk", "windows-sdk", "windows-sdk", version, Path.GetFileName(version));
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-            { inventory.Diagnostics.Add("Windows SDK registry lookup failed: " + ex.GetType().Name); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                           or System.Security.SecurityException)
+            {
+                inventory.Diagnostics.Add("Windows SDK registry lookup failed: " + ex.GetType().Name);
+            }
         }
+
         // PATH may already contain cl.exe from a VS prompt. Preserve its actual
         // installation owner so a different VS environment cannot be selected.
         for (var i = 0; i < inventory.Candidates.Count; i++)
@@ -195,7 +262,7 @@ public static class WindowsToolchains
             if (candidate.Role != "compiler" || candidate.VisualStudioInstanceId is not null) continue;
             var instance = inventory.VisualStudio.FirstOrDefault(v =>
                 candidate.Path.StartsWith(v.InstallationPath.TrimEnd(Path.DirectorySeparatorChar)
-                    + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+                                          + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
             if (instance is not null)
                 inventory.Candidates[i] = candidate with
                 {
@@ -203,6 +270,7 @@ public static class WindowsToolchains
                     EnvironmentProfileId = instance.DeveloperCommandPath is null ? null : "vs:" + instance.Id
                 };
         }
+
         inventory.Candidates.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
         return inventory;
     }
@@ -212,13 +280,16 @@ public static class WindowsToolchains
         ArgumentNullException.ThrowIfNull(inventory);
         ArgumentNullException.ThrowIfNull(selection);
         var messages = new List<string>();
-        if (inventory.Platform != "windows") return new(1, "unsupported", null, null, null, null,
-            null, ["Windows toolchain resolution is unavailable on this platform."]);
+        if (inventory.Platform != "windows")
+            return new(1, "unsupported", null, null, null, null,
+                null, ["Windows toolchain resolution is unavailable on this platform."]);
         if (string.IsNullOrWhiteSpace(selection.Generator))
             throw new ArgumentException("Generator is required.");
         var vsGenerator = selection.Generator.StartsWith("Visual Studio ", StringComparison.OrdinalIgnoreCase);
         if (selection.Generator is not ("Ninja" or "Ninja Multi-Config") && !vsGenerator)
-            throw new ArgumentException("Only Ninja, Ninja Multi-Config and Visual Studio generators are supported by this resolver.");
+            throw new ArgumentException(
+                "Only Ninja, Ninja Multi-Config and Visual Studio generators are supported by this resolver.");
+
         ToolchainCandidate? Pick(string role, string? id, bool required)
         {
             if (id is not null)
@@ -227,18 +298,25 @@ public static class WindowsToolchains
                 if (found is null) throw new ArgumentException("Unknown " + role + " candidate ID; discover again.");
                 return found;
             }
+
             // Tool locations are not compatibility policy. For the Windows
             // compiler, prefer an MSVC-ABI toolset with a known VS environment
             // over an unrelated executable that happened to occur first in PATH.
             // In particular, GNU/MinGW is never an implicit selection.
             var candidates = inventory.Candidates.Where(x => x.Role == role
-                && (role != "compiler" || x.Flavor is "msvc" or "clang-cl" or "clang")).ToArray();
+                                                             && (role != "compiler" ||
+                                                                 x.Flavor is "msvc" or "clang-cl" or "clang"))
+                .ToArray();
             var best = candidates.OrderBy(x => role == "compiler"
                     ? (x.EnvironmentProfileId is null ? 10 : 0) + (x.Flavor switch
                     {
                         "msvc" => 0, "clang-cl" => 1, "clang" => 2, _ => 9
                     })
-                    : x.Provider == "path" ? 0 : x.Provider == "standalone" ? 1 : 2)
+                    : x.Provider == "path"
+                        ? 0
+                        : x.Provider == "standalone"
+                            ? 1
+                            : 2)
                 .ThenBy(x => x.Provider == "visual-studio" ? 0 : x.Provider == "standalone" ? 1 : 2)
                 .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
             if (best is null && required) messages.Add("Missing " + role + " candidate.");
@@ -246,6 +324,7 @@ public static class WindowsToolchains
                 messages.Add("Selected " + role + " from " + best.Provider + "; alternatives are available.");
             return best;
         }
+
         var cmake = Pick("cmake", selection.CMakeCandidateId, true);
         var ninja = vsGenerator
             ? (selection.NinjaCandidateId is not null ? Pick("ninja", selection.NinjaCandidateId, false) : null)
@@ -254,32 +333,41 @@ public static class WindowsToolchains
         // A manually selected GNU toolchain is a distinct ABI environment:
         // don't silently bind the Windows SDK or a VS developer prompt to it.
         var sdk = compiler?.Flavor == "gcc" && selection.SdkCandidateId is null
-            ? null : Pick("sdk", selection.SdkCandidateId, false);
+            ? null
+            : Pick("sdk", selection.SdkCandidateId, false);
         var environment = selection.EnvironmentProfileId ?? compiler?.EnvironmentProfileId;
         if (compiler?.Flavor == "gcc" && (environment is not null || selection.SdkCandidateId is not null))
-            throw new ArgumentException("GNU/MinGW cannot be combined with a Visual Studio environment or Windows SDK in this resolver.");
+            throw new ArgumentException(
+                "GNU/MinGW cannot be combined with a Visual Studio environment or Windows SDK in this resolver.");
         if (vsGenerator && compiler?.Flavor is not ("msvc" or "clang-cl"))
             messages.Add("Visual Studio generator requires a compatible MSVC ABI toolchain; selection is unverified.");
         if (environment is not null)
         {
             var instanceId = environment.StartsWith("vs:", StringComparison.Ordinal)
-                ? environment[3..] : "";
+                ? environment[3..]
+                : "";
             if (!inventory.VisualStudio.Any(x => x.Id == instanceId && x.DeveloperCommandPath is not null))
                 throw new ArgumentException("Unknown Visual Studio environment profile.");
             if (compiler?.VisualStudioInstanceId is { } owner && owner != instanceId)
-                throw new ArgumentException("Compiler and developer environment belong to different Visual Studio instances.");
+                throw new ArgumentException(
+                    "Compiler and developer environment belong to different Visual Studio instances.");
         }
+
         if ((compiler?.Flavor is "msvc" or "clang-cl" or "clang") && environment is null)
-            messages.Add("Windows MSVC-ABI compiler requires a Visual Studio developer environment; select a matching profile.");
+            messages.Add(
+                "Windows MSVC-ABI compiler requires a Visual Studio developer environment; select a matching profile.");
         if ((compiler?.Flavor is "msvc" or "clang-cl" or "clang") && sdk is null)
             messages.Add("Windows MSVC-ABI compiler requires a Windows SDK; none was detected.");
         if (compiler?.Flavor == "clang")
-            messages.Add("clang++ target triple must be checked by CMake; this resolver assumes an explicitly activated MSVC environment.");
+            messages.Add(
+                "clang++ target triple must be checked by CMake; this resolver assumes an explicitly activated MSVC environment.");
         if (compiler?.Flavor == "gcc")
-            messages.Add("Explicit GNU/MinGW toolchain selected; no VS developer environment or Windows SDK is assumed.");
+            messages.Add(
+                "Explicit GNU/MinGW toolchain selected; no VS developer environment or Windows SDK is assumed.");
         var valid = cmake is not null && compiler is not null && (vsGenerator || ninja is not null)
-            && (!vsGenerator || compiler?.Flavor is "msvc" or "clang-cl")
-            && (compiler?.Flavor is not ("msvc" or "clang-cl" or "clang") || environment is not null && sdk is not null);
+                    && (!vsGenerator || compiler?.Flavor is "msvc" or "clang-cl")
+                    && (compiler?.Flavor is not ("msvc" or "clang-cl" or "clang") ||
+                        environment is not null && sdk is not null);
         return new(1, valid ? "resolved" : "incomplete", cmake, ninja, compiler, sdk, environment, messages);
     }
 
@@ -302,6 +390,7 @@ public static class WindowsToolchains
             var key = line[..index].Trim();
             if (Visible.Contains(key)) result[key] = line[(index + 1)..].TrimEnd('\r');
         }
+
         return result;
     }
 
@@ -320,9 +409,9 @@ public static class WindowsToolchains
             (request.ToolsetVersion.Length > 32 || request.ToolsetVersion.Any(c => !char.IsAsciiDigit(c) && c != '.')))
             throw new ArgumentException("Invalid MSVC toolset version.");
         var instance = inventory.VisualStudio.SingleOrDefault(x => "vs:" + x.Id == request.EnvironmentProfileId)
-            ?? throw new ArgumentException("Unknown developer environment profile.");
+                       ?? throw new ArgumentException("Unknown developer environment profile.");
         var devcmd = instance.DeveloperCommandPath
-            ?? throw new InvalidOperationException("Visual Studio instance has no VsDevCmd.bat.");
+                     ?? throw new InvalidOperationException("Visual Studio instance has no VsDevCmd.bat.");
         if (!File.Exists(devcmd)) throw new FileNotFoundException("Developer prompt script disappeared.", devcmd);
         var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
         if (string.IsNullOrWhiteSpace(system))
@@ -340,7 +429,7 @@ public static class WindowsToolchains
         var result = await RunBoundedAsync(start, TimeSpan.FromSeconds(20), ct);
         if (result.ExitCode != 0)
             throw new InvalidOperationException("VsDevCmd failed (exit " + result.ExitCode + "). " +
-                DeveloperCommandFailureDetails(result.Error));
+                                                DeveloperCommandFailureDetails(result.Error));
         var vars = ParseVisibleEnvironment(result.Output);
         if (!vars.ContainsKey("VSCMD_VER") || !vars.ContainsKey("VCToolsInstallDir"))
             throw new InvalidDataException("VsDevCmd returned no initialized VC environment.");
@@ -381,9 +470,9 @@ public static class WindowsToolchains
         // through Host RPC. Keep only characteristic diagnostic lines.
         var lines = stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(line => line.StartsWith("[ERROR", StringComparison.OrdinalIgnoreCase)
-                || line.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("is not recognized", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("The system cannot find", StringComparison.OrdinalIgnoreCase))
+                           || line.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase)
+                           || line.Contains("is not recognized", StringComparison.OrdinalIgnoreCase)
+                           || line.Contains("The system cannot find", StringComparison.OrdinalIgnoreCase))
             .Take(6)
             .Select(line => line.Length > 240 ? line[..240] + "..." : line);
         var errors = string.Join(" | ", lines);
@@ -426,6 +515,7 @@ public static class WindowsToolchains
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(CancellationToken.None);
             }
+
             if (ct.IsCancellationRequested) throw;
             throw new TimeoutException("Tool discovery timed out: " + info.FileName);
         }

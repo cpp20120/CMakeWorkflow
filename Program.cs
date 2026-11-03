@@ -12,7 +12,11 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
         try
         {
             if (args.Length > 0 && args[0] == "host")
@@ -40,6 +44,7 @@ public static class Program
                 Console.WriteLine(JsonSerializer.Serialize(observed, WorkflowJson.Default.ObservedBuildContext));
                 return 0;
             }
+
             if (args.Length >= 2 && args[0] == "workflow" && args[1] == "reconcile")
                 return await WorkflowReconcileCommand.ExecuteAsync(args[2..], cts.Token);
             if (args.Length >= 2 && args[0] == "workflow" && args[1] == "generate")
@@ -54,30 +59,37 @@ public static class Program
                     if (args.Length != 3) throw new ArgumentException("Usage: workflow resume <run-directory>");
                     var directory = Path.GetFullPath(args[2]);
                     var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(
-                        Path.Combine(directory, "run.json"), cts.Token), WorkflowJson.Default.WorkflowReport)
-                        ?? throw new InvalidDataException("Invalid run report.");
+                                        Path.Combine(directory, "run.json"), cts.Token),
+                                    WorkflowJson.Default.WorkflowReport)
+                                ?? throw new InvalidDataException("Invalid run report.");
                     return await WorkflowCommand.ExecuteAsync("run",
                         [saved.Workflow, "--resume-dir", directory], cts.Token, new ProfileWorkflowExecutor(),
                         toolchainProvider: new WindowsWorkflowToolchainProvider());
                 }
+
                 var history = HistoryOptions(args[2..]);
                 return await RunAndIndexAsync(async onRun =>
                 {
                     string? runDirectory = null;
                     var code = await WorkflowCommand.ExecuteAsync("run", history.Args, cts.Token,
                         new ProfileWorkflowExecutor(), directory =>
-                        { runDirectory = directory; onRun(directory); },
+                        {
+                            runDirectory = directory;
+                            onRun(directory);
+                        },
                         toolchainProvider: new WindowsWorkflowToolchainProvider());
                     // Explicit profile nodes are captured as independent passes. Analyze
                     // their saved artifacts before History import; ordinary workflows do
                     // not invoke perf, WPR or the analyzer.
                     if (code == 0 && runDirectory is not null
-                        && Directory.EnumerateFiles(runDirectory, "*.results.json").Any())
+                                  && Directory.EnumerateFiles(runDirectory, "*.results.json").Any())
                     {
                         code = await ProfileAnalyzer.AnalyzeAsync(runDirectory, cts.Token,
                             emitResultPath: false);
-                        Console.Error.WriteLine($"[CMakeWorkflow] Profile analysis: {Path.Combine(runDirectory, "analysis.json")}");
+                        Console.Error.WriteLine(
+                            $"[CMakeWorkflow] Profile analysis: {Path.Combine(runDirectory, "analysis.json")}");
                     }
+
                     return code;
                 }, history.Database, history.Disabled);
             }
@@ -117,6 +129,7 @@ public static class Program
                     default: throw new ArgumentException($"Invalid option: {args[i]}");
                 }
             }
+
             if (string.IsNullOrWhiteSpace(buildDir) || string.IsNullOrWhiteSpace(targetName))
                 throw new ArgumentException("--build-dir and --target are required.");
             if (command is "resolve" or "invoke" && prepared)
@@ -127,7 +140,8 @@ public static class Program
             // Prepared calls run under the native caller's DEPENDS/ownership contract.
             // Taking our lock there could deadlock an explicit invoke of that bridge.
             using var ownership = !prepared && command != "resolve"
-                ? await BuildTreeOwnership.AcquireAsync([buildDir], cts.Token) : null;
+                ? await BuildTreeOwnership.AcquireAsync([buildDir], cts.Token)
+                : null;
             var target = CMakeConfiguration.Resolve(
                 new CMakeTargetRef(buildDir, targetName, config));
             if (command == "invoke" || command == "build" && !prepared)
@@ -138,19 +152,23 @@ public static class Program
                 Console.Error.WriteLine(command == "invoke"
                     ? "[CMakeWorkflow] Explicit target invocation; arbitrary native commands may execute."
                     : "[CMakeWorkflow] Native build request; incremental verification belongs to CMake/backend.");
-                await ProcessRunner.RunAsync(observed.CMakeExecutable ?? "cmake", invocation.Arguments, invocation.WorkingDirectory, cts.Token);
+                await ProcessRunner.RunAsync(observed.CMakeExecutable ?? "cmake", invocation.Arguments,
+                    invocation.WorkingDirectory, cts.Token);
                 return 0;
             }
+
             ICMakeBuildContext context = prepared
                 ? new PreparedCMakeBuildContext()
                 : new ExternalCMakeBuildContext();
             var artifact = command == "resolve"
                 ? await CMakeFileApi.ResolveExecutableAsync(target, cts.Token)
                 : await context.EnsureBuiltAsync(target, cts.Token);
-            Console.Error.WriteLine($"[CMakeWorkflow] {target.Target} ({target.Configuration ?? "default"}) => {artifact.ExecutablePath}");
-            if (json) Console.Out.WriteLine(JsonSerializer.Serialize(new TargetResolutionView(1,
-                target.BuildDirectory, target.Target, target.Configuration, artifact.ExecutablePath),
-                WorkflowProtocolJson.Default.TargetResolutionView));
+            Console.Error.WriteLine(
+                $"[CMakeWorkflow] {target.Target} ({target.Configuration ?? "default"}) => {artifact.ExecutablePath}");
+            if (json)
+                Console.Out.WriteLine(JsonSerializer.Serialize(new TargetResolutionView(1,
+                        target.BuildDirectory, target.Target, target.Configuration, artifact.ExecutablePath),
+                    WorkflowProtocolJson.Default.TargetResolutionView));
 
             if (command == "run")
             {
@@ -158,6 +176,7 @@ public static class Program
                     throw new FileNotFoundException("Built executable is missing.", artifact.ExecutablePath);
                 await ProcessRunner.RunAsync(artifact.ExecutablePath, runArgs, target.BuildDirectory, cts.Token);
             }
+
             return 0;
         }
         catch (OperationCanceledException)
@@ -180,6 +199,7 @@ public static class Program
             return await RunAndIndexAsync(onRun => ProfileReplayCommand.ExecuteAsync(replayHistory.Args, ct,
                 onRun), replayHistory.Database, replayHistory.Disabled);
         }
+
         if (args.Length == 0 || args[0] != "run")
             return await ProfileCommand.ExecuteAsync(args, ct);
         var history = HistoryOptions(args);
@@ -194,18 +214,30 @@ public static class Program
         var disabled = false;
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--") { clean.AddRange(args[i..]); break; }
-            if (args[i] == "--no-history") { disabled = true; continue; }
+            if (args[i] == "--")
+            {
+                clean.AddRange(args[i..]);
+                break;
+            }
+
+            if (args[i] == "--no-history")
+            {
+                disabled = true;
+                continue;
+            }
+
             if (args[i] == "--history-db")
             {
                 if (database is not null || i + 1 >= args.Length
-                    || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                                         || args[i + 1].StartsWith("--", StringComparison.Ordinal))
                     throw new ArgumentException("--history-db requires one database path.");
                 database = args[++i];
                 continue;
             }
+
             clean.Add(args[i]);
         }
+
         if (disabled && database is not null)
             throw new ArgumentException("--no-history and --history-db cannot be combined.");
         return (clean.ToArray(), database, disabled);
@@ -216,11 +248,14 @@ public static class Program
     {
         string? directory = null;
         var result = 1;
-        try { result = await run(path => directory = path); }
+        try
+        {
+            result = await run(path => directory = path);
+        }
         finally
         {
             if (!disabled && directory is not null && (File.Exists(Path.Combine(directory, "run.json"))
-                || Directory.EnumerateFiles(directory, "*.results.json").Any()))
+                                                       || Directory.EnumerateFiles(directory, "*.results.json").Any()))
             {
                 try
                 {
@@ -235,6 +270,7 @@ public static class Program
                 }
             }
         }
+
         return result;
     }
 

@@ -3,9 +3,17 @@ using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.Campaigns;
 
-public sealed record FuzzRunOptions(string BuildDirectory, string Layer, string? Backend,
-    string? CorpusDirectory, string ResultsDirectory, string? Configuration,
-    int DurationSeconds, int InputTimeoutSeconds, int MaxLength, bool ReplayOnly);
+public sealed record FuzzRunOptions(
+    string BuildDirectory,
+    string Layer,
+    string? Backend,
+    string? CorpusDirectory,
+    string ResultsDirectory,
+    string? Configuration,
+    int DurationSeconds,
+    int InputTimeoutSeconds,
+    int MaxLength,
+    bool ReplayOnly);
 
 public static class FuzzRunCampaign
 {
@@ -15,7 +23,7 @@ public static class FuzzRunCampaign
         if (!System.Text.RegularExpressions.Regex.IsMatch(options.Layer, "^[a-z][a-z0-9_]*$"))
             throw new ArgumentException("--layer must be a DagFlow fuzz layer name.");
         if (options.DurationSeconds is < 1 or > 86400 || options.InputTimeoutSeconds is < 1 or > 3600
-            || options.MaxLength is < 1 or > 1048576)
+                                                      || options.MaxLength is < 1 or > 1048576)
             throw new ArgumentException("Fuzz duration, input timeout and max length must be positive and bounded.");
         var buildDirectory = Path.GetFullPath(options.BuildDirectory);
         var targetName = "dagflow_fuzz_" + options.Layer;
@@ -23,11 +31,12 @@ public static class FuzzRunCampaign
         if (!observed.HasCodeModel || observed.SourceDirectory is null)
             throw new InvalidOperationException("Fuzz run requires a configured CMake File API build tree.");
         var backend = CacheValue(buildDirectory, "DAGFLOW_FUZZ_BACKEND")
-            ?? throw new InvalidOperationException("Build tree has no DAGFLOW_FUZZ_BACKEND cache entry.");
+                      ?? throw new InvalidOperationException("Build tree has no DAGFLOW_FUZZ_BACKEND cache entry.");
         if (backend is not ("libfuzzer" or "aflpp" or "honggfuzz"))
             throw new InvalidOperationException($"Unsupported configured fuzz backend: {backend}");
         if (options.Backend is not null && options.Backend != backend)
-            throw new InvalidOperationException($"Requested backend {options.Backend} disagrees with configured {backend}.");
+            throw new InvalidOperationException(
+                $"Requested backend {options.Backend} disagrees with configured {backend}.");
         pathGuard?.Invoke(observed.SourceDirectory);
         var target = CMakeInspection.Resolve(new RequestedBuildContext(buildDirectory, options.Configuration),
             observed, targetName);
@@ -60,6 +69,7 @@ public static class FuzzRunCampaign
             pathGuard?.Invoke(Path.Combine(buildDirectory, targetName + "-corpus"));
             CopyInputs(Path.Combine(buildDirectory, targetName + "-corpus"), corpus);
         }
+
         if (Directory.GetFiles(corpus).Length == 0)
             throw new InvalidOperationException("Fuzz corpus is empty; supply --corpus or initialize seeds.");
         var baseline = await InventoryAsync(corpus, ct);
@@ -86,8 +96,10 @@ public static class FuzzRunCampaign
                 {
                     ct.ThrowIfCancellationRequested();
                     var result = await CommandExecution.RunAsync(executable,
-                        [input, "-runs=1", $"-timeout={options.InputTimeoutSeconds}",
-                            $"-artifact_prefix={artifacts}{Path.DirectorySeparatorChar}"],
+                        [
+                            input, "-runs=1", $"-timeout={options.InputTimeoutSeconds}",
+                            $"-artifact_prefix={artifacts}{Path.DirectorySeparatorChar}"
+                        ],
                         run, TimeSpan.FromSeconds(options.InputTimeoutSeconds + 30), null, ct);
                     report.ReplayedInputs++;
                     if (result.ExitCode != 0 || result.TimedOut)
@@ -99,6 +111,7 @@ public static class FuzzRunCampaign
                             report.Error = "LeakSanitizer cannot run in this environment; see replay-failure.log.";
                         }
                         else report.FailedInputs.Add(Path.GetFileName(input));
+
                         break;
                     }
                 }
@@ -127,8 +140,10 @@ public static class FuzzRunCampaign
                 if (options.ReplayOnly)
                 {
                     var result = await CommandExecution.RunAsync("honggfuzz",
-                        ["-P", "-i", corpus, "--workspace", Path.Combine(artifacts, "honggfuzz-replay"),
-                            "--run_time", "1", "--iterations", inputs.Length.ToString(), "--", executable],
+                        [
+                            "-P", "-i", corpus, "--workspace", Path.Combine(artifacts, "honggfuzz-replay"),
+                            "--run_time", "1", "--iterations", inputs.Length.ToString(), "--", executable
+                        ],
                         run, TimeSpan.FromSeconds(Math.Max(30, inputs.Length * options.InputTimeoutSeconds)), null, ct);
                     await File.WriteAllTextAsync(Path.Combine(run, "replay.log"), result.Output, ct);
                     report.ReplayedInputs = inputs.Length;
@@ -136,6 +151,7 @@ public static class FuzzRunCampaign
                         report.FailedInputs.Add("honggfuzz-native-replay");
                 }
             }
+
             if (report.FailedInputs.Count == 0 && !report.InfrastructureError && !options.ReplayOnly)
             {
                 var (tool, args, environment) = CampaignCommandLine(backend, executable, corpus,
@@ -148,6 +164,7 @@ public static class FuzzRunCampaign
                 report.CampaignExitCode = result.ExitCode;
                 report.CampaignTimedOut = result.TimedOut;
             }
+
             var after = await InventoryAsync(corpus, ct);
             await WriteInventoryAsync(Path.Combine(run, "final-corpus.json"), after, ct);
             report.FinalInputs = after.Count;
@@ -161,8 +178,11 @@ public static class FuzzRunCampaign
                 report.ArtifactSha256[crashArtifact] = await CommandExecution.Sha256Async(
                     Path.Combine(run, crashArtifact), ct);
             report.Status = report.FailedInputs.Count == 0 && !report.InfrastructureError
-                && (report.CampaignExitCode is null or 0)
-                && !report.CampaignTimedOut && report.CrashArtifacts.Count == 0 ? "succeeded" : "failed";
+                                                           && (report.CampaignExitCode is null or 0)
+                                                           && !report.CampaignTimedOut &&
+                                                           report.CrashArtifacts.Count == 0
+                ? "succeeded"
+                : "failed";
         }
         catch (OperationCanceledException)
         {
@@ -179,7 +199,9 @@ public static class FuzzRunCampaign
             report.FinishedAt = DateTimeOffset.UtcNow;
             await WriteReportAsync(run, report);
         }
-        Console.WriteLine($"{report.Status}: replayed {report.ReplayedInputs}, corpus {report.InitialInputs} -> {report.FinalInputs}, new {report.NewInputs.Count}, artifacts {report.CrashArtifacts.Count}");
+
+        Console.WriteLine(
+            $"{report.Status}: replayed {report.ReplayedInputs}, corpus {report.InitialInputs} -> {report.FinalInputs}, new {report.NewInputs.Count}, artifacts {report.CrashArtifacts.Count}");
         return report.Status == "succeeded" ? 0 : 1;
     }
 
@@ -189,20 +211,22 @@ public static class FuzzRunCampaign
         var run = Path.GetFullPath(runDirectory);
         pathGuard?.Invoke(Path.Combine(run, "report.json"));
         var report = JsonSerializer.Deserialize(await File.ReadAllTextAsync(
-            Path.Combine(run, "report.json"), ct), FuzzJson.Default.FuzzRunReport)
-            ?? throw new IOException("Invalid fuzz report.");
+                         Path.Combine(run, "report.json"), ct), FuzzJson.Default.FuzzRunReport)
+                     ?? throw new IOException("Invalid fuzz report.");
         pathGuard?.Invoke(report.Executable);
         if (report.InfrastructureError)
-            throw new InvalidOperationException(report.Error ?? "Fuzz run failed because the execution environment was unavailable.");
+            throw new InvalidOperationException(report.Error ??
+                                                "Fuzz run failed because the execution environment was unavailable.");
         if (await CommandExecution.Sha256Async(report.Executable, ct) != report.ExecutableSha256)
-            throw new InvalidOperationException("Fuzzer executable changed since the campaign; rebuild or keep the original binary.");
+            throw new InvalidOperationException(
+                "Fuzzer executable changed since the campaign; rebuild or keep the original binary.");
         if (report.FailedInputs.Count > 0)
             await VerifyCorpusSnapshotAsync(run, Path.Combine(run, "corpus"), ct);
         var findings = new System.Text.Json.Nodes.JsonArray();
         var unreproduced = 0;
         var candidates = report.CrashArtifacts.Concat(report.FailedInputs
-            .Where(x => File.Exists(Path.Combine(run, "corpus", x)))
-            .Select(x => Path.Combine("corpus", x)))
+                .Where(x => File.Exists(Path.Combine(run, "corpus", x)))
+                .Select(x => Path.Combine("corpus", x)))
             .Distinct(StringComparer.Ordinal).ToArray();
         var logDirectory = Path.Combine(run, "triage-logs");
         Directory.CreateDirectory(logDirectory);
@@ -211,7 +235,7 @@ public static class FuzzRunCampaign
             var path = Path.GetFullPath(Path.Combine(run, artifact));
             pathGuard?.Invoke(path);
             if (!path.StartsWith(run + Path.DirectorySeparatorChar,
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new IOException($"Triage artifact escapes the run directory: {artifact}");
             if (!File.Exists(path)) throw new FileNotFoundException("Crash artifact is missing.", path);
             if (report.ArtifactSha256.TryGetValue(artifact, out var expectedArtifactHash)
@@ -225,7 +249,7 @@ public static class FuzzRunCampaign
                     [path, "-runs=1", $"-timeout={report.InputTimeoutSeconds}"], run,
                     TimeSpan.FromSeconds(report.InputTimeoutSeconds + 30), null, ct);
                 reproduced = (result.ExitCode != 0 || result.TimedOut)
-                    && !IsInfrastructureFailure(result.Output);
+                             && !IsInfrastructureFailure(result.Output);
             }
             else if (report.Backend == "aflpp")
             {
@@ -241,14 +265,17 @@ public static class FuzzRunCampaign
                 File.Copy(path, Path.Combine(single, Path.GetFileName(path)), overwrite: true);
                 var workspace = Path.Combine(run, "triage-honggfuzz", Guid.NewGuid().ToString("N"));
                 result = await CommandExecution.RunAsync("honggfuzz",
-                    ["-P", "-i", single, "--workspace", workspace, "--run_time", "1",
-                        "--iterations", "1", "--", report.Executable], run,
+                    [
+                        "-P", "-i", single, "--workspace", workspace, "--run_time", "1",
+                        "--iterations", "1", "--", report.Executable
+                    ], run,
                     TimeSpan.FromSeconds(report.InputTimeoutSeconds + 30), null, ct);
                 reproduced = Directory.Exists(workspace)
-                    && Directory.GetFiles(workspace, "*", SearchOption.AllDirectories).Any(IsCrashArtifact);
+                             && Directory.GetFiles(workspace, "*", SearchOption.AllDirectories).Any(IsCrashArtifact);
                 Directory.Delete(single, recursive: true);
             }
             else throw new InvalidOperationException($"Unknown fuzz backend: {report.Backend}");
+
             if (!reproduced) unreproduced++;
             var logName = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes(artifact))).ToLowerInvariant()[..16] + ".log";
@@ -265,6 +292,7 @@ public static class FuzzRunCampaign
                 ["log"] = Path.GetRelativePath(run, logPath)
             });
         }
+
         var output = Path.Combine(run, "triage.json");
         await File.WriteAllTextAsync(output, findings.ToJsonString(
             new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
@@ -281,8 +309,8 @@ public static class FuzzRunCampaign
         var run = Path.GetFullPath(runDirectory);
         pathGuard?.Invoke(Path.Combine(run, "report.json"));
         var report = JsonSerializer.Deserialize(await File.ReadAllTextAsync(
-            Path.Combine(run, "report.json"), ct), FuzzJson.Default.FuzzRunReport)
-            ?? throw new IOException("Invalid fuzz report.");
+                         Path.Combine(run, "report.json"), ct), FuzzJson.Default.FuzzRunReport)
+                     ?? throw new IOException("Invalid fuzz report.");
         pathGuard?.Invoke(report.BuildDirectory);
         pathGuard?.Invoke(report.Executable);
         if (report.Status != "succeeded")
@@ -290,11 +318,12 @@ public static class FuzzRunCampaign
         var source = Path.Combine(run, "corpus");
         await VerifyCorpusSnapshotAsync(run, source, ct);
         var destination = Path.GetFullPath(outputDirectory
-            ?? Path.Combine(report.BuildDirectory, report.Target + "-corpus"));
+                                           ?? Path.Combine(report.BuildDirectory, report.Target + "-corpus"));
         pathGuard?.Invoke(destination);
         pathGuard?.Invoke(source);
         using var ownership = outputDirectory is null
-            ? await BuildTreeOwnership.AcquireAsync([report.BuildDirectory], ct) : null;
+            ? await BuildTreeOwnership.AcquireAsync([report.BuildDirectory], ct)
+            : null;
         Directory.CreateDirectory(destination);
         var known = (await InventoryAsync(destination, ct)).Values.ToHashSet(StringComparer.Ordinal);
         var imported = 0;
@@ -330,6 +359,7 @@ public static class FuzzRunCampaign
                 imported++;
             }
         }
+
         var summary = new System.Text.Json.Nodes.JsonObject
         {
             ["schemaVersion"] = 1, ["runDirectory"] = run,
@@ -347,18 +377,24 @@ public static class FuzzRunCampaign
     private static (string Tool, IReadOnlyList<string> Args, IReadOnlyDictionary<string, string?>? Environment)
         CampaignCommandLine(string backend, string executable, string corpus, string artifacts,
             int duration, int timeout, int maxLength) => backend switch
-        {
-            "libfuzzer" => (executable, [corpus, $"-max_total_time={duration}",
-                $"-timeout={timeout}", $"-max_len={maxLength}",
-                $"-artifact_prefix={artifacts}{Path.DirectorySeparatorChar}"], null),
-            "aflpp" => ("afl-fuzz", ["-i", corpus, "-o", Path.Combine(artifacts, "afl"),
-                "-V", duration.ToString(), "-G", maxLength.ToString(), "--", executable],
-                new Dictionary<string, string?> { ["AFL_NO_UI"] = "1" }),
-            "honggfuzz" => ("honggfuzz", ["-P", "-i", corpus, "--workspace",
-                Path.Combine(artifacts, "honggfuzz"), "--run_time", duration.ToString(),
-                "--max_file_size", maxLength.ToString(), "--", executable], null),
-            _ => throw new ArgumentException($"Unknown fuzz backend: {backend}")
-        };
+    {
+        "libfuzzer" => (executable, [
+            corpus, $"-max_total_time={duration}",
+            $"-timeout={timeout}", $"-max_len={maxLength}",
+            $"-artifact_prefix={artifacts}{Path.DirectorySeparatorChar}"
+        ], null),
+        "aflpp" => ("afl-fuzz", [
+                "-i", corpus, "-o", Path.Combine(artifacts, "afl"),
+                "-V", duration.ToString(), "-G", maxLength.ToString(), "--", executable
+            ],
+            new Dictionary<string, string?> { ["AFL_NO_UI"] = "1" }),
+        "honggfuzz" => ("honggfuzz", [
+            "-P", "-i", corpus, "--workspace",
+            Path.Combine(artifacts, "honggfuzz"), "--run_time", duration.ToString(),
+            "--max_file_size", maxLength.ToString(), "--", executable
+        ], null),
+        _ => throw new ArgumentException($"Unknown fuzz backend: {backend}")
+    };
 
     private static void CopyInputs(string source, string destination)
     {
@@ -374,6 +410,7 @@ public static class FuzzRunCampaign
                     .ToLowerInvariant()[..12];
                 target = Path.Combine(destination, name + "-" + hash);
             }
+
             if (!File.Exists(target)) File.WriteAllBytes(target, bytes);
         }
     }
@@ -383,11 +420,11 @@ public static class FuzzRunCampaign
         var name = Path.GetFileName(path);
         if (name.Equals("README.txt", StringComparison.OrdinalIgnoreCase)) return false;
         return name.StartsWith("crash-", StringComparison.Ordinal)
-            || name.StartsWith("timeout-", StringComparison.Ordinal)
-            || name.StartsWith("oom-", StringComparison.Ordinal)
-            || name.StartsWith("SIG", StringComparison.Ordinal)
-            || Path.GetDirectoryName(path)!.Split(Path.DirectorySeparatorChar)
-                .Contains("crashes", StringComparer.OrdinalIgnoreCase);
+               || name.StartsWith("timeout-", StringComparison.Ordinal)
+               || name.StartsWith("oom-", StringComparison.Ordinal)
+               || name.StartsWith("SIG", StringComparison.Ordinal)
+               || Path.GetDirectoryName(path)!.Split(Path.DirectorySeparatorChar)
+                   .Contains("crashes", StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsInfrastructureFailure(string output) =>
@@ -422,7 +459,7 @@ public static class FuzzRunCampaign
             .ToDictionary(x => x.Name, x => x.Value.GetString()!, StringComparer.Ordinal);
         var actual = await InventoryAsync(corpus, ct);
         if (expected.Count != actual.Count || expected.Any(x => !actual.TryGetValue(x.Key, out var hash)
-            || hash != x.Value))
+                                                                || hash != x.Value))
             throw new IOException("Fuzz corpus changed after the campaign; refusing to merge it.");
     }
 

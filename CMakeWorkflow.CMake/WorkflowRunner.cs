@@ -25,8 +25,12 @@ public sealed class WorkflowReport
     public List<WorkflowToolchainIdentity> Toolchains { get; set; } = [];
 }
 
-public sealed record WorkflowFinding(string Code, string Severity, string NodeId,
-    string Message, string[] SuggestedProfiles);
+public sealed record WorkflowFinding(
+    string Code,
+    string Severity,
+    string NodeId,
+    string Message,
+    string[] SuggestedProfiles);
 
 // A missing executable is a recoverable pre-execution admission failure, not
 // proof that the workflow operation ran and failed.
@@ -36,10 +40,19 @@ public sealed class MissingWorkflowToolException(string executable, Exception in
     public string Executable { get; } = executable;
 }
 
-public sealed record NativeBuildResult(CMakeTargetRef Target, string Verification,
-    int? BackendExitCode, string? ObservationIndex, GenerationObservation? Generation = null);
-public sealed record ArtifactReference(string BuildNode, CMakeTargetRef Target,
-    string Executable, string Sha256, string Materialization);
+public sealed record NativeBuildResult(
+    CMakeTargetRef Target,
+    string Verification,
+    int? BackendExitCode,
+    string? ObservationIndex,
+    GenerationObservation? Generation = null);
+
+public sealed record ArtifactReference(
+    string BuildNode,
+    CMakeTargetRef Target,
+    string Executable,
+    string Sha256,
+    string Materialization);
 
 public sealed class NodeResult
 {
@@ -93,7 +106,12 @@ public static class WorkflowCommand
         string? resumeDirectory = null;
         for (var i = 1; i < args.Length; ++i)
         {
-            if (args[i] == "--json") { json = true; continue; }
+            if (args[i] == "--json")
+            {
+                json = true;
+                continue;
+            }
+
             if (i + 1 >= args.Length) throw new ArgumentException($"Missing value for {args[i]}.");
             switch (args[i])
             {
@@ -108,6 +126,7 @@ public static class WorkflowCommand
                 default: throw new ArgumentException($"Invalid workflow option: {args[i]}");
             }
         }
+
         if (resumeDirectory is not null && (command != "run" || only.Count != 0 || results is not null))
             throw new ArgumentException("--resume-dir only supports workflow run without --only/--results-dir.");
         var plan = await WorkflowPlanner.LoadAsync(args[0], only, controller, ct);
@@ -116,19 +135,22 @@ public static class WorkflowCommand
             var view = WorkflowQueries.PlanView(plan);
             Console.Out.WriteLine(JsonSerializer.Serialize(view, WorkflowProtocolJson.Default.WorkflowPlanView));
         }
-        else foreach (var node in plan.Nodes)
-        {
-            Console.Error.WriteLine($"{node.Definition.Id}: {node.Definition.Kind} {node.Target.Target} " +
-                $"[{node.Target.BuildDirectory}] requested-config={node.Requested.Configuration ?? "<unspecified>"} " +
-                $"requested-preset={node.Requested.ConfigurePreset ?? "<unspecified>"} " +
-                $"observed={node.Observed.State} configs=[{string.Join(", ", node.Observed.Configurations)}] " +
-                $"after=[{string.Join(", ", node.Dependencies)}] resources=[{string.Join(", ", node.Definition.Resources)}]" +
-                (node.Definition.Exclusive ? " exclusive" : ""));
-            foreach (var diagnostic in node.Diagnostics)
-                Console.Error.WriteLine($"  {diagnostic.Severity}: {diagnostic.Message}");
-        }
+        else
+            foreach (var node in plan.Nodes)
+            {
+                Console.Error.WriteLine($"{node.Definition.Id}: {node.Definition.Kind} {node.Target.Target} " +
+                                        $"[{node.Target.BuildDirectory}] requested-config={node.Requested.Configuration ?? "<unspecified>"} " +
+                                        $"requested-preset={node.Requested.ConfigurePreset ?? "<unspecified>"} " +
+                                        $"observed={node.Observed.State} configs=[{string.Join(", ", node.Observed.Configurations)}] " +
+                                        $"after=[{string.Join(", ", node.Dependencies)}] resources=[{string.Join(", ", node.Definition.Resources)}]" +
+                                        (node.Definition.Exclusive ? " exclusive" : ""));
+                foreach (var diagnostic in node.Diagnostics)
+                    Console.Error.WriteLine($"  {diagnostic.Severity}: {diagnostic.Message}");
+            }
+
         if (!json || command == "run")
-            Console.Error.WriteLine("Scheduling: operations sharing a physical build tree or named resource conflict; exclusive nodes conflict with all nodes. Plain IDE/Ninja builds do not participate in tool locks.");
+            Console.Error.WriteLine(
+                "Scheduling: operations sharing a physical build tree or named resource conflict; exclusive nodes conflict with all nodes. Plain IDE/Ninja builds do not participate in tool locks.");
         // Both plan and run must reject a known-invalid selected graph *before*
         // creating result files, acquiring leases or launching independent branches.
         // A configure predecessor can defer checks to runtime (Severity=Runtime).
@@ -136,9 +158,11 @@ public static class WorkflowCommand
         if (errors.Length != 0)
         {
             if (command == "run")
-                Console.Error.WriteLine($"[CMakeWorkflow] Preflight rejected {errors.Length} node(s); no operations were launched.");
+                Console.Error.WriteLine(
+                    $"[CMakeWorkflow] Preflight rejected {errors.Length} node(s); no operations were launched.");
             return 1;
         }
+
         if (command == "plan") return 0;
 
         results ??= Path.Combine(Path.GetDirectoryName(plan.File)!, "out", "workflow-runs");
@@ -163,7 +187,7 @@ public static class WorkflowRunner
     {
         toolchains ??= new Dictionary<string, WorkflowToolchainRuntime>(WorkflowPlanner.PathComparer);
         if (plan.Nodes.Any(n => n.Toolchain is not null && n.Definition.Kind != "inspect"
-            && !toolchains.ContainsKey(n.Target.BuildDirectory)))
+                                                        && !toolchains.ContainsKey(n.Target.BuildDirectory)))
             throw new InvalidOperationException("Selected toolchain was not materialized before workflow admission.");
         // The run lease spans validation, the recovery checkpoint, execution and final persistence.
         // No second runner may inspect/commit the same persisted run concurrently.
@@ -172,8 +196,10 @@ public static class WorkflowRunner
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         // Validate resume observations under the same ownership used for dispatch.
         // Otherwise another cooperating runner can change the tree in between.
-        using var resumedOwnership = resume ? await BuildTreeOwnership.AcquireAsync(
-            plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory), ct) : null;
+        using var resumedOwnership = resume
+            ? await BuildTreeOwnership.AcquireAsync(
+                plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory), ct)
+            : null;
         var report = new WorkflowReport
         {
             Workflow = plan.File,
@@ -191,20 +217,23 @@ public static class WorkflowRunner
         {
             var file = Path.Combine(output, "run.json");
             if (!File.Exists(file)) throw new InvalidDataException("Run report not found for resume.");
-            var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct), WorkflowJson.Default.WorkflowReport)
-                ?? throw new InvalidDataException("Invalid resume report.");
-            if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") || saved.ManifestHash != plan.ManifestHash ||
+            var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct),
+                            WorkflowJson.Default.WorkflowReport)
+                        ?? throw new InvalidDataException("Invalid resume report.");
+            if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") ||
+                saved.ManifestHash != plan.ManifestHash ||
                 !WorkflowPlanner.PathComparer.Equals(
                     BuildTreeOwnership.CanonicalPath(saved.Workflow), BuildTreeOwnership.CanonicalPath(plan.File)))
-                throw new InvalidDataException("Resume requires a needs_attention checkpoint with identical workflow and manifest; interrupted running checkpoints can only be quarantined.");
+                throw new InvalidDataException(
+                    "Resume requires a needs_attention checkpoint with identical workflow and manifest; interrupted running checkpoints can only be quarantined.");
             if (saved.Nodes.Count != report.Nodes.Count ||
                 saved.Nodes.Where((n, i) => n.Id != report.Nodes[i].Id || n.Kind != report.Nodes[i].Kind ||
-                    n.Target != report.Nodes[i].Target ||
-                    !WorkflowPlanner.PathComparer.Equals(
-                        BuildTreeOwnership.CanonicalPath(n.BuildDirectory),
-                        BuildTreeOwnership.CanonicalPath(report.Nodes[i].BuildDirectory)) ||
-                    n.Configuration != report.Nodes[i].Configuration ||
-                    !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
+                                            n.Target != report.Nodes[i].Target ||
+                                            !WorkflowPlanner.PathComparer.Equals(
+                                                BuildTreeOwnership.CanonicalPath(n.BuildDirectory),
+                                                BuildTreeOwnership.CanonicalPath(report.Nodes[i].BuildDirectory)) ||
+                                            n.Configuration != report.Nodes[i].Configuration ||
+                                            !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
                 throw new InvalidDataException("Resume graph differs from saved execution.");
             WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
             // A write-ahead admission is not proof that a process started, nor
@@ -217,8 +246,10 @@ public static class WorkflowRunner
                 foreach (var node in saved.Nodes.Where(n => n.Status == "running"))
                 {
                     node.Status = "outcome_unknown";
-                    node.Error = "Runner interrupted after dispatch admission; external side effects cannot be ruled out.";
+                    node.Error =
+                        "Runner interrupted after dispatch admission; external side effects cannot be ruled out.";
                 }
+
                 saved.Status = "outcome_unknown";
                 saved.Error = "Interrupted execution requires manual reconciliation; automatic resume is prohibited.";
                 saved.RecoveryPhase = "interrupted";
@@ -226,6 +257,7 @@ public static class WorkflowRunner
                 Console.Error.WriteLine($"[CMakeWorkflow] {saved.Error}");
                 return 4;
             }
+
             // Compare the latest successful observation for each physical tree;
             // earlier configure/build nodes may legitimately observe older generations.
             foreach (var tree in saved.Nodes.Where(n => n.Status == "succeeded" && n.Kind != "inspect")
@@ -242,6 +274,7 @@ public static class WorkflowRunner
                     !expected.Configurations.SequenceEqual(observed.Configurations))
                     throw new InvalidDataException($"Build tree changed since node '{last!.Id}'; resume refused.");
             }
+
             foreach (var node in saved.Nodes.Where(n => n.Status == "succeeded"))
             {
                 if (node.Artifact is { } artifact)
@@ -250,12 +283,15 @@ public static class WorkflowRunner
                         await HashExecutableAsync(artifact.Executable, ct) != artifact.Sha256)
                         throw new InvalidDataException($"Artifact changed since node '{node.Id}'; resume refused.");
                 }
+
                 foreach (var evidence in node.DeclaredArtifacts)
                     if (await WorkflowArtifacts.HashAsync(evidence.Path, ct) != evidence.Sha256
                         || evidence.SnapshotPath is { } snapshot
                         && await WorkflowArtifacts.HashAsync(snapshot, ct) != evidence.Sha256)
-                        throw new InvalidDataException($"Declared artifact changed since node '{node.Id}'; resume refused.");
+                        throw new InvalidDataException(
+                            $"Declared artifact changed since node '{node.Id}'; resume refused.");
             }
+
             saved.ResumeCount++;
             saved.RecoveryPhase = "resuming";
             saved.Status = "running";
@@ -273,11 +309,23 @@ public static class WorkflowRunner
                 node.StartedAt = null;
                 node.FinishedAt = null;
             }
+
             report = saved;
         }
-        try { report.Environment = EnvironmentProvenance.CaptureHost(); }
-        catch (IOException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
-        catch (UnauthorizedAccessException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
+
+        try
+        {
+            report.Environment = EnvironmentProvenance.CaptureHost();
+        }
+        catch (IOException error)
+        {
+            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+        }
+        catch (UnauthorizedAccessException error)
+        {
+            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+        }
+
         var states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
         var sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
             .ToDictionary(p => p, _ => new BuildContextSession(), WorkflowPlanner.PathComparer);
@@ -295,6 +343,7 @@ public static class WorkflowRunner
                 else session.Observe(node.Requested, observed, "Resume");
             }
         }
+
         var active = new Dictionary<string, (PlannedNode Node, Task<NodeResult> Task)>(StringComparer.Ordinal);
         BuildTreeOwnership? ownership = null;
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -302,7 +351,8 @@ public static class WorkflowRunner
         await SaveAsync(report, output, events);
         try
         {
-            var mutationTrees = plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory).ToArray();
+            var mutationTrees = plan.Nodes.Where(n => n.Definition.Kind != "inspect")
+                .Select(n => n.Target.BuildDirectory).ToArray();
             if (mutationTrees.Length != 0 && !resume)
                 ownership = await BuildTreeOwnership.AcquireAsync(mutationTrees, stop.Token);
 
@@ -357,6 +407,7 @@ public static class WorkflowRunner
                         p.Definition.Kind is "run" or "profile" && p.Definition.From == node.Definition.Id);
                     dispatch.Add((node, snapshot));
                 }
+
                 await SaveAsync(report, output, events);
                 // The optional host-owned dispatch gate runs only after the runner's
                 // write-ahead checkpoint is durably committed, and strictly before
@@ -369,10 +420,13 @@ public static class WorkflowRunner
                     var sources = node.Definition.Inputs.Where(x => x.From is not null)
                         .Select(x => x.From!).Distinct(StringComparer.Ordinal)
                         .ToDictionary(id => id, id => states[id], StringComparer.Ordinal);
-                    active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
-                        snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id), stop.Token, extension,
+                    active.Add(node.Definition.Id, (node, ExecuteAsync(node,
+                        node.Definition.From is { } source ? states[source] : null,
+                        snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id),
+                        stop.Token, extension,
                         toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources)));
                 }
+
                 if (active.Count == 0)
                 {
                     if (report.Nodes.Any(n => n.Status == "needs_attention")) break;
@@ -380,6 +434,7 @@ public static class WorkflowRunner
                         throw new InvalidOperationException("No schedulable workflow node.");
                     break;
                 }
+
                 await Task.WhenAny(active.Values.Select(a => a.Task));
                 foreach (var pair in active.Where(p => p.Value.Task.IsCompleted).ToArray())
                 {
@@ -396,9 +451,11 @@ public static class WorkflowRunner
                         // Independent work already launched is allowed to complete; no
                         // additional nodes start after this finding.
                     }
+
                     Console.Error.WriteLine($"[CMakeWorkflow] {result.Status.ToUpperInvariant()} {pair.Key}" +
-                        (result.Error is null ? "" : $": {result.Error}"));
+                                            (result.Error is null ? "" : $": {result.Error}"));
                 }
+
                 await SaveAsync(report, output, events);
             }
         }
@@ -426,8 +483,10 @@ public static class WorkflowRunner
                 var result = await pair.Value.Task;
                 report.Nodes[report.Nodes.FindIndex(n => n.Id == pair.Key)] = result;
             }
+
             ownership?.Dispose();
         }
+
         report.FinishedAt = DateTimeOffset.UtcNow;
         report.RecoveryPhase = resume ? "finished" : report.RecoveryPhase;
         // An admission whose persistence failed must never appear as safely
@@ -439,8 +498,10 @@ public static class WorkflowRunner
                 node.Status = "outcome_unknown";
                 node.Error = "Admission did not commit reliably; manual reconciliation is required.";
             }
+
             report.RecoveryPhase = "interrupted";
         }
+
         report.Status = report.Nodes.Any(n => n.Status == "outcome_unknown") ? "outcome_unknown"
             : ct.IsCancellationRequested ? "canceled"
             : report.Nodes.Any(n => n.Status == "needs_attention") ? "needs_attention"
@@ -453,17 +514,28 @@ public static class WorkflowRunner
                 .Select(x => EnvironmentProvenance.CaptureBuild(x.BuildDirectory, x.Configuration))
                 .OfType<BuildEnvironment>().ToList();
         }
-        catch (IOException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
-        catch (UnauthorizedAccessException error) { Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}"); }
+        catch (IOException error)
+        {
+            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+        }
+        catch (UnauthorizedAccessException error)
+        {
+            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+        }
+
         await SaveAsync(report, output, events);
-        return report.Status == "canceled" ? 130 : report.Status == "succeeded" ? 0
-            : report.Status == "needs_attention" ? 3 : report.Status == "outcome_unknown" ? 4 : 1;
+        return report.Status == "canceled" ? 130
+            : report.Status == "succeeded" ? 0
+            : report.Status == "needs_attention" ? 3
+            : report.Status == "outcome_unknown" ? 4 : 1;
     }
 
     private static bool Conflicts(PlannedNode left, PlannedNode right) =>
         left.Definition.Exclusive || right.Definition.Exclusive
-        || WorkflowPlanner.PathComparer.Equals(left.Target.BuildDirectory, right.Target.BuildDirectory)
-        || left.Definition.Resources.Intersect(right.Definition.Resources, StringComparer.Ordinal).Any();
+                                  || WorkflowPlanner.PathComparer.Equals(left.Target.BuildDirectory,
+                                      right.Target.BuildDirectory)
+                                  || left.Definition.Resources
+                                      .Intersect(right.Definition.Resources, StringComparer.Ordinal).Any();
 
     private static string LogStem(WorkflowReport report, string nodeId)
     {
@@ -492,7 +564,8 @@ public static class WorkflowRunner
         if (definition.TimeoutSeconds is { } seconds) deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
         try
         {
-            if (toolchain is not null) WorkflowToolchainAdmission.ValidateBuildTree(node.Target.BuildDirectory, toolchain);
+            if (toolchain is not null)
+                WorkflowToolchainAdmission.ValidateBuildTree(node.Target.BuildDirectory, toolchain);
             result.ExecutionConditions = WorkflowExecutionAdmission.Require(definition.Constraints);
             if (definition.Constraints?.Profiler is { } requiredProfiler)
                 result.ExecutionConditions["profilerRequired"] = requiredProfiler.Backend + "/" + requiredProfiler.Mode;
@@ -501,10 +574,13 @@ public static class WorkflowRunner
                 var input = definition.Inputs[index];
                 var producer = input.From is null ? null : artifactSources[input.From];
                 var produced = producer?.DeclaredArtifacts.SingleOrDefault(x =>
-                    x.Role == "output" && x.Name == input.Artifact)
-                    ?? (input.From is null ? null : throw new InvalidDataException(
-                        $"{definition.Id}: producer output '{input.Artifact}' has no verified evidence."));
-                var path = input.Path is null ? produced!.Path
+                                   x.Role == "output" && x.Name == input.Artifact)
+                               ?? (input.From is null
+                                   ? null
+                                   : throw new InvalidDataException(
+                                       $"{definition.Id}: producer output '{input.Artifact}' has no verified evidence."));
+                var path = input.Path is null
+                    ? produced!.Path
                     : WorkflowArtifacts.ManifestPath(Path.GetDirectoryName(manifest)!, input.Path);
                 var sha = await WorkflowArtifacts.HashAsync(path, deadline.Token);
                 if (input.Sha256 is { } expected && !sha.Equals(expected, StringComparison.OrdinalIgnoreCase)
@@ -518,15 +594,18 @@ public static class WorkflowRunner
                     if (await WorkflowArtifacts.HashAsync(snapshot, deadline.Token) != sha)
                         throw new InvalidDataException($"{definition.Id}: source changed during snapshot: {path}");
                 }
+
                 result.DeclaredArtifacts.Add(new(input.Artifact ?? index.ToString(), path, sha,
                     "input", input.From, snapshot));
             }
+
             foreach (var declared in definition.Outputs.Where(x => x.Fresh))
             {
                 var path = WorkflowArtifacts.OutputPath(manifest, output, declared);
                 if (File.Exists(path) || Directory.Exists(path))
                     throw new InvalidDataException($"{definition.Id}: fresh output already exists: {path}");
             }
+
             result.ObservedContext = await CMakeInspection.InspectAsync(node.Requested.BuildDirectory, deadline.Token);
             // Inspect never changes the execution session or claims ownership.
             result.SessionBefore = definition.Kind == "inspect"
@@ -546,7 +625,8 @@ public static class WorkflowRunner
             {
                 // Re-inspect under ownership at every operation, including after configure.
                 session.Validate(node.Requested, result.ObservedContext);
-                var target = CMakeInspection.Resolve(BuildContextSession.ResolutionRequest(node.Requested), result.ObservedContext, node.Target.Target);
+                var target = CMakeInspection.Resolve(BuildContextSession.ResolutionRequest(node.Requested),
+                    result.ObservedContext, node.Target.Target);
                 result.Configuration = target.Configuration;
                 switch (definition.Kind)
                 {
@@ -559,21 +639,27 @@ public static class WorkflowRunner
                         break;
                     case "run":
                     case "profile":
-                        if (prerequisite?.BuildVerification is not { Verification: "BackendSucceeded" or "ManuallyAccepted" } verified
+                        if (prerequisite?.BuildVerification is not
+                                { Verification: "BackendSucceeded" or "ManuallyAccepted" } verified
                             || verified.Target != target)
-                            throw new InvalidOperationException("Run requires a successful native build verification for this exact target/configuration.");
+                            throw new InvalidOperationException(
+                                "Run requires a successful native build verification for this exact target/configuration.");
                         if (verified.Generation != GenerationObservation.From(result.ObservedContext))
-                            throw new InvalidOperationException("Generation changed since the referenced build verification; add a new build before Run. Artifact existence does not verify the new buildsystem.");
+                            throw new InvalidOperationException(
+                                "Generation changed since the referenced build verification; add a new build before Run. Artifact existence does not verify the new buildsystem.");
                         var item = CMakeInspection.RequireTarget(result.ObservedContext, target, executableOnly: true);
                         if (item.Executable is null)
-                            throw new InvalidOperationException("Executable artifact is Unknown/ambiguous; no path is guessed.");
+                            throw new InvalidOperationException(
+                                "Executable artifact is Unknown/ambiguous; no path is guessed.");
                         if (prerequisite?.Artifact is not { } builtArtifact
                             || builtArtifact.Target != target
                             || !WorkflowPlanner.PathComparer.Equals(builtArtifact.Executable, item.Executable))
-                            throw new InvalidOperationException("Run requires the executable artifact produced and recorded by its build node.");
+                            throw new InvalidOperationException(
+                                "Run requires the executable artifact produced and recorded by its build node.");
                         var currentHash = await HashExecutableAsync(item.Executable, deadline.Token);
                         if (currentHash != builtArtifact.Sha256)
-                            throw new InvalidOperationException("Executable changed since the referenced build node; add a new build dependency before Run.");
+                            throw new InvalidOperationException(
+                                "Executable changed since the referenced build node; add a new build dependency before Run.");
                         result.Executable = item.Executable;
                         result.ExecutableSha256 = currentHash;
                         result.Artifact = new ArtifactReference(definition.From!, target, item.Executable,
@@ -582,12 +668,15 @@ public static class WorkflowRunner
                         break;
                     case "ctest":
                         result.Executable = result.ObservedContext.CTestExecutable ?? "ctest";
-                        result.Arguments = ["--test-dir", target.BuildDirectory, "--output-on-failure", "--no-tests=error"];
-                        if (!string.IsNullOrEmpty(target.Configuration)) result.Arguments.AddRange(["-C", target.Configuration]);
+                        result.Arguments =
+                            ["--test-dir", target.BuildDirectory, "--output-on-failure", "--no-tests=error"];
+                        if (!string.IsNullOrEmpty(target.Configuration))
+                            result.Arguments.AddRange(["-C", target.Configuration]);
                         if (definition.TestRegex is not null) result.Arguments.AddRange(["-R", definition.TestRegex]);
                         if (definition.LabelRegex is not null) result.Arguments.AddRange(["-L", definition.LabelRegex]);
                         break;
                 }
+
                 if (definition.Kind == "profile")
                 {
                     if (extension is null || !extension.Supports("profile"))
@@ -612,8 +701,10 @@ public static class WorkflowRunner
                         DagFlowHarnessSnapshot.RequireFresh(node.Target.BuildDirectory, definition.HarnessDirectory);
                     result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
                         MergeEnvironment(toolchain, definition.Environment), output, deadline.Token,
-                        elapsed => Console.Error.WriteLine($"[CMakeWorkflow] RUNNING {result.Id} {elapsed.ToString(@"hh\:mm\:ss")} elapsed"));
+                        elapsed => Console.Error.WriteLine(
+                            $"[CMakeWorkflow] RUNNING {result.Id} {elapsed.ToString(@"hh\:mm\:ss")} elapsed"));
                 }
+
                 result.Status = result.ExitCode == 0 ? "succeeded" : "failed";
                 if (result.ExitCode != 0) result.Error ??= $"Process exited with code {result.ExitCode}.";
                 // The command's result remains factual even if subsequent context
@@ -622,24 +713,35 @@ public static class WorkflowRunner
                 if (definition.Kind == "build")
                 {
                     result.BuildVerification = new(target, result.ExitCode == 0 ? "BackendSucceeded" : "BackendFailed",
-                        result.ExitCode.Value, result.ObservedContext.IndexFile, GenerationObservation.From(result.ObservedContext));
+                        result.ExitCode.Value, result.ObservedContext.IndexFile,
+                        GenerationObservation.From(result.ObservedContext));
                     if (result.ExitCode == 0)
                     {
-                        result.ObservationAfter = await CMakeInspection.InspectAsync(target.BuildDirectory, deadline.Token);
-                        result.BuildVerification = result.BuildVerification with { ObservationIndex = result.ObservationAfter.IndexFile,
-                            Generation = GenerationObservation.From(result.ObservationAfter) };
+                        result.ObservationAfter =
+                            await CMakeInspection.InspectAsync(target.BuildDirectory, deadline.Token);
+                        result.BuildVerification = result.BuildVerification with
+                        {
+                            ObservationIndex = result.ObservationAfter.IndexFile,
+                            Generation = GenerationObservation.From(result.ObservationAfter)
+                        };
                         result.SessionAfter = session.Observe(node.Requested, result.ObservationAfter, "AfterBuild");
                         // Classify actual target/configuration conflicts before applying
                         // provenance policy; a new generation alone is not a mismatch.
                         var after = CMakeInspection.Resolve(BuildContextSession.ResolutionRequest(node.Requested) with
-                            { ProvenancePolicy = "allowUnverified" }, result.ObservationAfter, target.Target);
-                        if (after != target) throw new InvalidOperationException("Build regenerated a different configuration; dependent execution is blocked.");
+                        {
+                            ProvenancePolicy = "allowUnverified"
+                        }, result.ObservationAfter, target.Target);
+                        if (after != target)
+                            throw new InvalidOperationException(
+                                "Build regenerated a different configuration; dependent execution is blocked.");
                         var builtTarget = CMakeInspection.RequireTarget(result.ObservationAfter, after);
                         var beforeTarget = CMakeInspection.RequireTarget(result.ObservedContext, target);
                         if (builtTarget.Type != beforeTarget.Type || builtTarget.Executable != beforeTarget.Executable)
-                            throw new InvalidOperationException("Build regenerated a different target type or artifact path; dependent execution is blocked.");
+                            throw new InvalidOperationException(
+                                "Build regenerated a different target type or artifact path; dependent execution is blocked.");
                         session.Validate(node.Requested, result.ObservationAfter);
-                        if (snapshotExecutable && builtTarget.Type == "EXECUTABLE" && builtTarget.Executable is { } executable
+                        if (snapshotExecutable && builtTarget.Type == "EXECUTABLE" &&
+                            builtTarget.Executable is { } executable
                             && File.Exists(executable))
                         {
                             var sha = await HashExecutableAsync(executable, deadline.Token);
@@ -654,24 +756,31 @@ public static class WorkflowRunner
                     result.ObservationAfter = await CMakeInspection.InspectAsync(target.BuildDirectory, deadline.Token);
                     result.SessionAfter = session.Observe(node.Requested, result.ObservationAfter, "AfterInvoke");
                     var after = CMakeInspection.Resolve(BuildContextSession.ResolutionRequest(node.Requested) with
-                        { ProvenancePolicy = "allowUnverified" }, result.ObservationAfter, target.Target);
-                    if (after != target) throw new InvalidOperationException("Invoke regenerated a different configuration; dependent execution is blocked.");
+                    {
+                        ProvenancePolicy = "allowUnverified"
+                    }, result.ObservationAfter, target.Target);
+                    if (after != target)
+                        throw new InvalidOperationException(
+                            "Invoke regenerated a different configuration; dependent execution is blocked.");
                     session.Validate(node.Requested, result.ObservationAfter);
                     // Only attach measurements after the CLI's provenance checks pass.
                     if (definition.HarnessDirectory is not null)
                         result.Outputs = await DagFlowHarnessSnapshot.CaptureAsync(
-                            node.Target.BuildDirectory, definition.HarnessDirectory, output, definition.Id, deadline.Token);
+                            node.Target.BuildDirectory, definition.HarnessDirectory, output, definition.Id,
+                            deadline.Token);
                     else if (result.Stdout is not null && result.StartedAt is { } invokedAt)
                         result.Outputs = await DagFlowHarnessSnapshot.CaptureReportedAsync(
                             node.Target.BuildDirectory, Path.Combine(output, result.Stdout),
                             output, definition.Id, invokedAt, deadline.Token);
                 }
             }
+
             if (result.Status == "succeeded")
             {
                 foreach (var evidence in result.DeclaredArtifacts.Where(x => x.Role == "input"))
                     if (await WorkflowArtifacts.HashAsync(evidence.Path, deadline.Token) != evidence.Sha256)
-                        throw new InvalidDataException($"{definition.Id}: input changed during execution: {evidence.Path}");
+                        throw new InvalidDataException(
+                            $"{definition.Id}: input changed during execution: {evidence.Path}");
                 foreach (var declared in definition.Outputs)
                 {
                     var path = WorkflowArtifacts.OutputPath(manifest, output, declared);
@@ -688,7 +797,9 @@ public static class WorkflowRunner
         catch (OperationCanceledException)
         {
             result.Status = ct.IsCancellationRequested ? "canceled" : "failed";
-            result.Error = ct.IsCancellationRequested ? "Canceled." : $"Timed out after {definition.TimeoutSeconds} seconds.";
+            result.Error = ct.IsCancellationRequested
+                ? "Canceled."
+                : $"Timed out after {definition.TimeoutSeconds} seconds.";
             if (definition.Kind is "run" or "profile" or "ctest" or "invoke" && result.Executable is not null)
                 result.ExperimentResult = ct.IsCancellationRequested ? "canceled" : "timedOut";
         }
@@ -702,13 +813,16 @@ public static class WorkflowRunner
                 && result.ExperimentResult == "NotRun")
                 result.ExperimentResult = "failed";
         }
-        result.SessionAfter ??= session.State(node.Requested, result.ObservationAfter ?? result.ObservedContext ?? node.Observed);
+
+        result.SessionAfter ??= session.State(node.Requested,
+            result.ObservationAfter ?? result.ObservedContext ?? node.Observed);
         result.FinishedAt = DateTimeOffset.UtcNow;
         result.DurationSeconds = timer.Elapsed.TotalSeconds;
         return result;
     }
 
-    private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session, string output, CancellationToken ct,
+    private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session,
+        string output, CancellationToken ct,
         WorkflowToolchainRuntime? toolchain)
     {
         var request = node.Requested;
@@ -727,17 +841,21 @@ public static class WorkflowRunner
         result.Arguments = [];
         if (request.ConfigurePreset is not null)
         {
-            if (toolchain is not null) throw new InvalidOperationException(
-                "Explicit toolchain and configurePreset cannot be combined without verifying preset compiler selection.");
+            if (toolchain is not null)
+                throw new InvalidOperationException(
+                    "Explicit toolchain and configurePreset cannot be combined without verifying preset compiler selection.");
             result.Arguments.AddRange(["--preset", request.ConfigurePreset]);
         }
         else if (toolchain is not null)
         {
-            result.Arguments.AddRange(["-G", toolchain.Generator,
-                "-DCMAKE_CXX_COMPILER:FILEPATH=" + toolchain.Compiler]);
+            result.Arguments.AddRange([
+                "-G", toolchain.Generator,
+                "-DCMAKE_CXX_COMPILER:FILEPATH=" + toolchain.Compiler
+            ]);
             if (toolchain.Ninja is not null)
                 result.Arguments.Add("-DCMAKE_MAKE_PROGRAM:FILEPATH=" + toolchain.Ninja);
         }
+
         result.Arguments.AddRange(["-S", request.SourceDirectory, "-B", request.BuildDirectory]);
         result.Configure.Executable = result.Executable;
         result.Configure.WorkingDirectory = result.WorkingDirectory;
@@ -751,7 +869,8 @@ public static class WorkflowRunner
                 await File.WriteAllTextAsync(Path.Combine(query, kind), "", ct);
             result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
                 MergeEnvironment(toolchain, new Dictionary<string, string>()), output, ct,
-                elapsed => Console.Error.WriteLine($"[CMakeWorkflow] RUNNING {result.Id} {elapsed.ToString(@"hh\:mm\:ss")} elapsed"));
+                elapsed => Console.Error.WriteLine(
+                    $"[CMakeWorkflow] RUNNING {result.Id} {elapsed.ToString(@"hh\:mm\:ss")} elapsed"));
             result.Configure.ExitCode = result.ExitCode;
             result.Configure.State = result.ExitCode == 0 ? "Succeeded" : "Failed";
             await CMakeInspection.WriteProvenanceAsync(request.BuildDirectory, result.Configure);
@@ -779,6 +898,7 @@ public static class WorkflowRunner
                 result.Configure.State = result.Configure.State == "Attempted" ? "Interrupted" : "Rejected";
                 await CMakeInspection.WriteProvenanceAsync(request.BuildDirectory, result.Configure);
             }
+
             throw;
         }
     }
@@ -797,15 +917,20 @@ public static class WorkflowRunner
         // A run recipe may override application variables, but not silently
         // replace the compiler/SDK activation promised by its build context.
         var protectedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { "PATH", "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "VCINSTALLDIR",
-          "WindowsSdkDir", "WindowsSDKVersion", "VSCMD_ARG_HOST_ARCH", "VSCMD_ARG_TGT_ARCH" };
+        {
+            "PATH", "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "VCINSTALLDIR",
+            "WindowsSdkDir", "WindowsSDKVersion", "VSCMD_ARG_HOST_ARCH", "VSCMD_ARG_TGT_ARCH"
+        };
         foreach (var entry in overrides)
         {
             if (protectedKeys.Contains(entry.Key) && (!values.TryGetValue(entry.Key, out var current)
-                || !string.Equals(current, entry.Value, StringComparison.Ordinal)))
-                throw new InvalidOperationException("Run override conflicts with bound toolchain environment: " + entry.Key);
+                                                      || !string.Equals(current, entry.Value,
+                                                          StringComparison.Ordinal)))
+                throw new InvalidOperationException("Run override conflicts with bound toolchain environment: " +
+                                                    entry.Key);
             values[entry.Key] = entry.Value;
         }
+
         return values;
     }
 

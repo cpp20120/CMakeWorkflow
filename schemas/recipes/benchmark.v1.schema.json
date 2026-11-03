@@ -14,17 +14,43 @@
     "arguments"
   ],
   "properties": {
-    "kind": { "const": "benchmark" },
-    "schemaVersion": { "const": 1 },
-    "buildDirectory": { "type": "string", "minLength": 1 },
+    "kind": {
+      "const": "benchmark"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "buildDirectory": {
+      "type": "string",
+      "minLength": 1
+    },
     "target": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_.+\\-]+$"
     },
-    "configuration": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.+\\-]+$" },
-    "repeats": { "type": "integer", "minimum": 1, "maximum": 1000 },
-    "timeoutSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 86400 },
-    "arguments": { "type": "array", "items": { "type": "string" } }
+    "configuration": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9_.+\\-]+$"
+    },
+    "repeats": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "timeoutSeconds": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 86400
+    },
+    "arguments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
   },
   "$comment": "Absolute buildDirectory and configuration semantics are checked by BenchmarkWorkflowBuilder on the execution host."
 }

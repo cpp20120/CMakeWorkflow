@@ -47,6 +47,7 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
 
     [DllImport("advapi32.dll", EntryPoint = "StartTraceW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint StartTrace(out ulong session, string name, IntPtr properties);
+
     [DllImport("advapi32.dll", EntryPoint = "ControlTraceW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint ControlTrace(ulong session, string? name, IntPtr properties, uint controlCode);
 
@@ -104,8 +105,10 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
                 // Never stop by global name alone; use only the handle acquired by this invocation.
                 var stopCode = ControlTrace(handle, null, buffer, Stop);
                 if (stopCode != 0)
-                    throw new InvalidOperationException($"ETW probe session cleanup failed (Win32 {stopCode}); session {name} may remain active.");
+                    throw new InvalidOperationException(
+                        $"ETW probe session cleanup failed (Win32 {stopCode}); session {name} may remain active.");
             }
+
             Marshal.FreeHGlobal(buffer);
         }
     }

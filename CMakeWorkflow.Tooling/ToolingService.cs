@@ -9,7 +9,8 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         PackageManagerKind requestedManager, bool allowFallback,
         string? installDirectory, CancellationToken ct, Func<ToolStatus, Task>? onTool = null)
     {
-        var profiles = requestedProfiles.Count == 0 ? new[] { "cmake" }
+        var profiles = requestedProfiles.Count == 0
+            ? new[] { "cmake" }
             : requestedProfiles.Select(x => x.Trim().ToLowerInvariant()).Distinct(StringComparer.Ordinal).ToArray();
         var directory = Path.GetFullPath(installDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin"));
@@ -31,9 +32,11 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                     aptUpdate = true;
                     steps.Add(new("*", "package-index", "apt-get", ["update"], null, null));
                 }
+
                 var (command, args) = InstallCommand(manager, packages);
                 steps.Add(new(tool.Id, "package", command, args, null, null));
             }
+
             if (allowFallback && tool.StandaloneCMake && runtime.Platform == ToolPlatform.Linux)
                 steps.Add(new(tool.Id, "verified-release", null, [],
                     "https://github.com/Kitware/CMake/releases", "Requires a published SHA-256 asset digest."));
@@ -41,6 +44,7 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                 steps.Add(new(tool.Id, "manual", null, [], null,
                     tool.ManualHint ?? "No supported installer for this tool on this platform."));
         }
+
         return new(1, runtime.Platform, profiles, directory, manager,
             statuses.All(x => x.Installed), statuses, steps);
     }
@@ -50,14 +54,22 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
     {
         Task Progress(string tool, string stage, string? message = null) =>
             onProgress?.Invoke(new(tool, stage, message)) ?? Task.CompletedTask;
-        var ready = new List<string>(); var failed = new List<string>(); var diagnostics = new List<string>();
+
+        var ready = new List<string>();
+        var failed = new List<string>();
+        var diagnostics = new List<string>();
         var aptUpdated = false;
         foreach (var status in plan.Tools)
         {
             ct.ThrowIfCancellationRequested();
             var definition = ToolCatalog.GetTool(status.Id);
             if ((await ProbeAsync(definition, plan.InstallDirectory, ct)).Installed)
-            { ready.Add(status.Id); await Progress(status.Id, "tool_ready"); continue; }
+            {
+                ready.Add(status.Id);
+                await Progress(status.Id, "tool_ready");
+                continue;
+            }
+
             var packageStep = plan.Steps.FirstOrDefault(x => x.Tool == status.Id && x.Method == "package");
             if (packageStep is not null)
             {
@@ -68,20 +80,33 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                         aptUpdated = true;
                         await Progress(status.Id, "package_index", "Updating package index");
                         var update = await RunPackageAsync("apt-get", ["update"], plan.InstallDirectory, ct);
-                        if (update.ExitCode != 0) throw new InvalidOperationException(
-                            $"apt-get update failed: {update.Error.Trim()}");
+                        if (update.ExitCode != 0)
+                            throw new InvalidOperationException(
+                                $"apt-get update failed: {update.Error.Trim()}");
                     }
+
                     await Progress(status.Id, "package_install", "Installing through " + packageStep.Executable);
                     var install = await RunPackageAsync(packageStep.Executable!, packageStep.Arguments,
                         plan.InstallDirectory, ct);
-                    if (install.ExitCode != 0) diagnostics.Add($"{status.Id}: package installation exited {install.ExitCode}: {install.Error.Trim()}");
+                    if (install.ExitCode != 0)
+                        diagnostics.Add(
+                            $"{status.Id}: package installation exited {install.ExitCode}: {install.Error.Trim()}");
                     else if ((await ProbeAsync(definition, plan.InstallDirectory, ct)).Installed)
-                    { ready.Add(status.Id); await Progress(status.Id, "tool_ready"); continue; }
-                    else diagnostics.Add($"{status.Id}: package command succeeded but the required tool/version is still unavailable.");
+                    {
+                        ready.Add(status.Id);
+                        await Progress(status.Id, "tool_ready");
+                        continue;
+                    }
+                    else
+                        diagnostics.Add(
+                            $"{status.Id}: package command succeeded but the required tool/version is still unavailable.");
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
-                { diagnostics.Add($"{status.Id}: package installation failed: {error.Message}"); }
+                {
+                    diagnostics.Add($"{status.Id}: package installation failed: {error.Message}");
+                }
             }
+
             if (plan.Steps.Any(x => x.Tool == status.Id && x.Method == "verified-release"))
             {
                 try
@@ -89,16 +114,25 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                     await Progress(status.Id, "verified_release", "Installing verified CMake release");
                     await installer.InstallAsync(plan.InstallDirectory, ct);
                     if ((await ProbeAsync(definition, plan.InstallDirectory, ct)).Installed)
-                    { ready.Add(status.Id); await Progress(status.Id, "tool_ready"); continue; }
+                    {
+                        ready.Add(status.Id);
+                        await Progress(status.Id, "tool_ready");
+                        continue;
+                    }
+
                     diagnostics.Add($"{status.Id}: verified CMake release installed, but probing still failed.");
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
-                { diagnostics.Add($"{status.Id}: verified CMake release failed: {error.Message}"); }
+                {
+                    diagnostics.Add($"{status.Id}: verified CMake release failed: {error.Message}");
+                }
             }
+
             failed.Add(status.Id);
             await Progress(status.Id, "tool_failed", definition.ManualHint);
             if (definition.ManualHint is { } hint) diagnostics.Add($"{status.Id}: {hint}");
         }
+
         return new(1, failed.Count == 0, ready.ToArray(), failed.ToArray(), diagnostics.ToArray());
     }
 
@@ -110,7 +144,8 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         // GNU remains a normal default on Linux; an explicitly requested MinGW
         // workflow is a separate toolchain choice, not a fallback in doctor.
         var commands = tool.Id == "cxx" && runtime.Platform == ToolPlatform.Windows
-            ? new[] { "cl", "clang-cl", "clang++" } : tool.Commands;
+            ? new[] { "cl", "clang-cl", "clang++" }
+            : tool.Commands;
         foreach (var command in commands)
         {
             var resolved = runtime.Resolve(command, directory);
@@ -125,28 +160,44 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                 {
                     string? diagnostic = null;
                     if (tool.Id == "perf" && runtime is SystemToolingRuntime
-                        && runtime.Platform == ToolPlatform.Linux)
+                                          && runtime.Platform == ToolPlatform.Linux)
                     {
                         string paranoid;
-                        try { paranoid = File.ReadAllText("/proc/sys/kernel/perf_event_paranoid").Trim(); }
-                        catch (IOException) { paranoid = "unavailable"; }
-                        catch (UnauthorizedAccessException) { paranoid = "unavailable"; }
+                        try
+                        {
+                            paranoid = File.ReadAllText("/proc/sys/kernel/perf_event_paranoid").Trim();
+                        }
+                        catch (IOException)
+                        {
+                            paranoid = "unavailable";
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            paranoid = "unavailable";
+                        }
+
                         diagnostic = $"perf executable available; perf_event_paranoid={paranoid}. " +
-                            "PMU counters, sampling, user-space DWARF call chains and scheduler tracepoints " +
-                            "remain independently unverified. Run an explicit bounded profile capture; " +
-                            "scheduler mode may require additional tracepoint permissions.";
+                                     "PMU counters, sampling, user-space DWARF call chains and scheduler tracepoints " +
+                                     "remain independently unverified. Run an explicit bounded profile capture; " +
+                                     "scheduler mode may require additional tracepoint permissions.";
                     }
+
                     return new(tool.Id, tool.DisplayName, true, resolved, version?.ToString(),
                         tool.MinimumVersion?.ToString(), diagnostic);
                 }
+
                 outdated = new(tool.Id, tool.DisplayName, false, resolved, version?.ToString(),
                     tool.MinimumVersion.ToString(), version is null
-                        ? "Version could not be determined." : $"Requires >= {tool.MinimumVersion}.");
+                        ? "Version could not be determined."
+                        : $"Requires >= {tool.MinimumVersion}.");
             }
             catch (Exception error) when (error is not OperationCanceledException)
-            { outdated = new(tool.Id, tool.DisplayName, false, resolved, null,
-                tool.MinimumVersion?.ToString(), error.Message); }
+            {
+                outdated = new(tool.Id, tool.DisplayName, false, resolved, null,
+                    tool.MinimumVersion?.ToString(), error.Message);
+            }
         }
+
         // A Visual Studio install does not imply cl.exe works in this process's
         // uninitialized PATH/INCLUDE/LIB. Report its presence without lying
         // about readiness or implicitly mutating the Host environment.
@@ -155,13 +206,15 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         {
             var inventory = await WindowsToolchains.DiscoverAsync(ct);
             var msvc = inventory.Candidates.FirstOrDefault(x => x.Role == "compiler"
-                && x.Flavor == "msvc" && x.EnvironmentProfileId is not null);
+                                                                && x.Flavor == "msvc" &&
+                                                                x.EnvironmentProfileId is not null);
             if (msvc is not null)
                 return new(tool.Id, tool.DisplayName, false, msvc.Path, msvc.Version,
                     tool.MinimumVersion?.ToString(),
                     "MSVC is installed but its Developer Command Prompt is not active. " +
                     "Use toolchains/resolve and toolchains/inspectEnvironment; execution environment binding is required.");
         }
+
         return outdated ?? new(tool.Id, tool.DisplayName, false, null, null,
             tool.MinimumVersion?.ToString(), "Command not found.");
     }
@@ -171,12 +224,18 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         for (var i = 0; i < text.Length; i++)
         {
             if (!char.IsAsciiDigit(text[i])) continue;
-            var end = i; var dots = 0;
+            var end = i;
+            var dots = 0;
             while (end < text.Length && (char.IsAsciiDigit(text[end]) || text[end] == '.'))
-            { if (text[end] == '.') dots++; end++; }
+            {
+                if (text[end] == '.') dots++;
+                end++;
+            }
+
             if (dots > 0 && Version.TryParse(text[i..end].TrimEnd('.'), out var version)) return version;
             i = end;
         }
+
         return null;
     }
 
@@ -191,10 +250,11 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
             if (requested == PackageManagerKind.Brew && runtime.Platform != ToolPlatform.MacOS
                 || requested == PackageManagerKind.Winget && runtime.Platform != ToolPlatform.Windows
                 || requested is (PackageManagerKind.Apt or PackageManagerKind.Pacman or PackageManagerKind.Dnf)
-                    && runtime.Platform != ToolPlatform.Linux)
+                && runtime.Platform != ToolPlatform.Linux)
                 throw new ArgumentException($"Package manager {requested} is not supported on {runtime.Platform}.");
             return requested;
         }
+
         return PackageManagerKind.None;
     }
 
@@ -207,7 +267,8 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
             _ => [PackageManagerKind.Winget]
         };
         foreach (var candidate in candidates)
-            if (runtime.Resolve(ManagerCommand(candidate)!, directory) is not null) return candidate;
+            if (runtime.Resolve(ManagerCommand(candidate)!, directory) is not null)
+                return candidate;
         return PackageManagerKind.None;
     }
 
@@ -218,8 +279,10 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         PackageManagerKind.Pacman => ("pacman", ["-S", "--needed", "--noconfirm", .. packages]),
         PackageManagerKind.Dnf => ("dnf", ["install", "-y", .. packages]),
         PackageManagerKind.Brew => ("brew", ["install", .. packages]),
-        PackageManagerKind.Winget => ("winget", ["install", "--id", packages[0], "--exact",
-            "--accept-package-agreements", "--accept-source-agreements"]),
+        PackageManagerKind.Winget => ("winget", [
+            "install", "--id", packages[0], "--exact",
+            "--accept-package-agreements", "--accept-source-agreements"
+        ]),
         _ => throw new ArgumentException("No package manager selected.")
     };
 
@@ -229,12 +292,17 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         if (runtime.Platform == ToolPlatform.Linux && !runtime.IsAdministrator)
         {
             var sudo = runtime.Resolve("sudo", directory)
-                ?? throw new InvalidOperationException("sudo is required for package installation.");
+                       ?? throw new InvalidOperationException("sudo is required for package installation.");
             var result = await runtime.RunAsync(sudo, ["-n", executable, .. args], TimeSpan.FromMinutes(15), ct);
             if (result.ExitCode != 0)
-                return result with { Error = result.Error + "\nInstallation uses sudo -n and cannot prompt for a password. If authorization is required, install the reviewed packages in a terminal, then run Doctor again." };
+                return result with
+                {
+                    Error = result.Error +
+                            "\nInstallation uses sudo -n and cannot prompt for a password. If authorization is required, install the reviewed packages in a terminal, then run Doctor again."
+                };
             return result;
         }
+
         return await runtime.RunAsync(executable, args, TimeSpan.FromMinutes(15), ct);
     }
 
