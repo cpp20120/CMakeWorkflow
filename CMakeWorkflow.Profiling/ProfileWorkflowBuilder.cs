@@ -1,11 +1,7 @@
 using System.Globalization;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace CMakeWorkflow.Profiling;
-
-[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record ProfileVariant(string Name, string BuildDirectory);
 
 // Single typed graph builder for the CLI and the local Host. It does no I/O and
 // does not start a build or profiler. The caller owns persistence and admission.

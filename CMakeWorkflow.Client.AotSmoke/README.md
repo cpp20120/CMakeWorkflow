@@ -27,8 +27,10 @@ From the repository root, publish the SDK as a **local NuGet package** and consu
 that package instead of the normal development ProjectReference:
 
 ```sh
+dotnet pack CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj -c Release \
+  -p:Version=0.0.0-smoke.1 -p:PackageVersion=0.0.0-smoke.1 -o out/sdk-packages
 dotnet pack CMakeWorkflow.Client/CMakeWorkflow.Client.csproj -c Release \
-  -p:PackageVersion=0.0.0-smoke.1 -o out/sdk-packages
+  -p:Version=0.0.0-smoke.1 -p:PackageVersion=0.0.0-smoke.1 -o out/sdk-packages
 dotnet publish CMakeWorkflow.Client.AotSmoke/CMakeWorkflow.Client.AotSmoke.csproj \
   -c Release -r linux-x64 -p:SdkPackageVersion=0.0.0-smoke.1 \
   -p:RestoreAdditionalProjectSources="$PWD/out/sdk-packages" \
@@ -44,10 +46,10 @@ dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 \
 Choose a fresh local package version when repacking changed SDK sources, to avoid
 reusing NuGet's cached package. No package is uploaded to a registry.
 
-The package audit checks a strict asset allowlist (SDK DLL and NuGet metadata),
-the declared StreamJsonRpc dependency, and every compile/runtime target in the
+The package audit checks strict asset allowlists (Client DLL, Contracts DLL, and NuGet metadata),
+the declared StreamJsonRpc and Contracts dependencies, and every compile/runtime target in the
 consumer's `project.assets.json`. It rejects source-project dependencies and
-compares the actual archive's SHA512 with NuGet's restored package hash. The
+compares both archive SHA512 values with NuGet's restored package hashes. The
 package-mode build also rejects any `ProjectReference`. SDK dependency upgrades
 or intentional new package assets require updating the audit. Transitive runtime
 dependencies are resolved by NuGet, not bundled as Host/engine assemblies.
@@ -143,7 +145,8 @@ After a platform's checks pass, open **Actions → CI → run → Artifacts** an
 
 - `CMakeWorkflow-<rid>.tar.gz`: complete native CLI/Host publish output;
 - `CMakeWorkflow.Client.AotSmoke-<rid>.tar.gz`: complete native consumer output;
-- `CMakeWorkflow.Client.0.0.0-smoke.<run-id>.<attempt>.nupkg`: the audited SDK package;
+- `CMakeWorkflow.Client.0.0.0-smoke.<run-id>.<attempt>.nupkg`: audited client SDK;
+- `CMakeWorkflow.Contracts.0.0.0-smoke.<run-id>.<attempt>.nupkg`: audited shared contract models;
 - `build.json` with the commit, RID and run identity, and `SHA256SUMS`.
 
 Extract the inner archives with `tar -xzf FILE.tar.gz` into separate directories.

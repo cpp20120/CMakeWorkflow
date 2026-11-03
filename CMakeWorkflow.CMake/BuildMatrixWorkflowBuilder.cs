@@ -1,19 +1,4 @@
-using System.Text.Json.Serialization;
-
 namespace CMakeWorkflow;
-
-[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record BuildVariantV1(
-    [property: JsonRequired] string Name,
-    [property: JsonRequired] string BuildDirectory,
-    string? Configuration = null);
-
-[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record BuildMatrixRecipeV1(
-    [property: JsonRequired] string Kind,
-    [property: JsonRequired] int SchemaVersion,
-    [property: JsonRequired] BuildVariantV1[] Variants,
-    [property: JsonRequired] string[] Targets);
 
 public static class BuildMatrixWorkflowBuilder
 {

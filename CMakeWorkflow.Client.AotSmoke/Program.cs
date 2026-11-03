@@ -1,4 +1,6 @@
 using CMakeWorkflow.Client;
+using CMakeWorkflow;
+using CMakeWorkflow.Profiling;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;

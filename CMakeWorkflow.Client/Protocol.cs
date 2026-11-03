@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using PolyType;
 using StreamJsonRpc;
+using CMakeWorkflow;
+using CMakeWorkflow.Profiling;
 
 namespace CMakeWorkflow.Client;
 
@@ -16,7 +18,7 @@ public sealed record RecoverySnapshot(string OperationId, string AcceptanceState
 public sealed record WorkflowEvent(long Sequence, string Kind, JsonElement Data);
 public sealed record EventPage(string OperationId, long AfterSequence, long NextSequence, bool HasMore, List<JsonElement> Events);
 public sealed record RpcErrorData(string Code, string Message);
-// Independent SDK models: the client never references the Host assembly.
+// Independent SDK models: the client references only Contracts, never Host.
 public sealed record ToolchainCandidate(string Id, string Role, string Flavor, string Provider,
     string Path, string? Version = null, string? VisualStudioInstanceId = null,
     string? EnvironmentProfileId = null);
@@ -50,43 +52,18 @@ internal sealed record ResumeRequest(string OperationId, long ExpectedRevision, 
 internal sealed record ReconcileRequest(string OperationId, long ExpectedRevision, string Decision, string Note, bool ConfirmedQuiescent);
 internal sealed record PlanRequest(string Manifest, string[]? Only = null, string? ControllerBuildDirectory = null);
 
-// Public .NET SDK mirrors the Host's versioned wire DTOs without referencing
-// the Host assembly. TypeScript uses the same JSON field names.
+// Public .NET SDK DTOs outside the shared recipe/model contracts.
+// TypeScript uses the same JSON field names.
 public sealed record PreparedWorkflow(int SchemaVersion, string Manifest, string ManifestSha256,
     string ResultsDirectory);
-// Serializes to the same contract as the engine type without coupling SDK to Host.
-public sealed record PrepareToolchainSelection(
-    [property: JsonPropertyName("cmakeCandidateId")] string? CMakeCandidateId = null,
-    string? NinjaCandidateId = null,
-    string? CompilerCandidateId = null, string? SdkCandidateId = null,
-    string? EnvironmentProfileId = null, string Generator = "Ninja",
-    string HostArchitecture = "x64", string TargetArchitecture = "x64");
 public sealed record ProfileVariantOptions(string Name, string BuildDirectory,
-    PrepareToolchainSelection? Toolchain = null);
+    WorkflowToolchainBinding? Toolchain = null);
 public sealed record PrepareProfileOptions(string RequestId, string ResultsDirectory, string Target,
     List<ProfileVariantOptions> Variants, int Repeats = 3, double TimeoutSeconds = 300,
     string Backend = "auto", string Mode = "cpu", string? Configuration = null,
     string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
-public sealed record BenchmarkRecipeV1(string Kind, int SchemaVersion, string BuildDirectory,
-    string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments);
 public sealed record PrepareBenchmarkOptions(string RequestId, string OutputPath, BenchmarkRecipeV1 Recipe);
 public sealed record PreparedBenchmark(int SchemaVersion, string Manifest, string ManifestSha256);
-public sealed record ProfileRecipeVariantV1(string Name, string BuildDirectory);
-public sealed record ProfileRecipeV1(string Kind, int SchemaVersion, ProfileRecipeVariantV1[] Variants,
-    string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments,
-    string Backend, string Mode, string Platform, string? SourceDirectory = null,
-    string? ConfigurePreset = null);
-public sealed record TestMatrixGroupV1(string Name, string? TestRegex = null, string? LabelRegex = null);
-public sealed record TestMatrixRecipeV1(string Kind, int SchemaVersion, string BuildDirectory,
-    string Target, string? Configuration, TestMatrixGroupV1[] Groups,
-    string ExecutionOrder, double TimeoutSeconds);
-public sealed record BuildVariantV1(string Name, string BuildDirectory, string? Configuration = null);
-public sealed record BuildMatrixRecipeV1(string Kind, int SchemaVersion, BuildVariantV1[] Variants,
-    string[] Targets);
-public sealed record BenchmarkAxisV1(string Name, string Flag, string[] Values);
-public sealed record BenchmarkMatrixRecipeV1(string Kind, int SchemaVersion, BuildVariantV1[] Variants,
-    string Target, int Repeats, double TimeoutSeconds, string[] FixedArguments,
-    BenchmarkAxisV1[] Axes, string ExecutionOrder);
 public sealed record PrepareProfileRecipeOptions(string RequestId, string OutputPath, ProfileRecipeV1 Recipe);
 public sealed record PrepareTestMatrixOptions(string RequestId, string OutputPath, TestMatrixRecipeV1 Recipe);
 public sealed record PrepareBuildMatrixOptions(string RequestId, string OutputPath, BuildMatrixRecipeV1 Recipe);
@@ -101,7 +78,7 @@ public sealed record ReplayProfileResult(int SchemaVersion, string RunDirectory,
 public sealed record PrepareTargetOptions(string RequestId, string ResultsDirectory, string Action,
     string BuildDirectory, string? Target = null, string? SecondTarget = null,
     string? Configuration = null, string[]? Arguments = null, string[]? SecondArguments = null,
-    PrepareToolchainSelection? Toolchain = null);
+    WorkflowToolchainBinding? Toolchain = null);
 public sealed record MutationCampaignOptions(string SourceDirectory, string? ReportPath = null,
     string Suite = "all", string Compiler = "c++", string Seed = "496833221358",
     int Cases = 48, int Steps = 48, int TimeoutSeconds = 30);
@@ -168,14 +145,14 @@ internal partial interface IClientRpc
 [JsonSerializable(typeof(ToolchainResolveRequest))]
 [JsonSerializable(typeof(ToolchainInspectEnvironmentRequest))]
 [JsonSerializable(typeof(PreparedWorkflow))]
-[JsonSerializable(typeof(PrepareToolchainSelection))]
+[JsonSerializable(typeof(WorkflowToolchainBinding))]
 [JsonSerializable(typeof(ProfileVariantOptions))]
 [JsonSerializable(typeof(List<ProfileVariantOptions>))]
 [JsonSerializable(typeof(PrepareProfileOptions))]
 [JsonSerializable(typeof(BenchmarkRecipeV1))]
 [JsonSerializable(typeof(PrepareBenchmarkOptions))]
 [JsonSerializable(typeof(PreparedBenchmark))]
-[JsonSerializable(typeof(ProfileRecipeVariantV1))]
+[JsonSerializable(typeof(ProfileVariant))]
 [JsonSerializable(typeof(ProfileRecipeV1))]
 [JsonSerializable(typeof(TestMatrixGroupV1))]
 [JsonSerializable(typeof(TestMatrixRecipeV1))]

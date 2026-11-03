@@ -131,7 +131,7 @@ internal static class ProfileWorkflowWireTests
                 throw new Exception("Typed .NET SDK target preparation/plan mismatch.");
             var sdkBenchmark = await sdk.Benchmarks.PrepareAsync(new PrepareBenchmarkOptions(
                 Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-benchmark.json"),
-                new CMakeWorkflow.Client.BenchmarkRecipeV1("benchmark", 1, build,
+                new CMakeWorkflow.BenchmarkRecipeV1("benchmark", 1, build,
                     "worker", "Debug", 2, 5, ["one argument", ""])), cancellationToken);
             if (sdkBenchmark.ManifestSha256.Length != 64
                 || (await sdk.Workflows.PlanAsync(sdkBenchmark.Manifest, cancellationToken))
@@ -140,22 +140,22 @@ internal static class ProfileWorkflowWireTests
             var sdkPlatform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
             var sdkProfileRecipe = await sdk.Recipes.PrepareProfileAsync(new PrepareProfileRecipeOptions(
                 Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-profile-recipe.json"),
-                new CMakeWorkflow.Client.ProfileRecipeV1("profile", 1,
+                new CMakeWorkflow.Profiling.ProfileRecipeV1("profile", 1,
                     [new("main", build)], "worker", "Debug", 1, 5, [], "auto", "cpu", sdkPlatform)),
                 cancellationToken);
             var sdkTestMatrix = await sdk.Recipes.PrepareTestMatrixAsync(new PrepareTestMatrixOptions(
                 Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-test-matrix.json"),
-                new CMakeWorkflow.Client.TestMatrixRecipeV1("test-matrix", 1, build, "worker", "Debug",
+                new CMakeWorkflow.TestMatrixRecipeV1("test-matrix", 1, build, "worker", "Debug",
                     [new("unit", TestRegex: "worker")], "parallel", 5)), cancellationToken);
-            var sdkVariants = new[] { new CMakeWorkflow.Client.BuildVariantV1("main", build, "Debug") };
+            var sdkVariants = new[] { new CMakeWorkflow.BuildVariantV1("main", build, "Debug") };
             var sdkBuildMatrix = await sdk.Recipes.PrepareBuildMatrixAsync(new PrepareBuildMatrixOptions(
                 Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-build-matrix.json"),
-                new CMakeWorkflow.Client.BuildMatrixRecipeV1("build-matrix", 1, sdkVariants,
+                new CMakeWorkflow.BuildMatrixRecipeV1("build-matrix", 1, sdkVariants,
                     ["worker"])), cancellationToken);
             var sdkBenchmarkMatrix = await sdk.Recipes.PrepareBenchmarkMatrixAsync(
                 new PrepareBenchmarkMatrixOptions(Guid.NewGuid().ToString("N"),
                     Path.Combine(workspace, "sdk-benchmark-matrix.json"),
-                    new CMakeWorkflow.Client.BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
+                    new CMakeWorkflow.BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
                         sdkVariants, "worker", 2, 5, [], [new("case", "--case", ["x"])],
                         "round-robin")), cancellationToken);
             foreach (var preparedRecipe in new[] { sdkProfileRecipe, sdkTestMatrix, sdkBuildMatrix, sdkBenchmarkMatrix })

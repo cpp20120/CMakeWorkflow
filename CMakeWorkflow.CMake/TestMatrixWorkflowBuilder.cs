@@ -1,24 +1,6 @@
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace CMakeWorkflow;
-
-[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record TestMatrixGroupV1(
-    [property: JsonRequired] string Name,
-    string? TestRegex = null,
-    string? LabelRegex = null);
-
-[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record TestMatrixRecipeV1(
-    [property: JsonRequired] string Kind,
-    [property: JsonRequired] int SchemaVersion,
-    [property: JsonRequired] string BuildDirectory,
-    [property: JsonRequired] string Target,
-    string? Configuration,
-    [property: JsonRequired] TestMatrixGroupV1[] Groups,
-    [property: JsonRequired] string ExecutionOrder,
-    [property: JsonRequired] double TimeoutSeconds);
 
 public static class TestMatrixWorkflowBuilder
 {

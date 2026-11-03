@@ -105,9 +105,13 @@ jobs:
       - name: Publish NativeAOT CLI and Host
         shell: pwsh
         run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:Version=$env:SDK_VERSION -p:TreatWarningsAsErrors=true
-      - name: Pack NuGet SDK
+      - name: Pack NuGet contracts and client SDK
         shell: pwsh
-        run: dotnet pack CMakeWorkflow.Client/CMakeWorkflow.Client.csproj -c Release -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
+        run: |
+          dotnet pack CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj -c Release -p:Version=$env:SDK_VERSION -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
+          if ($LASTEXITCODE -ne 0) { throw "Contracts pack failed: $LASTEXITCODE" }
+          dotnet pack CMakeWorkflow.Client/CMakeWorkflow.Client.csproj -c Release -p:Version=$env:SDK_VERSION -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
+          if ($LASTEXITCODE -ne 0) { throw "Client pack failed: $LASTEXITCODE" }
       - name: Publish NativeAOT consumer from NuGet
         shell: pwsh
         run: |
@@ -197,9 +201,12 @@ jobs:
             cp "$source/build.json" "out/release-assets/build-${rid}.json"
           done
           version="${GITHUB_REF_NAME#v}"
-          package="out/release-inputs/CMakeWorkflow-linux-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/CMakeWorkflow.Client.${version}.nupkg"
-          test -f "$package"
-          cp "$package" out/release-assets/
+          packages="out/release-inputs/CMakeWorkflow-linux-x64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for id in CMakeWorkflow.Client CMakeWorkflow.Contracts; do
+            package="$packages/${id}.${version}.nupkg"
+            test -f "$package"
+            cp "$package" out/release-assets/
+          done
           (cd out/release-assets && sha256sum *.tar.gz *.nupkg *.json > SHA256SUMS)
       - name: Create immutable tagged release
         shell: bash

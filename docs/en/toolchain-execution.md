@@ -34,7 +34,7 @@ Without a binding, existing workflow behavior is unchanged.
 
 The same binding can be provided to `target/prepare` as `toolchain` or to
 `profile/prepare` on each variant (`variants[].toolchain`). The .NET SDK
-exposes `PrepareToolchainSelection` for both.
+exposes `WorkflowToolchainBinding` for both.
 
 ## Lifecycle and guarantees
 

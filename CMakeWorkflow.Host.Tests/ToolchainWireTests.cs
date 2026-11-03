@@ -162,7 +162,7 @@ internal static class ToolchainWireTests
             new ClientSdk.ToolchainSelection(CMakeCandidateId: cmake.Id),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         var clientPreparation = JsonSerializer.Serialize(
-            new ClientSdk.PrepareToolchainSelection(CMakeCandidateId: cmake.Id),
+            new WorkflowToolchainBinding(CMakeCandidateId: cmake.Id),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         Check(clientSelection.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal) &&
             clientPreparation.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),

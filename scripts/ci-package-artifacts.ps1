@@ -15,8 +15,13 @@ foreach ($binary in @((Join-Path $NativeDirectory "CMakeWorkflow$suffix"),
                      (Join-Path $ConsumerDirectory "CMakeWorkflow.Client.AotSmoke$suffix"))) {
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "Missing native binary: $binary" }
 }
-$packages = @(Get-ChildItem -LiteralPath $PackageDirectory -Filter 'CMakeWorkflow.Client.*.nupkg' -File)
-if ($packages.Count -ne 1) { throw 'Expected exactly one audited SDK package.' }
+$clientPackages = @(Get-ChildItem -LiteralPath $PackageDirectory -Filter 'CMakeWorkflow.Client.*.nupkg' -File)
+$contractsPackages = @(Get-ChildItem -LiteralPath $PackageDirectory -Filter 'CMakeWorkflow.Contracts.*.nupkg' -File)
+if ($clientPackages.Count -ne 1 -or $contractsPackages.Count -ne 1) {
+    throw 'Expected exactly one Client package and one Contracts package.'
+}
+$clientPackage = $clientPackages[0]
+$contractsPackage = $contractsPackages[0]
 
 # upload-artifact ZIPs lose Unix executable bits; tar preserves them. Include the
 # complete publish outputs, including platform runtime dependencies and symbols.
@@ -26,17 +31,20 @@ if ($LASTEXITCODE -ne 0) { throw 'CLI archive creation failed.' }
 $consumerArchive = Join-Path $output "CMakeWorkflow.Client.AotSmoke-$Rid.tar.gz"
 tar -czf $consumerArchive -C $ConsumerDirectory .
 if ($LASTEXITCODE -ne 0) { throw 'Consumer archive creation failed.' }
-$package = Join-Path $output $packages[0].Name
-Copy-Item -LiteralPath $packages[0].FullName -Destination $package
+$package = Join-Path $output $clientPackage.Name
+$contracts = Join-Path $output $contractsPackage.Name
+Copy-Item -LiteralPath $clientPackage.FullName -Destination $package
+Copy-Item -LiteralPath $contractsPackage.FullName -Destination $contracts
 $metadata = Join-Path $output 'build.json'
 @{
     rid = $Rid
     commit = $env:GITHUB_SHA
     runId = $env:GITHUB_RUN_ID
     runAttempt = $env:GITHUB_RUN_ATTEMPT
-    sdkPackage = $packages[0].Name
+    sdkPackage = $clientPackage.Name
+    contractsPackage = $contractsPackage.Name
 } | ConvertTo-Json | Set-Content -LiteralPath $metadata -Encoding utf8
-$checksums = foreach ($path in @($nativeArchive, $consumerArchive, $package, $metadata)) {
+$checksums = foreach ($path in @($nativeArchive, $consumerArchive, $package, $contracts, $metadata)) {
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $([IO.Path]::GetFileName($path))"
 }

@@ -238,3 +238,16 @@ fields and pass the returned path to `workflow/plan`. Explicit execution uses
 the existing durable `workflow/start` with the returned manifest and hash,
 a separate `clientRequestId`, and an explicit results directory. Subsequent
 status, reconnect, cancellation and recovery use the existing operation API.
+
+## .NET SDK recipe models
+
+Recipe DTOs (`BenchmarkRecipeV1`, `TestMatrixRecipeV1`, `BuildMatrixRecipeV1`,
+`BenchmarkMatrixRecipeV1` and their variants) now live in the
+`CMakeWorkflow.Contracts` assembly under the `CMakeWorkflow` namespace.
+`ProfileRecipeV1` and `ProfileVariant` retain the `CMakeWorkflow.Profiling`
+namespace but also live in Contracts. `CMakeWorkflow.Client` references the same
+models instead of defining separate wire copies. This is a **source-breaking**
+namespace change for consumers using the old `CMakeWorkflow.Client.*RecipeV1`
+models: add `using CMakeWorkflow;` and `using CMakeWorkflow.Profiling;`.
+For selected native toolchains use `WorkflowToolchainBinding` instead of
+`PrepareToolchainSelection`. The JSON-RPC method names and JSON fields do not change.
