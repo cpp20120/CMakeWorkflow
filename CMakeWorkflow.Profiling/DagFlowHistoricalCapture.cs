@@ -380,7 +380,7 @@ public static class DagFlowHistoricalCapture
                 row["min_paired_change_pct"] = changes.Min();
                 row["max_paired_change_pct"] = changes.Max();
             }
-            result.Add(row);
+            result.Add((JsonNode?)row);
         }
         return result;
     }

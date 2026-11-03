@@ -122,7 +122,7 @@ public static partial class DagFlowHistoricalFlamegraph
         {
             var (frame, parent) = pending.Pop();
             var index = nodes.Count;
-            nodes.Add(new JsonObject
+            nodes.Add((JsonNode?)new JsonObject
             {
                 ["p"] = parent, ["n"] = frame.Name, ["v"] = frame.Self
             });

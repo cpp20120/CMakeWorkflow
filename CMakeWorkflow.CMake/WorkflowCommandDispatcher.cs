@@ -79,7 +79,7 @@ public sealed class WorkflowCommandDispatcher
             ["argv"] = new JsonArray(new[] { executable }.Concat(argv)
                 .Select(x => (JsonNode?)JsonValue.Create(x)).ToArray())
         };
-        commands.Add(entry);
+        commands.Add((JsonNode?)entry);
         // Dispatch must not precede durable admission. On a crash this entry is
         // intentionally outcome-unknown, never silently replayable.
         await PersistAsync();
