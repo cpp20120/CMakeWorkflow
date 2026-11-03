@@ -69,6 +69,7 @@ CMakeWorkflow profile analyze RUN_DIRECTORY
 CMakeWorkflow profile replay BASELINE_DIRECTORY CANDIDATE_DIRECTORY --node NODE --backend auto --results-dir out/profiles
 CMakeWorkflow dagflow mutation run --source-dir SOURCE_DIR --suite all
 CMakeWorkflow dagflow weak-memory run --source-dir SOURCE_DIR --protocol all --relacy RELACY_ROOT
+CMakeWorkflow dagflow weak-memory run --source-dir SOURCE_DIR --protocol deque --mutant deque-relax-publication --relacy RELACY_ROOT
 CMakeWorkflow dagflow fuzz seed --layer wake_protocol --output CORPUS_ROOT
 CMakeWorkflow dagflow fuzz run --build-dir BUILD_DIR --layer wake_protocol --duration 60 --results-dir out/fuzz-runs
 CMakeWorkflow dagflow fuzz triage --run-dir RUN_DIRECTORY

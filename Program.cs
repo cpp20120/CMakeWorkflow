@@ -251,6 +251,9 @@ public static class Program
         "       CMakeWorkflow dagflow profile run --build-dir DIR --target NAME [--repeats N] [--backend auto|perf|etw|instruments] [--mode cpu|scheduler|counters|allocations]\n" +
         "       CMakeWorkflow dagflow profile run --variant NAME=DIR --variant NAME=DIR --target NAME [--repeats N]\n" +
         "       CMakeWorkflow dagflow profile analyze RUN_DIRECTORY\n" +
+        "       CMakeWorkflow dagflow profile flamegraph PERF_DATA OUTPUT_JSON\n" +
+        "       CMakeWorkflow dagflow profile render-historical DIRECTORY\n" +
+        "       CMakeWorkflow dagflow profile run-historical --source-dir DIR --output DIR [--trials N] [--stat-trials N] [--jobs N] [--resume]\n" +
         "       CMakeWorkflow profile replay BASELINE_DIR CANDIDATE_DIR --node ID [--case NAME] [--harness INDEX] [--backend auto|perf|etw] [--results-dir DIR]\n" +
         "Usage: CMakeWorkflow context inspect BUILD_DIR [--json]\n" +
         "       CMakeWorkflow target <build|invoke|run|resolve> --build-dir DIR --target NAME [--config CONFIG] [--prepared] [--json for resolve] [-- executable-args...]\n" +

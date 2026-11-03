@@ -74,6 +74,8 @@ public sealed class NodeResult
     public BuildContextSessionState? SessionAfter { get; set; }
     public string ExperimentResult { get; set; } = "NotRun";
     public Dictionary<string, string> Outputs { get; set; } = [];
+    public List<WorkflowArtifactEvidence> DeclaredArtifacts { get; set; } = [];
+    public Dictionary<string, string> ExecutionConditions { get; set; } = [];
 }
 
 public static class WorkflowCommand
@@ -248,6 +250,11 @@ public static class WorkflowRunner
                         await HashExecutableAsync(artifact.Executable, ct) != artifact.Sha256)
                         throw new InvalidDataException($"Artifact changed since node '{node.Id}'; resume refused.");
                 }
+                foreach (var evidence in node.DeclaredArtifacts)
+                    if (await WorkflowArtifacts.HashAsync(evidence.Path, ct) != evidence.Sha256
+                        || evidence.SnapshotPath is { } snapshot
+                        && await WorkflowArtifacts.HashAsync(snapshot, ct) != evidence.Sha256)
+                        throw new InvalidDataException($"Declared artifact changed since node '{node.Id}'; resume refused.");
             }
             saved.ResumeCount++;
             saved.RecoveryPhase = "resuming";
@@ -359,9 +366,12 @@ public static class WorkflowRunner
                 foreach (var (node, snapshot) in dispatch)
                 {
                     await RecoveryFaults.HitAsync("after-checkpoint", node.Definition.Id, ct);
+                    var sources = node.Definition.Inputs.Where(x => x.From is not null)
+                        .Select(x => x.From!).Distinct(StringComparer.Ordinal)
+                        .ToDictionary(id => id, id => states[id], StringComparer.Ordinal);
                     active.Add(node.Definition.Id, (node, ExecuteAsync(node, node.Definition.From is { } source ? states[source] : null,
                         snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id), stop.Token, extension,
-                        toolchains.GetValueOrDefault(node.Target.BuildDirectory))));
+                        toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources)));
                 }
                 if (active.Count == 0)
                 {
@@ -463,7 +473,8 @@ public static class WorkflowRunner
 
     private static async Task<NodeResult> ExecuteAsync(PlannedNode node, NodeResult? prerequisite,
         bool snapshotExecutable, BuildContextSession session, string output, string logStem, CancellationToken ct,
-        IWorkflowOperationExecutor? extension, WorkflowToolchainRuntime? toolchain)
+        IWorkflowOperationExecutor? extension, WorkflowToolchainRuntime? toolchain,
+        string manifest, IReadOnlyDictionary<string, NodeResult> artifactSources)
     {
         var definition = node.Definition;
         var result = new NodeResult
@@ -482,6 +493,40 @@ public static class WorkflowRunner
         try
         {
             if (toolchain is not null) WorkflowToolchainAdmission.ValidateBuildTree(node.Target.BuildDirectory, toolchain);
+            result.ExecutionConditions = WorkflowExecutionAdmission.Require(definition.Constraints);
+            if (definition.Constraints?.Profiler is { } requiredProfiler)
+                result.ExecutionConditions["profilerRequired"] = requiredProfiler.Backend + "/" + requiredProfiler.Mode;
+            for (var index = 0; index < definition.Inputs.Count; index++)
+            {
+                var input = definition.Inputs[index];
+                var producer = input.From is null ? null : artifactSources[input.From];
+                var produced = producer?.DeclaredArtifacts.SingleOrDefault(x =>
+                    x.Role == "output" && x.Name == input.Artifact)
+                    ?? (input.From is null ? null : throw new InvalidDataException(
+                        $"{definition.Id}: producer output '{input.Artifact}' has no verified evidence."));
+                var path = input.Path is null ? produced!.Path
+                    : WorkflowArtifacts.ManifestPath(Path.GetDirectoryName(manifest)!, input.Path);
+                var sha = await WorkflowArtifacts.HashAsync(path, deadline.Token);
+                if (input.Sha256 is { } expected && !sha.Equals(expected, StringComparison.OrdinalIgnoreCase)
+                    || produced is not null && sha != produced.Sha256)
+                    throw new InvalidDataException($"{definition.Id}: declared input changed: {path}");
+                string? snapshot = null;
+                if (input.Snapshot)
+                {
+                    snapshot = Path.Combine(output, "artifacts", definition.Id, "inputs", index.ToString());
+                    await WorkflowArtifacts.CopySnapshotAsync(path, snapshot, deadline.Token);
+                    if (await WorkflowArtifacts.HashAsync(snapshot, deadline.Token) != sha)
+                        throw new InvalidDataException($"{definition.Id}: source changed during snapshot: {path}");
+                }
+                result.DeclaredArtifacts.Add(new(input.Artifact ?? index.ToString(), path, sha,
+                    "input", input.From, snapshot));
+            }
+            foreach (var declared in definition.Outputs.Where(x => x.Fresh))
+            {
+                var path = WorkflowArtifacts.OutputPath(manifest, output, declared);
+                if (File.Exists(path) || Directory.Exists(path))
+                    throw new InvalidDataException($"{definition.Id}: fresh output already exists: {path}");
+            }
             result.ObservedContext = await CMakeInspection.InspectAsync(node.Requested.BuildDirectory, deadline.Token);
             // Inspect never changes the execution session or claims ownership.
             result.SessionBefore = definition.Kind == "inspect"
@@ -549,9 +594,15 @@ public static class WorkflowRunner
                         throw new InvalidOperationException("Profile operation is unavailable in this CLI.");
                     var operation = await extension.ExecuteAsync(new WorkflowOperationRequest(
                         "profile", result.Executable!, result.Arguments, node.WorkingDirectory,
-                        MergeEnvironment(toolchain, definition.Environment), definition.Options, output, definition.Id), deadline.Token);
+                        MergeEnvironment(toolchain, definition.Environment), definition.Options, output, definition.Id,
+                        definition.Constraints?.CpuSet, definition.Constraints?.Profiler,
+                        result.ExecutionConditions.GetValueOrDefault("cpuAffinityLauncher")), deadline.Token);
                     result.ExitCode = operation.ExitCode;
                     result.Outputs = new Dictionary<string, string>(operation.Outputs);
+                    if (operation.Outputs.TryGetValue("backend", out var selectedBackend))
+                        result.ExecutionConditions["profilerBackend"] = selectedBackend;
+                    if (operation.Outputs.TryGetValue("eventSource", out var eventSource))
+                        result.ExecutionConditions["profilerEventSource"] = eventSource;
                     result.ExperimentResult = operation.Status;
                     if (operation.Message is not null) result.Error = operation.Message;
                 }
@@ -559,7 +610,9 @@ public static class WorkflowRunner
                 {
                     if (definition.Kind == "invoke" && definition.HarnessDirectory is not null)
                         DagFlowHarnessSnapshot.RequireFresh(node.Target.BuildDirectory, definition.HarnessDirectory);
-                    result.ExitCode = await RunProcessAsync(result, MergeEnvironment(toolchain, definition.Environment), output, deadline.Token);
+                    result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
+                        MergeEnvironment(toolchain, definition.Environment), output, deadline.Token,
+                        elapsed => Console.Error.WriteLine($"[CMakeWorkflow] RUNNING {result.Id} {elapsed.ToString(@"hh\:mm\:ss")} elapsed"));
                 }
                 result.Status = result.ExitCode == 0 ? "succeeded" : "failed";
                 if (result.ExitCode != 0) result.Error ??= $"Process exited with code {result.ExitCode}.";
@@ -612,6 +665,18 @@ public static class WorkflowRunner
                         result.Outputs = await DagFlowHarnessSnapshot.CaptureReportedAsync(
                             node.Target.BuildDirectory, Path.Combine(output, result.Stdout),
                             output, definition.Id, invokedAt, deadline.Token);
+                }
+            }
+            if (result.Status == "succeeded")
+            {
+                foreach (var evidence in result.DeclaredArtifacts.Where(x => x.Role == "input"))
+                    if (await WorkflowArtifacts.HashAsync(evidence.Path, deadline.Token) != evidence.Sha256)
+                        throw new InvalidDataException($"{definition.Id}: input changed during execution: {evidence.Path}");
+                foreach (var declared in definition.Outputs)
+                {
+                    var path = WorkflowArtifacts.OutputPath(manifest, output, declared);
+                    var sha = await WorkflowArtifacts.HashAsync(path, deadline.Token);
+                    result.DeclaredArtifacts.Add(new(declared.Name, path, sha, "output"));
                 }
             }
         }
@@ -684,7 +749,9 @@ public static class WorkflowRunner
             Directory.CreateDirectory(query);
             foreach (var kind in new[] { "codemodel-v2", "cache-v2", "toolchains-v1" })
                 await File.WriteAllTextAsync(Path.Combine(query, kind), "", ct);
-            result.ExitCode = await RunProcessAsync(result, MergeEnvironment(toolchain, new Dictionary<string, string>()), output, ct);
+            result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
+                MergeEnvironment(toolchain, new Dictionary<string, string>()), output, ct,
+                elapsed => Console.Error.WriteLine($"[CMakeWorkflow] RUNNING {result.Id} {elapsed.ToString(@"hh\:mm\:ss")} elapsed"));
             result.Configure.ExitCode = result.ExitCode;
             result.Configure.State = result.ExitCode == 0 ? "Succeeded" : "Failed";
             await CMakeInspection.WriteProvenanceAsync(request.BuildDirectory, result.Configure);
@@ -740,71 +807,6 @@ public static class WorkflowRunner
             values[entry.Key] = entry.Value;
         }
         return values;
-    }
-
-    private static async Task<int> RunProcessAsync(NodeResult result,
-        IReadOnlyDictionary<string, string> environment, string output, CancellationToken ct)
-    {
-        var info = new ProcessStartInfo(result.Executable!)
-        {
-            UseShellExecute = false, WorkingDirectory = result.WorkingDirectory,
-            RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true
-        };
-        foreach (var argument in result.Arguments) info.ArgumentList.Add(argument);
-        foreach (var pair in environment) info.Environment[pair.Key] = pair.Value;
-        BuildTreeOwnership.PropagateTo(info);
-        await using var stdout = File.Create(Path.Combine(output, result.Stdout!));
-        await using var stderr = File.Create(Path.Combine(output, result.Stderr!));
-        ct.ThrowIfCancellationRequested();
-        var processTimer = Stopwatch.StartNew();
-        Process process;
-        try { process = Process.Start(info) ?? throw new MissingWorkflowToolException(result.Executable!,
-            new IOException("Process.Start returned null.")); }
-        catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3)
-        { throw new MissingWorkflowToolException(result.Executable!, error); }
-        using (process)
-        {
-        // Windows Kill(entireProcessTree:true) does not wait for grandchildren.
-        // A Job Object retains custody of descendants even if Ninja exits first.
-        using var windowsJob = OperatingSystem.IsWindows() ? WindowsProcessJob.Attach(process) : null;
-        process.StandardInput.Close();
-        var copies = Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(stdout),
-            process.StandardError.BaseStream.CopyToAsync(stderr));
-        try
-        {
-            await process.WaitForExitAsync(ct);
-            await copies.WaitAsync(ct);
-            return process.ExitCode;
-        }
-        finally
-        {
-            processTimer.Stop();
-            result.ProcessDurationSeconds = processTimer.Elapsed.TotalSeconds;
-            if (windowsJob is not null && (ct.IsCancellationRequested || !process.HasExited))
-            {
-                // Terminate descendants only on cancellation/failure. Successful
-                // executions must never query or terminate their job in cleanup.
-                // Await the entire job, not only the direct Ninja/CMake process.
-                await windowsJob.TerminateAndWaitAsync(CancellationToken.None);
-                await process.WaitForExitAsync(CancellationToken.None);
-            }
-            else if (windowsJob is null && !process.HasExited)
-            {
-                try { process.Kill(entireProcessTree: true); }
-                catch (InvalidOperationException) when (process.HasExited) { }
-                await process.WaitForExitAsync(CancellationToken.None);
-            }
-            // A detached descendant can keep pipes open after the direct child exits.
-            // Closing readers also makes cancellation bounded in that case.
-            if (!copies.IsCompleted)
-            {
-                process.StandardOutput.Close();
-                process.StandardError.Close();
-            }
-            try { await copies; }
-            catch (Exception error) when (ct.IsCancellationRequested && error is IOException or ObjectDisposedException) { }
-        }
-        }
     }
 
     private static async Task SaveAsync(WorkflowReport report, string output, WorkflowEventJournal events)

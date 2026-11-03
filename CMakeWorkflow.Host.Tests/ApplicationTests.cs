@@ -38,8 +38,10 @@ internal static class ApplicationTests
         var manifest = Path.Combine(root, "workflow.json");
         File.WriteAllText(manifest, """
             {"schemaVersion":2,"contexts":{"x":{"buildDirectory":"build space","mode":"adopt"}},
-             "nodes":[{"id":"build","kind":"build","context":"x","target":"worker"},
-                      {"id":"run","kind":"run","from":"build"}]}
+             "nodes":[{"id":"build","kind":"build","context":"x","target":"worker",
+                       "inputs":[{"path":"build space/CMakeCache.txt","snapshot":true}]},
+                      {"id":"run","kind":"run","from":"build",
+                       "outputs":[{"name":"example","root":"run","path":"example.json"}]}]}
             """);
         var run = Directory.CreateDirectory(Path.Combine(root, "run directory")).FullName;
         var report = new WorkflowReport { Workflow = manifest, Status = "failed", FinishedAt = DateTimeOffset.UtcNow,
@@ -247,6 +249,8 @@ internal static class ApplicationTests
         var standalone = WorkflowQueries.PlanView(await WorkflowPlanner.LoadAsync(manifest, [], null, ct));
         Check(JsonSerializer.Serialize(plan, HostJson.Default.WorkflowPlanView)
             == JsonSerializer.Serialize(standalone, HostJson.Default.WorkflowPlanView), "CLI/Host plan semantics differ");
+        Check(plan.Nodes[0].Inputs.Count == 1 && plan.Nodes[1].Outputs.Count == 1,
+            "Host plan omitted typed artifact declarations.");
         var saved = await client.RunGetAsync(new(run), ct);
         Check(saved.Revision == Convert.ToHexString(SHA256.HashData(raw)) && saved.Report.Status == "outcome_unknown",
             "Report revision/status differs from authoritative bytes");

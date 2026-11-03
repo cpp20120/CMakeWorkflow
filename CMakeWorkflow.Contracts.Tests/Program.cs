@@ -16,9 +16,11 @@ static void Refused(Action operation, string description)
 var workflow = WorkflowBuilder.Create()
     .Context("release", c => c.BuildDirectory("/tmp/cmwf-test/release")
         .Configuration("Release").AdoptExisting().AllowUnverified());
-var build = workflow.BuildTarget("compile", "release", "dagflow_bench");
+var build = workflow.BuildTarget("compile", "release", "dagflow_bench",
+    n => n.Output("binary", "bin/dagflow_bench"));
 var run = workflow.Run("measure", build, n => n.Arguments("--case", "chain")
-    .Timeout(TimeSpan.FromSeconds(12)).Resource("measurement-host"));
+    .Timeout(TimeSpan.FromSeconds(12)).Resource("measurement-host")
+    .InputFrom(build, "binary").RequireCpuSet("2"));
 workflow.CTest("unit", "release", build, n => n.LabelRegex("unit").DependsOn(run));
 var snapshot = workflow.ToDocument();
 Check(snapshot.SchemaVersion == 2 && snapshot.Contexts["release"].Mode == "adopt"
@@ -26,13 +28,19 @@ Check(snapshot.SchemaVersion == 2 && snapshot.Contexts["release"].Mode == "adopt
 Check(snapshot.Nodes.Count == 3 && snapshot.Nodes[1].Kind == "run"
     && snapshot.Nodes[1].From == "compile" && snapshot.Nodes[1].Context is null
     && snapshot.Nodes[1].Arguments.SequenceEqual(["--case", "chain"])
-    && snapshot.Nodes[1].TimeoutSeconds == 12, "Typed build-to-run contract");
+    && snapshot.Nodes[1].TimeoutSeconds == 12
+    && snapshot.Nodes[1].Inputs.Single().Artifact == "binary"
+    && snapshot.Nodes[1].Constraints?.CpuSet == "2", "Typed build-to-run contract");
 Check(snapshot.Nodes[2].DependsOn.SequenceEqual(["compile", "measure"]), "CTest prerequisites");
 
 // Documents returned to callers must not mutate future builder state.
 snapshot.Nodes[1].Arguments.Add("--mutated");
+snapshot.Nodes[1].Inputs[0].Artifact = "changed";
+snapshot.Nodes[1].Constraints!.CpuSet = "3";
 snapshot.Contexts["release"].BuildDirectory = "other";
 Check(workflow.ToDocument().Nodes[1].Arguments.Count == 2
+    && workflow.ToDocument().Nodes[1].Inputs[0].Artifact == "binary"
+    && workflow.ToDocument().Nodes[1].Constraints?.CpuSet == "2"
     && workflow.ToDocument().Contexts["release"].BuildDirectory == "/tmp/cmwf-test/release",
     "Document snapshots share mutable state");
 

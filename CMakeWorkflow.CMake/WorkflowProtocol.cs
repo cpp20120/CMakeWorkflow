@@ -8,7 +8,8 @@ public sealed record WorkflowPlanView(int SchemaVersion, string Workflow, string
 public sealed record WorkflowPlanNodeView(string Id, string Kind, string Target,
     string BuildDirectory, string? Configuration, List<string> Dependencies,
     string ObservedState, List<PlanDiagnostic> Diagnostics, List<string> Resources,
-    bool Exclusive);
+    bool Exclusive, List<WorkflowArtifactInput> Inputs, List<WorkflowArtifactOutput> Outputs,
+    WorkflowExecutionConstraints? Constraints);
 public sealed record WorkflowArtifactView(string Type, string Path, string? Sha256);
 public sealed record TargetResolutionView(int SchemaVersion, string BuildDirectory,
     string Target, string? Configuration, string Executable);
@@ -114,6 +115,11 @@ internal sealed class WorkflowEventJournal : IDisposable
         Add("stdout", node.Stdout);
         Add("stderr", node.Stderr);
         Add("executable", node.Artifact?.Executable, node.Artifact?.Sha256);
+        foreach (var item in node.DeclaredArtifacts)
+        {
+            if (item.Role == "output") Add("declared:" + item.Name, item.Path, item.Sha256);
+            if (item.SnapshotPath is not null) Add("snapshot:" + item.Name, item.SnapshotPath, item.Sha256);
+        }
         foreach (var (type, path) in node.Outputs)
             if (type is "rawTrace" || type.StartsWith("dagflow-", StringComparison.Ordinal)) Add(type, path);
         if (node.Kind == "profile")

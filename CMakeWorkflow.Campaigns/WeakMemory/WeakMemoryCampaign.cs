@@ -1,5 +1,3 @@
-using System.IO.Compression;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -10,7 +8,7 @@ public static class WeakMemoryCampaign
 {
     public static async Task<int> RunAsync(string sourceRoot, string protocol,
         string relacyRoot, string compiler, int timeoutSeconds, string reportPath,
-        CancellationToken ct)
+        string? mutant, CancellationToken ct)
     {
         if (timeoutSeconds < 1) throw new ArgumentException("--timeout must be positive.");
         sourceRoot = Path.GetFullPath(sourceRoot);
@@ -18,14 +16,10 @@ public static class WeakMemoryCampaign
         reportPath = Path.GetFullPath(reportPath);
         if (!File.Exists(Path.Combine(relacyRoot, "relacy/relacy.hpp")))
             throw new ArgumentException("--relacy must contain relacy/relacy.hpp.");
-        using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream(
-            "CMakeWorkflow.Campaigns.WeakMemory.catalog.json.gz")
-            ?? throw new IOException("Embedded weak memory catalog is missing.");
-        using var compressed = new GZipStream(resource, CompressionMode.Decompress);
-        using var catalog = await JsonDocument.ParseAsync(compressed, cancellationToken: ct);
-        var protocols = catalog.RootElement.GetProperty("protocols");
-        if (protocol != "all" && !protocols.TryGetProperty(protocol, out _))
+        var protocols = SourceCases.Sources;
+        if (protocol != "all" && !protocols.ContainsKey(protocol))
             throw new ArgumentException($"Unknown protocol: {protocol}");
+        var generator = new SourceCases(sourceRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
         var report = new JsonObject
         {
@@ -45,28 +39,42 @@ public static class WeakMemoryCampaign
             var version = await CommandExecution.RunAsync(compiler, ["--version"], sourceRoot,
                 TimeSpan.FromSeconds(timeoutSeconds), null, ct);
             report["compiler_version"] = version.Output;
-            foreach (var entry in protocols.EnumerateObject())
+            var chosen = protocols.Keys.Where(name => protocol == "all" || name == protocol).ToArray();
+            var variants = chosen.ToDictionary(name => name, name => generator.Generate(name),
+                StringComparer.Ordinal);
+            if (mutant is not null && !variants.Values.SelectMany(items => items)
+                .Any(item => item.Name == mutant && mutant != "baseline"))
+                throw new ArgumentException($"Unknown mutant for protocol '{protocol}': {mutant}");
+            foreach (var protocolName in chosen)
             {
-                if (protocol != "all" && entry.Name != protocol) continue;
-                var data = entry.Value;
-                foreach (var source in data.GetProperty("sources").EnumerateObject())
+                var sourceFiles = protocols[protocolName].Concat([
+                    $"tests/weak_memory/{protocolName}_relacy_tests.cpp",
+                    "tests/weak_memory/model_support.hpp"
+                ]).Concat(protocolName switch
                 {
-                    var current = await CommandExecution.Sha256Async(Path.Combine(sourceRoot, source.Name), ct);
-                    if (!string.Equals(current, source.Value.GetString(), StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException($"Source changed since adapter catalog generation: {source.Name}. Refresh the C# campaign catalog before running this protocol.");
-                    ((JsonObject)report["sources"]!)[source.Name] = current;
+                    "parking" => ["tests/weak_memory/parking_fixture.hpp"],
+                    "idle_accounting" => ["tests/weak_memory/idle_accounting_fixture.hpp"],
+                    "shutdown" => ["tests/weak_memory/idle_accounting_fixture.hpp",
+                        "tests/weak_memory/shutdown_fixture.hpp"],
+                    _ => Array.Empty<string>()
+                }).Distinct(StringComparer.Ordinal);
+                foreach (var source in sourceFiles)
+                {
+                    var current = await CommandExecution.Sha256Async(Path.Combine(sourceRoot, source), ct);
+                    ((JsonObject)report["sources"]!)[source] = current;
                 }
                 await Save();
-                foreach (var variant in data.GetProperty("variants").EnumerateArray())
+                foreach (var variant in variants[protocolName])
                 {
-                    var name = variant.GetProperty("name").GetString()!;
-                    var header = variant.GetProperty("header").GetString()!;
-                    var source = Path.Combine(temporary, entry.Name + "_under_test.hpp");
+                    var name = variant.Name;
+                    if (mutant is not null && name != "baseline" && name != mutant) continue;
+                    var header = variant.Header;
+                    var source = Path.Combine(temporary, protocolName + "_under_test.hpp");
                     await File.WriteAllTextAsync(source, header, ct);
-                    var artifact = Path.Combine(Path.GetDirectoryName(reportPath)!, $"{entry.Name}-{name}.hpp");
+                    var artifact = Path.Combine(Path.GetDirectoryName(reportPath)!, $"{protocolName}-{name}.hpp");
                     await File.WriteAllTextAsync(artifact, header, ct);
-                    var binary = Path.Combine(temporary, entry.Name + "-" + name);
-                    var test = Path.Combine(sourceRoot, "tests/weak_memory", entry.Name + "_relacy_tests.cpp");
+                    var binary = Path.Combine(temporary, protocolName + "-" + name);
+                    var test = Path.Combine(sourceRoot, "tests/weak_memory", protocolName + "_relacy_tests.cpp");
                     var build = await CommandExecution.RunAsync(compiler,
                         ["-std=c++23", "-O2", "-pthread", "-I", relacyRoot, "-I", temporary,
                          "-I", Path.Combine(sourceRoot, "include"), "-I",
@@ -76,17 +84,16 @@ public static class WeakMemoryCampaign
                     {
                         report["build_error"] = new JsonObject
                         {
-                            ["variant"] = $"{entry.Name}/{name}", ["output"] = build.Output,
+                            ["variant"] = $"{protocolName}/{name}", ["output"] = build.Output,
                             ["timed_out"] = build.TimedOut
                         };
                         await Save();
                         return 2;
                     }
-                    foreach (var suite in variant.GetProperty("suites").EnumerateArray())
+                    foreach (var suite in variant.Suites)
                     {
-                        var suiteName = suite.GetProperty("name").GetString()!;
-                        var expected = suite.GetProperty("expected").EnumerateArray()
-                            .Select(x => x.GetString()!).ToArray();
+                        var suiteName = suite.Name;
+                        var expected = suite.Expected;
                         var result = await CommandExecution.RunAsync(binary, [suiteName], sourceRoot,
                             TimeSpan.FromSeconds(timeoutSeconds), null, ct);
                         var match = Regex.Match(result.Output,
@@ -105,7 +112,7 @@ public static class WeakMemoryCampaign
                             && result.ExitCode == code;
                         var kind = name == "baseline" ? "baseline" : expected.SequenceEqual(["SUCCESS"])
                             ? "survivor-control" : "counterexample";
-                        ((JsonObject)report["checks"]!)[$"{entry.Name}/{name}/{suiteName}"] = new JsonObject
+                        ((JsonObject)report["checks"]!)[$"{protocolName}/{name}/{suiteName}"] = new JsonObject
                         {
                             ["kind"] = kind, ["matched_expectation"] = passed,
                             ["status"] = status, ["expected"] = new JsonArray(expected.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()),
@@ -117,7 +124,7 @@ public static class WeakMemoryCampaign
                             ["adapter"] = Path.GetFileName(artifact), ["output"] = result.Output
                         };
                         await Save();
-                        Console.WriteLine($"{entry.Name}/{name}/{suiteName}: {(passed ? "PASS" : "FAIL")} ({kind}: {status})");
+                        Console.WriteLine($"{protocolName}/{name}/{suiteName}: {(passed ? "PASS" : "FAIL")} ({kind}: {status})");
                         if (!passed) return 1;
                     }
                 }

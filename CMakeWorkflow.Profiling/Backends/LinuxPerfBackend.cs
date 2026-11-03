@@ -28,6 +28,14 @@ public sealed class LinuxPerfBackend(IProfileProcess process) : IProfilerBackend
         else if (request.Mode == "scheduler")
             args.AddRange(["-e", "sched:sched_switch", "-e", "sched:sched_wakeup", "--call-graph", "dwarf,16384"]);
         args.Add("--");
+        if (request.CpuSet is not null)
+        {
+            if (request.CpuAffinityLauncher is null)
+                throw new InvalidOperationException("Required CPU affinity launcher was not admitted.");
+            args.Add(request.CpuAffinityLauncher);
+            args.Add("-c");
+            args.Add(request.CpuSet);
+        }
         args.Add(request.Executable);
         args.AddRange(request.Arguments);
         var start = DateTimeOffset.UtcNow;

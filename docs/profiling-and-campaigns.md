@@ -122,7 +122,7 @@ raw measurements. Instrumented diagnostic builds не следует испол�
 | Команда | Основные параметры |
 |---|---|
 | `dagflow mutation run` | `--source-dir`, `--suite`, `--cxx`, `--seed`, `--cases`, `--steps`, `--timeout`, `--report` |
-| `dagflow weak-memory run` | `--source-dir`, `--protocol`, `--relacy`, `--cxx`, `--timeout`, `--report` |
+| `dagflow weak-memory run` | `--source-dir`, `--protocol`, `--relacy`, `--cxx`, `--timeout`, `--report`, optional `--mutant` (baseline plus one named mutant) |
 | `dagflow fuzz seed` | `--layer`, `--source-dir`, `--output` |
 | `dagflow fuzz run` | `--build-dir`, `--layer`, `--backend`, `--config`, `--duration`, `--timeout`, `--max-len`, `--corpus`, `--results-dir`, `--replay-only` |
 | `dagflow fuzz triage` | `--run-dir` |

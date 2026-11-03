@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj" />
+    <EmbeddedResource Include="weak-memory-catalog.json.gz" />
   </ItemGroup>
 </Project>

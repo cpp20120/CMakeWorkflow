@@ -11,6 +11,38 @@ public static class ProfileCommand
         Action<string>? onRunDirectory = null)
     {
         if (args.Length == 0) throw new ArgumentException("Usage: profile <run|analyze> ...");
+        if (args[0] == "flamegraph")
+        {
+            if (args.Length != 3) throw new ArgumentException("profile flamegraph PERF_DATA OUTPUT_JSON");
+            await DagFlowHistoricalFlamegraph.DecodeAsync(args[1], args[2], ct);
+            return 0;
+        }
+        if (args[0] == "render-historical")
+        {
+            if (args.Length != 2) throw new ArgumentException("profile render-historical DIRECTORY");
+            return await DagFlowHistoricalReport.RenderAsync(args[1], ct);
+        }
+        if (args[0] == "run-historical")
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            var resume = false;
+            for (var i = 1; i < args.Length; i++)
+            {
+                if (args[i] == "--resume") { resume = true; continue; }
+                if (args[i] is not ("--source-dir" or "--output" or "--trials"
+                    or "--stat-trials" or "--jobs") || i + 1 >= args.Length
+                    || !values.TryAdd(args[i], args[++i]))
+                    throw new ArgumentException("Invalid historical profile option.");
+            }
+            int Count(string name, int fallback) => values.TryGetValue(name, out var text)
+                ? int.TryParse(text, out var parsed) ? parsed
+                    : throw new ArgumentException(name + " must be an integer.")
+                : fallback;
+            return await DagFlowHistoricalCapture.RunAsync(new DagFlowHistoricalOptions(
+                values.GetValueOrDefault("--source-dir", Directory.GetCurrentDirectory()),
+                values.GetValueOrDefault("--output") ?? throw new ArgumentException("--output is required."),
+                Count("--trials", 5), Count("--stat-trials", 3), Count("--jobs", 4), resume), ct);
+        }
         if (args[0] == "analyze")
         {
             if (args.Length != 2) throw new ArgumentException("profile analyze RUN_DIRECTORY");

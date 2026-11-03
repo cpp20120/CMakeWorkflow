@@ -3,7 +3,8 @@ using System.Security.Cryptography;
 
 namespace CMakeWorkflow;
 
-public sealed record CommandResult(int ExitCode, string Output, bool TimedOut, int? ProcessId = null);
+public sealed record CommandResult(int ExitCode, string Output, bool TimedOut, int? ProcessId = null,
+    string? Stdout = null, string? Stderr = null);
 
 public static class CommandExecution
 {
@@ -41,10 +42,15 @@ public static class CommandExecution
                 await process.WaitForExitAsync(CancellationToken.None);
             }
             if (cancellationToken.IsCancellationRequested) throw;
-            return new CommandResult(process.ExitCode,
-                await stdout + await stderr, true, process.Id);
+            var outText = await stdout;
+            var errText = await stderr;
+            return new CommandResult(process.ExitCode, outText + errText, true, process.Id,
+                outText, errText);
         }
-        return new CommandResult(process.ExitCode, await stdout + await stderr, false, process.Id);
+        var standardOutput = await stdout;
+        var standardError = await stderr;
+        return new CommandResult(process.ExitCode, standardOutput + standardError, false,
+            process.Id, standardOutput, standardError);
     }
 
     public static async Task<string> Sha256Async(string path, CancellationToken ct)

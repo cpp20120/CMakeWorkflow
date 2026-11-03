@@ -14,7 +14,8 @@ public static class WorkflowQueries
         !plan.Nodes.Any(n => n.Diagnostics.Any(d => d.Severity == "Error")),
         plan.Nodes.Select(n => new WorkflowPlanNodeView(n.Definition.Id, n.Definition.Kind,
             n.Target.Target, n.Target.BuildDirectory, n.Target.Configuration, n.Dependencies.ToList(),
-            n.Observed.State, n.Diagnostics.ToList(), n.Definition.Resources.ToList(), n.Definition.Exclusive)).ToList());
+            n.Observed.State, n.Diagnostics.ToList(), n.Definition.Resources.ToList(), n.Definition.Exclusive,
+            n.Definition.Inputs.ToList(), n.Definition.Outputs.ToList(), n.Definition.Constraints)).ToList());
 
     public static async Task<WorkflowReportSnapshot> ReportAsync(string directory, CancellationToken ct,
         Action<string>? readGuard = null)

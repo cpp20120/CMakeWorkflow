@@ -6,6 +6,9 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>CMakeWorkflow.Campaigns.Tests</_Parameter1>
+    </AssemblyAttribute>
     <Compile Include="CampaignCommand.cs" />
     <Compile Include="CampaignService.cs" />
     <Compile Include="Mutation/*.cs" />
@@ -15,6 +18,5 @@
     <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj" />
     <EmbeddedResource Include="Mutation/mutants.json" />
     <EmbeddedResource Include="FuzzCorpus/seeds.json" />
-    <EmbeddedResource Include="WeakMemory/catalog.json.gz" />
   </ItemGroup>
 </Project>

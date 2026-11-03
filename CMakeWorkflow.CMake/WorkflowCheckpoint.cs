@@ -7,34 +7,48 @@ namespace CMakeWorkflow;
 // run.json and its audit are a single commit. Callers must hold the run lease.
 internal static class WorkflowCheckpoint
 {
-    public static async Task SaveAsync(WorkflowReport report, string directory, CancellationToken ct)
+    public static Task SaveAsync(WorkflowReport report, string directory, CancellationToken ct)
     {
         var path = Path.Combine(directory, "run.json");
-        var temporary = path + ".tmp";
         var faultNode = report.Nodes.FirstOrDefault(n => n.Status == "running")?.Id
             ?? report.Reconciliations.LastOrDefault()?.NodeId;
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
+        return WriteDurableBytesAsync(path, bytes, ct, faultNode, injectRecoveryFaults: true);
+    }
+
+    // Same write-ahead durability boundary for the DAG report and ordered
+    // research-command journals. A command must never launch until this commit
+    // succeeds. Callers hold their exclusive output-directory lease.
+    internal static async Task WriteDurableBytesAsync(string path, ReadOnlyMemory<byte> bytes,
+        CancellationToken ct, string? faultNode = null, bool injectRecoveryFaults = false)
+    {
+        path = Path.GetFullPath(path);
+        var temporary = path + ".tmp";
         await using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            await JsonSerializer.SerializeAsync(stream, report, WorkflowJson.Default.WorkflowReport, ct);
+            await stream.WriteAsync(bytes, ct);
             ct.ThrowIfCancellationRequested();
             stream.Flush(flushToDisk: true);
             if (OperatingSystem.IsMacOS()) FullSync(stream);
         }
-        await RecoveryFaults.HitAsync("checkpoint-flushed", faultNode, ct);
+        if (injectRecoveryFaults)
+            await RecoveryFaults.HitAsync("checkpoint-flushed", faultNode, ct);
         ct.ThrowIfCancellationRequested();
         if (OperatingSystem.IsWindows())
         {
-            // Same directory/volume; never fall back to copy+delete.
             if (!MoveFileExW(WindowsPath(temporary), WindowsPath(path), 0x1 | 0x8))
-                throw NativeError("Checkpoint replacement"); // REPLACE_EXISTING | WRITE_THROUGH
+                throw NativeError("Checkpoint replacement");
         }
         else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             File.Move(temporary, path, overwrite: true);
-            await RecoveryFaults.HitAsync("checkpoint-replaced", faultNode, ct);
-            await RecoveryFaults.HitAsync("checkpoint-directory-sync", faultNode, ct);
-            // Include parents: a newly created run directory must also survive.
-            for (string? parent = Path.GetFullPath(directory); parent is not null; parent = Path.GetDirectoryName(parent))
+            if (injectRecoveryFaults)
+            {
+                await RecoveryFaults.HitAsync("checkpoint-replaced", faultNode, ct);
+                await RecoveryFaults.HitAsync("checkpoint-directory-sync", faultNode, ct);
+            }
+            for (string? parent = Path.GetDirectoryName(path); parent is not null;
+                parent = Path.GetDirectoryName(parent))
                 SyncDirectory(parent);
             if (OperatingSystem.IsMacOS())
             {
@@ -42,7 +56,8 @@ internal static class WorkflowCheckpoint
                 FullSync(committed);
             }
         }
-        else throw new PlatformNotSupportedException("Durable workflow checkpoints require Linux, macOS or Windows.");
+        else throw new PlatformNotSupportedException(
+            "Durable workflow checkpoints require Linux, macOS or Windows.");
     }
 
     private static string WindowsPath(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path

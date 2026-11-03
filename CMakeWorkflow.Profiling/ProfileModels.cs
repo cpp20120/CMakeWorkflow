@@ -19,7 +19,9 @@ public sealed record ProfileRequest(
     string OutputDirectory,
     string CaptureId,
     string Mode,
-    TimeSpan Timeout);
+    TimeSpan Timeout,
+    string? CpuSet = null,
+    string? CpuAffinityLauncher = null);
 
 public sealed record ProfileResult(
     string Backend,

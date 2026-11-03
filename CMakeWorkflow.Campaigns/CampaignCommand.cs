@@ -15,7 +15,7 @@ public static class CampaignCommand
             ("mutation", "run") => new[] { "--source-dir", "--suite", "--cxx", "--seed",
                 "--cases", "--steps", "--timeout", "--report" },
             ("weak-memory", "run") => new[] { "--source-dir", "--protocol", "--relacy",
-                "--cxx", "--timeout", "--report" },
+                "--cxx", "--timeout", "--report", "--mutant" },
             ("fuzz", "seed") => new[] { "--source-dir", "--layer", "--output" },
             ("fuzz", "run") => new[] { "--build-dir", "--layer", "--backend", "--duration",
                 "--timeout", "--corpus", "--results-dir", "--config", "--max-len", "--replay-only" },
@@ -47,7 +47,7 @@ public static class CampaignCommand
                 Option(args, "--protocol") ?? "all",
                 Option(args, "--relacy") ?? throw new ArgumentException("--relacy is required."),
                 Option(args, "--cxx") ?? "c++", Integer(args, "--timeout", 60),
-                Option(args, "--report")), ct),
+                Option(args, "--report"), Option(args, "--mutant")), ct),
             ("fuzz", "seed") => await CampaignService.FuzzSeedAsync(new FuzzSeedOptions(
                 Option(args, "--layer") ?? throw new ArgumentException("--layer is required."),
                 Option(args, "--output") ?? Path.Combine(source, "fuzz/corpus")), ct),

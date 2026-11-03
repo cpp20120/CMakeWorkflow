@@ -1,15 +1,240 @@
 using CMakeWorkflow;
 using CMakeWorkflow.Profiling;
 using CMakeWorkflow.Profiling.Backends;
+using System.Globalization;
+using System.Text;
+
+if (args.Length == 1 && args[0] == "--progress-e2e")
+{
+    await ProgressE2E.RunAsync();
+    return;
+}
+if (args.Length != 0)
+    throw new ArgumentException("Usage: CMakeWorkflow.Profiling.Tests [--progress-e2e]");
 
 var root = Path.Combine(Path.GetTempPath(), "cmake-workflow-profile-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
 {
+    Check(HistoricalProgress.TotalOperations(5, 3) == 397,
+        "Historical progress step count changed.");
+    // A real process executed through the shared workflow process owner must
+    // be journalled before dispatch, replayable by identity and reject tampering.
+    var dispatchRoot = Path.Combine(root, "dispatch-fixture");
+    Directory.CreateDirectory(Path.Combine(dispatchRoot, "logs"));
+    var steps = new System.Text.Json.Nodes.JsonArray();
+    var notifications = new List<WorkflowDispatchEvent>();
+    var environment = new Dictionary<string, string>();
+    var dispatcher = new WorkflowCommandDispatcher(dispatchRoot, steps, false, environment,
+        notifications.Add);
+    const string dotnetExe = "dotnet";
+    var actualVersion = await dispatcher.RunAsync("version", dotnetExe, ["--version"],
+        null, 30, CancellationToken.None);
+    Check(!string.IsNullOrWhiteSpace(actualVersion) && steps.Count == 1 &&
+        notifications.Any(n => n.Type == "started") &&
+        notifications.Any(n => n.Type == "succeeded"),
+        "Shared command dispatch and progress events failed.");
+    // Simulate a new process: deserialize committed journal bytes from disk.
+    var committedSteps = System.Text.Json.Nodes.JsonNode.Parse(
+        await File.ReadAllTextAsync(Path.Combine(dispatchRoot, "commands.json")))!.AsArray();
+    Check(committedSteps.Count == 1 && committedSteps[0]!["returncode"]!.GetValue<int>() == 0,
+        "Shared command journal was not committed after external execution.");
+    var resumed = new WorkflowCommandDispatcher(dispatchRoot, committedSteps, true, environment,
+        notifications.Add);
+    var verifiedVersion = await resumed.RunAsync("version", dotnetExe, ["--version"],
+        null, 30, CancellationToken.None);
+    Check(verifiedVersion == actualVersion && committedSteps.Count == 1 &&
+        notifications.Any(n => n.Type == "verified"),
+        "Journal-based verification launched the command again.");
+    await File.AppendAllTextAsync(Path.Combine(dispatchRoot, "logs", "version.stdout"), "tampered");
+    var rejectedChange = false;
+    try
+    {
+        await resumed.RunAsync("version", dotnetExe, ["--version"],
+            null, 30, CancellationToken.None);
+    }
+    catch (InvalidDataException) { rejectedChange = true; }
+    Check(rejectedChange, "Resume accepted a modified stdout artifact.");
+    committedSteps.Add(new System.Text.Json.Nodes.JsonObject { ["label"] = "unknown" });
+    var rejectedUnknown = false;
+    try
+    {
+        await resumed.RunAsync("unknown", dotnetExe, ["--version"],
+            null, 30, CancellationToken.None);
+    }
+    catch (InvalidDataException) { rejectedUnknown = true; }
+    Check(rejectedUnknown, "Resume replayed an unknown-effect operation.");
+
     var executable = Path.Combine(root, "test-worker");
     await File.WriteAllTextAsync(executable, "fixture");
     var request = new ProfileRequest(executable, ["--workers", "1"], root,
         new Dictionary<string, string>(), root, "capture", "cpu", TimeSpan.FromSeconds(5));
+    var historicalOrder = new PythonShuffleRandom(20260930);
+    var points = Enumerable.Range(0, 12).ToList();
+    historicalOrder.Shuffle(points);
+    Check(points.SequenceEqual([8, 9, 1, 2, 5, 0, 11, 10, 4, 3, 6, 7]),
+        "Historical paired shuffle schedule changed: " + string.Join(",", points));
+    var timing = DagFlowHistoricalCapture.ParseTiming(
+        "idle-burst p50= 42.5 p99= 99 max= 123\n", "idle-burst");
+    Check(timing["time_us"]!.GetValue<double>() == 42.5
+        && timing["p99_us"]!.GetValue<double>() == 99,
+        "Historical timing units changed.");
+    var historicalCounters = DagFlowHistoricalCapture.ParseStat("""
+        100;;cycles:u;;100.00
+        200;;instructions:u;;100.00
+        300;;branches:u;;100.00
+        4;;branch-misses:u;;100.00
+        500;;cache-references:u;;100.00
+        6;;cache-misses:u;;100.00
+        7;;page-faults:u;;100.00
+        """);
+    Check(historicalCounters.Counts["cycles:u"]!.GetValue<double>() == 100
+        && historicalCounters.Running["page-faults"]!.GetValue<double>() == 100,
+        "Historical perf counters or running percentages changed.");
+    if (Environment.GetEnvironmentVariable("DAGFLOW_HISTORICAL_DATA_DIR") is { } data)
+    {
+        static System.Text.Json.Nodes.JsonObject[] ReadRows(string path) =>
+            File.ReadLines(path).Where(x => x.Length > 0)
+                .Select(x => System.Text.Json.Nodes.JsonNode.Parse(x)!.AsObject()).ToArray();
+        var summarized = DagFlowHistoricalCapture.Summarize(
+            ReadRows(Path.Combine(data, "timings.jsonl")),
+            ReadRows(Path.Combine(data, "counters.jsonl")));
+        var expected = System.Text.Json.Nodes.JsonNode.Parse(
+            File.ReadAllText(Path.Combine(data, "summary.json")))!.AsArray();
+        Check(summarized.Count == expected.Count, "Historical summary row count changed.");
+        for (var i = 0; i < summarized.Count; i++)
+            foreach (var (key, value) in expected[i]!.AsObject())
+            {
+                var actual = summarized[i]![key];
+                if (value is null || actual is null) continue;
+                if (value is System.Text.Json.Nodes.JsonValue && actual is System.Text.Json.Nodes.JsonValue
+                    && double.TryParse(value.ToString(), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out var numeric)
+                    && double.TryParse(actual.ToString(), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out var computed))
+                    Check(Math.Abs(numeric - computed) < 1e-7 * Math.Max(1, Math.Abs(numeric)),
+                        "Historical metric changed: " + i + "/" + key);
+                else
+                    Check(value.ToString() == actual.ToString(),
+                        "Historical summary value changed: " + i + "/" + key);
+            }
+    }
+    using (var weighted = new StringReader("""
+        worker 100/101 [001] 123.456: 17 cycles:u:
+                     7ff0 Work::execute (dagflow-runtime-bench)
+                     7ff1 Pool::worker (dagflow-runtime-bench)
+        worker 100/101 [001] 123.457: 23 cycles:u:
+                     7ff0 Work::execute (dagflow-runtime-bench)
+                     7ff1 Pool::worker (dagflow-runtime-bench)
+        """))
+    {
+        var tree = DagFlowHistoricalFlamegraph.Parse(weighted, CancellationToken.None);
+        Check(tree["metadata"]!["samples"]!.GetValue<long>() == 2
+            && tree["format"]!.GetValue<string>() == "flat-prefix-tree-v1"
+            && DagFlowHistoricalFlamegraph.ReadFrames(tree).Last().Self == 40
+            && DagFlowHistoricalFlamegraph.Svg(tree, "weighted test").Contains("sampled cycles"),
+            "Period-weighted flamegraph conversion failed.");
+        // Thousands of real stack frames must neither overflow JSON's nesting
+        // limit nor recurse through frame trees when producing SVG/statistics.
+        var deepPerf = new StringBuilder("deep 100/101 [001] 123.456: 37 cycles:u:\n");
+        for (var frameIndex = 0; frameIndex < 1500; frameIndex++)
+            deepPerf.Append("    7ff0 VeryDeep::frame_")
+                .Append(frameIndex.ToString(CultureInfo.InvariantCulture))
+                .Append(" (dagflow-runtime-bench)\n");
+        var deepTree = DagFlowHistoricalFlamegraph.Parse(
+            new StringReader(deepPerf.ToString()), CancellationToken.None);
+        var deepFrames = DagFlowHistoricalFlamegraph.ReadFrames(deepTree);
+        Check(deepFrames.Count == 1502 && deepFrames[^1].Self == 37
+            && deepTree.ToJsonString().Length > 0
+            && DagFlowHistoricalFlamegraph.Svg(deepTree, "deep test").Contains("VeryDeep::frame_1499"),
+            "Deep flamegraph lost weighted frames or exceeded JSON nesting depth.");
+        // Reports written before this change use nested frame trees.
+        var legacy = System.Text.Json.Nodes.JsonNode.Parse(
+            """{"n":"all","v":0,"c":[{"n":"worker","v":17,"c":[]}],"metadata":{"samples":1,"missing_callchain_samples":0}}""")!.AsObject();
+        Check(DagFlowHistoricalFlamegraph.ReadFrames(legacy).Count == 2
+            && DagFlowHistoricalFlamegraph.Svg(legacy, "legacy test").Contains("worker"),
+            "Legacy nested flamegraphs are no longer renderable.");
+        var historical = Path.Combine(root, "historical");
+        var snapshot = Path.Combine(historical, "source");
+        var profile = Path.Combine(historical, "profiles", "o3-1-idle-burst");
+        Directory.CreateDirectory(snapshot);
+        Directory.CreateDirectory(profile);
+        await File.WriteAllTextAsync(Path.Combine(snapshot, "source.cpp"), "source");
+        await File.WriteAllTextAsync(Path.Combine(profile, "flamegraph.json"), tree.ToJsonString());
+        var sourceHash = await CommandExecution.Sha256Async(Path.Combine(snapshot, "source.cpp"), CancellationToken.None);
+        var binaryHash = await CommandExecution.Sha256Async(executable, CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(historical, "manifest.json"),
+            new System.Text.Json.Nodes.JsonObject
+            {
+                ["source_sha256"] = new System.Text.Json.Nodes.JsonObject { ["source.cpp"] = sourceHash },
+                ["binaries"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["o3"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["path"] = executable, ["sha256"] = binaryHash
+                    }
+                }
+            }.ToJsonString());
+        var historicalRows = new System.Text.Json.Nodes.JsonArray();
+        foreach (var profileName in new[] { "o3", "o3-lto" })
+        foreach (var workers in new[] { 1, 4 })
+        foreach (var scenario in new[] { "external-contention", "hot-shard-skew",
+            "local-overflow", "nested-helping", "mixed-chaos", "idle-burst" })
+        {
+            var fixtureProfile = Path.Combine(historical, "profiles",
+                $"{profileName}-{workers}-{scenario}");
+            Directory.CreateDirectory(fixtureProfile);
+            await File.WriteAllTextAsync(Path.Combine(fixtureProfile, "flamegraph.json"),
+                tree.ToJsonString());
+            historicalRows.Add(new System.Text.Json.Nodes.JsonObject
+            {
+                ["profile"] = profileName, ["workers"] = workers, ["scenario"] = scenario,
+                ["time_us"] = 42, ["cycles:u"] = 40000000, ["instructions:u"] = 10000000,
+                ["branches:u"] = 2000000, ["branch-misses:u"] = 100,
+                ["cache-references:u"] = 1000, ["cache-misses:u"] = 100,
+                ["page-faults"] = 7
+            });
+        }
+        await File.WriteAllTextAsync(Path.Combine(historical, "summary.json"),
+            historicalRows.ToJsonString());
+        await DagFlowHistoricalReport.RenderAsync(historical, CancellationToken.None);
+        Check(File.ReadAllText(Path.Combine(profile, "flamegraph.svg")).Contains("Work::execute")
+            && File.ReadAllText(Path.Combine(profile, "flamegraph.svg")).Contains("Search frames")
+            && File.ReadAllText(Path.Combine(historical, "index.html")).Contains("idle-burst")
+            && File.Exists(Path.Combine(historical, "README.md")),
+            "Historical profile rendering dropped symbols, search UX, or summary rows.");
+        // The final report must handle both a very deep newly-generated tree
+        // and a previously persisted nested flamegraph in the same campaign.
+        await File.WriteAllTextAsync(Path.Combine(profile, "flamegraph.json"),
+            deepTree.ToJsonString());
+        var legacyPath = Path.Combine(historical, "profiles", "o3-1-local-overflow", "flamegraph.json");
+        await File.WriteAllTextAsync(legacyPath, legacy.ToJsonString());
+        await DagFlowHistoricalReport.RenderAsync(historical, CancellationToken.None);
+        var deepStatistics = System.Text.Json.Nodes.JsonNode.Parse(
+            await File.ReadAllTextAsync(Path.Combine(historical, "sampling-summary.json")))!
+            .AsObject()["o3-1-idle-burst"]!;
+        Check(deepStatistics["max_depth"]!.GetValue<int>() == 1501
+            && deepStatistics["sampled_cycles"]!.GetValue<long>() == 37,
+            "Historical report cannot summarize a deep flamegraph.");
+        var lastRow = historicalRows[historicalRows.Count - 1]!.DeepClone();
+        historicalRows.RemoveAt(historicalRows.Count - 1);
+        await File.WriteAllTextAsync(Path.Combine(historical, "summary.json"), historicalRows.ToJsonString());
+        try
+        {
+            await DagFlowHistoricalReport.RenderAsync(historical, CancellationToken.None);
+            throw new Exception("Historical renderer accepted a truncated campaign.");
+        }
+        catch (InvalidDataException) { }
+        historicalRows.Add(lastRow);
+        await File.WriteAllTextAsync(Path.Combine(historical, "summary.json"), historicalRows.ToJsonString());
+        await File.WriteAllTextAsync(Path.Combine(snapshot, "source.cpp"), "mutated");
+        try
+        {
+            await DagFlowHistoricalReport.RenderAsync(historical, CancellationToken.None);
+            throw new Exception("Historical renderer accepted a changed source snapshot.");
+        }
+        catch (InvalidDataException) { }
+    }
 
     using (var script = new StringReader("""
         test 100 [001] 123.456: 1 cycles:u:
@@ -127,6 +352,24 @@ try
     Check(perf.Calls[1].Args.Take(3).SequenceEqual(["stat", "-x", ","])
         && counterResult.RawTrace.EndsWith(".csv", StringComparison.Ordinal)
         && File.Exists(counterResult.RawTrace), "perf counter capture must remain separate from sampling");
+    var pinned = new LinuxPerfBackend(perf);
+    await pinned.CaptureAsync(request with { CaptureId = "pinned", CpuSet = "2",
+        CpuAffinityLauncher = "/usr/bin/taskset" }, CancellationToken.None);
+    Check(perf.Calls[2].Args.TakeLast(6).SequenceEqual(
+        ["/usr/bin/taskset", "-c", "2", executable, "--workers", "1"]),
+        "Required affinity was not inserted between profiler and target exec.");
+    try
+    {
+        await new ProfileWorkflowExecutor(perf).ExecuteAsync(new WorkflowOperationRequest(
+            "profile", executable, [], root, new Dictionary<string, string>(),
+            new Dictionary<string, string> { ["backend"] = "perf", ["mode"] = "cpu" },
+            root, "mismatched-capability", RequiredProfiler: new WorkflowProfilerRequirement
+            { Backend = "perf", Mode = "cpu", EventSource = "unavailable" }), CancellationToken.None);
+        throw new Exception("Unsupported required profiler capability was accepted.");
+    }
+    catch (InvalidOperationException error) when (error.Message.Contains("Required profiler capabilities")) { }
+    Check(perf.Calls.Count == 3 && !File.Exists(Path.Combine(root, "mismatched-capability.manifest.json")),
+        "Profiler was started before required capabilities were checked.");
 
     // No profiler tool is invoked by replay when a stored executable is
     // stale or both variants point to the same mutable build output.

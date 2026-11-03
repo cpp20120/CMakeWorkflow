@@ -76,6 +76,9 @@ public static class WorkflowReconcileCommand
             if (node.Dependencies.Any(id => report.Nodes.Single(n => n.Id == id).Status != "succeeded"))
                 throw new InvalidDataException("Reconcile successful prerequisites first.");
             var planned = plan.Nodes.Single(n => n.Definition.Id == node.Id);
+            if (planned.Definition.Inputs.Count != 0 || planned.Definition.Outputs.Count != 0
+                || planned.Definition.Constraints is not null)
+                throw new InvalidDataException("Manual success cannot establish declared artifact or execution constraints; reconcile as failed or retry explicitly.");
             var observed = await CMakeInspection.InspectAsync(node.BuildDirectory, ct);
             var session = new BuildContextSession();
             if (node.Kind == "configure") session.Configured(planned.Requested, observed);

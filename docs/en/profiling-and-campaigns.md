@@ -68,7 +68,7 @@ History imports successful, non-warmup raw samples under method `dagflow-harness
 | Command | Scope |
 |---|---|
 | `dagflow mutation run` | Mutation tests: source, suite, seed, cases, steps, timeout, report |
-| `dagflow weak-memory run` | Relacy protocol/model runs: source, protocol, compiler, report |
+| `dagflow weak-memory run` | Relacy protocol/model runs: source, protocol, compiler, report; optional `--mutant` keeps baselines and selects one mutation |
 | `dagflow fuzz seed` | Seed generation by fuzz layer |
 | `dagflow fuzz run` | Backend-specific corpus campaign and artifacts |
 | `dagflow fuzz triage` | Triage saved fuzz run |
@@ -96,3 +96,56 @@ On Linux, uninstrumented timing is separate from `perf stat` PMU counters and `p
 In stack schema v2, `samples` counts recognized sample headers, while `parsedSamples` counts those with one or more frames. The analyzer retains up to 96 frames per sample and records any truncation. `droppedDistinctStacks` is a lower bound if the distinct-stack limit is reached.
 
 The CPU normalizer also accepts `perf script` formats with an inline sampled leaf after the event header. For CPU captures, `analysis.json` reports `reportedSamples` from `perf report`, `sampleCountMatchesReport`, and `parsedSamples` in the summary. A mismatch is marked `partial`, not silently `complete`; a nonempty capture with no decoded stacks is a failed analysis. Errors from `perf report` itself are also recorded as `analysisStatus: failed`, while the original trace remains available. An interrupted capture with a manifest but no committed `.results.json` is recorded as `capture_incomplete` using its `runs.jsonl` status, instead of disappearing from analysis. Partial decoding lists concrete quality warnings. Re-run `profile analyze RUN_DIRECTORY` against an existing trace after updating CMakeWorkflow; no benchmark rerun is required.
+
+## DagFlow historical O3/LTO capture: progress and recovery
+
+```sh
+CMakeWorkflow dagflow profile run-historical --source-dir /path/to/DagFlow \
+  --output /path/to/new-results --trials 5 --stat-trials 3 --jobs 4
+```
+
+The historical capture is Linux-only and requires an admissible `perf record`
+(`cycles:u`, DWARF callgraph). The CLI now displays the current stage and
+command identity, an operation-count progress indicator and a periodic elapsed
+heartbeat on stderr. With the default trial counts the protocol has 397 command
+steps; **the percentage is completed command operations, not time remaining**.
+The final SVG/HTML rendering stage is explicitly reported after those commands.
+When stderr is redirected, the progress reporter reduces verbosity but still
+reports long-running operations. `workflow run` uses the same process dispatcher
+and emits an elapsed heartbeat for long child processes.
+
+The historical adapter owns the fixed research schedule and its single
+`commands.json` journal. External process execution and cleanup are delegated
+to the same `WorkflowProcessDispatcher` as ordinary workflow nodes, and journal
+updates use the same durable checkpoint writer as `run.json`. Progress is an
+observer, not another source of truth. This is **not** a claim that the fixed
+historical schedule has become a general WorkflowDocument DAG or that its
+`commands.json` is interchangeable with a regular `run.json`.
+
+On `--resume`, previously succeeded commands are accepted only after executable
+and argument identity, stdout/stderr hashes, and declared `perf.data`/counter
+output hashes are checked. A prior command with an unknown outcome or timeout
+is not automatically repeated. Derived flamegraphs may be regenerated from
+verified saved `perf script` output without resampling. Keep the complete output
+folder and use a new one if recovery refuses; never force success by editing
+`commands.json`.
+
+### Live progress E2E (Linux)
+
+The regular `--resume` smoke only validates progress over already-completed
+commands. To test the real active path, run both process-level fixtures:
+
+```sh
+dotnet build CMakeWorkflow.slnx -c Release
+# 14-second silent process, live TTY/redirected progress, durable resume,
+# cancellation of a real shell + descendant, unknown-effect replay refusal:
+dotnet CMakeWorkflow.Profiling.Tests/bin/Release/net10.0/CMakeWorkflow.Profiling.Tests.dll --progress-e2e
+# Real CLI invoking a silent 14-second CMake/Ninja target; checks that a
+# heartbeat appears *before* the CLI exits:
+bash scripts/test-progress-e2e.sh
+```
+
+Neither test requires DagFlow, `perf`, elevated privileges or a production
+historical run. The tests exercise the actual process dispatcher, not a mocked
+heartbeat timer. They do not replace the historical O3/LTO acceptance run or
+the separate `--recovery` fault-injection suite.

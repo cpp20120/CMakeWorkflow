@@ -49,6 +49,14 @@ public static class WorkflowReportCommand
                 Console.WriteLine($"    artifact: {artifact.Executable} [{artifact.Materialization}]");
             if (node.ExperimentResult != "NotRun")
                 Console.WriteLine($"    experiment result: {node.ExperimentResult}");
+            if (node.DeclaredArtifacts.Count != 0)
+                Console.WriteLine($"    declared artifacts: {node.DeclaredArtifacts.Count} verified records (see run.json)");
+            if (node.ExecutionConditions.TryGetValue("cpuSetRequested", out var cpus))
+                Console.WriteLine($"    required CPU set: {cpus} (taskset admission)");
+            if (node.ExecutionConditions.TryGetValue("profilerBackend", out var backend))
+                Console.WriteLine($"    profiler backend: {backend}");
+            else if (node.ExecutionConditions.TryGetValue("profilerRequired", out var required))
+                Console.WriteLine($"    required profiler: {required} (capture not confirmed)");
             if (node.Stdout is { } stdout)
                 Console.WriteLine($"    stdout: {Path.GetFullPath(Path.Combine(runDirectory, stdout))}");
             if (node.Stderr is { } stderr)

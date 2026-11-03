@@ -139,7 +139,21 @@ public sealed class WorkflowBuilder
         Options = new(source.Options, StringComparer.Ordinal),
         HarnessDirectory = source.HarnessDirectory, TestRegex = source.TestRegex,
         LabelRegex = source.LabelRegex, Resources = [.. source.Resources],
-        Exclusive = source.Exclusive, TimeoutSeconds = source.TimeoutSeconds
+        Exclusive = source.Exclusive, TimeoutSeconds = source.TimeoutSeconds,
+        Inputs = source.Inputs.Select(x => new WorkflowArtifactInput
+        { Path = x.Path, Sha256 = x.Sha256, From = x.From, Artifact = x.Artifact, Snapshot = x.Snapshot }).ToList(),
+        Outputs = source.Outputs.Select(x => new WorkflowArtifactOutput
+        { Name = x.Name, Path = x.Path, Root = x.Root, Fresh = x.Fresh }).ToList(),
+        Constraints = source.Constraints is null ? null : new WorkflowExecutionConstraints
+        {
+            CpuSet = source.Constraints.CpuSet,
+            Profiler = source.Constraints.Profiler is null ? null : new WorkflowProfilerRequirement
+            {
+                Backend = source.Constraints.Profiler.Backend,
+                Mode = source.Constraints.Profiler.Mode,
+                EventSource = source.Constraints.Profiler.EventSource
+            }
+        }
     };
 }
 
@@ -194,4 +208,31 @@ public sealed class WorkflowNodeBuilder(WorkflowNode node, WorkflowBuilder owner
     public WorkflowNodeBuilder HarnessDirectory(string path) { node.HarnessDirectory = path; return this; }
     public WorkflowNodeBuilder TestRegex(string regex) { node.TestRegex = regex; return this; }
     public WorkflowNodeBuilder LabelRegex(string regex) { node.LabelRegex = regex; return this; }
+    public WorkflowNodeBuilder RequireCpuSet(string cpuSet)
+    {
+        (node.Constraints ??= new()).CpuSet = cpuSet;
+        return this;
+    }
+    public WorkflowNodeBuilder RequireProfiler(string backend, string mode, string? eventSource = null)
+    {
+        (node.Constraints ??= new()).Profiler = new()
+        { Backend = backend, Mode = mode, EventSource = eventSource };
+        return this;
+    }
+    public WorkflowNodeBuilder Input(string path, string? sha256 = null, bool snapshot = false)
+    {
+        node.Inputs.Add(new() { Path = path, Sha256 = sha256, Snapshot = snapshot });
+        return this;
+    }
+    public WorkflowNodeBuilder InputFrom(WorkflowNodeRef producer, string artifact, string? path = null)
+    {
+        owner.RequireNode(producer);
+        node.Inputs.Add(new() { From = producer.Id, Artifact = artifact, Path = path });
+        return this;
+    }
+    public WorkflowNodeBuilder Output(string name, string path, string root = "manifest", bool fresh = false)
+    {
+        node.Outputs.Add(new() { Name = name, Path = path, Root = root, Fresh = fresh });
+        return this;
+    }
 }

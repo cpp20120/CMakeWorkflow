@@ -24,9 +24,15 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : I
         var backend = SelectBackend(backendName);
         if (!backend.Capabilities.Modes.Contains(mode))
             throw new InvalidOperationException($"Backend {backend.Capabilities.Backend} does not support mode {mode}.");
+        if (operation.RequiredProfiler is { } required
+            && (required.Backend != backend.Capabilities.Backend || required.Mode != mode
+                || required.EventSource is { } eventSource && eventSource != backend.Capabilities.EventSource))
+            throw new InvalidOperationException("Required profiler capabilities are unavailable on this host.");
+        if (operation.CpuSet is not null && (backend.Capabilities.Backend != "perf" || operation.CpuAffinityLauncher is null))
+            throw new InvalidOperationException("Required CPU affinity cannot be guaranteed for this profiler backend.");
         var request = new ProfileRequest(operation.Executable, operation.Arguments,
             operation.WorkingDirectory, operation.Environment, operation.OutputDirectory,
-            operation.NodeId, mode, timeout);
+            operation.NodeId, mode, timeout, operation.CpuSet, operation.CpuAffinityLauncher);
         var session = new ProfileSession(operation.OutputDirectory, operation.NodeId);
         await session.StartAsync(backend.Capabilities, request, ct);
         try
@@ -81,6 +87,8 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
             ["attribution"] = capabilities.Attribution,
             ["executable"] = request.Executable,
             ["executableSha256"] = await CommandExecution.Sha256Async(request.Executable, ct),
+            ["requiredCpuSet"] = request.CpuSet,
+            ["cpuAffinityLauncher"] = request.CpuAffinityLauncher,
             ["startedAt"] = startedAt.ToString("O"),
             ["metricComparability"] = "Backend-specific units and attribution; no cross-platform equivalence is asserted."
         };

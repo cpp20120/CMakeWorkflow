@@ -10,7 +10,10 @@ public sealed record WorkflowOperationRequest(
     IReadOnlyDictionary<string, string> Environment,
     IReadOnlyDictionary<string, string> Options,
     string OutputDirectory,
-    string NodeId);
+    string NodeId,
+    string? CpuSet = null,
+    WorkflowProfilerRequirement? RequiredProfiler = null,
+    string? CpuAffinityLauncher = null);
 
 public sealed record WorkflowOperationResult(
     int ExitCode,

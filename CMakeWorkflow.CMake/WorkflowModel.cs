@@ -58,6 +58,14 @@ public static class WorkflowPlanner
         foreach (var node in document.Nodes)
         {
             var deps = node.DependsOn.ToList();
+            foreach (var input in node.Inputs)
+            {
+                if (input.From is null) continue;
+                if (!nodes.TryGetValue(input.From, out var producer)
+                    || !producer.Outputs.Any(output => output.Name == input.Artifact))
+                    throw new ArgumentException($"{node.Id}: artifact reference must name a declared producer output.");
+                deps.Add(input.From);
+            }
             if (node.Kind is "run" or "profile")
             {
                 if (node.From is null || !nodes.TryGetValue(node.From, out var source) || source.Kind != "build")
@@ -99,6 +107,13 @@ public static class WorkflowPlanner
         }
 
         var directory = Path.GetDirectoryName(file)!;
+        foreach (var node in ordered.Where(n => selected.Contains(n.Id)))
+        {
+            foreach (var input in node.Inputs.Where(x => x.Path is not null))
+                readGuard?.Invoke(WorkflowArtifacts.ManifestPath(directory, input.Path!));
+            foreach (var declared in node.Outputs.Where(x => x.Root == "manifest"))
+                readGuard?.Invoke(WorkflowArtifacts.ManifestPath(directory, declared.Path));
+        }
         var contexts = new Dictionary<string, (RequestedBuildContext Request, ObservedBuildContext Observed)>(StringComparer.Ordinal);
         var plan = new List<PlannedNode>();
         foreach (var node in ordered.Where(n => selected.Contains(n.Id)))
@@ -197,6 +212,18 @@ public static class WorkflowPlanner
                     ? node.WorkingDirectory : Path.Combine(directory, node.WorkingDirectory));
             if (node.WorkingDirectory is not null && !Directory.Exists(workingDirectory))
                 diagnostics.Add(new("Runtime", "Working directory must exist when execution starts."));
+            foreach (var input in node.Inputs)
+                diagnostics.Add(new("Runtime", $"Declared input {(input.Path ?? input.From + ":" + input.Artifact)}: content identity is checked before and after this node"
+                    + (input.Snapshot ? "; a verified copy is retained in the run directory." : ".")));
+            foreach (var output in node.Outputs)
+                diagnostics.Add(new("Runtime", $"Declared output {output.Name}: existence and content identity are checked after this node"
+                    + (output.Fresh ? "; pre-existing output is rejected." : "; no freshness is inferred from existence.")));
+            if (node.Constraints?.CpuSet is { } cpus)
+                diagnostics.Add(new(OperatingSystem.IsLinux() ? "Runtime" : "Error",
+                    OperatingSystem.IsLinux() ? $"Required CPU set {cpus}: Linux taskset admission and allowed CPUs are checked before dispatch."
+                    : "Required CPU affinity cannot be guaranteed on this host."));
+            if (node.Constraints?.Profiler is { } profiler)
+                diagnostics.Add(new("Runtime", $"Required profiler {profiler.Backend}/{profiler.Mode}: the profiling extension must confirm capabilities before capture."));
             plan.Add(new PlannedNode(node, target, workingDirectory, dependencies[node.Id],
                 context.Request, context.Observed, diagnostics, document.Contexts[contextName].Toolchain));
         }
@@ -270,6 +297,46 @@ public static class WorkflowPlanner
             throw new ArgumentException($"{n.Id}: ctest uses context, testRegex and labelRegex, not target/from/arguments.");
         if (n.Kind != "ctest" && (n.TestRegex is not null || n.LabelRegex is not null))
             throw new ArgumentException($"{n.Id}: testRegex and labelRegex are only valid for ctest.");
+        if (n.Inputs is null || n.Outputs is null || n.Inputs.Any(x => x is null)
+            || n.Outputs.Any(x => x is null))
+            throw new ArgumentException($"{n.Id}: invalid artifact declarations.");
+        if (n.Kind == "inspect" && n.Outputs.Count != 0)
+            throw new ArgumentException($"{n.Id}: inspect cannot produce declared artifacts.");
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var input in n.Inputs)
+        {
+            if (input.Path is null && input.From is null || input.Path is not null
+                && (string.IsNullOrWhiteSpace(input.Path) || input.Path.Contains('\0'))
+                || input.From is not null && (!IsIdentifier(input.From) || !IsIdentifier(input.Artifact))
+                || input.From is null && input.Artifact is not null
+                || input.Sha256 is not null && !WorkflowArtifacts.ValidSha256(input.Sha256))
+                throw new ArgumentException($"{n.Id}: invalid input artifact declaration.");
+        }
+        foreach (var output in n.Outputs)
+        {
+            if (!IsIdentifier(output.Name) || !names.Add(output.Name)
+                || string.IsNullOrWhiteSpace(output.Path) || output.Path.Contains('\0')
+                || output.Root is not ("manifest" or "run")
+                || output.Root == "run" && (Path.IsPathRooted(output.Path)
+                    || output.Path.Split(['/', '\\']).Any(x => x is "" or "." or "..")))
+                throw new ArgumentException($"{n.Id}: invalid output artifact declaration.");
+        }
+        if (n.Constraints is { } requirements)
+        {
+            if (n.Kind == "inspect" && (requirements.CpuSet is not null || requirements.Profiler is not null))
+                throw new ArgumentException($"{n.Id}: inspect has no execution to constrain.");
+            if (requirements.CpuSet is not null && n.Kind is not ("run" or "profile"))
+                throw new ArgumentException($"{n.Id}: required CPU affinity is supported only for run and profile execution.");
+            if (requirements.CpuSet is { } cpuSet && !WorkflowExecutionAdmission.ValidCpuSet(cpuSet))
+                throw new ArgumentException($"{n.Id}: invalid required CPU set.");
+            if (requirements.Profiler is { } profiler && (n.Kind != "profile"
+                || string.IsNullOrWhiteSpace(profiler.Backend) || profiler.Backend == "auto"
+                || string.IsNullOrWhiteSpace(profiler.Mode)
+                || profiler.EventSource is { Length: 0 }
+                || n.Options.GetValueOrDefault("backend", "auto") != profiler.Backend
+                || n.Options.GetValueOrDefault("mode", "cpu") != profiler.Mode))
+                throw new ArgumentException($"{n.Id}: required profiler must match an explicit profile backend/mode.");
+        }
     }
 }
 

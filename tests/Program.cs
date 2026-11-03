@@ -31,6 +31,7 @@ internal static class Program
             TypedRecipeIntegrationTests.Run();
             ProtocolTests.Run();
             WorkflowTests.Run();
+            ArtifactTests.Run();
             BoundaryTests.Run();
             LifecycleTests.Run();
             Console.WriteLine("All integration checks passed.");

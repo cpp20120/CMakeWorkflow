@@ -43,6 +43,41 @@ public sealed class WorkflowNode
     public List<string> Resources { get; set; } = [];
     public bool Exclusive { get; set; }
     public double? TimeoutSeconds { get; set; }
+    // Optional schema-v2 evidence. A reference adds an ordinary DAG dependency.
+    public List<WorkflowArtifactInput> Inputs { get; set; } = [];
+    public List<WorkflowArtifactOutput> Outputs { get; set; } = [];
+    public WorkflowExecutionConstraints? Constraints { get; set; }
+}
+
+public sealed class WorkflowExecutionConstraints
+{
+    public string? CpuSet { get; set; }
+    public WorkflowProfilerRequirement? Profiler { get; set; }
+}
+
+public sealed class WorkflowProfilerRequirement
+{
+    public string Backend { get; set; } = "";
+    public string Mode { get; set; } = "";
+    public string? EventSource { get; set; }
+}
+
+public sealed class WorkflowArtifactInput
+{
+    public string? Path { get; set; }
+    public string? Sha256 { get; set; }
+    public string? From { get; set; }
+    public string? Artifact { get; set; }
+    public bool Snapshot { get; set; }
+}
+
+public sealed class WorkflowArtifactOutput
+{
+    public string Name { get; set; } = "";
+    public string Path { get; set; } = "";
+    // manifest: relative to the manifest; run: relative to the current run directory.
+    public string Root { get; set; } = "manifest";
+    public bool Fresh { get; set; }
 }
 
 // A request for toolchain binding, deliberately independent of Windows discovery DTOs.

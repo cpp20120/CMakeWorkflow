@@ -64,6 +64,53 @@ Relative `sourceDirectory`, `buildDirectory` and explicit `workingDirectory` fie
 
 An `invoke` node can specify `harnessDirectory`: a **relative** path inside its build tree, with no absolute path or `.`/`..`/empty segments. It refers to a fresh DagFlow harness directory and has strict output-ownership rules; see [DagFlow harness](profiling-and-campaigns.md#dagflow-harness).
 
+## Declared experiment artifacts and execution requirements
+
+Schema v2 nodes may declare `inputs`, `outputs` and `constraints`. These are
+optional and do not change old manifests. For example:
+
+```json
+{
+  "id": "build-model", "kind": "build", "context": "research", "target": "model",
+  "inputs": [{"path": "../src/model.cpp", "sha256": "<64 hex digits>", "snapshot": true}],
+  "outputs": [{"name": "model-report", "path": "../out/model/report.json"}]
+}
+```
+
+Input `path` is relative to the manifest unless absolute. An input may instead
+use `{"from":"producer-node","artifact":"output-name"}`; this adds an ordinary
+DAG dependency and checks the producer's recorded hash again before the
+consumer. With both `from` and `path`, the live path must match that hash.
+`sha256` pins an expected value; without it, the runner records the value it
+observed. Inputs are checked before and after the node. `snapshot:true` copies
+the observed file or directory into the run directory and verifies the copy.
+Symlinks and reparse points in declared artifacts are rejected.
+
+An output has a unique `name` and a `path` relative to the manifest by default.
+`"root":"run"` makes it relative to the run directory. The runner requires
+the output to exist after success and records its SHA-256 in `run.json` and
+workflow events. `"fresh":true` additionally refuses a pre-existing path
+before dispatch; omit it for valid incremental CMake outputs. This is a
+declared output check, **not** a native build freshness predicate. Resume
+rechecks recorded artifacts. Neither hashing nor snapshots continuously lock
+external writers or attest the complete compiler environment.
+An interrupted node with artifact declarations or execution constraints cannot
+be manually reconciled as `succeeded`: that decision cannot reconstruct the
+required checks. Reconcile it as failed or explicitly retry according to the
+existing recovery protocol.
+
+`constraints.cpuSet` is supported on `run` and `profile` nodes and requires a
+numeric CPU list such as `"2,4-5"`. On Linux
+the runner checks the host allowance and launches through `taskset` so affinity
+is applied before target exec; it records the requested and allowed sets. On
+hosts without this launch guarantee it refuses the node. A profile node may
+also require `constraints.profiler` with exact `backend`, `mode` and optional
+`eventSource`; these must match explicit profile options and the selected
+backend's capabilities before capture starts. Profiler permissions and actual
+event availability can still fail during capture and are reported as failures.
+These constraints do not assert fixed CPU frequency, isolation or comparable
+counter semantics across platforms.
+
 ## Plan and execute
 
 ```sh

@@ -14,6 +14,17 @@
 int main(int argc, char** argv) {
   std::string mode = argc > 1 ? argv[1] : "args";
   if (mode == "fail") { std::cerr << "EXPECTED_FAILURE\n"; return 7; }
+#ifdef __linux__
+  if (mode == "affinity") {
+    std::ifstream status("/proc/self/status");
+    for (std::string line; std::getline(status, line);)
+      if (line.rfind("Cpus_allowed_list:", 0) == 0) {
+        auto cpus = line.substr(18);
+        cpus.erase(0, cpus.find_first_not_of(" \t"));
+        std::cout << "CPUS_ALLOWED=" << cpus << "\n";
+      }
+  }
+#endif
   if (mode == "generate") {
     std::ofstream("generated.hpp") << "#define GENERATED_VALUE " << argv[2] << "\n";
     return 0;
