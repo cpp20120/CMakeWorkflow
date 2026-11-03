@@ -195,7 +195,10 @@ try
     }
     var endpoint = OperatingSystem.IsWindows() ? @"\\.\pipe\cmakeworkflow-" + Guid.NewGuid().ToString("N")
         : Path.Combine(socketDirectory!, "rpc.sock");
-    using (var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+    // This is the budget for the entire sequential Host IPC suite, not for a single
+    // operation. Individual cancellation/recovery assertions retain their own short deadlines.
+    // A 30-second suite-wide budget could expire while Windows is configuring a later fixture.
+    using (var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(3)))
     {
         var server = HostServer.RunAsync(endpoint, lifetime.Token);
         try
