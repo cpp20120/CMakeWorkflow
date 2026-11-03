@@ -6,8 +6,15 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
     <ItemGroup>
-        <Compile Include="CommandExecution.cs"/>
-        <Compile Include="WorkflowOperation.cs"/>
-        <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
+        <Compile Include="CommandExecution.cs" />
+
+        <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj" />
     </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="CommandResult.cs" />
+    <Compile Include="IWorkflowOperationExecutor.cs" />
+    <Compile Include="WorkflowOperationRequest.cs" />
+    <Compile Include="WorkflowOperationResult.cs" />
+  </ItemGroup>
 </Project>

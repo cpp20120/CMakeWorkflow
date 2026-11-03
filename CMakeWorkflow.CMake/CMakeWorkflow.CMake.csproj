@@ -8,6 +8,15 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="*.cs"/>
+        <Compile Include="Artifacts/*.cs"/>
+        <Compile Include="Build/*.cs"/>
+        <Compile Include="Execution/*.cs"/>
+        <Compile Include="Planning/*.cs"/>
+        <Compile Include="Recipes/*.cs"/>
+        <Compile Include="Recovery/*.cs"/>
+        <Compile Include="Reporting/*.cs"/>
+        <Compile Include="Serialization/*.cs"/>
+        <Compile Include="Toolchains/*.cs"/>
         <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
     </ItemGroup>

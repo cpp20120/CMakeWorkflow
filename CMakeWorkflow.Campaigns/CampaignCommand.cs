@@ -135,16 +135,3 @@ public static class CampaignCommand
         return result;
     }
 }
-
-internal sealed record CampaignCompletion(
-    int SchemaVersion,
-    string Campaign,
-    string Report,
-    string ReportSha256,
-    DateTimeOffset StartedAt,
-    DateTimeOffset FinishedAt,
-    string Status);
-
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(CampaignCompletion))]
-internal partial class CampaignCompletionJson : JsonSerializerContext;

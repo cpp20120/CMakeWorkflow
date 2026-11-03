@@ -2,7 +2,7 @@
 
 **[English](workflows.md) · [Русский](../workflows.md) · [Index](README.md)**
 
-The manifest contract is implemented in [WorkflowModel.cs](../../CMakeWorkflow.CMake/WorkflowModel.cs). The CLI accepts
+The manifest contract is implemented in [WorkflowDocument.cs](../../CMakeWorkflow.Contracts/Workflows/WorkflowDocument.cs). The CLI accepts
 `schemaVersion` **1** and **2**, rejects unknown JSON properties, and uses version 2 in new examples.
 
 ## A complete example

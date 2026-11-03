@@ -34,7 +34,7 @@ recipe отдельных CPU и scheduler captures, а не новый унив
 
 ## Backend и возможности
 
-Источник — [ProfileWorkflowExecutor](../CMakeWorkflow.Profiling/ProfileWorkflowExecutor.cs)
+Источник — [ProfileWorkflowExecutor](../CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs)
 и [Backends](../CMakeWorkflow.Profiling/Backends).
 
 | Хост    | Backend       | Режимы backend                    |
@@ -72,7 +72,7 @@ outputs — [ProfileCommand.cs](../CMakeWorkflow.Profiling/ProfileCommand.cs).
 ## Replay сохранённой пары
 
 В текущем рабочем дереве реализован
-[ProfileReplayCommand](../CMakeWorkflow.Profiling/ProfileReplayCommand.cs):
+[ProfileReplayCommand](../CMakeWorkflow.Profiling/Replay/ProfileReplayCommand.cs):
 
 ```sh
 CMakeWorkflow profile replay BASELINE_DIRECTORY CANDIDATE_DIRECTORY --node RUN_NODE --backend auto --timeout-seconds 300 --results-dir out/profiles
@@ -97,7 +97,7 @@ Invoke-узел может явно задать `harnessDirectory` относи
 
 После успешного invoke CLI сохраняет копии под run-каталогом и записывает ссылки в outputs/events. Поддерживаются
 snapshot и native replay metadata в соответствии с
-[DagFlowHarnessSnapshot.cs](../CMakeWorkflow.CMake/DagFlowHarnessSnapshot.cs). Плагин не должен самостоятельно искать
+[DagFlowHarnessSnapshot.cs](../CMakeWorkflow.CMake/Artifacts/DagFlowHarnessSnapshot.cs). Плагин не должен самостоятельно искать
 подходящий harness в build tree.
 
 History импортирует успешные non-warmup samples с методом `dagflow-harness`, проверяя структуру, идентичность и

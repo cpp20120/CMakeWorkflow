@@ -7,12 +7,23 @@
 | Компонент       | Ответственность                                                                    | Основные исходники                                                                                                                                     |
 |-----------------|------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
 | CLI entry point | Маршрутизация команд, SIGINT, подключение profiling, автоматический импорт History | [Program.cs](../Program.cs)                                                                                                                            |
-| Core            | Запуск процессов, hashing, контракт дополнительных операций                        | [CommandExecution.cs](../CMakeWorkflow.Core/CommandExecution.cs), [WorkflowOperation.cs](../CMakeWorkflow.Core/WorkflowOperation.cs)                   |
-| CMake           | File API, наблюдение build tree, provenance, leases, план и исполнение DAG         | [WorkflowModel.cs](../CMakeWorkflow.CMake/WorkflowModel.cs), [WorkflowRunner.cs](../CMakeWorkflow.CMake/WorkflowRunner.cs)                             |
-| Profiling       | Платформенные captures, анализ и replay                                            | [ProfileCommand.cs](../CMakeWorkflow.Profiling/ProfileCommand.cs), [ProfileWorkflowExecutor.cs](../CMakeWorkflow.Profiling/ProfileWorkflowExecutor.cs) |
+| Core            | Запуск процессов, hashing, контракт дополнительных операций                        | [CommandExecution.cs](../CMakeWorkflow.Core/CommandExecution.cs), [IWorkflowOperationExecutor.cs](../CMakeWorkflow.Core/IWorkflowOperationExecutor.cs)                   |
+| CMake           | File API, наблюдение build tree, provenance, leases, план и исполнение DAG         | [WorkflowDocument.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowDocument.cs), [WorkflowRunner.cs](../CMakeWorkflow.CMake/Execution/WorkflowRunner.cs)                             |
+| Profiling       | Платформенные captures, анализ и replay                                            | [ProfileCommand.cs](../CMakeWorkflow.Profiling/ProfileCommand.cs), [ProfileWorkflowExecutor.cs](../CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs) |
 | Campaigns       | Предметные DagFlow mutation, weak-memory и fuzz-сценарии                           | [CampaignCommand.cs](../CMakeWorkflow.Campaigns/CampaignCommand.cs)                                                                                    |
-| History         | Импорт результатов в SQLite, запросы, сравнения и detection                        | [HistoryStore.cs](../CMakeWorkflow.History/HistoryStore.cs), [HistoryCommand.cs](../CMakeWorkflow.History/HistoryCommand.cs)                           |
+| History         | Импорт результатов в SQLite, запросы, сравнения и detection                        | [HistoryStore.cs](../CMakeWorkflow.History/Storage/HistoryStore.cs), [HistoryCommand.cs](../CMakeWorkflow.History/HistoryCommand.cs)                           |
 | Tooling         | Обнаружение инструментов, план и явная установка                                   | [ToolingCommand.cs](../CMakeWorkflow.Tooling/ToolingCommand.cs)                                                                                        |
+
+Исходники сгруппированы внутри существующих проектов по назначению, без дополнительной вложенности:
+
+- `Contracts`: модели workflow в `Workflows`, fluent API в `Builders`, контракты рецептов в `Recipes`.
+- `CMake`: `Build`, `Planning`, `Execution`, `Recovery`, `Artifacts`, `Reporting`, `Recipes`, `Toolchains`, `Serialization`.
+- `Host` и `Client`: предметные группы `Workflows`, `Recipes`, `Profiling`, `Campaigns`, `History`, `Toolchains`; у Host также `Sessions`, `Transport` и `Provisioning`, общие RPC-контракты — в `Protocol`.
+- `Profiling`: `Capture`, `Analysis`, `Backends`, `Historical`, `Replay`, `Workflows`.
+- `History`: `Models`, `Storage`, `Analysis`; `Tooling`: `Tools`, `Toolchains`, `Environment`.
+
+Командные точки входа остаются в корнях проектов; обработчики корневого CLI — в `Commands`.
+Небольшие проекты сохраняют плоскую структуру. Папки не меняют пространства имён и публичный API.
 
 ```mermaid
 flowchart TD

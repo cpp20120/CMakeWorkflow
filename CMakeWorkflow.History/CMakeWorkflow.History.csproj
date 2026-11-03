@@ -7,6 +7,9 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="*.cs"/>
+        <Compile Include="Analysis/*.cs"/>
+        <Compile Include="Models/*.cs"/>
+        <Compile Include="Storage/*.cs"/>
         <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.0"/>
         <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5"/>
     </ItemGroup>

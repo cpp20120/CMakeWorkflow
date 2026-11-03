@@ -20,7 +20,7 @@ separately.
 
 ## Read-only planning
 
-[WorkflowPlanView](../../CMakeWorkflow.CMake/WorkflowProtocol.cs) includes `schemaVersion`, `workflow`, `manifestHash`,
+[WorkflowPlanView](../../CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs) includes `schemaVersion`, `workflow`, `manifestHash`,
 `valid` and `nodes`. Node entries expose `id`, `kind`, `target`, `buildDirectory`, `configuration`, `dependencies`,
 `observedState`, `diagnostics`, `resources` and `exclusive`. Diagnostics have severity and message; observation states
 include `Observed`, `Unverified`, `Runtime` and `Error`.
@@ -54,7 +54,7 @@ Node states can be `pending`, `running`, `succeeded`, `failed`, `blocked`, `canc
 
 **`run.json` is the authoritative workflow state**, not JSONL. It stores manifest identity, timestamps, overall state,
 individual node results, failure information and recorded host/build environments. The
-complete [NodeResult implementation](../../CMakeWorkflow.CMake/WorkflowRunner.cs) also holds executable and artifact
+complete [NodeResult implementation](../../CMakeWorkflow.CMake/Reporting/NodeResult.cs) also holds executable and artifact
 identity, arguments, timing and outputs. Node `stdout`, `stderr` and output paths may be relative to the run directory;
 event artifact paths may be absolute. Always validate an artifact path exists before opening it.
 
@@ -77,7 +77,7 @@ resume. See [Recovery](recovery.md). JSONL does not serve as a crash-recovery da
 
 ## Local SQLite History
 
-[HistoryStore](../../CMakeWorkflow.History/HistoryStore.cs) indexes finalized run results; raw directories remain the
+[HistoryStore](../../CMakeWorkflow.History/Storage/HistoryStore.cs) indexes finalized run results; raw directories remain the
 source of truth and the catalog is **rebuildable**. Completed success/failed/canceled workflows are indexed
 automatically unless disabled. Saved profiler results can be indexed after analysis. Manual import is available:
 
@@ -118,4 +118,4 @@ median effect at least as large as `--min-percent` in the worse direction. `inco
 
 Recorded fingerprints cannot establish independent samples or exclude thermals, frequency drift and background
 interference. Profiled/instrumented numbers should not silently become ordinary timing baselines.
-See [HistoryDetector](../../CMakeWorkflow.History/HistoryDetector.cs) and [profiling](profiling-and-campaigns.md).
+See [HistoryDetector](../../CMakeWorkflow.History/Analysis/HistoryDetector.cs) and [profiling](profiling-and-campaigns.md).

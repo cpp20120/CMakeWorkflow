@@ -52,7 +52,7 @@ AOT-проверки. VS Code остаётся IDE-адаптером.
 
 `initialize`, `tooling/progress` и `tooling/fixProgress` также уже существуют.
 
-Фактический текущий wire contract — [HostProtocol.cs](../../CMakeWorkflow.Host/HostProtocol.cs).
+Фактический текущий wire contract — [HostProtocol.cs](../../CMakeWorkflow.Host/Protocol/HostProtocol.cs).
 
 Список выше — целевая поверхность, не обещание доступности этих RPC сегодня.
 

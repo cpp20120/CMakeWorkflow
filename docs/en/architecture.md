@@ -11,12 +11,23 @@ compiler. The boundaries matter both for correctness and for interpreting saved 
 |-----------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
 | CLI       | Command dispatch, Ctrl+C/SIGINT, history indexing                        | [Program.cs](../../Program.cs)                                                         |
 | Core      | Child-process execution, cancellation, hashing and operation contracts   | [Core](../../CMakeWorkflow.Core/)                                                      |
-| CMake     | CMake File API, contexts, provenance, leases, DAG planning and execution | [WorkflowRunner.cs](../../CMakeWorkflow.CMake/WorkflowRunner.cs)                       |
-| Profiling | Platform capture, analysis and replay                                    | [ProfileWorkflowExecutor.cs](../../CMakeWorkflow.Profiling/ProfileWorkflowExecutor.cs) |
+| CMake     | CMake File API, contexts, provenance, leases, DAG planning and execution | [WorkflowRunner.cs](../../CMakeWorkflow.CMake/Execution/WorkflowRunner.cs)                       |
+| Profiling | Platform capture, analysis and replay                                    | [ProfileWorkflowExecutor.cs](../../CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs) |
 | Campaigns | Optional DagFlow mutation, weak-memory and fuzz workflows                | [CampaignCommand.cs](../../CMakeWorkflow.Campaigns/CampaignCommand.cs)                 |
-| History   | SQLite indexing, queries, descriptive comparison and statistical tests   | [HistoryStore.cs](../../CMakeWorkflow.History/HistoryStore.cs)                         |
+| History   | SQLite indexing, queries, descriptive comparison and statistical tests   | [HistoryStore.cs](../../CMakeWorkflow.History/Storage/HistoryStore.cs)                         |
 | Tooling   | Read-only discovery/planning and explicit tool installation              | [ToolingCommand.cs](../../CMakeWorkflow.Tooling/ToolingCommand.cs)                     |
 | Host/SDK  | Local JSON-RPC session and typed NativeAOT-compatible clients            | [Host](../../CMakeWorkflow.Host/), [Client](../../CMakeWorkflow.Client/)               |
+
+Sources are grouped by responsibility within the existing projects, with one level of folders:
+
+- `Contracts`: workflow models in `Workflows`, the fluent API in `Builders`, recipe contracts in `Recipes`.
+- `CMake`: `Build`, `Planning`, `Execution`, `Recovery`, `Artifacts`, `Reporting`, `Recipes`, `Toolchains`, `Serialization`.
+- `Host` and `Client`: feature groups `Workflows`, `Recipes`, `Profiling`, `Campaigns`, `History`, `Toolchains`; Host also has `Sessions`, `Transport` and `Provisioning`, with shared RPC contracts in `Protocol`.
+- `Profiling`: `Capture`, `Analysis`, `Backends`, `Historical`, `Replay`, `Workflows`.
+- `History`: `Models`, `Storage`, `Analysis`; `Tooling`: `Tools`, `Toolchains`, `Environment`.
+
+Command entry points stay at project roots; root CLI handlers live in `Commands`.
+Small projects remain flat. Folder names do not change namespaces or the public API.
 
 ```mermaid
 flowchart TD

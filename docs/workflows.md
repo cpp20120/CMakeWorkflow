@@ -2,7 +2,7 @@
 
 > **Язык / Language:** [Русский](workflows.md) · [English](en/workflows.md) · [Documentation index](README.md)
 
-Источник контракта — [WorkflowModel.cs](../CMakeWorkflow.CMake/WorkflowModel.cs). Принимаются `schemaVersion: 1` и `2`;
+Источник контракта — [WorkflowDocument.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowDocument.cs). Принимаются `schemaVersion: 1` и `2`;
 новые примеры используют версию 2. Неизвестные JSON-поля отклоняются десериализатором.
 
 ## Рабочий пример

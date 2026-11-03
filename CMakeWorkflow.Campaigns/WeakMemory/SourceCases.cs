@@ -1,9 +1,5 @@
 namespace CMakeWorkflow.Campaigns;
 
-internal sealed record RelacySuite(string Name, string[] Expected);
-
-internal sealed record RelacyVariant(string Name, string Header, RelacySuite[] Suites);
-
 internal sealed class SourceCases(string root)
 {
     private readonly SourceAdapters adapters = new(root);

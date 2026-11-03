@@ -7,14 +7,6 @@ using System.Xml.Linq;
 
 namespace CMakeWorkflow.Profiling;
 
-public sealed record EtwAnalysisResult(
-    string EventDump,
-    string Summary,
-    string Samples,
-    int CpuSamples,
-    int ContextSwitchesIn,
-    int ReadyEvents);
-
 public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 {
     private readonly IProfileProcess process = process ?? new ProfileProcess();

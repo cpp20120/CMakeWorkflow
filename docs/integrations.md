@@ -26,7 +26,7 @@ Profiles: `native`, `cmake`, `ninja`, `profiling`, `fuzz`, `development`, `all`.
 Fallback CMake/CTest на Linux x64/arm64 использует Kitware release с опубликованным SHA-256 digest и проверкой архива.
 Store задаётся `CMAKEWORKFLOW_TOOL_STORE`. Для неподдерживаемых installer/platform combinations выводятся manual
 diagnostics. Windows ADK и Xcode автоматически не устанавливаются.
-Смотрите [ToolingService](../CMakeWorkflow.Tooling/ToolingService.cs).
+Смотрите [ToolingService](../CMakeWorkflow.Tooling/Tools/ToolingService.cs).
 
 Workflow никогда не запускает provisioning автоматически. Готовность toolchain не равна доступности profiler permissions
 и не гарантирует, что проект корректно настроен.

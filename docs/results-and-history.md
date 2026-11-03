@@ -19,7 +19,7 @@ Language:** [Русский](results-and-history.md) · [English](en/results-and
 
 ## План
 
-[WorkflowPlanView](../CMakeWorkflow.CMake/WorkflowProtocol.cs) содержит
+[WorkflowPlanView](../CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs) содержит
 `schemaVersion`, `workflow`, `manifestHash`, `valid`, `nodes`.
 
 У элемента `nodes`: `id`, `kind`, `target`, `buildDirectory`, `configuration`,
@@ -67,7 +67,7 @@ CMakeWorkflow workflow report RUN_DIRECTORY --json
 `finishedAt`, `status`, `nodes`, `error`, `environment`, `environmentAtEnd`,
 `buildEnvironments`. Полная модель `NodeResult`, включая observations, artifact identity, `outputs`, argv и timing,
 находится в
-[WorkflowRunner.cs](../CMakeWorkflow.CMake/WorkflowRunner.cs).
+[WorkflowRunner.cs](../CMakeWorkflow.CMake/Execution/WorkflowRunner.cs).
 
 Пути `stdout`, `stderr` и отдельные outputs в отчёте могут быть относительными к run-каталогу; protocol artifact paths
 формируются как полные пути. Не заменяйте реальные ссылки догадками по имени target или суффиксу `.exe`. Перед открытием
@@ -115,7 +115,7 @@ runner **не запускает операции**:
 
 ## Локальная History
 
-[HistoryStore](../CMakeWorkflow.History/HistoryStore.cs) индексирует сохранённые результаты. SQLite — восстановимый
+[HistoryStore](../CMakeWorkflow.History/Storage/HistoryStore.cs) индексирует сохранённые результаты. SQLite — восстановимый
 индекс, исходные run-каталоги остаются источником данных. Scheduler не зависит от успешности индексации. Ошибка импорта
 сообщается в stderr и не должна переопределять exit status workflow.
 
@@ -152,4 +152,4 @@ workload, variant/scenario, host и зафиксированные характ�
 
 Фильтры variant/scenario меняют семейство проверок для Holm correction. Графики raw samples и совпадение fingerprint не
 доказывают независимость измерений, отсутствие thermal drift или фоновой нагрузки. Подробности реализации:
-[HistoryDetector.cs](../CMakeWorkflow.History/HistoryDetector.cs).
+[HistoryDetector.cs](../CMakeWorkflow.History/Analysis/HistoryDetector.cs).

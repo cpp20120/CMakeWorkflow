@@ -1,0 +1,24 @@
+using System.Security.Cryptography;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace CMakeWorkflow.History;
+
+public sealed record HistoryRun(
+    string Id,
+    string Directory,
+    string Format,
+    string? Workflow,
+    string? ManifestHash,
+    string? StartedAt,
+    string? FinishedAt,
+    string Status,
+    string? Revision,
+    string SourceHash,
+    bool SourceAvailable = true,
+    string? HostId = null,
+    string? EnvironmentFingerprint = null,
+    HistoryHostEnvironment? Environment = null,
+    List<HistoryBuildEnvironment>? BuildEnvironments = null);

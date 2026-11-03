@@ -10,10 +10,10 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="Program.cs"/>
-        <Compile Include="BenchmarkGenerateCommand.cs"/>
-        <Compile Include="RecipeJson.cs" />
-        <Compile Include="WorkflowRecipeGenerateCommand.cs"/>
-        <Compile Include="WorkflowReportCommand.cs"/>
+        <Compile Include="Commands/BenchmarkGenerateCommand.cs"/>
+        <Compile Include="Commands/RecipeJson.cs" />
+        <Compile Include="Commands/WorkflowRecipeGenerateCommand.cs"/>
+        <Compile Include="Commands/WorkflowReportCommand.cs"/>
         <ProjectReference Include="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>

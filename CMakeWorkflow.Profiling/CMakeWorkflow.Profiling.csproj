@@ -6,12 +6,16 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
     <ItemGroup>
-        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
-            <_Parameter1>CMakeWorkflow.Profiling.Tests</_Parameter1>
-        </AssemblyAttribute>
         <Compile Include="*.cs"/>
         <Compile Include="Analysis/*.cs"/>
         <Compile Include="Backends/*.cs"/>
+        <Compile Include="Capture/*.cs"/>
+        <Compile Include="Historical/*.cs"/>
+        <Compile Include="Replay/*.cs"/>
+        <Compile Include="Workflows/*.cs"/>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+            <_Parameter1>CMakeWorkflow.Profiling.Tests</_Parameter1>
+        </AssemblyAttribute>
         <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
     </ItemGroup>

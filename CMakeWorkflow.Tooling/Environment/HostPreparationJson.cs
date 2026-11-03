@@ -1,0 +1,23 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Serialization;
+using System.Text.Json;
+
+namespace CMakeWorkflow.Tooling;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    Converters =
+    [
+        typeof(JsonStringEnumConverter<ToolPlatform>),
+        typeof(JsonStringEnumConverter<PackageManagerKind>)
+    ])]
+[JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(HostRequirements))]
+[JsonSerializable(typeof(EtwProbeResult))]
+[JsonSerializable(typeof(List<HostFinding>))]
+[JsonSerializable(typeof(HostPreparationPlan))]
+[JsonSerializable(typeof(HostPreparationResult))]
+[JsonSerializable(typeof(IReadOnlyList<HostSettingChange>))]
+[JsonSerializable(typeof(ProvisioningAuditEntry))]
+internal partial class HostPreparationJson : JsonSerializerContext;
