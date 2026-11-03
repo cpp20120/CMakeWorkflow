@@ -57,7 +57,10 @@ internal static class CancellationSmoke
         {
             using var started = CancellationTokenSource.CreateLinkedTokenSource(ct);
             started.CancelAfter(TimeSpan.FromSeconds(15));
-            while (!File.Exists(marker) || !(await File.ReadAllLinesAsync(marker, started.Token)).Contains("started", StringComparer.Ordinal))
+            // CMake file(APPEND) can hold an exclusive file handle briefly on
+            // Windows. File existence does not imply the marker is readable yet.
+            while ((await TryReadEffectLinesAsync(marker, started.Token)) is not { } lines
+                || !lines.Contains("started", StringComparer.Ordinal))
                 await Task.Delay(30, started.Token);
             // Cancellation intent has its own CAS revision, independent of the
             // reconciliation revision returned by InspectRecoveryAsync.
@@ -76,7 +79,15 @@ internal static class CancellationSmoke
             var retry = await client.Workflows.StartAsync(options, ct);
             if (retry.OperationId != operation.OperationId || (await retry.GetSnapshotAsync(ct)).State != "canceled")
                 throw new InvalidOperationException("Retry after cancellation did not preserve operation identity/outcome.");
-            if (!(await File.ReadAllLinesAsync(marker, ct)).SequenceEqual(["started"]))
+            // Do not treat a transient Windows sharing violation as an
+            // execution failure. Still require the complete, exact effect log;
+            // a writer that never releases the file must fail this smoke.
+            using var markerDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            markerDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+            string[]? effects;
+            while ((effects = await TryReadEffectLinesAsync(marker, markerDeadline.Token)) is null)
+                await Task.Delay(30, markerDeadline.Token);
+            if (!effects.SequenceEqual(["started"]))
                 throw new InvalidOperationException("Canceled effect completed or ran more than once.");
             Console.WriteLine("PASS NativeAOT active cancellation: typed receipt, durable canceled, retry without redispatch; effect stopped.");
         }
@@ -92,6 +103,17 @@ internal static class CancellationSmoke
                     await operation.RequestCancellationAsync(state.CancellationRequested ? 1 : 0, cleanup.Token);
             }
             catch (Exception error) { Console.Error.WriteLine("Cancellation fixture cleanup failed: " + error.Message); }
+        }
+    }
+
+    private static async Task<string[]?> TryReadEffectLinesAsync(string path, CancellationToken ct)
+    {
+        if (!File.Exists(path)) return null;
+        try { return await File.ReadAllLinesAsync(path, ct); }
+        catch (IOException) when (!ct.IsCancellationRequested)
+        {
+            // A concurrent CMake APPEND may temporarily deny readers on Windows.
+            return null;
         }
     }
 }
