@@ -19,6 +19,8 @@ public static class Program
         };
         try
         {
+            if (args.Length > 0 && args[0] == "remote")
+                return await RemoteCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "host")
                 return await Host.HostCommand.ExecuteAsync(args[1..], cts.Token);
             if (args.Length > 0 && args[0] == "history")
@@ -275,6 +277,7 @@ public static class Program
     }
 
     private static void Usage() => Console.Error.WriteLine(
+        "Usage: CMakeWorkflow remote <start|find|status|inspect|events|report|artifacts|download|cancel> --destination USER@HOST --endpoint REMOTE_SOCKET --workspace REMOTE_DIR ...\n" +
         "Usage: CMakeWorkflow host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--json]; fix: [--yes|--dry-run] [--pm NAME] [--no-fallback]\n" +
         "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare|detect> ...\n" +
         "Usage: CMakeWorkflow env <doctor|plan|setup> REQUIREMENTS.json [--json] [--yes --plan-sha SHA256] [--allow-system-changes]\n" +

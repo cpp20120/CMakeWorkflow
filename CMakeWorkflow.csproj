@@ -10,6 +10,7 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="Program.cs"/>
+        <Compile Include="Commands/RemoteCommand.cs"/>
         <Compile Include="Commands/BenchmarkGenerateCommand.cs"/>
         <Compile Include="Commands/RecipeJson.cs" />
         <Compile Include="Commands/WorkflowRecipeGenerateCommand.cs"/>
@@ -21,5 +22,6 @@
         <ProjectReference Include="CMakeWorkflow.History/CMakeWorkflow.History.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Host/CMakeWorkflow.Host.csproj"/>
+        <ProjectReference Include="CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
     </ItemGroup>
 </Project>
