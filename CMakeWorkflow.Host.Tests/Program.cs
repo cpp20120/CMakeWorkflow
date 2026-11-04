@@ -28,6 +28,12 @@ if (args.Length > 0 && args[0] == "--ssh-artifact-tests")
     return;
 }
 
+if (args.Length > 0 && args[0] == "--ssh-download-tests")
+{
+    await SshDownloadTests.RunAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--ssh-lifecycle-tests")
 {
     await SshLifecycleTests.RunAsync();

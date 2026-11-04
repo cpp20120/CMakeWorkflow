@@ -39,6 +39,18 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
             artifact.Size, artifact.LastWriteUtcTicks), ct);
     }
 
+    /// <summary>
+    /// Download a finalized artifact to a new local file. Keeps verified .cmwf.part
+    /// state after transport loss/cancellation for explicit resume after reconnect.
+    /// The destination must not exist; no implicit SSH reconnect or workflow redispatch.
+    /// </summary>
+    public Task<string> DownloadArtifactAsync(OperationArtifactInfo artifact, string destinationPath,
+        IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/artifacts/readChunk");
+        return OperationArtifactDownloader.DownloadAsync(this, artifact, destinationPath, progress, ct);
+    }
+
     public Task<CancellationReceipt> RequestCancellationAsync(long expectedRevision, CancellationToken ct = default) =>
         client.Proxy.CancelAsync(new(OperationId, expectedRevision), ct);
 
