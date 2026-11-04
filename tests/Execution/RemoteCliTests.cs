@@ -15,7 +15,11 @@ internal static class RemoteCliTests
         var connection = new[] { "--destination", "unreachable.example", "--endpoint", "/tmp/host.sock",
             "--workspace", "/remote/workspace" };
         Reject(["remote", "nope"], "Unknown remote command");
-        Reject(["remote", "status", "--operation", "abc"], "--destination");
+        // Connection-wide options are validated before transport-specific ones.
+        Reject(["remote", "status", "--operation", "abc"], "--endpoint");
+        Reject(["remote", "status", "--endpoint", "/tmp/host.sock", "--operation", "abc"], "--workspace");
+        Reject(["remote", "status", "--endpoint", "/tmp/host.sock", "--workspace", "/remote/workspace",
+            "--operation", "abc"], "--destination");
         Reject(["remote", "status", ..connection], "--operation");
         Reject(["remote", "status", ..connection, "--operation", "id", "--operation", "again"], "Duplicate option");
         Reject(["remote", "status", ..connection, "--operation", "id", "--jobs", "2"], "invalid for remote status");
