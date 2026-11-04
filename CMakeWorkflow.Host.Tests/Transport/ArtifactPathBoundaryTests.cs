@@ -77,24 +77,67 @@ internal static class ArtifactPathBoundaryTests
             File.Move(backup, expected);
         }
 
-        // Read from a held inode even if the directory name is redirected later.
-        using (var held = OperationArtifactFile.OpenRead(root, expected))
+        // Unix permits rename of an open directory. Windows can deny the rename
+        // while a descendant file is held, even when the leaf shares deletion.
+        // Check the pinned handle in both cases; if Windows blocks the rename,
+        // test the redirect immediately after the handle has been released.
+        var moved = directory + ".moved";
+        var movedWhileHeld = false;
+        try
         {
-            var moved = directory + ".moved";
+            using (var held = OperationArtifactFile.OpenRead(root, expected))
+            {
+                try
+                {
+                    Directory.Move(directory, moved);
+                    movedWhileHeld = true;
+                }
+                catch (IOException error) when (OperatingSystem.IsWindows() &&
+                                               (error.HResult == unchecked((int)0x80070005) ||
+                                                error.HResult == unchecked((int)0x80070020) ||
+                                                error.HResult == unchecked((int)0x80070021)))
+                {
+                    // Access denied / sharing or lock violation: this is a Windows
+                    // filesystem constraint, not a failure of no-follow opening.
+                }
+
+                if (movedWhileHeld)
+                {
+                    Directory.CreateSymbolicLink(directory, outside);
+                    Reject(root, expected);
+                }
+                using var reader = new StreamReader(held, Encoding.UTF8, leaveOpen: true);
+                Check(reader.ReadToEnd() == "authorized-result", "Pinned file handle was redirected.");
+            }
+        }
+        finally
+        {
+            // A successful rename may still leave the reverse rename blocked
+            // until the held leaf is closed (Windows).
+            if (movedWhileHeld) RestoreDirectory(directory, moved);
+        }
+
+        if (!movedWhileHeld)
+        {
+            // Still exercise the redirected-parent rejection on Windows, but
+            // don't require a rename that the OS forbids with an open child.
             Directory.Move(directory, moved);
             try
             {
                 Directory.CreateSymbolicLink(directory, outside);
                 Reject(root, expected);
-                using var reader = new StreamReader(held, Encoding.UTF8, leaveOpen: true);
-                Check(reader.ReadToEnd() == "authorized-result", "Pinned file handle was redirected.");
             }
             finally
             {
-                if (Directory.Exists(directory) || File.Exists(directory)) Directory.Delete(directory);
-                Directory.Move(moved, directory);
+                RestoreDirectory(directory, moved);
             }
         }
+    }
+
+    private static void RestoreDirectory(string directory, string moved)
+    {
+        if (Directory.Exists(directory) || File.Exists(directory)) Directory.Delete(directory);
+        Directory.Move(moved, directory);
     }
 
     private static void Reject(string root, string path)
