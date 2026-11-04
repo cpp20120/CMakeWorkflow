@@ -1,8 +1,11 @@
 # Удалённый Host
 
-Реализованы этапы A и B: `host bridge --stdio --endpoint PATH` соединяет stdin/stdout
+Реализованы и проверены на Linux-хосте пользователя этапы A–C:
+`host bridge --stdio --endpoint PATH` соединяет stdin/stdout
 с существующим Host через `LocalTransport`, а `CMakeWorkflowClient.ConnectSshAsync`
-подключает typed SDK через установленный OpenSSH. Этапы C–F в этот коммит не входят.
+подключает typed SDK через установленный OpenSSH. Durable-запуск использует
+существующие workflow/operation services. Этапы D–F — загрузка результатов,
+удалённые CLI-команды и ephemeral Host — пока не реализованы.
 
 Host запускается независимо командой `host serve --endpoint PATH`. Мост
 передаёт байты без изменения JSON-RPC framing и использует ограниченные буферы.
@@ -60,6 +63,96 @@ RPC-отмену. Истечение времени даёт `TimeoutException`,
 от существующего `LaunchAsync`, где клиент владеет частным Host. Ephemeral SSH
 Host пока не реализован. Windows-клиент и Windows remote shell здесь не проверены.
 
+## Запуск существующего удалённого workflow
+
+Workspace, manifest, исходники, toolchain и необходимый build context уже должны
+находиться на удалённой машине. Host читает и сохраняет snapshot manifest,
+планирует workflow, удерживает build-tree leases, запускает CMake и записывает
+результаты там же. Относительные пути внутри manifest сохраняют удалённый базовый
+каталог. SDK не читает эти файлы локально и не синхронизирует исходники.
+
+Перед запуском получи SHA-256 точных байтов удалённого manifest: например,
+выполни на удалённой машине `sha256sum /srv/projects/example/workflow.json`
+или используй hash из существующего процесса размещения manifest. Несовпадение
+hash отклоняется до принятия запроса. `Manifest` и `ResultsDirectory` — абсолютные
+пути Host внутри инициализированного workspace. Host отклоняет относительные
+пути, выход за workspace и symlink escape. Не вызывай локальный `Path.GetFullPath`
+и не собирай удалённые пути с разделителем файловой системы клиента.
+
+```csharp
+// Сохрани ID и точные параметры запроса в состоянии своего приложения ДО StartAsync.
+// После отключения или перезапуска клиента загрузи тот же ID.
+var requestId = Guid.NewGuid().ToString("N");
+var request = new StartWorkflowOptions(
+    requestId,
+    "/srv/projects/example/workflow.json",
+    expectedRemoteManifestSha256,
+    Jobs: 2,
+    ResultsDirectory: "/srv/projects/example/results");
+
+await using (var submitting = await CMakeWorkflowClient.ConnectSshAsync(options, cancellationToken))
+{
+    var operation = await submitting.Workflows.StartAsync(request, cancellationToken);
+    Console.WriteLine(operation.OperationId); // Сохрани, если ответ получен.
+} // Закрывается соединение; принятой операцией продолжает владеть постоянный Host.
+```
+
+`StartAsync` отправляет один запрос durable admission. Явный повтор идентичного
+запроса с тем же ID возвращает ту же операцию, в том числе после завершения.
+Изменённые параметры с тем же ID отклоняются. Принятый snapshot manifest
+неизменяем: дальнейшее редактирование исходного файла его не заменяет.
+
+## Переподключение, события и отмена
+
+Подключись к **тому же постоянному Host и workspace**. Сохранённый request ID
+позволяет найти операцию даже после потери ответа о её принятии:
+
+```csharp
+await using var inspecting = await CMakeWorkflowClient.ConnectSshAsync(options, cancellationToken);
+var accepted = await inspecting.Operations.FindAsync(requestId, cancellationToken);
+var operation = inspecting.Operations.GetHandle(accepted.OperationId);
+var state = await operation.GetSnapshotAsync(cancellationToken);
+var recovery = await operation.InspectRecoveryAsync(cancellationToken);
+Console.WriteLine($"{state.OperationId}: {state.State}; recovery: {recovery.Decision}");
+
+// Ноль для первой страницы; затем — сохранённый cursor обработанной страницы.
+var page = await operation.ReadEventsAsync(savedSequence, limit: 100, ct: cancellationToken);
+foreach (var evt in page.Events) Console.WriteLine(evt);
+savedSequence = page.NextSequence; // Сохраняй после обработки событий.
+// При HasMore читай следующую страницу; активную операцию можно опрашивать позднее.
+```
+
+Handle привязан к соединению. После reconnect создай новый через
+`Operations.GetHandle`: это не отправляет новый workflow и не запускает resume.
+Для обычной активной операции `WaitForCompletionAsync(ct: cancellationToken)`
+ждёт `succeeded`, `failed` или `canceled`. Ограничивай ожидание токеном; для
+прерванных и неопределённых операций используй status/recovery inspection.
+
+Обрыв SSH или отмена start RPC не доказывает отказ admission. Автоматического
+reconnect/redispatch нет. Сначала выполни `Operations.FindAsync`; отсутствие
+результата не разрешает молча повторить запуск с новым ID. Сохрани первоначальный
+запрос и разреши неопределённость явно. Потерянный транспортный ответ отличается
+от durable-состояния `outcome_unknown` после прерывания Host. Последнее может
+требовать операторской проверки и явного `ReconcileAsync` с актуальной revision
+и подтверждением остановки внешнего выполнения. События не заменяют recovery
+checkpoint; reconnect не выполняет reconciliation или resume автоматически.
+
+Отмена принятой операции запрашивается отдельно:
+
+```csharp
+var current = await operation.InspectRecoveryAsync(cancellationToken);
+var receipt = await operation.RequestCancellationAsync(current.Revision, cancellationToken);
+Console.WriteLine(receipt.State);
+// Receipt фиксирует намерение. Проверь конечное состояние: операция могла успеть
+// завершиться. При конфликте revision нужна новая inspection, а не перезапись.
+```
+
+Отключение инициатора или отменяющего клиента не отзывает durable acceptance
+или cancellation intent. Для продолжения выполнения постоянный Host должен
+оставаться запущенным; при его прерывании действует существующий recovery.
+Каталоги результатов в metadata остаются **удалёнными** путями. Этап C даёт
+status и replay событий; загрузка отчётов и файлов относится к этапу D.
+
 ## Проверки
 
 Release-сборка и группы `--ssh-tests`, `--ssh-lifecycle-tests` проходят в sandbox.
@@ -80,5 +173,36 @@ handshake ждал ответа на `$/cancelRequest`. Добавлено ло�
 Полная CI-матрица и NativeAOT publish/smoke в этом этапе не запускались; formatter
 с явными source-generated metadata переиспользован, новых wire DTO нет.
 
-Работа остановлена после B. Точные команды проверок и ограничения приведены в
-[английском руководстве](../en/remote-host.md). Следующий этап — C, durable remote workflow.
+Этап C проверен 2026-11-04: Release-сборка Host.Tests с `--no-restore` прошла
+с 0 предупреждений и 0 ошибок. Sandbox снова остановил запуск на `Socket.Bind`
+до первого сценария. Пользователь выполнил на Linux-хосте:
+
+```sh
+timeout --kill-after=5s 90s dotnet \
+  CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll \
+  --ssh-workflow-tests
+```
+
+Все четыре сценария прошли:
+
+- `execution`: настоящий CMake/Ninja workflow, два клиента, disconnect/reconnect,
+  идемпотентность и конфликт request ID, неизменность snapshot, постраничный replay
+  и однократный внешний эффект.
+- `cancellation`: отключение инициатора и отменяющего клиента, конфликт revision,
+  durable-отмена, остановка процесса и отсутствие повторного dispatch.
+- `paths`: абсолютные удалённые пути, границы workspace, symlink escape,
+  отсутствующие workspace/manifest и неверный hash; отклонённые запросы не выполняются.
+- `lost-reply`: тестовый процесс теряет успешный ответ admission до получения SDK;
+  отдельное SSH-соединение находит ту же операцию по request ID, читает события
+  и видит завершение без повторного start.
+
+Тесты используют постоянный Host и настоящие bridge-процессы. Только lost-reply
+заменяет bridge тестовым обработчиком frames для точного воспроизведения потери
+ответа. Требуются CMake 3.26+ и Ninja. Для изоляции сбоя добавь имя одного сценария
+после `--ssh-workflow-tests`. Сетевой переход OpenSSH заменён тем же POSIX fixture,
+что и в B. Настоящий sshd, Windows и NativeAOT publish в C не проверялись.
+Production transport, scheduler и поведение RPC не менялись: существующий
+durable-путь SDK уже предоставляет необходимые операции.
+
+Работа остановлена после C. Остальные команды проверок приведены в
+[английском руководстве](../en/remote-host.md). Следующий этап — D, получение результатов.

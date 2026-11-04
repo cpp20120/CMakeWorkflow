@@ -1,6 +1,18 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--ssh-workflow-tests")
+{
+    await SshWorkflowTests.RunAsync(args.Length > 1 ? args[1] : null);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-drop-start-worker")
+{
+    await SshLostReplyPeer.RunAsync(args[1], args[2]);
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--ssh-lifecycle-tests")
 {
     await SshLifecycleTests.RunAsync();
