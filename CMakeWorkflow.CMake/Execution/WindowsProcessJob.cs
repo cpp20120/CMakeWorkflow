@@ -22,7 +22,21 @@ internal sealed class WindowsProcessJob : IDisposable
         try
         {
             if (!AssignProcessToJobObject(handle, process.Handle))
-                throw new Win32Exception(Marshal.GetLastPInvokeError(), "AssignProcessToJobObject failed.");
+            {
+                // Process.Start resumes the child before we can assign a Job Object.
+                // A very short-lived child may exit in that window; Windows then
+                // returns ERROR_ACCESS_DENIED although its exit code remains valid.
+                // Never accept an assignment failure for a still-running process:
+                // without the Job Object its descendants could escape cleanup.
+                var error = Marshal.GetLastPInvokeError();
+                if (error != 5 || !process.HasExited) // ERROR_ACCESS_DENIED
+                    throw new Win32Exception(error,
+                        $"AssignProcessToJobObject failed (Win32={error}, exited={process.HasExited}).");
+                // Empty Job Object; the direct child has already terminated.
+                // The caller must still drain redirected streams and inspect ExitCode.
+                // This does not close the pre-assignment descendant race; atomic
+                // supervision would require CREATE_SUSPENDED at process creation.
+            }
             return job;
         }
         catch
