@@ -1,6 +1,13 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--workflow-dag-tests")
+{
+    await WorkflowDagTests.RunAsync();
+    WorkflowDagDirectTests.Run();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--durable-workflow-wire-tests")
 {
     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));

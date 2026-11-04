@@ -4,10 +4,10 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli"))
+        if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow"))
         {
             Console.Error.WriteLine(
-                "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli]");
+                "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli|--workflow]");
             return 2;
         }
 
@@ -23,6 +23,12 @@ internal static class Program
         Environment.SetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB", historyDatabase);
         try
         {
+            if (args.Length == 2 && args[1] == "--workflow")
+            {
+                WorkflowTests.Run();
+                Console.WriteLine("All workflow integration checks passed.");
+                return 0;
+            }
             if (args.Length == 2 && args[1] == "--remote-cli")
             {
                 RemoteCliTests.Run();

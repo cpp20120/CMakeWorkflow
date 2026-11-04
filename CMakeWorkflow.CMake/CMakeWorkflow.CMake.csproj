@@ -7,6 +7,9 @@
         <DefineConstants Condition="'$(RecoveryFaultInjection)' == 'true'">$(DefineConstants);RECOVERY_FAULT_INJECTION</DefineConstants>
     </PropertyGroup>
     <ItemGroup>
+        <InternalsVisibleTo Include="CMakeWorkflow.Host.Tests"/>
+    </ItemGroup>
+    <ItemGroup>
         <Compile Include="*.cs"/>
         <Compile Include="Artifacts/*.cs"/>
         <Compile Include="Build/*.cs"/>

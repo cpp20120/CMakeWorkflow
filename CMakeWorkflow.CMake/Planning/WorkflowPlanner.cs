@@ -46,6 +46,8 @@ public static class WorkflowPlanner
             ValidateNode(node);
         }
 
+        var orderedNodeIds = document.Nodes.Select(node => node.Id).ToArray();
+        var nodeIds = new HashSet<string>(nodes.Keys, StringComparer.Ordinal);
         var dependencies = new Dictionary<string, string[]>(StringComparer.Ordinal);
         foreach (var node in document.Nodes)
         {
@@ -68,38 +70,12 @@ public static class WorkflowPlanner
             else if (node.Context is null || !document.Contexts.ContainsKey(node.Context))
                 throw new ArgumentException($"{node.Id}: unknown context '{node.Context}'.");
 
-            foreach (var dep in deps)
-                if (!nodes.ContainsKey(dep))
-                    throw new ArgumentException($"{node.Id}: unknown dependency '{dep}'.");
+            WorkflowDag.ValidateDependencies(node.Id, deps, nodeIds);
             dependencies[node.Id] = deps.Distinct(StringComparer.Ordinal).ToArray();
         }
 
-        // Validate the whole graph, including unselected branches, before any execution.
-        var ordered = new List<WorkflowNode>();
-        var remaining = document.Nodes.ToList();
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        while (remaining.Count > 0)
-        {
-            var ready = remaining.Where(n => dependencies[n.Id].All(visited.Contains)).ToArray();
-            if (ready.Length == 0)
-                throw new ArgumentException(
-                    $"Workflow contains a dependency cycle: {string.Join(", ", remaining.Select(n => n.Id))}");
-            foreach (var node in ready)
-            {
-                ordered.Add(node);
-                visited.Add(node.Id);
-                remaining.Remove(node);
-            }
-        }
-
-        var selected = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(only.Count == 0 ? nodes.Keys : only);
-        while (pending.TryPop(out var id))
-        {
-            if (!nodes.ContainsKey(id)) throw new ArgumentException($"Unknown selected node '{id}'.");
-            if (!selected.Add(id)) continue;
-            foreach (var dep in dependencies[id]) pending.Push(dep);
-        }
+        var (orderedIds, selected) = WorkflowDag.Select(orderedNodeIds, dependencies, only);
+        var ordered = orderedIds.Select(id => nodes[id]).ToList();
 
         var directory = Path.GetDirectoryName(file)!;
         foreach (var node in ordered.Where(n => selected.Contains(n.Id)))
