@@ -8,6 +8,8 @@ public static class HostCommand
 {
     public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        if (args.Length > 0 && args[0] == "bridge")
+            return await HostBridgeCommand.ExecuteAsync(args[1..], ct);
         if (args.Length == 0 || args[0] is not ("serve" or "doctor" or "fix"))
             throw new ArgumentException(
                 "host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--install-dir DIR] [--json]; fix: [--pm NAME] [--no-fallback] [--yes|--dry-run]");

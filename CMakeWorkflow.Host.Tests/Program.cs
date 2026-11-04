@@ -1,6 +1,32 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--bridge-unit-tests")
+{
+    await BridgeTests.RunUnitAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--bridge-tests")
+{
+    await BridgeTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--bridge-worker")
+{
+    try
+    {
+        Environment.ExitCode = await HostCommand.ExecuteAsync(["bridge", .. args[1..]], default);
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine(error.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+
 static void SetPrivateUnixDirectory(string path) => SetUnixDirectoryMode(path,
     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 

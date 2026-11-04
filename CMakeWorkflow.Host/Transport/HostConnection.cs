@@ -5,9 +5,11 @@ namespace CMakeWorkflow.Host;
 
 public static class HostConnection
 {
-    public static JsonRpc Create(Stream stream)
+    public static JsonRpc Create(Stream stream) => Create(stream, stream);
+
+    public static JsonRpc Create(Stream input, Stream output)
     {
-        var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(stream, stream, CreateFormatter()));
+        var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(output, input, CreateFormatter()));
 #if RPC_CANCELLATION_TESTING
         rpc.TraceSource.Switch.Level = System.Diagnostics.SourceLevels.All;
         rpc.TraceSource.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(Console.Error));
