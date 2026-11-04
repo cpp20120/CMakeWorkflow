@@ -1,6 +1,34 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--ssh-lifecycle-tests")
+{
+    await SshLifecycleTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-integration-tests")
+{
+    await SshIntegrationTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-tests")
+{
+    await SshTransportTests.RunAsync();
+    return;
+}
+if (args.Length > 0 && args[0] == "--ssh-peer")
+{
+    await SshTestPeer.RunAsync(args[1..]);
+    return;
+}
+if (args.Length > 0 && args[0] == "--ssh-mismatch-peer")
+{
+    await SshProtocolMismatchPeer.RunAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--bridge-unit-tests")
 {
     await BridgeTests.RunUnitAsync();

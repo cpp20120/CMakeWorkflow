@@ -25,7 +25,7 @@ then use an existing CMake build directory.
 | [Profiling and campaigns](profiling-and-campaigns.md) | perf, ETW, Instruments, replay and DagFlow harness/fuzz                |
 | [Provisioning and IDE integration](integrations.md)   | Doctor/Setup, CMake bridge, VS Code, limits of tests                   |
 | [Local Host IPC](host-ipc.md)                         | Local JSON-RPC, NativeAOT, Doctor/Fix, operation lifecycle             |
-| [Remote Host progress](remote-host.md)                | Stdio bridge, validation status and remaining SSH stages             |
+| [Remote Host progress](remote-host.md)                | Stdio bridge, SSH SDK, lifecycle and validation status                |
 
 ## Design records
 
