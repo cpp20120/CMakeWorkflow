@@ -14,7 +14,7 @@ public sealed partial class DoctorSession
         "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel",
         "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
-        "operations/events", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
+        "operations/events", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
         "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"
@@ -189,6 +189,21 @@ public sealed partial class DoctorSession
             accepted.ManifestBaseDirectory));
     }
 
+
+    public Task<WorkflowReportSnapshot> OperationReportAsync(OperationGetRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ReportAsync(paths, request.OperationId, ct),
+            cancellationToken);
+
+    public Task<OperationArtifactList> OperationArtifactListAsync(OperationArtifactListRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ListAsync(paths, request.OperationId, ct),
+            cancellationToken);
+
+    public Task<OperationArtifactChunk> OperationArtifactReadAsync(OperationArtifactChunkRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ReadChunkAsync(paths, request, ct),
+            cancellationToken);
 
     public Task<ObservedBuildContext> ContextInspectAsync(ContextInspectRequest request,
         CancellationToken cancellationToken) =>

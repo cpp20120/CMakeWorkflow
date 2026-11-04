@@ -14,6 +14,43 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
     public Task<OperationSnapshot> GetSnapshotAsync(CancellationToken ct = default) =>
         client.Operations.GetAsync(OperationId, ct);
 
+    /// <summary>Read the verified terminal report bound to this durable operation on the Host.</summary>
+    /// <remarks>Available after finalization, including failed and canceled runs.</remarks>
+    public Task<OperationReportSnapshot> GetReportAsync(CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/report");
+        return client.Proxy.ReportAsync(new(OperationId), ct);
+    }
+
+    /// <summary>Discover finalized run logs, report and in-results-tree artifact files.</summary>
+    public Task<OperationArtifactList> ListArtifactsAsync(CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/artifacts/list");
+        return client.Proxy.ArtifactsAsync(new(OperationId), ct);
+    }
+
+    /// <summary>Read at most 64 KiB. Callers must validate the final SHA-256 from ListArtifactsAsync.</summary>
+    public Task<OperationArtifactChunk> ReadArtifactChunkAsync(OperationArtifactInfo artifact,
+        long offset, int count = 64 * 1024, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+        client.RequireCapability("operations/artifacts/readChunk");
+        return client.Proxy.ReadArtifactAsync(new(OperationId, artifact.ArtifactId, offset, count,
+            artifact.Size, artifact.LastWriteUtcTicks), ct);
+    }
+
+    /// <summary>
+    /// Download a finalized artifact to a new local file. Keeps verified .cmwf.part
+    /// state after transport loss/cancellation for explicit resume after reconnect.
+    /// The destination must not exist; no implicit SSH reconnect or workflow redispatch.
+    /// </summary>
+    public Task<string> DownloadArtifactAsync(OperationArtifactInfo artifact, string destinationPath,
+        IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/artifacts/readChunk");
+        return OperationArtifactDownloader.DownloadAsync(this, artifact, destinationPath, progress, ct);
+    }
+
     public Task<CancellationReceipt> RequestCancellationAsync(long expectedRevision, CancellationToken ct = default) =>
         client.Proxy.CancelAsync(new(OperationId, expectedRevision), ct);
 

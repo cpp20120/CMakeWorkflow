@@ -8,6 +8,7 @@
     </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="StreamJsonRpc" Version="2.26.150"/>
+        <PackageReference Include="SSH.NET" Version="2026.0.0"/>
         <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
     </ItemGroup>
 </Project>

@@ -46,7 +46,7 @@ Choose a fresh local package version when repacking changed SDK sources, to avoi
 package is uploaded to a registry.
 
 The package audit checks strict asset allowlists (Client DLL, Contracts DLL, and NuGet metadata), the declared
-StreamJsonRpc and Contracts dependencies, and every compile/runtime target in the consumer's `project.assets.json`. It
+StreamJsonRpc, SSH.NET and Contracts dependencies, and every compile/runtime target in the consumer's `project.assets.json`. It
 rejects source-project dependencies and compares both archive SHA512 values with NuGet's restored package hashes. The
 package-mode build also rejects any `ProjectReference`. SDK dependency upgrades or intentional new package assets
 require updating the audit. Transitive runtime dependencies are resolved by NuGet, not bundled as Host/engine

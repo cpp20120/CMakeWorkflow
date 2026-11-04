@@ -81,12 +81,15 @@ internal static class PackageAudit
             if (groups.Length != 1 || (string?)groups[0].Attribute("targetFramework") != "net10.0")
                 throw new InvalidDataException("Unexpected target framework groups.");
             var dependencies = groups[0].Elements(ns + "dependency").ToArray();
-            if (dependencies.Length != 2 ||
+            if (dependencies.Length != 3 ||
                 !dependencies.Any(d => (string?)d.Attribute("id") == "StreamJsonRpc"
                                        && (string?)d.Attribute("version") == "2.26.150") ||
+                !dependencies.Any(d => (string?)d.Attribute("id") == "SSH.NET"
+                                       && (string?)d.Attribute("version") == "2026.0.0") ||
                 !dependencies.Any(d => (string?)d.Attribute("id") == "CMakeWorkflow.Contracts"
                                        && (string?)d.Attribute("version") == version))
-                throw new InvalidDataException("Unexpected SDK dependencies; expected Contracts and StreamJsonRpc.");
+                throw new InvalidDataException(
+                    "Unexpected SDK dependencies; expected Contracts, StreamJsonRpc and SSH.NET.");
 
             using var assets = JsonDocument.Parse(File.ReadAllBytes(assetsPath));
             var libraries = assets.RootElement.GetProperty("libraries");
@@ -120,7 +123,7 @@ internal static class PackageAudit
             }
 
             Console.WriteLine(
-                "PASS NuGet audit: Client + Contracts DLLs; StreamJsonRpc dependency; both package SHA512 match consumer; no source projects.");
+                "PASS NuGet audit: Client + Contracts DLLs; StreamJsonRpc and SSH.NET dependencies; both package SHA512 match consumer; no source projects.");
             return 0;
         }
         catch (Exception error)

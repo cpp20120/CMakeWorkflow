@@ -9,6 +9,13 @@ namespace CMakeWorkflow.Client;
 
 public sealed class WorkflowService(CMakeWorkflowClient client)
 {
+    /// <summary>Submits once through durable Host admission. Paths are sent unchanged, including over SSH.</summary>
+    /// <remarks>
+    /// The Host owns accepted work independently of this connection. Cancellation of this RPC or a lost
+    /// response is not proof of rejection or operation cancellation. Reconnect to the same workspace and
+    /// use Operations.FindAsync with the saved ClientRequestId; never automatically resubmit an uncertain request.
+    /// Stop accepted work explicitly through WorkflowOperation.RequestCancellationAsync.
+    /// </remarks>
     public async Task<WorkflowOperation> StartAsync(StartWorkflowOptions options, CancellationToken ct = default)
     {
         client.RequireCapability("workflow/start");

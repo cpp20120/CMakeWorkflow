@@ -8,13 +8,16 @@ public static class HostCommand
 {
     public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        if (args.Length > 0 && args[0] == "bridge")
+            return await HostBridgeCommand.ExecuteAsync(args[1..], ct);
         if (args.Length == 0 || args[0] is not ("serve" or "doctor" or "fix"))
             throw new ArgumentException(
-                "host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--install-dir DIR] [--json]; fix: [--pm NAME] [--no-fallback] [--yes|--dry-run]");
+                "host serve (--endpoint PATH | --stdio) | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--install-dir DIR] [--json]; fix: [--pm NAME] [--no-fallback] [--yes|--dry-run]");
         string? endpoint = null, install = null;
         var workspace = Directory.GetCurrentDirectory();
         var profiles = new List<string>();
         var json = false;
+        var stdio = false;
         var yes = false;
         var dryRun = false;
         var manager = PackageManagerKind.Auto;
@@ -24,6 +27,7 @@ public static class HostCommand
             switch (args[i])
             {
                 case "--endpoint" when i + 1 < args.Length: endpoint = args[++i]; break;
+                case "--stdio" when args[0] == "serve" && !stdio: stdio = true; break;
                 case "--workspace"
                     when args[0] != "serve" && i + 1 < args.Length: workspace = Path.GetFullPath(args[++i]); break;
                 case "--install-dir"
@@ -42,6 +46,14 @@ public static class HostCommand
             }
         }
 
+        if (args[0] == "serve" && stdio)
+        {
+            if (endpoint is not null) throw new ArgumentException("--stdio cannot be combined with --endpoint.");
+            using var input = Console.OpenStandardInput();
+            using var output = Console.OpenStandardOutput();
+            await HostServer.RunStdioAsync(input, output, ct);
+            return 0;
+        }
         if (string.IsNullOrWhiteSpace(endpoint)) throw new ArgumentException("--endpoint is required.");
         if (args[0] == "serve")
         {

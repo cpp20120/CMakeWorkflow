@@ -1,6 +1,123 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--durable-workflow-wire-tests")
+{
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+    await using var host = new TransportTestHost();
+    await host.ReadyAsync(deadline.Token);
+    await DurableWorkflowWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-workflow-tests")
+{
+    await SshWorkflowTests.RunAsync(args.Length > 1 ? args[1] : null);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-drop-start-worker")
+{
+    await SshLostReplyPeer.RunAsync(args[1], args[2]);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-artifact-tests")
+{
+    await SshArtifactTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-download-tests")
+{
+    await SshDownloadTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--artifact-path-tests")
+{
+    ArtifactPathBoundaryTests.Run();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-lifecycle-tests")
+{
+    await SshLifecycleTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-integration-tests")
+{
+    await SshIntegrationTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--sshnet-contract-tests")
+{
+    await SshNetContractTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--sshnet-live-tests")
+{
+    await SshNetContractTests.RunLiveAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--sshnet-provision-live-tests")
+{
+    await SshNetProvisionTests.RunLiveAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--sshnet-live-lifecycle-tests")
+{
+    await SshNetLiveLifecycleTests.RunAsync(args.Length > 1 ? args[1] : null);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--ssh-tests")
+{
+    await SshTransportTests.RunAsync();
+    return;
+}
+if (args.Length > 0 && args[0] == "--ssh-peer")
+{
+    await SshTestPeer.RunAsync(args[1..]);
+    return;
+}
+if (args.Length > 0 && args[0] == "--ssh-mismatch-peer")
+{
+    await SshProtocolMismatchPeer.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--bridge-unit-tests")
+{
+    await BridgeTests.RunUnitAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--bridge-tests")
+{
+    await BridgeTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--bridge-worker")
+{
+    try
+    {
+        Environment.ExitCode = await HostCommand.ExecuteAsync(["bridge", .. args[1..]], default);
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine(error.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+
 static void SetPrivateUnixDirectory(string path) => SetUnixDirectoryMode(path,
     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 

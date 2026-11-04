@@ -78,6 +78,10 @@ jobs:
         run: dotnet CMakeWorkflow.Tooling.Tests/bin/Release/net10.0/CMakeWorkflow.Tooling.Tests.dll
       - name: Host IPC and session checks
         run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll
+      - name: Artifact handle-relative path security checks
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll --artifact-path-tests
+      - name: SSH.NET options and host-key pin validation
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll --sshnet-contract-tests
       - name: Windows host provisioning CLI plan (read-only)
         if: runner.os == 'Windows'
         shell: pwsh

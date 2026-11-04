@@ -20,6 +20,7 @@ tree.
 | [Профилирование и DagFlow](../profiling-and-campaigns.md)     | Capture, analyze, replay и кампании                         |
 | [Интеграции](../integrations.md)                              | Provisioning, target bridge, VS Code, ограничения проверок  |
 | [Local Host IPC](host-ipc.md)                                 | JSON-RPC, Doctor, Fix, NativeAOT                            |
+| [Удалённый Host: состояние](remote-host.md)                  | SSH SDK, durable-запуск, reconnect, отмена и проверки       |
 | [ADR-0001: MSBuild](../adr/0001-msbuild-execution-backend.md) | Не внедрённое предложение альтернативного execution engine  |
 | [ADR-0002: Host IPC (RU)](adr/0002-local-host-ipc.md)         | Решение об IPC и границы ответственности                    |
 

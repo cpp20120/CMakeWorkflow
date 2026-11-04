@@ -8,17 +8,18 @@ using StreamJsonRpc;
 namespace CMakeWorkflow.Client;
 
 /// <summary>Client owns the RPC connection, never the server-side workflow operation.</summary>
-public sealed class CMakeWorkflowClient : IAsyncDisposable
+public sealed partial class CMakeWorkflowClient : IAsyncDisposable
 {
     private readonly Stream transport;
     private readonly JsonRpc rpc;
     private readonly IClientRpc proxy;
     private readonly Process? ownedHost;
     private readonly string? ownedSocketDirectory;
+    private readonly IRemoteSshConnection? sshConnection;
     private bool disposed;
 
     private CMakeWorkflowClient(Stream stream, JsonRpc connection, IClientRpc target, HostIdentity identity,
-        Process? ownedHost, string? ownedSocketDirectory)
+        Process? ownedHost, string? ownedSocketDirectory, IRemoteSshConnection? sshConnection = null)
     {
         transport = stream;
         rpc = connection;
@@ -26,6 +27,7 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
         Host = identity;
         this.ownedHost = ownedHost;
         this.ownedSocketDirectory = ownedSocketDirectory;
+        this.sshConnection = sshConnection;
         Workflows = new(this);
         Operations = new(this);
         Profiles = new(this);
@@ -145,13 +147,14 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
         Justification =
             "Formatter uses ClientJson source-generated metadata; verified by the AOT consumer smoke test.")]
     private static async Task<CMakeWorkflowClient> InitializeAsync(Stream stream, string workspace,
-        Process? process, string? directory, CancellationToken ct)
+        Process? process, string? directory, CancellationToken ct, Stream? output = null,
+        IRemoteSshConnection? ssh = null)
     {
         var formatter = new SystemTextJsonFormatter
         {
             JsonSerializerOptions = new(ClientJson.Default.Options) { TypeInfoResolver = ClientJson.Default }
         };
-        var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(stream, stream, formatter));
+        var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(output ?? stream, stream, formatter));
         // Diagnostic opt-in for NativeAOT RPC smoke. A lost $/cancelRequest is
         // otherwise invisible when StreamJsonRpc dispatches it asynchronously.
         if (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_RPC_TRACE") == "1")
@@ -160,17 +163,36 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
             rpc.TraceSource.Listeners.Add(new TextWriterTraceListener(Console.Error));
         }
 
+        Task<HostIdentity>? initialization = null;
         try
         {
             var proxy = rpc.Attach<IClientRpc>();
             rpc.StartListening();
-            var info = await proxy.InitializeAsync(new(1, workspace), ct);
+            initialization = proxy.InitializeAsync(new(1, workspace), ct);
+            // RPC cancellation is cooperative: a silent peer may never acknowledge
+            // it. SSH connection establishment also needs a local deadline.
+            var info = ssh is null ? await initialization : await initialization.WaitAsync(ct);
             if (info.ProtocolVersion != 1) throw new InvalidDataException("Unsupported Host protocol version.");
-            return new(stream, rpc, proxy, info, process, directory);
+            return new(stream, rpc, proxy, info, process, directory, ssh);
         }
         catch
         {
-            rpc.Dispose();
+            // Terminate/reap SSH before disposing handlers with pending pipe I/O.
+            try
+            {
+                if (ssh is not null) await ssh.DisposeAsync();
+            }
+            finally
+            {
+                rpc.Dispose();
+                if (ssh is not null && initialization is not null)
+                {
+                    // Dispose completes pending RPC invocations; observe the failed
+                    // handshake even when process teardown itself reported an error.
+                    try { await initialization; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { }
+                }
+            }
             throw;
         }
     }
@@ -245,8 +267,16 @@ public sealed class CMakeWorkflowClient : IAsyncDisposable
     {
         if (disposed) return;
         disposed = true;
-        rpc.Dispose();
-        await transport.DisposeAsync();
+        // Closing a remote connection owns only SSH, not persistent Host work.
+        try
+        {
+            if (sshConnection is not null) await sshConnection.DisposeAsync();
+        }
+        finally
+        {
+            rpc.Dispose();
+            await transport.DisposeAsync();
+        }
         if (ownedHost is not null)
         {
             try

@@ -8,6 +8,10 @@ namespace CMakeWorkflow.Host;
 
 public static class HostServer
 {
+    /// <summary>Serve one private Host directly on a binary stdin/stdout pair.</summary>
+    public static Task RunStdioAsync(Stream input, Stream output, CancellationToken ct) =>
+        StdioHostServer.RunAsync(input, output, ct);
+
     public static async Task RunAsync(string endpoint, CancellationToken ct)
     {
         using var shutdownHost = CancellationTokenSource.CreateLinkedTokenSource(ct);
