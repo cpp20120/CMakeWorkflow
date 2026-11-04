@@ -14,6 +14,14 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
     public Task<OperationSnapshot> GetSnapshotAsync(CancellationToken ct = default) =>
         client.Operations.GetAsync(OperationId, ct);
 
+    /// <summary>Read the verified terminal report bound to this durable operation on the Host.</summary>
+    /// <remarks>Available after finalization, including failed and canceled runs.</remarks>
+    public Task<OperationReportSnapshot> GetReportAsync(CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/report");
+        return client.Proxy.ReportAsync(new(OperationId), ct);
+    }
+
     public Task<CancellationReceipt> RequestCancellationAsync(long expectedRevision, CancellationToken ct = default) =>
         client.Proxy.CancelAsync(new(OperationId, expectedRevision), ct);
 

@@ -57,6 +57,7 @@ namespace CMakeWorkflow.Client;
 [JsonSerializable(typeof(InitRequest))]
 [JsonSerializable(typeof(StartWorkflowOptions))]
 [JsonSerializable(typeof(OperationSnapshot))]
+[JsonSerializable(typeof(OperationReportSnapshot))]
 [JsonSerializable(typeof(CancellationReceipt))]
 [JsonSerializable(typeof(RecoverySnapshot))]
 [JsonSerializable(typeof(EventPage))]

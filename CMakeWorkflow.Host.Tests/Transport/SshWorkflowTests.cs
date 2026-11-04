@@ -35,6 +35,7 @@ internal static class SshWorkflowTests
             var operation = await client.Workflows.StartAsync(fixture.Request, ct);
             id = operation.OperationId;
             await fixture.WaitForStartAsync(ct);
+            await RejectAsync<RemoteInvocationException>(() => operation.GetReportAsync(ct));
             var page = await operation.ReadEventsAsync(0, 1, ct);
             Check(page.Events.Count == 1 && page.NextSequence > 0, "No live event cursor.");
             cursor = page.NextSequence;
@@ -60,6 +61,11 @@ internal static class SshWorkflowTests
             fixture.Finish();
             var final = await operation.WaitForCompletionAsync(ct: ct);
             Check(final.State == "succeeded", "Remote workflow failed: " + final.State);
+            var report = await operation.GetReportAsync(ct);
+            Check(report.SchemaVersion == 1 && report.Revision.Length == 64 &&
+                  report.Report.GetProperty("status").GetString() == "succeeded" &&
+                  report.RunDirectory == fixture.Request.ResultsDirectory,
+                "Operation-bound terminal report is incorrect.");
             var recovery = await operation.InspectRecoveryAsync(ct);
             Check(recovery.TerminalState == "succeeded" && !recovery.CancellationRequested,
                 "Disconnect changed durable recovery state.");
@@ -67,6 +73,9 @@ internal static class SshWorkflowTests
             var retry = await reconnected.Workflows.StartAsync(fixture.Request, ct);
             Check(retry.OperationId == id, "Terminal retry created a new operation.");
             Check(fixture.Effects().SequenceEqual(["started", "finished"]), "Remote effect ran more than once.");
+            // A post-finalization edit must not replace the report bound to this operation.
+            File.AppendAllText(Path.Combine(fixture.Request.ResultsDirectory, "run.json"), " ");
+            await RejectAsync<RemoteInvocationException>(() => operation.GetReportAsync(ct));
         }
         second.AssertExited();
         Console.WriteLine("SSH execution passed: two clients, disconnect/reconnect, request identity, immutable snapshot, cursor replay and one effect.");

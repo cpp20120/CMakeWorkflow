@@ -40,6 +40,9 @@ public partial interface IHostRpc
     [JsonRpcMethod("operations/get")]
     Task<OperationReference> OperationGetAsync(OperationGetRequest request, CancellationToken cancellationToken);
 
+    [JsonRpcMethod("operations/report")]
+    Task<WorkflowReportSnapshot> OperationReportAsync(OperationGetRequest request, CancellationToken cancellationToken);
+
     [JsonRpcMethod("context/inspect")]
     Task<ObservedBuildContext> ContextInspectAsync(ContextInspectRequest request, CancellationToken cancellationToken);
 

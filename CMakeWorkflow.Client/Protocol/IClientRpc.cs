@@ -80,6 +80,9 @@ internal partial interface IClientRpc
     [JsonRpcMethod("operations/get")]
     Task<OperationSnapshot> GetAsync(OpIdRequest request, CancellationToken ct);
 
+    [JsonRpcMethod("operations/report")]
+    Task<OperationReportSnapshot> ReportAsync(OpIdRequest request, CancellationToken ct);
+
     [JsonRpcMethod("operations/find")]
     Task<OperationSnapshot> FindAsync(FindRequest request, CancellationToken ct);
 
