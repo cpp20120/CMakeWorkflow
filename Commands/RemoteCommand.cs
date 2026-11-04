@@ -21,6 +21,7 @@ internal static class RemoteCommand
     internal const string Usage = """
         Usage: CMakeWorkflow remote COMMAND --endpoint REMOTE_SOCKET --workspace REMOTE_DIR [CONNECTION] [OPTIONS]
         Commands:
+          provision plan|apply  (SSH.NET user-scoped Host installation; see remote provision help)
           start     --request-id ID --manifest REMOTE_FILE --manifest-sha256 SHA256 --results-dir REMOTE_DIR [--jobs N]
           find      --request-id ID
           status    --operation ID
@@ -42,6 +43,8 @@ internal static class RemoteCommand
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        if (args.Length > 0 && args[0] == "provision")
+            return RemoteProvisionCommand.Execute(args[1..], ct);
         if (args is [] or ["help"] or ["--help"])
         {
             Console.WriteLine(Usage);

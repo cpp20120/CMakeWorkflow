@@ -64,6 +64,12 @@ if (args.Length > 0 && args[0] == "--sshnet-live-tests")
     return;
 }
 
+if (args.Length > 0 && args[0] == "--sshnet-provision-live-tests")
+{
+    await SshNetProvisionTests.RunLiveAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--sshnet-live-lifecycle-tests")
 {
     await SshNetLiveLifecycleTests.RunAsync(args.Length > 1 ? args[1] : null);

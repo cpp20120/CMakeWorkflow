@@ -11,6 +11,7 @@
     <ItemGroup>
         <Compile Include="Program.cs"/>
         <Compile Include="Commands/RemoteCommand.cs"/>
+        <Compile Include="Commands/RemoteProvisionCommand.cs"/>
         <Compile Include="Commands/BenchmarkGenerateCommand.cs"/>
         <Compile Include="Commands/RecipeJson.cs" />
         <Compile Include="Commands/WorkflowRecipeGenerateCommand.cs"/>

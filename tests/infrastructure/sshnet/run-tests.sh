@@ -87,6 +87,7 @@ export CMWF_SSHNET_KEY="$tmp/id_ed25519"
 export CMWF_SSHNET_PIN="$pin"
 export CMWF_SSHNET_PORT="$port"
 export CMWF_SSHNET_WORKSPACE=/home/cmwf/workspace
+export CMWF_SSHNET_PUBLISH="$tmp/publish"
 export CMWF_SSHNET_EXE=/opt/cmwf/CMakeWorkflow
 export CMWF_SSHNET_ENDPOINT=/home/cmwf/private/host.sock
 
@@ -97,4 +98,8 @@ for scenario in handshake workflow persistent; do
     --sshnet-live-lifecycle-tests "$scenario"
 done
 
+echo '=== Real sshd / SSH.NET: F2 provisioning ==='
+timeout --signal=TERM --kill-after=5s 150s dotnet "$suite" --sshnet-provision-live-tests
+
 echo 'PASS real SSH.NET integration: host-key pin, authentication, private lifecycle, workflow cleanup, persistent reconnect'
+echo 'PASS F2 real SSH.NET Host provisioning: approved SFTP install, SHA256 verification and idempotent activation'

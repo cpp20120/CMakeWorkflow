@@ -22,3 +22,6 @@ PermitTunnel no
 PermitTTY no
 PrintMotd no
 LogLevel VERBOSE
+
+# F2: authenticated SFTP upload to the unprivileged user-owned install tree.
+Subsystem sftp internal-sftp
