@@ -56,12 +56,12 @@ internal static class DurableWorkflowWireTests
             Check(accepted.ClientRequestId == request.ClientRequestId, "First RPC lost request identity.");
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
             wait.CancelAfter(TimeSpan.FromSeconds(15));
-            while (!File.Exists(marker) || !File.ReadAllText(marker).Contains("started", StringComparison.Ordinal))
+            while (!File.Exists(marker) || !(await ReadMarkerAsync(marker, wait.Token)).Contains("started"))
             {
                 await Task.Delay(25, wait.Token);
             }
 
-            Check(!File.ReadAllText(marker).Contains("finished", StringComparison.Ordinal),
+            Check(!(await ReadMarkerAsync(marker, wait.Token)).Contains("finished"),
                 "Workflow completed before initiator disconnected; test is not exercising detached execution.");
         }
 
@@ -92,11 +92,12 @@ internal static class DurableWorkflowWireTests
             Check(found.State == "succeeded" && terminalRetry.State == "succeeded"
                                              && terminalRetry.OperationId == operationId,
                 "Terminal RPC retry/lookup inconsistency.");
+
+            var lines = await ReadMarkerAsync(marker, wait.Token);
+            Check(lines.SequenceEqual(["started", "finished"]),
+                "Detached execution duplicated or lost the external effect.");
         }
 
-        var lines = File.ReadAllLines(marker);
-        Check(lines.SequenceEqual(["started", "finished"]),
-            "Detached execution duplicated or lost the external effect.");
         Check(File.Exists(Path.Combine(output, "run.json")), "Terminal runner report missing.");
         using (var store = new DurableAcceptanceStore(workspace, readOnly: true))
         {
@@ -107,6 +108,24 @@ internal static class DurableWorkflowWireTests
 
         Console.WriteLine(
             "Workflow/start JSON-RPC lifecycle checks passed: disconnect, reconnect, terminal lookup and single dispatch.");
+    }
+
+    private static async Task<string[]> ReadMarkerAsync(string path, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await File.ReadAllLinesAsync(path, ct);
+            }
+            // CMake file(APPEND) may briefly deny concurrent readers on Windows.
+            // Only ERROR_SHARING_VIOLATION is transient; all other failures propagate.
+            catch (IOException error) when (OperatingSystem.IsWindows() && (error.HResult & 0xffff) == 32)
+            {
+                await Task.Delay(25, ct);
+            }
+        }
     }
 
     private static async Task ConfigureAsync(string source, string build, CancellationToken ct)

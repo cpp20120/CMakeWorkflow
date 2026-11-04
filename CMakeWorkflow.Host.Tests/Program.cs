@@ -1,6 +1,15 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--durable-workflow-wire-tests")
+{
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+    await using var host = new TransportTestHost();
+    await host.ReadyAsync(deadline.Token);
+    await DurableWorkflowWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--ssh-workflow-tests")
 {
     await SshWorkflowTests.RunAsync(args.Length > 1 ? args[1] : null);
