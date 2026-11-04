@@ -1,6 +1,27 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--durable-persistence-tests")
+{
+    var persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(persistenceRoot);
+    try
+    {
+        await DurableByteWriterTests.RunAsync(persistenceRoot);
+        await DurablePersistenceTests.RunAsync(persistenceRoot);
+        DurableAcceptanceTests.Run(persistenceRoot);
+        DurableRecoveryTests.Run(persistenceRoot);
+        await ResumeReplayTests.RunAsync(persistenceRoot);
+        await DurableExecutionProcessTests.RunAsync(persistenceRoot);
+        await DurableCrashTests.RunAsync(persistenceRoot);
+        return;
+    }
+    finally
+    {
+        if (Directory.Exists(persistenceRoot)) Directory.Delete(persistenceRoot, recursive: true);
+    }
+}
+
 if (args.Length > 0 && args[0] == "--workflow-dag-tests")
 {
     await WorkflowDagTests.RunAsync();
