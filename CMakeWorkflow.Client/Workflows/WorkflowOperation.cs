@@ -22,6 +22,23 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
         return client.Proxy.ReportAsync(new(OperationId), ct);
     }
 
+    /// <summary>Discover finalized run logs, report and in-results-tree artifact files.</summary>
+    public Task<OperationArtifactList> ListArtifactsAsync(CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/artifacts/list");
+        return client.Proxy.ArtifactsAsync(new(OperationId), ct);
+    }
+
+    /// <summary>Read at most 64 KiB. Callers must validate the final SHA-256 from ListArtifactsAsync.</summary>
+    public Task<OperationArtifactChunk> ReadArtifactChunkAsync(OperationArtifactInfo artifact,
+        long offset, int count = 64 * 1024, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+        client.RequireCapability("operations/artifacts/readChunk");
+        return client.Proxy.ReadArtifactAsync(new(OperationId, artifact.ArtifactId, offset, count,
+            artifact.Size, artifact.LastWriteUtcTicks), ct);
+    }
+
     public Task<CancellationReceipt> RequestCancellationAsync(long expectedRevision, CancellationToken ct = default) =>
         client.Proxy.CancelAsync(new(OperationId, expectedRevision), ct);
 

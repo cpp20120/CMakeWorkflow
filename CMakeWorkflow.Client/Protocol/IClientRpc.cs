@@ -83,6 +83,12 @@ internal partial interface IClientRpc
     [JsonRpcMethod("operations/report")]
     Task<OperationReportSnapshot> ReportAsync(OpIdRequest request, CancellationToken ct);
 
+    [JsonRpcMethod("operations/artifacts/list")]
+    Task<OperationArtifactList> ArtifactsAsync(OperationArtifactListRequest request, CancellationToken ct);
+
+    [JsonRpcMethod("operations/artifacts/readChunk")]
+    Task<OperationArtifactChunk> ReadArtifactAsync(OperationArtifactChunkRequest request, CancellationToken ct);
+
     [JsonRpcMethod("operations/find")]
     Task<OperationSnapshot> FindAsync(FindRequest request, CancellationToken ct);
 

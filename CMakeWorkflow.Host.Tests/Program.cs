@@ -22,6 +22,12 @@ if (args.Length > 0 && args[0] == "--ssh-drop-start-worker")
     return;
 }
 
+if (args.Length > 0 && args[0] == "--ssh-artifact-tests")
+{
+    await SshArtifactTests.RunAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--ssh-lifecycle-tests")
 {
     await SshLifecycleTests.RunAsync();

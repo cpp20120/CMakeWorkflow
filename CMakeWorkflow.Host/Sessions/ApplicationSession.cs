@@ -14,7 +14,7 @@ public sealed partial class DoctorSession
         "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel",
         "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
-        "operations/events", "operations/report", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
+        "operations/events", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
         "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"
@@ -190,29 +190,20 @@ public sealed partial class DoctorSession
     }
 
 
-    // Resolve from the durable finalization, never from a client-controlled path.
-    // The committed digest prevents post-finalization report substitution.
     public Task<WorkflowReportSnapshot> OperationReportAsync(OperationGetRequest request,
         CancellationToken cancellationToken) =>
-        ReadAsync(request, async (paths, ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(request.OperationId) || request.OperationId.Length > 128)
-                throw new ArgumentException("Invalid operation ID.");
-            paths.Database(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite"));
-            using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory, readOnly: true);
-            var accepted = store.Get(request.OperationId)
-                           ?? throw new KeyNotFoundException("Unknown operation.");
-            var finalized = store.GetFinalization(request.OperationId)
-                            ?? throw new ApplicationRefusal("not_finalized",
-                                "The operation has no durable terminal report yet.");
-            var report = await WorkflowQueries.ReportAsync(paths.Require(finalized.RunDirectory), ct, paths.Read);
-            if (!string.Equals(report.Revision, finalized.ReportSha256, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(report.Report.Status, finalized.State, StringComparison.Ordinal) ||
-                !string.Equals(report.Report.ManifestHash, accepted.ManifestSha256,
-                    StringComparison.OrdinalIgnoreCase) || report.Report.FinishedAt is null)
-                throw new ApplicationRefusal("report_changed", "The durable terminal report failed verification.");
-            return report;
-        }, cancellationToken);
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ReportAsync(paths, request.OperationId, ct),
+            cancellationToken);
+
+    public Task<OperationArtifactList> OperationArtifactListAsync(OperationArtifactListRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ListAsync(paths, request.OperationId, ct),
+            cancellationToken);
+
+    public Task<OperationArtifactChunk> OperationArtifactReadAsync(OperationArtifactChunkRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ReadChunkAsync(paths, request, ct),
+            cancellationToken);
 
     public Task<ObservedBuildContext> ContextInspectAsync(ContextInspectRequest request,
         CancellationToken cancellationToken) =>
