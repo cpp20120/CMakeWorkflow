@@ -52,6 +52,18 @@ if (args.Length > 0 && args[0] == "--ssh-integration-tests")
     return;
 }
 
+if (args.Length > 0 && args[0] == "--sshnet-contract-tests")
+{
+    await SshNetContractTests.RunAsync();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--sshnet-live-tests")
+{
+    await SshNetContractTests.RunLiveAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--ssh-tests")
 {
     await SshTransportTests.RunAsync();

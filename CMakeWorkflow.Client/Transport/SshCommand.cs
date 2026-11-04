@@ -25,8 +25,15 @@ internal static class SshCommand
         // prevents credential prompts from hanging an SDK caller. No TTY/framing changes.
         foreach (var arg in new[] { "-T", "-o", "BatchMode=yes", "--", options.Destination })
             start.ArgumentList.Add(arg);
-        start.ArgumentList.Add($"exec {Quote(options.RemoteExecutable)} host bridge --stdio --endpoint {Quote(options.Endpoint)}");
+        start.ArgumentList.Add(BridgeCommand(options.RemoteExecutable, options.Endpoint));
         return start;
+    }
+
+    internal static string BridgeCommand(string executable, string endpoint)
+    {
+        Text(executable, nameof(executable));
+        RemotePath(endpoint, nameof(endpoint));
+        return $"exec {Quote(executable)} host bridge --stdio --endpoint {Quote(endpoint)}";
     }
 
     private static string Quote(string value) => "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
@@ -37,7 +44,7 @@ internal static class SshCommand
             throw new ArgumentException("A nonempty value without control characters is required.", name);
     }
 
-    private static void RemotePath(string path, string name)
+    internal static void RemotePath(string path, string name)
     {
         Text(path, name);
         if (!path.StartsWith('/') || path.StartsWith("//", StringComparison.Ordinal)

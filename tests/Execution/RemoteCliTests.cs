@@ -29,6 +29,18 @@ internal static class RemoteCliTests
             "--output");
         Reject(["remote", "find", ..connection, "--request-id", "id", "--connect-timeout-seconds", "0"],
             "--connect-timeout-seconds");
+        var direct = new[] { "--transport", "sshnet", "--host", "server.invalid", "--user", "builder",
+            "--key-file", "/missing/key", "--host-key-sha256", "SHA256:INVALID",
+            "--endpoint", "/tmp/host.sock", "--workspace", "/remote/project" };
+        Reject(["remote", "status", ..direct, "--operation", "id", "--destination", "alias"],
+            "OpenSSH-only");
+        Reject(["remote", "status", ..connection, "--operation", "id", "--port", "22"],
+            "SSH.NET options require");
+        Reject(["remote", "status", ..direct, "--operation", "id", "--port", "0"], "--port");
+        Reject(["remote", "status", ..direct, "--operation", "id", "--transport", "openssh"],
+            "Duplicate option");
+        Reject(["remote", "status", ..direct, "--operation", "id", "--connect-timeout-seconds", "0"],
+            "--connect-timeout-seconds");
         Pass("remote CLI validation rejects malformed admission, cursor, cancellation and downloads before SSH");
     }
 

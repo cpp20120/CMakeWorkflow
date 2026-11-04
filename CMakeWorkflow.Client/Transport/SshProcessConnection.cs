@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace CMakeWorkflow.Client;
 
 // Owns only the local SSH transport process, never the remote persistent Host.
-internal sealed class SshProcessConnection : IAsyncDisposable
+internal sealed class SshProcessConnection : IRemoteSshConnection
 {
     private readonly Process process;
     private readonly BoundedSshDiagnostics diagnostics = new();
@@ -17,10 +17,10 @@ internal sealed class SshProcessConnection : IAsyncDisposable
         stderr = ReadDiagnosticsAsync();
     }
 
-    internal Stream Input => process.StandardOutput.BaseStream;
-    internal Stream Output => process.StandardInput.BaseStream;
-    internal string Diagnostics => diagnostics.Snapshot();
-    internal int? ExitCode { get; private set; }
+    public Stream Input => process.StandardOutput.BaseStream;
+    public Stream Output => process.StandardInput.BaseStream;
+    public string Diagnostics => diagnostics.Snapshot();
+    public int? ExitCode { get; private set; }
 
     private async Task ReadDiagnosticsAsync()
     {

@@ -15,11 +15,11 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     private readonly IClientRpc proxy;
     private readonly Process? ownedHost;
     private readonly string? ownedSocketDirectory;
-    private readonly SshProcessConnection? sshConnection;
+    private readonly IRemoteSshConnection? sshConnection;
     private bool disposed;
 
     private CMakeWorkflowClient(Stream stream, JsonRpc connection, IClientRpc target, HostIdentity identity,
-        Process? ownedHost, string? ownedSocketDirectory, SshProcessConnection? sshConnection = null)
+        Process? ownedHost, string? ownedSocketDirectory, IRemoteSshConnection? sshConnection = null)
     {
         transport = stream;
         rpc = connection;
@@ -148,7 +148,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
             "Formatter uses ClientJson source-generated metadata; verified by the AOT consumer smoke test.")]
     private static async Task<CMakeWorkflowClient> InitializeAsync(Stream stream, string workspace,
         Process? process, string? directory, CancellationToken ct, Stream? output = null,
-        SshProcessConnection? ssh = null)
+        IRemoteSshConnection? ssh = null)
     {
         var formatter = new SystemTextJsonFormatter
         {

@@ -14,11 +14,12 @@ internal static class RemoteCommand
     private static readonly HashSet<string> ConnectionFlags =
     [
         "--destination", "--endpoint", "--workspace", "--ssh-executable",
-        "--remote-executable", "--connect-timeout-seconds"
+        "--remote-executable", "--connect-timeout-seconds", "--transport",
+        "--host", "--user", "--key-file", "--host-key-sha256", "--port"
     ];
 
     internal const string Usage = """
-        Usage: CMakeWorkflow remote COMMAND --destination USER@HOST --endpoint REMOTE_SOCKET --workspace REMOTE_DIR [OPTIONS]
+        Usage: CMakeWorkflow remote COMMAND --endpoint REMOTE_SOCKET --workspace REMOTE_DIR [CONNECTION] [OPTIONS]
         Commands:
           start     --request-id ID --manifest REMOTE_FILE --manifest-sha256 SHA256 --results-dir REMOTE_DIR [--jobs N]
           find      --request-id ID
@@ -29,8 +30,12 @@ internal static class RemoteCommand
           artifacts --operation ID
           download  --operation ID --artifact-id ID --output LOCAL_FILE
           cancel    --operation ID --revision N
-        Connection options: [--ssh-executable PATH] [--remote-executable PATH] [--connect-timeout-seconds N]
-        All paths except --output refer to the REMOTE filesystem. The Host must already be running.
+        Connection options: [--remote-executable PATH] [--connect-timeout-seconds N]
+        Default transport: OpenSSH, --destination USER@HOST [--ssh-executable PATH]
+        SSH.NET transport: --transport sshnet --host HOST --user USER --key-file LOCAL_PRIVATE_KEY
+          --host-key-sha256 SHA256:PIN [--port 22] (no ssh-agent or ~/.ssh/config)
+        All paths except --output and --key-file refer to the REMOTE filesystem.
+        The Host must already be running.
         On a lost start response use 'find' with the SAME request ID; do not silently start again.
         No command reconnects or retries a failed RPC automatically.
         """;
@@ -47,14 +52,28 @@ internal static class RemoteCommand
         var values = Parse(action, args[1..]);
         // Reject malformed input before spawning SSH or accepting any workflow.
         Validate(action, values);
-        var ssh = new SshHostOptions(Require(values, "--destination"), Require(values, "--endpoint"),
-            Require(values, "--workspace"))
-        {
-            SshExecutable = Get(values, "--ssh-executable") ?? "ssh",
-            RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
-            ConnectionTimeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600))
-        };
-        await using var client = await CMakeWorkflowClient.ConnectSshAsync(ssh, ct);
+        var timeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600));
+        var transport = Get(values, "--transport") ?? "openssh";
+        // Both paths connect to the same durable Host and identical RPC surface.
+        // No auto-reconnect or retry of an uncertain workflow/start response.
+        await using var client = transport == "sshnet"
+            ? await CMakeWorkflowClient.ConnectSshNetAsync(new SshNetHostOptions(
+                Require(values, "--host"), Require(values, "--user"),
+                Require(values, "--key-file"), Require(values, "--host-key-sha256"),
+                Require(values, "--endpoint"), Require(values, "--workspace"))
+            {
+                Port = (int)Number(values, "--port", 22, 1, 65535),
+                RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
+                ConnectionTimeout = timeout
+            }, ct)
+            : await CMakeWorkflowClient.ConnectSshAsync(new SshHostOptions(
+                Require(values, "--destination"), Require(values, "--endpoint"),
+                Require(values, "--workspace"))
+            {
+                SshExecutable = Get(values, "--ssh-executable") ?? "ssh",
+                RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
+                ConnectionTimeout = timeout
+            }, ct);
         switch (action)
         {
             case "start":
@@ -154,7 +173,25 @@ internal static class RemoteCommand
             if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
                 throw new ArgumentException($"Option '{key}' must be nonempty and contain no control characters.");
         }
-        foreach (var key in new[] { "--destination", "--endpoint", "--workspace" }) Require(values, key);
+        var transport = Get(values, "--transport") ?? "openssh";
+        if (transport is not ("openssh" or "sshnet"))
+            throw new ArgumentException("--transport must be openssh or sshnet.");
+        foreach (var key in new[] { "--endpoint", "--workspace" }) Require(values, key);
+        if (transport == "sshnet")
+        {
+            foreach (var key in new[] { "--host", "--user", "--key-file", "--host-key-sha256" })
+                Require(values, key);
+            if (values.ContainsKey("--destination") || values.ContainsKey("--ssh-executable"))
+                throw new ArgumentException("--destination/--ssh-executable are OpenSSH-only options.");
+            Number(values, "--port", 22, 1, 65535);
+        }
+        else
+        {
+            Require(values, "--destination");
+            if (new[] { "--host", "--user", "--key-file", "--host-key-sha256", "--port" }
+                .Any(values.ContainsKey))
+                throw new ArgumentException("SSH.NET options require --transport sshnet.");
+        }
         switch (action)
         {
             case "start":
