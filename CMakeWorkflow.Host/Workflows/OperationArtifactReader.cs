@@ -22,7 +22,14 @@ internal static class OperationArtifactReader
                        ?? throw new KeyNotFoundException("Unknown operation.");
         var finalized = store.GetFinalization(operationId)
                         ?? throw new ApplicationRefusal("not_finalized", "No durable terminal report yet.");
-        var report = await WorkflowQueries.ReportAsync(paths.Require(finalized.RunDirectory), ct, paths.Read);
+        var directory = paths.Require(finalized.RunDirectory);
+        var reportPath = WithinResults(paths, directory, "run.json");
+        await using var reportFile = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, reportPath);
+        if (reportFile.Length > 16 * 1024 * 1024)
+            throw new ApplicationRefusal("resource_limit", "Terminal report exceeds 16 MiB.");
+        using var buffer = new MemoryStream();
+        await reportFile.CopyToAsync(buffer, ct);
+        var report = WorkflowQueries.ReportFromBytes(directory, buffer.ToArray());
         if (!string.Equals(report.Revision, finalized.ReportSha256, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(report.Report.Status, finalized.State, StringComparison.Ordinal) ||
             !string.Equals(report.Report.ManifestHash, accepted.ManifestSha256,
@@ -40,17 +47,21 @@ internal static class OperationArtifactReader
         {
             ct.ThrowIfCancellationRequested();
             var path = WithinResults(paths, report.RunDirectory, candidate.Path);
-            if (!File.Exists(path))
+            FileStream file;
+            try { file = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path); }
+            catch (FileNotFoundException) when (candidate.Id != "report")
             {
-                if (candidate.Id == "report")
-                    throw new ApplicationRefusal("not_found", "The durable report is missing.");
                 continue; // A node not dispatched has no logs.
             }
-            await using var file = OpenRead(path);
+            catch (DirectoryNotFoundException) when (candidate.Id != "report")
+            {
+                continue;
+            }
+            await using var owned = file;
             var size = file.Length;
-            var stamp = File.GetLastWriteTimeUtc(path).Ticks;
+            var stamp = File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks;
             var sha = Convert.ToHexString(await SHA256.HashDataAsync(file, ct));
-            if (file.Length != size || File.GetLastWriteTimeUtc(path).Ticks != stamp)
+            if (file.Length != size || File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks != stamp)
                 throw new ApplicationRefusal("artifact_changed", "Artifact changed during catalog creation.");
             result.Add(new(candidate.Id, candidate.Kind, candidate.NodeId,
                 Path.GetRelativePath(report.RunDirectory, path).Replace('\\', '/'), size, stamp, sha));
@@ -73,9 +84,9 @@ internal static class OperationArtifactReader
         var candidate = Candidates(report).FirstOrDefault(c => c.Id == request.ArtifactId)
                         ?? throw new ApplicationRefusal("not_found", "Unknown operation artifact.");
         var path = WithinResults(paths, report.RunDirectory, candidate.Path);
-        await using var file = OpenRead(path);
+        await using var file = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path);
         var size = file.Length;
-        var stamp = File.GetLastWriteTimeUtc(path).Ticks;
+        var stamp = File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks;
         if (size != request.ExpectedSize || stamp != request.ExpectedLastWriteUtcTicks)
             throw new ApplicationRefusal("artifact_changed", "The artifact changed since catalog discovery.");
 
@@ -83,7 +94,7 @@ internal static class OperationArtifactReader
         var bytes = new byte[count];
         file.Seek(request.Offset, SeekOrigin.Begin);
         await file.ReadExactlyAsync(bytes, ct);
-        if (file.Length != size || File.GetLastWriteTimeUtc(path).Ticks != stamp)
+        if (file.Length != size || File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks != stamp)
             throw new ApplicationRefusal("artifact_changed", "The artifact changed during transfer.");
         return new(candidate.Id, request.Offset, size, stamp, bytes, request.Offset + count == size);
     }
@@ -129,35 +140,15 @@ internal static class OperationArtifactReader
             throw new ApplicationRefusal("path_not_allowed", "Empty artifact path.");
         var path = Path.GetFullPath(Path.IsPathFullyQualified(candidate)
             ? candidate : Path.Combine(runDirectory, candidate));
-        // Authorization is anchored to the durable results directory, not just
-        // the broader workspace. Resolve symlinks with the existing workspace policy.
-        path = paths.Require(path);
+        // Preliminary workspace validation; final authority is the descriptor-
+        // relative, no-follow open anchored to the workspace handle.
+        // Do not substitute the resolved result into the lexical results boundary.
         var relative = Path.GetRelativePath(runDirectory, path);
         if (Path.IsPathRooted(relative) || relative == ".." ||
             relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new ApplicationRefusal("path_not_allowed", "Artifact escapes its results directory.");
-        // Fail closed on reparse points, including intermediate directories.
-        for (var part = path; ; part = Path.GetDirectoryName(part)!)
-        {
-            if (File.Exists(part) || Directory.Exists(part))
-                if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
-                    throw new ApplicationRefusal("path_not_allowed", "Linked artifacts are not downloadable.");
-            if (string.Equals(part, runDirectory,
-                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-                break;
-            if (Path.GetDirectoryName(part) is null)
-                throw new ApplicationRefusal("path_not_allowed", "Invalid artifact ancestry.");
-        }
+        paths.Require(path);
         return path;
     }
 
-    private static FileStream OpenRead(string path)
-    {
-        if (Directory.Exists(path) || !File.Exists(path))
-            throw new ApplicationRefusal("not_found", "Artifact is not a regular file.");
-        // Shared reads only; final digest validation belongs to the SDK download
-        // layer (D3), so changes preserving length/mtime are still detected there.
-        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-    }
 }

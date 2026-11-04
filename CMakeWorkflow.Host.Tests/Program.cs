@@ -34,6 +34,12 @@ if (args.Length > 0 && args[0] == "--ssh-download-tests")
     return;
 }
 
+if (args.Length > 0 && args[0] == "--artifact-path-tests")
+{
+    ArtifactPathBoundaryTests.Run();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--ssh-lifecycle-tests")
 {
     await SshLifecycleTests.RunAsync();

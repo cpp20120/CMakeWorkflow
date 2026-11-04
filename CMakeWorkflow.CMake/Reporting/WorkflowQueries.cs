@@ -21,6 +21,13 @@ public static class WorkflowQueries
         var path = Path.Combine(directory, "run.json");
         readGuard?.Invoke(path);
         var bytes = await File.ReadAllBytesAsync(path, ct);
+        return ReportFromBytes(directory, bytes);
+    }
+
+    // Allows the Host's secure, handle-relative artifact reader to use the same
+    // validation as CLI reports without reopening a checked pathname.
+    public static WorkflowReportSnapshot ReportFromBytes(string directory, byte[] bytes)
+    {
         var report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
                      ?? throw new InvalidDataException("run.json contains an empty report.");
         if (report.SchemaVersion != 1)
