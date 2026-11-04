@@ -1,7 +1,7 @@
 namespace CMakeWorkflow.Client;
 
 // One full-duplex JSON-RPC byte transport, either OpenSSH or SSH.NET.
-// Closing this channel never cancels a durable workflow accepted by the Host.
+// Persistent Host operations survive channel close; private Host operations do not.
 internal interface IRemoteSshConnection : IAsyncDisposable
 {
     Stream Input { get; }

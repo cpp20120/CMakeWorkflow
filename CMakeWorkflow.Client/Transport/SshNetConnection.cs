@@ -7,7 +7,8 @@ namespace CMakeWorkflow.Client;
 
 /// <summary>
 /// SSH exec channel, without PTY: raw binary stdin/stdout for JSON-RPC, stderr
-/// exclusively for bounded diagnostics. It owns the SSH channel, not the Host.
+/// exclusively for bounded diagnostics. With ephemeral mode the channel also
+/// bounds the private remote Host lifetime.
 /// </summary>
 internal sealed class SshNetConnection : IRemoteSshConnection
 {
@@ -43,51 +44,84 @@ internal sealed class SshNetConnection : IRemoteSshConnection
     internal static byte[] Validate(SshNetHostOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        foreach (var (text, name) in new[] {
-            (options.Host, nameof(options.Host)), (options.Username, nameof(options.Username)),
-            (options.PrivateKeyPath, nameof(options.PrivateKeyPath)),
-            (options.RemoteExecutable, nameof(options.RemoteExecutable)) })
-            if (string.IsNullOrWhiteSpace(text) || text.Any(char.IsControl))
-                throw new ArgumentException("Value must be nonempty and contain no control characters.", name);
-        if (options.Host.Any(char.IsWhiteSpace) || options.Username.Any(char.IsWhiteSpace))
-            throw new ArgumentException("Host and username cannot contain whitespace.");
-        if (options.Port is < 1 or > 65535)
-            throw new ArgumentOutOfRangeException(nameof(options.Port));
-        if (!Path.IsPathFullyQualified(options.PrivateKeyPath))
-            throw new ArgumentException("Private key path must be absolute on the local machine.");
         SshCommand.RemotePath(options.Endpoint, nameof(options.Endpoint));
-        SshCommand.RemotePath(options.Workspace, nameof(options.Workspace));
-        if (options.ConnectionTimeout <= TimeSpan.Zero || options.ConnectionTimeout > TimeSpan.FromHours(1))
-            throw new ArgumentOutOfRangeException(nameof(options.ConnectionTimeout));
+        return ValidateCommon(options.Host, options.Username, options.PrivateKeyPath,
+            options.HostKeySha256, options.Workspace, options.RemoteExecutable,
+            options.Port, options.ConnectionTimeout);
+    }
 
-        var pin = options.HostKeySha256;
+    internal static byte[] Validate(SshNetLaunchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return ValidateCommon(options.Host, options.Username, options.PrivateKeyPath,
+            options.HostKeySha256, options.Workspace, options.RemoteExecutable,
+            options.Port, options.ConnectionTimeout);
+    }
+
+    private static byte[] ValidateCommon(string host, string username, string privateKeyPath,
+        string? hostKeySha256, string workspace, string remoteExecutable, int port,
+        TimeSpan connectionTimeout)
+    {
+        foreach (var (value, name) in new[] {
+            (host, nameof(host)), (username, nameof(username)),
+            (privateKeyPath, nameof(privateKeyPath)), (remoteExecutable, nameof(remoteExecutable)) })
+            if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
+                throw new ArgumentException("Value must be nonempty and contain no control characters.", name);
+        if (host.Any(char.IsWhiteSpace) || username.Any(char.IsWhiteSpace))
+            throw new ArgumentException("Host and username cannot contain whitespace.");
+        if (port is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(port));
+        if (!Path.IsPathFullyQualified(privateKeyPath))
+            throw new ArgumentException("Private key path must be absolute on the local machine.");
+        SshCommand.RemotePath(workspace, nameof(workspace));
+        if (connectionTimeout <= TimeSpan.Zero || connectionTimeout > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(connectionTimeout));
+
+        var pin = hostKeySha256;
         if (pin is null) throw new ArgumentException("A SHA256 host key pin is required.");
         if (pin.StartsWith("SHA256:", StringComparison.Ordinal)) pin = pin[7..];
         if (pin.Length != 43 || !pin.All(c => char.IsLetterOrDigit(c) || c is '+' or '/'))
             throw new ArgumentException("Host key pin must be OpenSSH SHA256:base64 (43 unpadded characters).");
         byte[] expected;
         try { expected = Convert.FromBase64String(pin + "="); }
-        catch (FormatException error) { throw new ArgumentException("Invalid SHA256 host key pin.", nameof(options.HostKeySha256), error); }
+        catch (FormatException error) { throw new ArgumentException("Invalid SHA256 host key pin.", nameof(hostKeySha256), error); }
         if (expected.Length != 32 || Convert.ToBase64String(expected).TrimEnd('=') != pin)
-            throw new ArgumentException("Invalid SHA256 host key pin.", nameof(options.HostKeySha256));
+            throw new ArgumentException("Invalid SHA256 host key pin.", nameof(hostKeySha256));
         return expected;
     }
 
-    internal static async Task<SshNetConnection> ConnectAsync(SshNetHostOptions options, CancellationToken ct)
+    internal static Task<SshNetConnection> ConnectAsync(SshNetHostOptions options, CancellationToken ct)
     {
         var expected = Validate(options);
+        return ConnectCommandAsync(options.Host, options.Port, options.Username, options.PrivateKeyPath,
+            options.ConnectionTimeout, expected,
+            SshCommand.BridgeCommand(options.RemoteExecutable, options.Endpoint), ct);
+    }
+
+    internal static Task<SshNetConnection> LaunchAsync(SshNetLaunchOptions options, CancellationToken ct)
+    {
+        var expected = Validate(options);
+        return ConnectCommandAsync(options.Host, options.Port, options.Username, options.PrivateKeyPath,
+            options.ConnectionTimeout, expected,
+            SshCommand.StdioHostCommand(options.RemoteExecutable), ct);
+    }
+
+    private static async Task<SshNetConnection> ConnectCommandAsync(string host, int port, string username,
+        string privateKeyPath, TimeSpan connectionTimeout, byte[] expected, string remoteCommand,
+        CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
         // SSH.NET does not implicitly use ssh-agent, ~/.ssh/config or known_hosts.
         // Host authentication is deliberately fail-closed by the supplied key pin.
-        var key = new PrivateKeyFile(options.PrivateKeyPath);
+        var key = new PrivateKeyFile(privateKeyPath);
         SshClient? client = null;
         SshNetCommand? command = null;
         Stream? stdin = null;
         try
         {
-            var connection = new PrivateKeyConnectionInfo(options.Host, options.Port, options.Username, key)
+            var connection = new PrivateKeyConnectionInfo(host, port, username, key)
             {
-                Timeout = options.ConnectionTimeout
+                Timeout = connectionTimeout
             };
             client = new SshClient(connection);
             client.HostKeyReceived += (_, args) =>
@@ -97,7 +131,7 @@ internal sealed class SshNetConnection : IRemoteSshConnection
             };
             await client.ConnectAsync(ct);
             ct.ThrowIfCancellationRequested();
-            command = client.CreateCommand(SshCommand.BridgeCommand(options.RemoteExecutable, options.Endpoint));
+            command = client.CreateCommand(remoteCommand);
             // Do not use RunCommand/Result: they buffer stdout and destroy RPC framing.
             var executing = command.ExecuteAsync(CancellationToken.None);
             stdin = command.CreateInputStream();
@@ -139,7 +173,8 @@ internal sealed class SshNetConnection : IRemoteSshConnection
     {
         if (disposed) return;
         disposed = true;
-        // Shutdown is connection-local. Durable operations on the Host survive it.
+        // Closing a persistent bridge does not cancel Host work. An ephemeral
+        // stdio Host instead observes EOF and cancels its private coordinator.
         try { input.Dispose(); }
         finally
         {

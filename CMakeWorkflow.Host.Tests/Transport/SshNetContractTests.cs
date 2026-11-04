@@ -1,4 +1,6 @@
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Host;
+using Nerdbank.Streams;
 
 internal static class SshNetContractTests
 {
@@ -18,7 +20,15 @@ internal static class SshNetContractTests
         await RejectAsync<ArgumentException>(options with { Username = "user name" });
         await RejectAsync<ArgumentOutOfRangeException>(options with { Port = 0 });
         await RejectAsync<ArgumentOutOfRangeException>(options with { ConnectionTimeout = TimeSpan.Zero });
-        Console.WriteLine("PASS SSH.NET options: host-key pin, remote path, port, user and timeout");
+        var ephemeral = new SshNetLaunchOptions(options.Host, options.Username, missingKey,
+            ValidPin, options.Workspace);
+        await RejectEphemeralAsync<ArgumentException>(ephemeral with { HostKeySha256 = "SHA256:BAD" });
+        await RejectEphemeralAsync<ArgumentException>(ephemeral with { Workspace = "relative" });
+        await RejectEphemeralAsync<ArgumentException>(ephemeral with { PrivateKeyPath = "id_ed25519" });
+        await RejectEphemeralAsync<ArgumentOutOfRangeException>(ephemeral with { Port = 0 });
+        await RejectEphemeralAsync<ArgumentOutOfRangeException>(ephemeral with { ConnectionTimeout = TimeSpan.Zero });
+        await VerifyPrivateHostAsync();
+        Console.WriteLine("PASS SSH.NET options and private stdio Host: pin, paths, handshake, EOF shutdown");
     }
 
     private static async Task RejectAsync<T>(SshNetHostOptions options) where T : Exception
@@ -26,6 +36,56 @@ internal static class SshNetContractTests
         try { await CMakeWorkflowClient.ConnectSshNetAsync(options); }
         catch (T) { return; }
         throw new Exception("SSH.NET did not reject " + typeof(T).Name + " before connecting.");
+    }
+
+    private static async Task RejectEphemeralAsync<T>(SshNetLaunchOptions options) where T : Exception
+    {
+        try { await CMakeWorkflowClient.LaunchSshNetAsync(options); }
+        catch (T) { return; }
+        throw new Exception("Private SSH.NET Host did not reject " + typeof(T).Name + " before connecting.");
+    }
+
+    private static async Task VerifyPrivateHostAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var root = Path.Combine(Path.GetTempPath(), "cmw-ephemeral-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var (clientStream, hostStream) = FullDuplexStream.CreatePair();
+        using (clientStream)
+        using (hostStream)
+        {
+            var server = HostServer.RunStdioAsync(hostStream, hostStream, timeout.Token);
+            try
+            {
+                using (var rpc = HostConnection.Create(clientStream))
+                {
+                    var proxy = rpc.Attach<IHostRpc>();
+                    rpc.StartListening();
+                    var identity = await proxy.InitializeAsync(new(1, root), timeout.Token);
+                    if (identity.WorkspaceDirectory != root || !identity.Capabilities.Contains("workflow/start"))
+                        throw new Exception("Private Host handshake returned invalid identity/capabilities.");
+                }
+                clientStream.Dispose();
+                await server.WaitAsync(TimeSpan.FromSeconds(8), timeout.Token);
+            }
+            finally
+            {
+                clientStream.Dispose();
+                if (!server.IsCompleted) await timeout.CancelAsync();
+                await server.WaitAsync(TimeSpan.FromSeconds(8));
+            }
+        }
+        try
+        {
+            await SshTransportTests.RejectAsync<ArgumentException>(() =>
+                HostCommand.ExecuteAsync(["serve", "--stdio", "--endpoint", "/tmp/unused"], default));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     // Opt-in integration against a real sshd and a persistent remote Host.

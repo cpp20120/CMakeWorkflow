@@ -36,6 +36,13 @@ internal static class SshCommand
         return $"exec {Quote(executable)} host bridge --stdio --endpoint {Quote(endpoint)}";
     }
 
+    internal static string StdioHostCommand(string executable)
+    {
+        Text(executable, nameof(executable));
+        // The exec channel itself owns the private Host; no remote socket needed.
+        return $"exec {Quote(executable)} host serve --stdio";
+    }
+
     private static string Quote(string value) => "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
 
     private static void Text(string value, string name)
