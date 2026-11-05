@@ -8,6 +8,7 @@
     <ItemGroup>
         <Compile Include="CommandExecution.cs" />
         <Compile Include="Execution/*.cs" />
+        <Compile Include="Processes/*.cs" />
         <Compile Include="Persistence/*.cs" />
 
         <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj" />
