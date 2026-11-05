@@ -20,7 +20,8 @@ internal static class PackageAudit
                 HashSet<string> requiredContracts = new(StringComparer.Ordinal)
                 {
                     "_rels/.rels", "[Content_Types].xml", "CMakeWorkflow.Contracts.nuspec",
-                    "lib/net10.0/CMakeWorkflow.Contracts.dll"
+                    "lib/net10.0/CMakeWorkflow.Contracts.dll",
+                    "lib/net10.0/CMakeWorkflow.Contracts.xml"
                 };
                 HashSet<string> seenContracts = new(StringComparer.Ordinal);
                 foreach (ZipArchiveEntry entry in contractsArchive.Entries)
@@ -69,7 +70,8 @@ internal static class PackageAudit
             HashSet<string> required = new(StringComparer.Ordinal)
             {
                 "_rels/.rels", "[Content_Types].xml", "CMakeWorkflow.Client.nuspec",
-                "lib/net10.0/CMakeWorkflow.Client.dll"
+                "lib/net10.0/CMakeWorkflow.Client.dll",
+                "lib/net10.0/CMakeWorkflow.Client.xml"
             };
             HashSet<string> seen = new(StringComparer.Ordinal);
             foreach (ZipArchiveEntry entry in archive.Entries)
