@@ -52,6 +52,16 @@ public sealed class DurableAcceptanceStore : IDisposable
                           state TEXT NOT NULL CHECK(state IN ('accepted_not_dispatched', 'dispatch_authorized'))
                         );
                         """);
+            // Additive migration. Old accepted_workflows remain unmodified and
+            // mean 'workflow'; new non-CMake operations carry a durable domain tag.
+            if (!readOnly)
+                Execute("""
+                        CREATE TABLE IF NOT EXISTS operation_domains (
+                          operation_id TEXT NOT NULL PRIMARY KEY,
+                          domain_kind TEXT NOT NULL,
+                          FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
+                        );
+                        """);
             if (!readOnly)
                 Execute("""
                         CREATE TABLE IF NOT EXISTS dispatch_checkpoints (
@@ -209,7 +219,8 @@ public sealed class DurableAcceptanceStore : IDisposable
         if (string.IsNullOrWhiteSpace(request.ClientRequestId) || request.ClientRequestId.Length > 128 ||
             !Path.IsPathFullyQualified(request.SnapshotPath) ||
             !Path.IsPathFullyQualified(request.ResultsDirectory) ||
-            !IsSha256(request.SnapshotSha256) || !IsSha256(request.RequestDigest))
+            !IsSha256(request.SnapshotSha256) || !IsSha256(request.RequestDigest) ||
+            string.IsNullOrWhiteSpace(request.DomainKind) || request.DomainKind.Length > 64)
             throw new ArgumentException("Invalid immutable operation admission request.");
         var paths = new WorkspaceReadPaths(workspace);
         var source = paths.Require(request.SnapshotPath);
@@ -266,9 +277,34 @@ public sealed class DurableAcceptanceStore : IDisposable
             insert.ExecuteNonQuery();
         }
 
+        if (request.DomainKind != "workflow")
+        {
+            using var tag = connection.CreateCommand();
+            tag.Transaction = transaction;
+            tag.CommandText =
+                "INSERT INTO operation_domains(operation_id,domain_kind) VALUES($id,$kind);";
+            tag.Parameters.AddWithValue("$id", operationId);
+            tag.Parameters.AddWithValue("$kind", request.DomainKind);
+            tag.ExecuteNonQuery();
+        }
+
         transaction.Commit();
         return new(WorkspaceId, operationId, clientRequestId, digest, expectedManifestSha256.ToUpperInvariant(),
             baseDirectory, "accepted_not_dispatched");
+    }
+
+    // An old database may not have operation_domains. Such operations always
+    // belong to the original CMake workflow domain.
+    public string GetDomainKind(string operationId)
+    {
+        using var table = connection.CreateCommand();
+        table.CommandText =
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_domains';";
+        if (table.ExecuteScalar() is null) return "workflow";
+        using var read = connection.CreateCommand();
+        read.CommandText = "SELECT domain_kind FROM operation_domains WHERE operation_id=$id;";
+        read.Parameters.AddWithValue("$id", operationId);
+        return (string?)read.ExecuteScalar() ?? "workflow";
     }
 
     public AcceptedWorkflow? Find(string clientRequestId)

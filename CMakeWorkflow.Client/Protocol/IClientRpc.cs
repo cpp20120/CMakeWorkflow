@@ -71,6 +71,12 @@ internal partial interface IClientRpc
     [JsonRpcMethod("history/import")]
     Task<ImportHistoryResult> HistoryImportAsync(ImportHistoryOptions request, CancellationToken ct);
 
+    [JsonRpcMethod("execution/report")]
+    Task<JsonElement> ExecutionReportAsync(OpIdRequest request, CancellationToken ct);
+
+    [JsonRpcMethod("execution/start")]
+    Task<OperationSnapshot> ExecutionStartAsync(ExecutionStartOptions request, CancellationToken ct);
+
     [JsonRpcMethod("workflow/start")]
     Task<OperationSnapshot> StartAsync(StartWorkflowOptions request, CancellationToken ct);
 

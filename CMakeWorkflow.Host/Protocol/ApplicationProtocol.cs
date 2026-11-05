@@ -8,6 +8,13 @@ namespace CMakeWorkflow.Host;
 
 public partial interface IHostRpc
 {
+    [JsonRpcMethod("execution/report")]
+    Task<System.Text.Json.JsonElement> ExecutionReportAsync(OperationGetRequest request,
+        CancellationToken cancellationToken);
+
+    [JsonRpcMethod("execution/start")]
+    Task<OperationReference> ExecutionStartAsync(ExecutionStartRequest request, CancellationToken cancellationToken);
+
     [JsonRpcMethod("workflow/start")]
     Task<OperationReference> WorkflowStartAsync(WorkflowStartRequest request, CancellationToken cancellationToken);
 

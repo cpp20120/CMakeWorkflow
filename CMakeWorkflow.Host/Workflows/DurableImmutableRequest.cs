@@ -7,4 +7,5 @@ internal sealed record DurableImmutableRequest(
     string SnapshotPath,
     string SnapshotSha256,
     string ResultsDirectory,
-    string RequestDigest);
+    string RequestDigest,
+    string DomainKind = "workflow");

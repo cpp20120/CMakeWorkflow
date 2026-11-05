@@ -8,6 +8,7 @@
     </PropertyGroup>
     <ItemGroup>
         <InternalsVisibleTo Include="CMakeWorkflow.Host.Tests"/>
+        <InternalsVisibleTo Include="CMakeWorkflow.Host"/>
     </ItemGroup>
     <ItemGroup>
         <Compile Include="*.cs"/>

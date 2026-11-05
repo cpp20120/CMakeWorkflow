@@ -13,7 +13,7 @@ public sealed partial class DoctorSession
         "context/inspect", "target/resolve", "workflow/plan", "runs/get",
         "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel",
-        "workflow/start", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
+        "workflow/start", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
         "operations/events", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
@@ -114,6 +114,8 @@ public sealed partial class DoctorSession
         if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
         var paths = new WorkspaceReadPaths(workspace);
         using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
+        if (store.GetDomainKind(request.OperationId) != "workflow")
+            throw new InvalidOperationException("resume_unsupported_for_execution_domain");
         if (durableExecutions.IsActive(store.WorkspaceId, request.OperationId))
             throw new InvalidOperationException("operation_execution_active");
         if (string.IsNullOrWhiteSpace(request.OperationId) || request.OperationId.Length != 32 ||
@@ -144,6 +146,8 @@ public sealed partial class DoctorSession
         if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
         var paths = new WorkspaceReadPaths(workspace);
         using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
+        if (store.GetDomainKind(request.OperationId) != "workflow")
+            throw new InvalidOperationException("resume_unsupported_for_execution_domain");
         var inspected = store.InspectRecovery(request.OperationId);
         if (inspected.Revision != 2 || inspected.Decision != "needs_attention" ||
             inspected.TerminalState is not null || inspected.CancellationRequested)
@@ -185,7 +189,8 @@ public sealed partial class DoctorSession
         var accepted = byRequestId ? store.Find(id) : store.Get(id);
         if (accepted is null) throw new KeyNotFoundException("Unknown operation.");
         return Task.FromResult(new OperationReference(accepted.WorkspaceId, accepted.OperationId,
-            accepted.ClientRequestId, "workflow", accepted.State, accepted.ManifestSha256,
+            accepted.ClientRequestId, store.GetDomainKind(accepted.OperationId), accepted.State,
+            accepted.ManifestSha256,
             accepted.ManifestBaseDirectory));
     }
 

@@ -53,6 +53,13 @@ internal static class DurableWorkflowWireTests
             await client.InitializeAsync(new(1, workspace), ct);
             var accepted = await client.WorkflowStartAsync(request, ct);
             operationId = accepted.OperationId;
+            // The domain-qualified entry point must share the original durable
+            // CMake identity and must not redispatch the same request.
+            var composed = await client.ExecutionStartAsync(new ExecutionStartRequest(
+                "cmake", request.ClientRequestId, request.Manifest, request.ManifestSha256,
+                request.Jobs, request.ResultsDirectory), ct);
+            Check(composed.OperationId == operationId && composed.Kind == "workflow",
+                "Neutral Host composition changed CMake operation identity.");
             Check(accepted.ClientRequestId == request.ClientRequestId, "First RPC lost request identity.");
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
             wait.CancelAfter(TimeSpan.FromSeconds(15));

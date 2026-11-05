@@ -95,6 +95,8 @@ namespace CMakeWorkflow.Host;
 [JsonSerializable(typeof(List<HistoryMeasurement>))]
 [JsonSerializable(typeof(List<HistoryDifference>))]
 [JsonSerializable(typeof(HistoryDetectionReport))]
+[JsonSerializable(typeof(System.Text.Json.JsonElement))]
+[JsonSerializable(typeof(ExecutionStartRequest))]
 [JsonSerializable(typeof(WorkflowStartRequest))]
 [JsonSerializable(typeof(OperationCancelRequest))]
 [JsonSerializable(typeof(OperationCancelResult))]

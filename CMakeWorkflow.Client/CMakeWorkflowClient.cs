@@ -29,6 +29,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         this.ownedSocketDirectory = ownedSocketDirectory;
         this.sshConnection = sshConnection;
         Workflows = new(this);
+        Executions = new(this);
         Operations = new(this);
         Profiles = new(this);
         Benchmarks = new(this);
@@ -41,6 +42,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
 
     public HostIdentity Host { get; }
     public WorkflowService Workflows { get; }
+    public ExecutionService Executions { get; }
     public OperationService Operations { get; }
     public ProfileService Profiles { get; }
     public BenchmarkService Benchmarks { get; }

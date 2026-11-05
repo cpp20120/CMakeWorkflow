@@ -11,6 +11,7 @@
         <PackageReference Include="StreamJsonRpc" Version="2.26.150"/>
         <ProjectReference Include="../CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.History/CMakeWorkflow.History.csproj"/>

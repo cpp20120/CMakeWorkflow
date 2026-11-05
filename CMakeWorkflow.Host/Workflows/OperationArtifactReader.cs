@@ -20,6 +20,8 @@ internal static class OperationArtifactReader
         using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory, readOnly: true);
         var accepted = store.Get(operationId)
                        ?? throw new KeyNotFoundException("Unknown operation.");
+        if (store.GetDomainKind(operationId) != "workflow")
+            throw new ApplicationRefusal("wrong_domain", "Use execution/report for process operations.");
         var finalized = store.GetFinalization(operationId)
                         ?? throw new ApplicationRefusal("not_finalized", "No durable terminal report yet.");
         var directory = paths.Require(finalized.RunDirectory);
@@ -41,6 +43,8 @@ internal static class OperationArtifactReader
     internal static async Task<OperationArtifactList> ListAsync(
         WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {
+        if (ProcessArtifactReader.IsProcess(paths, operationId))
+            return await ProcessArtifactReader.ListAsync(paths, operationId, ct);
         var report = await ReportAsync(paths, operationId, ct);
         var result = new List<OperationArtifactInfo>();
         foreach (var candidate in Candidates(report))
@@ -79,6 +83,8 @@ internal static class OperationArtifactReader
             request.Offset > request.ExpectedSize)
             throw new ArgumentException("Invalid artifact range or expected identity.");
 
+        if (ProcessArtifactReader.IsProcess(paths, request.OperationId))
+            return await ProcessArtifactReader.ReadChunkAsync(paths, request, ct);
         var report = await ReportAsync(paths, request.OperationId, ct);
         // The artifact ID is opaque; it selects a known report-bound file, never a path.
         var candidate = Candidates(report).FirstOrDefault(c => c.Id == request.ArtifactId)

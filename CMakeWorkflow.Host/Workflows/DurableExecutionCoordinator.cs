@@ -73,6 +73,65 @@ public sealed class DurableExecutionCoordinator : IDisposable
         return reference;
     }
 
+    // A non-CMake domain shares durable requestId, cancellation, leases and
+    // lost-reply recovery, but executes its own immutable snapshot and report.
+    public OperationReference StartProcess(string workspace, ExecutionStartRequest request)
+    {
+        if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)
+            throw new InvalidOperationException("host_shutting_down");
+        // Reject oversized process manifests before SQLite snapshots their bytes.
+        // Domain-specific resource limits must not alter legacy CMake admission.
+        var paths = new WorkspaceReadPaths(workspace);
+        var manifestPath = paths.Require(request.Manifest);
+        if (!File.Exists(manifestPath) || new FileInfo(manifestPath).Length > 2 * 1024 * 1024)
+            throw new InvalidDataException("Process execution manifest is missing or exceeds 2 MiB.");
+        using var store = new DurableAcceptanceStore(workspace, false, ProcessCheckpointEvidenceCodec.Instance);
+        var immutable = ProcessWorkflowDomain.Admission(request);
+        var accepted = store.AcceptImmutable(immutable);
+        var reference = new OperationReference(accepted.WorkspaceId, accepted.OperationId,
+            accepted.ClientRequestId, "process", accepted.State,
+            accepted.ManifestSha256, accepted.ManifestBaseDirectory);
+        if (accepted.State != "accepted_not_dispatched") return reference;
+
+        var key = accepted.WorkspaceId + ":" + accepted.OperationId;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
+        if (!active.TryAdd(key, completion.Task))
+        {
+            linked.Dispose();
+            return reference;
+        }
+        cancellation[key] = linked;
+        if (store.Get(accepted.OperationId)?.State == "cancel_requested") linked.Cancel();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DurableProcessWorkflowExecutor.ExecuteAcceptedAsync(workspace, accepted.OperationId,
+                    immutable, request.Jobs, linked.Token);
+                completion.TrySetResult();
+            }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            {
+                completion.TrySetCanceled(linked.Token);
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine($"[Host process:{accepted.OperationId}] {error}");
+                completion.TrySetException(error);
+            }
+            finally
+            {
+                active.TryRemove(key, out _);
+                cancellation.TryRemove(key, out _);
+                linked.Dispose();
+            }
+        });
+        _ = completion.Task.ContinueWith(task => _ = task.Exception,
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        return reference;
+    }
+
     public void Resume(string workspace, string operationId)
     {
         if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)

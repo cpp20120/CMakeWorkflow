@@ -438,6 +438,11 @@ internal static class WorkflowProcessTestWorker
             case "touch":
                 await File.WriteAllTextAsync(args[1], "started");
                 return 0;
+            case "append-delay":
+                await File.AppendAllTextAsync(args[1], "started\n");
+                await Task.Delay(850);
+                await File.AppendAllTextAsync(args[1], "finished\n");
+                return 0;
             case "exit-output":
                 await File.WriteAllTextAsync(args[1], Environment.ProcessId.ToString());
                 Console.Out.WriteLine("gated output");
