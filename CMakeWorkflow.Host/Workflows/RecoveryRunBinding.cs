@@ -28,7 +28,7 @@ internal sealed record RecoveryRunBinding(string Directory, string Snapshot)
              !string.Equals(path, root, OperatingSystem.IsWindows()
                  ? StringComparison.OrdinalIgnoreCase
                  : StringComparison.Ordinal);
-             path = Path.GetDirectoryName(path)!)
+             path = Path.GetDirectoryName(path))
         {
             if (path is null || !System.IO.Directory.Exists(path))
             {
