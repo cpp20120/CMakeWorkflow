@@ -1,5 +1,7 @@
 // Prevent the storage-free Client read projections from silently diverging from
 // existing History Host DTOs. No dependency from Client to the SQLite assembly.
+using CMakeWorkflow.Client.History;
+
 internal static class HistoryWireModelParityTests
 {
     private static string Shape(Type type) => type.IsGenericType
@@ -19,19 +21,19 @@ internal static class HistoryWireModelParityTests
 
     public static void Run()
     {
-        Check(typeof(CMakeWorkflow.History.HistoryRun), typeof(CMakeWorkflow.Client.HistoryRun));
-        Check(typeof(CMakeWorkflow.History.HistoryRunPage), typeof(CMakeWorkflow.Client.HistoryRunPage));
+        Check(typeof(CMakeWorkflow.History.HistoryRun), typeof(HistoryRun));
+        Check(typeof(CMakeWorkflow.History.HistoryRunPage), typeof(HistoryRunPage));
         Check(typeof(CMakeWorkflow.Host.OperationNodeView), typeof(CMakeWorkflow.Client.OperationNodeView));
-        Check(typeof(CMakeWorkflow.History.HistoryDetail), typeof(CMakeWorkflow.Client.HistoryDetail));
-        Check(typeof(CMakeWorkflow.History.HistoryNode), typeof(CMakeWorkflow.Client.HistoryNode));
-        Check(typeof(CMakeWorkflow.History.HistoryMeasurement), typeof(CMakeWorkflow.Client.HistoryMeasurement));
-        Check(typeof(CMakeWorkflow.History.HistoryArtifact), typeof(CMakeWorkflow.Client.HistoryArtifact));
-        Check(typeof(CMakeWorkflow.History.HistoryHostEnvironment), typeof(CMakeWorkflow.Client.HistoryHostEnvironment));
-        Check(typeof(CMakeWorkflow.History.HistoryBuildEnvironment), typeof(CMakeWorkflow.Client.HistoryBuildEnvironment));
-        Check(typeof(CMakeWorkflow.History.HistoryStats), typeof(CMakeWorkflow.Client.HistoryStats));
-        Check(typeof(CMakeWorkflow.History.HistoryDifference), typeof(CMakeWorkflow.Client.HistoryDifference));
-        Check(typeof(CMakeWorkflow.History.HistoryDetection), typeof(CMakeWorkflow.Client.HistoryDetection));
-        Check(typeof(CMakeWorkflow.History.HistoryDetectionReport), typeof(CMakeWorkflow.Client.HistoryDetectionReport));
+        Check(typeof(CMakeWorkflow.History.HistoryDetail), typeof(HistoryDetail));
+        Check(typeof(CMakeWorkflow.History.HistoryNode), typeof(HistoryNode));
+        Check(typeof(CMakeWorkflow.History.HistoryMeasurement), typeof(HistoryMeasurement));
+        Check(typeof(CMakeWorkflow.History.HistoryArtifact), typeof(HistoryArtifact));
+        Check(typeof(CMakeWorkflow.History.HistoryHostEnvironment), typeof(HistoryHostEnvironment));
+        Check(typeof(CMakeWorkflow.History.HistoryBuildEnvironment), typeof(HistoryBuildEnvironment));
+        Check(typeof(CMakeWorkflow.History.HistoryStats), typeof(HistoryStats));
+        Check(typeof(CMakeWorkflow.History.HistoryDifference), typeof(HistoryDifference));
+        Check(typeof(CMakeWorkflow.History.HistoryDetection), typeof(HistoryDetection));
+        Check(typeof(CMakeWorkflow.History.HistoryDetectionReport), typeof(HistoryDetectionReport));
         Console.WriteLine("History SDK/Host read model parity passed.");
     }
 }

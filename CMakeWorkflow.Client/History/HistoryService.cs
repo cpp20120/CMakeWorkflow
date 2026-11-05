@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.History;
 
 /// <summary>Typed read and analysis endpoints over a Host-owned history database.</summary>
 /// <remarks>All database and run paths are resolved on the initialized Host workspace.</remarks>

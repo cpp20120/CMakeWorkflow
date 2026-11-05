@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using CMakeWorkflow.Core.Processes;
 
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;

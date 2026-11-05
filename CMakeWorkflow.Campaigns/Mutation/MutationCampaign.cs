@@ -3,9 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Campaigns;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Campaigns.Mutation;
 
 public static class MutationCampaign
 {

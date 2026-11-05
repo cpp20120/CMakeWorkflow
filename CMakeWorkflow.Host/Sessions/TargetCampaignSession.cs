@@ -3,6 +3,9 @@ using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.Campaigns;
 using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Campaigns.FuzzCorpus;
+using CMakeWorkflow.Campaigns.Mutation;
+using CMakeWorkflow.Campaigns.WeakMemory;
 
 namespace CMakeWorkflow.Host;
 

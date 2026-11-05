@@ -3,9 +3,7 @@ using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Core.Processes;
 
 // Owns the Windows descendant process group until all members are terminated.
 // Applied immediately after Process.Start. The initial start/assignment window

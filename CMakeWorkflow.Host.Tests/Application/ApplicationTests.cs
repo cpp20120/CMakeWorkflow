@@ -390,23 +390,23 @@ internal static class ApplicationTests
         await using (CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(
                          new ClientOptions(endpoint, root), ct))
         {
-            CMakeWorkflow.Client.HistoryRunPage historyPage = await sdk.History.RunsPageAsync(new(database, Limit: 1), ct);
+            CMakeWorkflow.Client.History.HistoryRunPage historyPage = await sdk.History.RunsPageAsync(new(database, Limit: 1), ct);
             Check(historyPage.SchemaVersion == 1 && historyPage.Items.Count == 1 &&
                   historyPage.Items[0].Id == ownId && historyPage.NextCursor is null,
                 "SDK history keyset page projection");
-            List<CMakeWorkflow.Client.HistoryRun> historyRows = await sdk.History.RunsAsync(new(database, Limit: 1), ct);
+            List<CMakeWorkflow.Client.History.HistoryRun> historyRows = await sdk.History.RunsAsync(new(database, Limit: 1), ct);
             Check(historyRows.Count == 1 && historyRows[0].Id == ownId,
                 "SDK history runs projection or filtering");
-            CMakeWorkflow.Client.HistoryDetail historyDetail = await sdk.History.ShowAsync(new(database, ownId), ct);
+            CMakeWorkflow.Client.History.HistoryDetail historyDetail = await sdk.History.ShowAsync(new(database, ownId), ct);
             Check(historyDetail.Run.Id == ownId, "SDK history detail projection");
             Check((await sdk.History.MetricsAsync(new(database, RunId: ownId), ct)).Count == 0,
                 "SDK history metrics projection");
             Check((await sdk.History.QueryAsync(new(database, Metric: "duration"), ct)).Count == 0,
                 "SDK history query projection");
-            List<CMakeWorkflow.Client.HistoryDifference> historyComparison = await sdk.History.CompareAsync(new(database, ownId, ownId), ct);
+            List<CMakeWorkflow.Client.History.HistoryDifference> historyComparison = await sdk.History.CompareAsync(new(database, ownId, ownId), ct);
             Check(historyComparison.Count == 1 && historyComparison[0].Status == "missing",
                 "SDK history compare projection");
-            CMakeWorkflow.Client.HistoryDetectionReport detected = await sdk.History.DetectAsync(
+            CMakeWorkflow.Client.History.HistoryDetectionReport detected = await sdk.History.DetectAsync(
                 new(database, ownId, ownId, "duration", "higher-worse", 5), ct);
             Check(detected.SchemaVersion == 1, "SDK history detection projection");
         }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using CMakeWorkflow.Core.Processes;
 using CMakeWorkflow.Engine;
 
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.

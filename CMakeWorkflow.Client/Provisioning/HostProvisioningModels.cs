@@ -1,9 +1,7 @@
 using System.Text.Json.Serialization;
 using System.Diagnostics.CodeAnalysis;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Provisioning;
 
 // These are SDK wire DTOs, not references to Host/Tooling assemblies.
 // Enum strings match the Host's AOT-safe JsonStringEnumConverter contracts.

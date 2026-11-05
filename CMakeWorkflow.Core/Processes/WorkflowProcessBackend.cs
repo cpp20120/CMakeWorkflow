@@ -3,9 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Core.Processes;
 
 // A neutral process lifecycle backend. Callers prepare the process and stream
 // destinations; this type only starts, drains, waits for and cleans up the child.

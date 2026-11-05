@@ -1,9 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 // SDK wire projections of CMakeWorkflow.History records. Keep properties/constructors in sync with Host DTOs.
 // Do NOT reference CMakeWorkflow.History from the SDK: that assembly also contains SQLite storage.
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.History;
 
 public sealed record HistoryArtifact(
     string RunId,

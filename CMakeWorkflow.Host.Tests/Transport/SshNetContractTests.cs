@@ -1,4 +1,5 @@
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Toolchains;
 using CMakeWorkflow.Host;
 using Nerdbank.Streams;
 using StreamJsonRpc;

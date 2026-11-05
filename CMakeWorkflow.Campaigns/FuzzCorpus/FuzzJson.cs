@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.Campaigns.FuzzCorpus;
 
 namespace CMakeWorkflow.Campaigns;
 

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using CMakeWorkflow;
+using CMakeWorkflow.Core.Processes;
 
 internal static class WorkflowProcessCleanupTests
 {

@@ -1,6 +1,10 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
+using CMakeWorkflow.Campaigns.FuzzCorpus;
+using CMakeWorkflow.Campaigns.Mutation;
+using CMakeWorkflow.Campaigns.WeakMemory;
+
 namespace CMakeWorkflow.Campaigns;
 
 public static class CampaignCommand

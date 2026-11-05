@@ -1,6 +1,6 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+using CMakeWorkflow.Client.Protocol;
+
+namespace CMakeWorkflow.Client.Provisioning;
 
 /// <summary>Host-side tool inspection and explicit, single-use fix-plan execution.</summary>
 public sealed class HostProvisioningService(CMakeWorkflowClient client)

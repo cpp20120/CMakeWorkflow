@@ -1,4 +1,11 @@
 using System.Text.Json;
+using CMakeWorkflow.Client.Campaigns;
+using CMakeWorkflow.Client.History;
+using CMakeWorkflow.Client.Profiling;
+using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Client.Provisioning;
+using CMakeWorkflow.Client.Recipes;
+using CMakeWorkflow.Client.Toolchains;
 using PolyType;
 using StreamJsonRpc;
 

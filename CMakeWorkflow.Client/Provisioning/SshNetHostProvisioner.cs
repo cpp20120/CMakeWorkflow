@@ -2,9 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Renci.SshNet;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Provisioning;
 
 /// <summary>
 /// Opt-in deployment of an already published Linux Host. Builds a deterministic

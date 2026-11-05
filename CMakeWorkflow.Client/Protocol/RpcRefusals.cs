@@ -2,9 +2,7 @@ using System.Text.Json;
 using StreamJsonRpc;
 using System.Diagnostics.CodeAnalysis;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Protocol;
 
 /// <summary>A stable Host application refusal with a machine-readable code.</summary>
 [SuppressMessage("Design", "CA1032", Justification = "Existing constructors require domain-specific error evidence; generic constructors would create invalid exception state.")]

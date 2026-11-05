@@ -3,6 +3,12 @@ using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.Client.Campaigns;
+using CMakeWorkflow.Client.History;
+using CMakeWorkflow.Client.Profiling;
+using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Client.Provisioning;
+using CMakeWorkflow.Client.Recipes;
 using StreamJsonRpc;
 
 namespace CMakeWorkflow.Client;

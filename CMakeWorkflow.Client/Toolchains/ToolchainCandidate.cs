@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Toolchains;
 
 // Independent SDK models: the client references only Contracts, never Host.
 public sealed record ToolchainCandidate(

@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using StreamJsonRpc;
+using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Client.Recipes;
 
 if (args.Length == 4 && args[0] == "--verify-package")
 {

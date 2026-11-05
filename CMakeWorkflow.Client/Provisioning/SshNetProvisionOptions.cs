@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Provisioning;
 
 /// <summary>Explicit, user-scoped Linux Host installation over authenticated SSH.NET.</summary>
 public sealed record SshNetProvisionOptions(
