@@ -94,6 +94,11 @@ internal static class DurableWorkflowWireTests
                 await Task.Delay(50, wait.Token);
             } while (true);
 
+            var overview = await client.OperationOverviewAsync(new(operationId), ct);
+            Check(overview.IsFinalized && overview.Operation.Kind == "workflow" &&
+                  overview.Nodes.Count == 1 && overview.Nodes[0].Id == "effect" &&
+                  overview.Nodes[0].Status == "succeeded" && overview.ReportSha256 is { Length: 64 },
+                "CMake domain-neutral terminal overview missing verified node state.");
             var found = await client.OperationFindAsync(new(request.ClientRequestId), ct);
             var terminalRetry = await client.WorkflowStartAsync(request, ct);
             Check(found.State == "succeeded" && terminalRetry.State == "succeeded"

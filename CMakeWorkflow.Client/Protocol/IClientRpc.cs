@@ -68,6 +68,27 @@ internal partial interface IClientRpc
     [JsonRpcMethod("dagflow/fuzz/merge")]
     Task<CampaignResult> CampaignFuzzMergeAsync(FuzzMergeCampaignOptions request, CancellationToken ct);
 
+    [JsonRpcMethod("history/runsPage")]
+    Task<HistoryRunPage> HistoryRunsPageAsync(HistoryRunsPageQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/runs")]
+    Task<List<HistoryRun>> HistoryRunsAsync(HistoryRunsQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/show")]
+    Task<HistoryDetail> HistoryShowAsync(HistoryShowQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/metrics")]
+    Task<List<HistoryMeasurement>> HistoryMetricsAsync(HistoryMetricsQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/query")]
+    Task<List<HistoryMeasurement>> HistoryQueryAsync(HistoryMetricsQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/compare")]
+    Task<List<HistoryDifference>> HistoryCompareAsync(HistoryCompareQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/detect")]
+    Task<HistoryDetectionReport> HistoryDetectAsync(HistoryDetectQuery request, CancellationToken ct);
+
     [JsonRpcMethod("history/import")]
     Task<ImportHistoryResult> HistoryImportAsync(ImportHistoryOptions request, CancellationToken ct);
 
@@ -82,6 +103,12 @@ internal partial interface IClientRpc
 
     [JsonRpcMethod("workflow/plan")]
     Task<JsonElement> PlanAsync(PlanRequest request, CancellationToken ct);
+
+    [JsonRpcMethod("operations/list")]
+    Task<OperationPage> ListOperationsAsync(OperationQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("operations/overview")]
+    Task<OperationOverview> OverviewAsync(OpIdRequest request, CancellationToken ct);
 
     [JsonRpcMethod("operations/get")]
     Task<OperationSnapshot> GetAsync(OpIdRequest request, CancellationToken ct);

@@ -288,6 +288,10 @@ internal static class ApplicationTests
         Check(admitted.Revision == 2 && admitted.Decision == "needs_attention", "resume wire CAS admission");
         Check((await client.WorkflowResumeAsync(new(resumeId, 2, true), ct)).Revision == 2,
             "resume wire idempotence");
+        var overview = await client.OperationOverviewAsync(new(resumeId), ct);
+        Check(!overview.IsFinalized && overview.Nodes.Count == 0 &&
+              overview.ReportSha256 is null && overview.Operation.OperationId == resumeId,
+            "Preterminal overview must not project an unverified checkpoint as node evidence");
         var emptyFeed = await client.OperationEventsAsync(new(resumeId, 0, 10), ct);
         Check(emptyFeed.Events.Count == 0 && !emptyFeed.HasMore, "event wire empty feed");
         try
@@ -365,6 +369,31 @@ internal static class ApplicationTests
             File.Move(Path.Combine(outside, "cache.txt"), cache);
         }
 
+        // Public SDK parity: no Host DTO dependency or manually authored JSON-RPC.
+        await using (var sdk = await CMakeWorkflow.Client.CMakeWorkflowClient.ConnectAsync(
+                         new CMakeWorkflow.Client.ClientOptions(endpoint, root), ct))
+        {
+            var historyPage = await sdk.History.RunsPageAsync(new(database, Limit: 1), ct);
+            Check(historyPage.SchemaVersion == 1 && historyPage.Items.Count == 1 &&
+                  historyPage.Items[0].Id == ownId && historyPage.NextCursor is null,
+                "SDK history keyset page projection");
+            var historyRows = await sdk.History.RunsAsync(new(database, Limit: 1), ct);
+            Check(historyRows.Count == 1 && historyRows[0].Id == ownId,
+                "SDK history runs projection or filtering");
+            var historyDetail = await sdk.History.ShowAsync(new(database, ownId), ct);
+            Check(historyDetail.Run.Id == ownId, "SDK history detail projection");
+            Check((await sdk.History.MetricsAsync(new(database, RunId: ownId), ct)).Count == 0,
+                "SDK history metrics projection");
+            Check((await sdk.History.QueryAsync(new(database, Metric: "duration"), ct)).Count == 0,
+                "SDK history query projection");
+            var historyComparison = await sdk.History.CompareAsync(new(database, ownId, ownId), ct);
+            Check(historyComparison.Count == 1 && historyComparison[0].Status == "missing",
+                "SDK history compare projection");
+            var detected = await sdk.History.DetectAsync(
+                new(database, ownId, ownId, "duration", "higher-worse", 5), ct);
+            Check(detected.SchemaVersion == 1, "SDK history detection projection");
+        }
+
         // Read-only API must refuse old schema rather than silently migrate it.
         using (var db = new SqliteConnection($"Data Source={database};Pooling=False"))
         {
@@ -397,6 +426,28 @@ internal static class ApplicationTests
         var byId = await client.OperationGetAsync(new(operationId), ct);
         Check(found == byId && found.OperationId == operationId && found.WorkspaceId == acceptedWorkspaceId
               && found.State == "accepted_not_dispatched" && found.Kind == "workflow", "Operation read DTO mismatch");
+        var listed = await client.OperationListAsync(new(Limit: 1), ct);
+        Check(listed.SchemaVersion == 1 && listed.Items.Count == 1 &&
+              listed.Items[0].OperationId == operationId && listed.Items[0].Kind == "workflow" &&
+              listed.NextCursor is not null,
+            "Operation list RPC result mismatch");
+        var nextListed = await client.OperationListAsync(new(Limit: 1, Cursor: listed.NextCursor), ct);
+        Check(nextListed.Items.Count == 1 && nextListed.Items[0].OperationId != operationId,
+            "Operation list RPC cursor failed to advance");
+        await Refused(() => client.OperationListAsync(new(Limit: 0), ct), "invalid_argument");
+        await Refused(() => client.OperationListAsync(new(Cursor: "malformed"), ct), "invalid_argument");
+        await using (var sdk = await CMakeWorkflow.Client.CMakeWorkflowClient.ConnectAsync(
+                         new CMakeWorkflow.Client.ClientOptions(endpoint, root), ct))
+        {
+            var sdkOverview = await sdk.Operations.GetOverviewAsync(resumeId, ct);
+            Check(!sdkOverview.IsFinalized && sdkOverview.Nodes.Count == 0 &&
+                  sdkOverview.Operation.OperationId == resumeId,
+                "SDK nonterminal overview projection");
+            var sdkPage = await sdk.Operations.ListAsync(new(Limit: 1), ct);
+            Check(sdkPage.Items.Count == 1 && sdkPage.Items[0].OperationId == operationId &&
+                  sdkPage.Items[0].WorkspaceId == acceptedWorkspaceId,
+                "SDK operation listing changed operation identity");
+        }
         await Refused(() => client.OperationGetAsync(new("missing"), ct), "not_found");
         await Refused(() => client.OperationFindAsync(new(""), ct), "invalid_argument");
         using (var secondWire = await LocalTransport.ConnectAsync(endpoint, ct))
@@ -405,6 +456,11 @@ internal static class ApplicationTests
             var second = secondRpc.Attach<IHostRpc>();
             secondRpc.StartListening();
             await second.InitializeAsync(new(1, outside), ct);
+            var empty = await second.OperationListAsync(new(), ct);
+            Check(empty.Items.Count == 0 && empty.NextCursor is null,
+                "Foreign workspace leaked operations");
+            await Refused(() => second.OperationListAsync(new(Cursor: listed.NextCursor), ct),
+                "invalid_argument");
             await Refused(() => second.OperationGetAsync(new(operationId), ct), "not_found");
             await Refused(() => second.OperationFindAsync(new("stable-client-id"), ct), "not_found");
             Check(!Directory.Exists(Path.Combine(outside, ".cmakeworkflow")), "Foreign query created store");

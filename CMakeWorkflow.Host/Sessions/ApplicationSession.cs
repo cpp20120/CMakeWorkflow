@@ -12,10 +12,10 @@ public sealed partial class DoctorSession
     [
         "context/inspect", "target/resolve", "workflow/plan", "runs/get",
         "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
-        "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/cancel",
+        "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/list", "operations/cancel",
         "workflow/start", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
-        "operations/events", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
-        "history/compare", "history/detect", "toolchains/discover", "toolchains/resolve",
+        "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
+        "history/compare", "history/detect", "history/runsPage", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
         "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"
     ];
@@ -165,6 +165,25 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) => OperationEventReplay.ReadAsync(paths, request, ct), cancellationToken);
 
+    public Task<OperationListPage> OperationListAsync(OperationListRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            DurableAcceptanceStore.ValidateListQuery(request);
+            // Listing is read-only. A fresh workspace must not get an SQLite store as a side effect.
+            var storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+            if (!File.Exists(storePath))
+            {
+                if (request.Cursor is not null)
+                    throw new ArgumentException("Cursor does not belong to this workspace.");
+                return Task.FromResult(new OperationListPage(1, [], null));
+            }
+            paths.Database(storePath);
+            using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory, readOnly: true);
+            return Task.FromResult(store.ListOperations(request, ct));
+        }, cancellationToken);
+
     public Task<OperationReference> OperationFindAsync(OperationFindRequest request,
         CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) => LookupOperation(paths, request.ClientRequestId, byRequestId: true, ct),
@@ -194,6 +213,11 @@ public sealed partial class DoctorSession
             accepted.ManifestBaseDirectory));
     }
 
+
+    public Task<OperationOverview> OperationOverviewAsync(OperationGetRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) => OperationOverviewReader.ReadAsync(paths, request.OperationId, ct),
+            cancellationToken);
 
     public Task<WorkflowReportSnapshot> OperationReportAsync(OperationGetRequest request,
         CancellationToken cancellationToken) =>
@@ -261,6 +285,19 @@ public sealed partial class DoctorSession
                         paths.Require(file);
                 });
             return Task.FromResult(result ?? throw new InvalidDataException("Import produced no summary."));
+        }, cancellationToken);
+
+    public Task<CMakeWorkflow.History.HistoryRunPage> HistoryRunsPageAsync(
+        HistoryRunsPageRequest request, CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, ct) =>
+        {
+            if (request.Limit is < 1 or > 200)
+                throw new ArgumentException("limit must be between 1 and 200.");
+            var database = paths.Database(request.DatabasePath);
+            using var db = new HistoryStore(database, readOnly: true);
+            return Task.FromResult(db.RunsPage(database, request.Limit, request.Status,
+                Date(request.Since), Date(request.Until), request.Workflow, request.Variant,
+                request.Cursor, paths.Contains, ct));
         }, cancellationToken);
 
     public Task<List<HistoryRun>> HistoryRunsAsync(HistoryRunsRequest request, CancellationToken cancellationToken) =>

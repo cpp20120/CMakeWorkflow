@@ -68,6 +68,32 @@ if (args.Length > 0 && args[0] == "--workflow-domain-tests")
     }
 }
 
+if (args.Length > 0 && args[0] == "--read-api-wire-tests")
+{
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+    await using var host = new TransportTestHost();
+    await host.ReadyAsync(deadline.Token);
+    await ApplicationTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--operation-query-tests")
+{
+    var queryRoot = Path.Combine(Path.GetTempPath(), "cmwf-operation-query-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(queryRoot);
+    try
+    {
+        OperationListTests.Run(queryRoot);
+        HistoryWireModelParityTests.Run();
+        HistoryRunsPageTests.Run(queryRoot);
+        return;
+    }
+    finally
+    {
+        if (Directory.Exists(queryRoot)) Directory.Delete(queryRoot, recursive: true);
+    }
+}
+
 if (args.Length > 0 && args[0] == "--durable-operation-tests")
 {
     var neutralRoot = Path.Combine(Path.GetTempPath(), "cmwf-neutral-operation-" + Guid.NewGuid().ToString("N"));

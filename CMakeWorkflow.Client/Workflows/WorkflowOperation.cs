@@ -14,6 +14,10 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
     public Task<OperationSnapshot> GetSnapshotAsync(CancellationToken ct = default) =>
         client.Operations.GetAsync(OperationId, ct);
 
+    /// <summary>Read normalized operation/node state, backed by verified terminal evidence.</summary>
+    public Task<OperationOverview> GetOverviewAsync(CancellationToken ct = default) =>
+        client.Operations.GetOverviewAsync(OperationId, ct);
+
     /// <summary>Read the verified terminal report bound to this durable operation on the Host.</summary>
     /// <remarks>Available after finalization, including failed and canceled runs.</remarks>
     public Task<OperationReportSnapshot> GetReportAsync(CancellationToken ct = default)
@@ -71,18 +75,44 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
     public Task<EventPage> ReadEventsAsync(long afterSequence = 0, int limit = 100, CancellationToken ct = default) =>
         client.Proxy.EventsAsync(new(OperationId, afterSequence, limit), ct);
 
+    /// <summary>Replay events from the supplied cursor and follow until terminal finalization.</summary>
+    /// <remarks>Event cursors survive reconnects. RPC failures propagate; no implicit reconnect,
+    /// resubmission or remote cancellation occurs. A terminal state triggers an extra drain of
+    /// the journal, not an assumption that the most recent page was complete.</remarks>
     public async IAsyncEnumerable<JsonElement> WatchEventsAsync(long afterSequence = 0,
         TimeSpan? pollInterval = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        var cursor = afterSequence;
+        if (afterSequence < 0) throw new ArgumentOutOfRangeException(nameof(afterSequence));
         var delay = pollInterval ?? TimeSpan.FromMilliseconds(300);
+        if (delay <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(pollInterval));
+        var cursor = afterSequence;
         while (true)
         {
+            ct.ThrowIfCancellationRequested();
             var page = await ReadEventsAsync(cursor, 100, ct);
+            if (page.NextSequence < cursor || (page.Events.Count > 0 && page.NextSequence <= cursor) ||
+                (page.HasMore && page.Events.Count == 0))
+                throw new InvalidDataException("Non-progressing event cursor from Host.");
             foreach (var evt in page.Events) yield return evt;
             cursor = page.NextSequence;
-            if (page.Events.Count == 0) await Task.Delay(delay, ct);
+            if (page.HasMore || page.Events.Count > 0) continue;
+
+            var operation = await GetSnapshotAsync(ct);
+            if (operation.State is "succeeded" or "failed" or "canceled")
+            {
+                // The journal is published before durable finalization; drain once
+                // again in case the first read raced with the final append.
+                var final = await ReadEventsAsync(cursor, 100, ct);
+                if (final.NextSequence < cursor || (final.Events.Count > 0 && final.NextSequence <= cursor) ||
+                    (final.HasMore && final.Events.Count == 0))
+                    throw new InvalidDataException("Non-progressing final event cursor from Host.");
+                foreach (var evt in final.Events) yield return evt;
+                cursor = final.NextSequence;
+                if (!final.HasMore && final.Events.Count == 0) yield break;
+                continue;
+            }
+            await Task.Delay(delay, ct);
         }
     }
 

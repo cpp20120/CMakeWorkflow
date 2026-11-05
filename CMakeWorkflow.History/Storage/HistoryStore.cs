@@ -1,4 +1,7 @@
 using Microsoft.Data.Sqlite;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace CMakeWorkflow.History;
@@ -296,6 +299,104 @@ public sealed class HistoryStore : IDisposable
         }
 
         return result;
+    }
+
+    /// <summary>Stable keyset traversal of imported runs, without modifying the history database.</summary>
+    /// <remarks>New imports are excluded by the first page's rowid watermark. Deletions or
+    /// updates to existing run rows are not snapshot-isolated across requests.</remarks>
+    public HistoryRunPage RunsPage(string databaseIdentity, int limit, string? status,
+        string? since, string? until, string? workflow, string? variant, string? cursor,
+        Func<string, bool>? includeDirectory = null, CancellationToken ct = default)
+    {
+        if (limit is < 1 or > 200 || string.IsNullOrWhiteSpace(databaseIdentity) ||
+            cursor is { Length: < 1 or > 2048 })
+            throw new ArgumentException("Invalid history page request.");
+        ct.ThrowIfCancellationRequested();
+        var binding = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\0",
+            databaseIdentity, status ?? "", since ?? "", until ?? "", workflow ?? "", variant ?? ""))));
+        long watermark;
+        string? lastStarted = null;
+        string? lastId = null;
+        if (cursor is not null)
+        {
+            try
+            {
+                if (cursor.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+                    throw new FormatException();
+                var input = cursor.Replace('-', '+').Replace('_', '/');
+                var encoded = Convert.FromBase64String(input + new string('=', (4 - input.Length % 4) % 4));
+                var fields = Encoding.UTF8.GetString(encoded).Split('\n');
+                if (fields.Length != 5 || fields[0] != "v1" || fields[1] != binding ||
+                    !long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out watermark) ||
+                    watermark <= 0 || fields[4].Length is < 1 or > 256)
+                    throw new FormatException();
+                lastStarted = fields[3] == "-" ? null : Encoding.UTF8.GetString(
+                    Convert.FromBase64String(fields[3] + new string('=', (4 - fields[3].Length % 4) % 4)));
+                lastId = fields[4];
+            }
+            catch (Exception error) when (error is FormatException or ArgumentException or DecoderFallbackException)
+            {
+                throw new ArgumentException("Invalid or mismatched history page cursor.", nameof(cursor), error);
+            }
+        }
+        else
+        {
+            using var max = db.CreateCommand();
+            max.CommandText = "SELECT COALESCE(MAX(rowid),0) FROM runs;";
+            watermark = (long)max.ExecuteScalar()!;
+        }
+        if (watermark == 0) return new(1, [], null);
+
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json
+            FROM runs
+            WHERE rowid <= $watermark
+              AND ($status IS NULL OR status = $status)
+              AND ($since IS NULL OR started_at >= $since)
+              AND ($until IS NULL OR started_at <= $until)
+              AND ($workflow IS NULL OR workflow LIKE '%' || $workflow || '%')
+              AND ($variant IS NULL OR EXISTS (SELECT 1 FROM measurements m WHERE m.run_id = runs.id AND m.variant = $variant))
+              AND ($lastId IS NULL OR
+                   ($lastStarted IS NULL AND started_at IS NULL AND id > $lastId) OR
+                   ($lastStarted IS NOT NULL AND
+                    (started_at < $lastStarted OR started_at IS NULL OR
+                     (started_at = $lastStarted AND id > $lastId))))
+            ORDER BY started_at DESC, id ASC;
+            """;
+        cmd.Parameters.AddWithValue("$watermark", watermark);
+        cmd.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$since", (object?)since ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$until", (object?)until ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$workflow", (object?)workflow ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$variant", (object?)variant ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$lastId", (object?)lastId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$lastStarted", (object?)lastStarted ?? DBNull.Value);
+
+        var items = new List<HistoryRun>(limit);
+        string? continuationId = null;
+        string? continuationStart = null;
+        bool hasMore = false;
+        using (var reader = cmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (includeDirectory is not null && !includeDirectory(reader.GetString(1))) continue;
+                if (items.Count == limit) { hasMore = true; break; }
+                items.Add(Run(reader));
+                continuationId = reader.GetString(0);
+                continuationStart = reader.IsDBNull(5) ? null : reader.GetString(5);
+            }
+        }
+        if (!hasMore) return new(1, items, null);
+        var startedToken = continuationStart is null ? "-" : Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(continuationStart)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var value = string.Join("\n", "v1", binding,
+            watermark.ToString(CultureInfo.InvariantCulture), startedToken, continuationId);
+        var next = Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=')
+            .Replace('+', '-').Replace('/', '_');
+        return new(1, items, next);
     }
 
     public HistoryDetail Show(string id, Action<string>? validateDirectory = null,

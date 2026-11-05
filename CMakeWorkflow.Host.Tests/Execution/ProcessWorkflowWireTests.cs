@@ -83,6 +83,12 @@ internal static class ProcessWorkflowWireTests
             var terminal = await client.ExecutionStartAsync(request, ct);
             Check(found.OperationId == operationId && terminal.OperationId == operationId &&
                   terminal.State == "succeeded", "Lost-reply recovery/terminal retry failed.");
+            var overview = await client.OperationOverviewAsync(new(operationId), ct);
+            Check(overview.IsFinalized && overview.ReportSha256 is { Length: 64 } &&
+                  overview.Operation.Kind == "process" && overview.Operation.State == "succeeded" &&
+                  overview.Nodes.Count == 1 && overview.Nodes[0].Id == "effect" &&
+                  overview.Nodes[0].Kind == "process" && overview.Nodes[0].Status == "succeeded",
+                "Process domain-neutral terminal overview lost verified node evidence.");
             var report = await client.ExecutionReportAsync(new(operationId), ct);
             Check(report.GetProperty("status").GetString() == "succeeded" &&
                   report.GetProperty("nodes")[0].GetProperty("status").GetString() == "succeeded",
@@ -107,6 +113,17 @@ internal static class ProcessWorkflowWireTests
             Check((await handle.GetSnapshotAsync(ct)).Kind == "process", "SDK lost domain kind.");
             Check((await sdk.Executions.GetReportAsync(operationId, ct)).GetProperty("status")
                   .GetString() == "succeeded", "SDK could not retrieve verified process report.");
+            var overview = await handle.GetOverviewAsync(ct);
+            Check(overview.IsFinalized && overview.Nodes.Single().Id == "effect" &&
+                  overview.Operation.Kind == "process", "SDK operation overview projection failed.");
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                deadline.CancelAfter(TimeSpan.FromSeconds(8));
+                var events = 0;
+                await foreach (var _ in handle.WatchEventsAsync(pollInterval: TimeSpan.FromMilliseconds(20),
+                                   ct: deadline.Token)) ++events;
+                Check(events > 0, "Watching a finalized process operation yielded no replay events.");
+            }
             Check((await handle.ListArtifactsAsync(ct)).Artifacts.Any(x => x.ArtifactId == "report"),
                 "SDK artifact listing is not domain-neutral.");
         }

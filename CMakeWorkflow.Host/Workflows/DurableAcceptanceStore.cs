@@ -307,6 +307,118 @@ public sealed class DurableAcceptanceStore : IDisposable
         return (string?)read.ExecuteScalar() ?? "workflow";
     }
 
+    internal static void ValidateListQuery(OperationListRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Limit is < 1 or > 200 ||
+            (request.State is not null && request.State is not
+                ("accepted_not_dispatched" or "dispatch_authorized" or "cancel_requested" or
+                 "succeeded" or "failed" or "canceled")) ||
+            (request.Domain is not null && (request.Domain.Length is < 1 or > 64 ||
+                request.Domain.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or '-')))) ||
+            (request.Cursor is not null && request.Cursor.Length is < 1 or > 512))
+            throw new ArgumentException("Invalid operation list query.");
+    }
+
+    /// <summary>Read-only keyset traversal of admitted operations, ordered by SQLite rowid descending.</summary>
+    /// <remarks>The first cursor captures an admission high-water mark, not a snapshot of mutable states.
+    /// Cursor tokens are tied to the workspace and exact filters, but are not authorization tokens.</remarks>
+    public OperationListPage ListOperations(OperationListRequest request, CancellationToken ct = default)
+    {
+        ValidateListQuery(request);
+        ct.ThrowIfCancellationRequested();
+        long watermark, before;
+        if (request.Cursor is not null)
+        {
+            (watermark, before) = DecodeOperationCursor(request.Cursor, request.State, request.Domain);
+        }
+        else
+        {
+            using var max = connection.CreateCommand();
+            max.CommandText = "SELECT COALESCE(MAX(rowid), 0) FROM accepted_workflows;";
+            watermark = (long)max.ExecuteScalar()!;
+            before = long.MaxValue;
+        }
+        if (watermark == 0) return new(1, [], null);
+
+        // Legacy databases may not have operation_domains; all their operations are CMake workflows.
+        using var check = connection.CreateCommand();
+        check.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_domains';";
+        var hasDomains = check.ExecuteScalar() is not null;
+        const string effectiveState = "COALESCE(f.terminal_state, CASE WHEN c.operation_id IS NOT NULL THEN 'cancel_requested' ELSE a.state END)";
+        var domain = hasDomains ? "COALESCE(d.domain_kind, 'workflow')" : "'workflow'";
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT a.rowid, a.operation_id, a.request_id, a.manifest_sha256,
+                   a.manifest_base_directory, {effectiveState}, {domain}
+            FROM accepted_workflows a
+            LEFT JOIN operation_finalizations f ON f.operation_id = a.operation_id
+            LEFT JOIN operation_cancellations c ON c.operation_id = a.operation_id
+            {(hasDomains ? "LEFT JOIN operation_domains d ON d.operation_id = a.operation_id" : "")}
+            WHERE a.rowid <= $watermark AND a.rowid < $before
+              AND ($state IS NULL OR {effectiveState} = $state)
+              AND ($domain IS NULL OR {domain} = $domain)
+            ORDER BY a.rowid DESC
+            LIMIT $limit;
+            """;
+        cmd.Parameters.AddWithValue("$watermark", watermark);
+        cmd.Parameters.AddWithValue("$before", before);
+        cmd.Parameters.AddWithValue("$state", (object?)request.State ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$domain", (object?)request.Domain ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$limit", request.Limit + 1);
+        var items = new List<OperationReference>(request.Limit);
+        long lastRowId = 0;
+        bool hasMore = false;
+        using (var reader = cmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (items.Count == request.Limit) { hasMore = true; break; }
+                lastRowId = reader.GetInt64(0);
+                items.Add(new OperationReference(WorkspaceId, reader.GetString(1), reader.GetString(2),
+                    reader.GetString(6), reader.GetString(5), reader.GetString(3), reader.GetString(4)));
+            }
+        }
+        return new(1, items, hasMore
+            ? EncodeOperationCursor(watermark, lastRowId, request.State, request.Domain) : null);
+    }
+
+    private string EncodeOperationCursor(long watermark, long before, string? state, string? domain)
+    {
+        var value = string.Join("|", "v1", WorkspaceId,
+            watermark.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            before.ToString(System.Globalization.CultureInfo.InvariantCulture), state ?? "", domain ?? "");
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=')
+            .Replace('+', '-').Replace('/', '_');
+    }
+
+    private (long Watermark, long Before) DecodeOperationCursor(string cursor, string? state, string? domain)
+    {
+        try
+        {
+            if (cursor.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+                throw new FormatException();
+            var encoded = cursor.Replace('-', '+').Replace('_', '/');
+            var padding = (4 - encoded.Length % 4) % 4;
+            var fields = Encoding.UTF8.GetString(Convert.FromBase64String(encoded + new string('=', padding)))
+                .Split('|');
+            if (fields.Length != 6 || fields[0] != "v1" || fields[1] != WorkspaceId ||
+                fields[4] != (state ?? "") || fields[5] != (domain ?? "") ||
+                !long.TryParse(fields[2], System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var watermark) ||
+                !long.TryParse(fields[3], System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var before) ||
+                watermark < 1 || before < 1 || before > watermark)
+                throw new FormatException();
+            return (watermark, before);
+        }
+        catch (Exception e) when (e is FormatException or ArgumentException or DecoderFallbackException)
+        {
+            throw new ArgumentException("Invalid or mismatched operation list cursor.", nameof(cursor), e);
+        }
+    }
+
     public AcceptedWorkflow? Find(string clientRequestId)
     {
         using var command = connection.CreateCommand();

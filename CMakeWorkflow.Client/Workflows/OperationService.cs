@@ -10,7 +10,21 @@ namespace CMakeWorkflow.Client;
 public sealed class OperationService(CMakeWorkflowClient client)
 {
     /// <summary>Binds an existing operation ID to this connection without submitting or resuming work.</summary>
+    /// <summary>Browse durable operations, newest first. Does not start or resume execution.</summary>
+    public Task<OperationPage> ListAsync(OperationQuery? query = null, CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/list");
+        return client.Proxy.ListOperationsAsync(query ?? new OperationQuery(), ct);
+    }
+
     public WorkflowOperation GetHandle(string operationId) => new(client, operationId);
+
+    /// <summary>Returns one domain-neutral view. Node data requires verified durable finalization.</summary>
+    public Task<OperationOverview> GetOverviewAsync(string operationId, CancellationToken ct = default)
+    {
+        client.RequireCapability("operations/overview");
+        return client.Proxy.OverviewAsync(new(operationId), ct);
+    }
 
     public Task<OperationSnapshot> GetAsync(string operationId, CancellationToken ct = default) =>
         client.Proxy.GetAsync(new(operationId), ct);

@@ -44,6 +44,13 @@ public partial interface IHostRpc
     [JsonRpcMethod("operations/find")]
     Task<OperationReference> OperationFindAsync(OperationFindRequest request, CancellationToken cancellationToken);
 
+    [JsonRpcMethod("operations/list")]
+    Task<OperationListPage> OperationListAsync(OperationListRequest request,
+        CancellationToken cancellationToken);
+
+    [JsonRpcMethod("operations/overview")]
+    Task<OperationOverview> OperationOverviewAsync(OperationGetRequest request, CancellationToken cancellationToken);
+
     [JsonRpcMethod("operations/get")]
     Task<OperationReference> OperationGetAsync(OperationGetRequest request, CancellationToken cancellationToken);
 
@@ -128,6 +135,10 @@ public partial interface IHostRpc
 
     [JsonRpcMethod("history/import")]
     Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request, CancellationToken cancellationToken);
+
+    [JsonRpcMethod("history/runsPage")]
+    Task<CMakeWorkflow.History.HistoryRunPage> HistoryRunsPageAsync(HistoryRunsPageRequest request,
+        CancellationToken cancellationToken);
 
     [JsonRpcMethod("history/runs")]
     Task<List<HistoryRun>> HistoryRunsAsync(HistoryRunsRequest request, CancellationToken cancellationToken);
