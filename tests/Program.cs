@@ -4,10 +4,10 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow"))
+        if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow" or "--process-boundaries"))
         {
             Console.Error.WriteLine(
-                "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli|--workflow]");
+                "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli|--workflow|--process-boundaries]");
             return 2;
         }
 
@@ -23,6 +23,13 @@ internal static class Program
         Environment.SetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB", historyDatabase);
         try
         {
+            if (args.Length == 2 && args[1] == "--process-boundaries")
+            {
+                BoundaryTests.Run();
+                LifecycleTests.Run();
+                Console.WriteLine("All workflow process boundary checks passed.");
+                return 0;
+            }
             if (args.Length == 2 && args[1] == "--workflow")
             {
                 WorkflowTests.Run();

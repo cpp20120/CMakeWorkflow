@@ -1,6 +1,42 @@
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Tooling;
 
+if (args.Length > 0 && args[0] == "--workflow-process-worker")
+{
+    Environment.ExitCode = await WorkflowProcessTestWorker.RunAsync(args[1..]);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--workflow-process-characterization")
+{
+    var processRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-test-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(processRoot);
+    try
+    {
+        await WorkflowProcessCharacterization.RunAsync(processRoot);
+        return;
+    }
+    finally
+    {
+        if (Directory.Exists(processRoot)) Directory.Delete(processRoot, recursive: true);
+    }
+}
+
+if (args.Length > 0 && args[0] == "--workflow-process-backend-tests")
+{
+    var backendRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-backend-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(backendRoot);
+    try
+    {
+        await WorkflowProcessBackendTests.RunAsync(backendRoot);
+        return;
+    }
+    finally
+    {
+        if (Directory.Exists(backendRoot)) Directory.Delete(backendRoot, recursive: true);
+    }
+}
+
 if (args.Length > 0 && args[0] == "--durable-persistence-tests")
 {
     var persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));
