@@ -438,8 +438,20 @@ internal static class WorkflowProcessTestWorker
             case "touch":
                 await File.WriteAllTextAsync(args[1], "started");
                 return 0;
+            case "exit-output":
+                await File.WriteAllTextAsync(args[1], Environment.ProcessId.ToString());
+                Console.Out.WriteLine("gated output");
+                return 0;
+            case "quiet-pid":
+                await File.WriteAllTextAsync(args[1], Environment.ProcessId.ToString());
+                return 0;
             case "wait":
                 await File.WriteAllTextAsync(args[1], "ready");
+                await Task.Delay(Timeout.InfiniteTimeSpan);
+                return 0;
+            case "wait-pid":
+                await File.WriteAllTextAsync(args[1], Environment.ProcessId.ToString());
+                await File.WriteAllTextAsync(args[2], "ready");
                 await Task.Delay(Timeout.InfiniteTimeSpan);
                 return 0;
             case "spawn":
@@ -456,6 +468,24 @@ internal static class WorkflowProcessTestWorker
                 await File.WriteAllTextAsync(args[1], Environment.ProcessId + "|" + child.Id);
                 await child.WaitForExitAsync();
                 return child.ExitCode;
+            }
+            case "spawn-flood":
+            {
+                var childInfo = new ProcessStartInfo(Environment.ProcessPath
+                    ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+                { UseShellExecute = false };
+                foreach (var argument in new[]
+                         {
+                             typeof(WorkflowProcessTestWorker).Assembly.Location,
+                             "--workflow-process-worker", "wait", args[2]
+                         }) childInfo.ArgumentList.Add(argument);
+                using var child = Process.Start(childInfo) ?? throw new Exception("Cannot start worker child.");
+                await File.WriteAllTextAsync(args[1], Environment.ProcessId + "|" + child.Id);
+                while (true)
+                {
+                    Console.Out.WriteLine("stream-output-0123456789");
+                    Console.Error.WriteLine("stream-error-0123456789");
+                }
             }
             default:
                 throw new ArgumentException("Unknown workflow process worker mode: " + args[0]);

@@ -54,6 +54,57 @@ internal static class WorkflowProcessBackendTests
         if (failed.ExitCode is not null || failed.StartError is not System.ComponentModel.Win32Exception and not IOException)
             throw new Exception("Neutral backend did not return the original process-start failure.");
 
+        var exitedMarker = Path.Combine(outputDirectory, "quiet-child-exited");
+        var quietStart = new ProcessStartInfo(Environment.ProcessPath
+            ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+        {
+            UseShellExecute = false,
+            WorkingDirectory = outputDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in new[]
+                 {
+                     typeof(WorkflowProcessBackendTests).Assembly.Location,
+                     "--workflow-process-worker", "quiet-pid", exitedMarker
+                 }) quietStart.ArgumentList.Add(argument);
+        await using var quietStdout = new QuietChildExitBarrier(exitedMarker);
+        await using var quietStderr = new MemoryStream();
+        TimeSpan? quietDuration = null;
+        var quietExecution = Task.Run(() => WorkflowProcessBackend.RunAsync(
+            new WorkflowProcessBackend.Specification(quietStart, quietStdout, quietStderr),
+            CancellationToken.None, null, elapsed => quietDuration = elapsed));
+        var quietOutcome = await quietExecution.WaitAsync(TimeSpan.FromSeconds(10));
+        if (quietOutcome.StartError is not null || quietOutcome.ExitCode != 0 || quietDuration is null
+            || quietStdout.Length != 0 || quietStderr.Length != 0)
+            throw new Exception("Immediate empty child did not complete both redirected pumps cleanly.");
+
         Console.WriteLine("Neutral workflow process backend direct checks passed.");
+    }
+
+    private sealed class QuietChildExitBarrier(string pidPath) : MemoryStream
+    {
+        public override bool CanWrite
+        {
+            get
+            {
+                var timeout = Stopwatch.StartNew();
+                while (timeout.Elapsed < TimeSpan.FromSeconds(8))
+                {
+                    if (File.Exists(pidPath) && int.TryParse(File.ReadAllText(pidPath), out var pid))
+                    {
+                        try
+                        {
+                            using var child = Process.GetProcessById(pid);
+                            if (child.HasExited) return base.CanWrite;
+                        }
+                        catch (ArgumentException) { return base.CanWrite; }
+                    }
+                    Thread.Sleep(10);
+                }
+                throw new TimeoutException("Quiet process did not exit before stdout pump setup.");
+            }
+        }
     }
 }

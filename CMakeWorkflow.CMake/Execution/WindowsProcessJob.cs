@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
 namespace CMakeWorkflow;
@@ -39,9 +40,10 @@ internal sealed class WindowsProcessJob : IDisposable
             }
             return job;
         }
-        catch
+        catch (Exception attachError)
         {
             // Fail closed: a process we cannot supervise must not keep running.
+            var failures = new List<Exception> { attachError };
             try
             {
                 process.Kill(entireProcessTree: true);
@@ -49,9 +51,16 @@ internal sealed class WindowsProcessJob : IDisposable
             catch (InvalidOperationException) when (process.HasExited)
             {
             }
+            catch (Exception killError)
+            {
+                failures.Add(killError);
+            }
 
-            job.Dispose();
-            throw;
+            try { job.Dispose(); }
+            catch (Exception disposeError) { failures.Add(disposeError); }
+
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(attachError).Throw();
+            throw new AggregateException("Process supervision attachment and cleanup failed.", failures);
         }
     }
 
