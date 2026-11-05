@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CMakeWorkflow.Engine;
 
 namespace CMakeWorkflow;
 
@@ -153,7 +154,6 @@ public static class WorkflowRunner
         var states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
         var sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
             .ToDictionary(p => p, _ => new BuildContextSession(), WorkflowPlanner.PathComparer);
-        var remaining = plan.Nodes.Where(n => states[n.Definition.Id].Status != "succeeded").ToList();
         if (resume)
         {
             // Restore per-tree session admission state from the verified observations.
@@ -168,7 +168,6 @@ public static class WorkflowRunner
             }
         }
 
-        var active = new Dictionary<string, (PlannedNode Node, Task<NodeResult> Task)>(StringComparer.Ordinal);
         BuildTreeOwnership? ownership = null;
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var events = new WorkflowEventJournal(output, eventsToStdout, resume ? report : null);
@@ -180,108 +179,88 @@ public static class WorkflowRunner
             if (mutationTrees.Length != 0 && !resume)
                 ownership = await BuildTreeOwnership.AcquireAsync(mutationTrees, stop.Token);
 
-            while (remaining.Count > 0 || active.Count > 0)
-            {
-                if (report.Nodes.Any(n => n.Status == "needs_attention") && active.Count == 0)
-                    break;
-                foreach (var node in remaining.ToArray())
+            // The engine owns ready/active admission; CMake owns persistence,
+            // resource identity, node execution and authoritative report states.
+            var executionPlan = new ExecutionPlan<PlannedNode>(plan.Nodes.Select(node =>
+                new ExecutionNode<PlannedNode>(node.Definition.Id, node.Dependencies,
+                    node.Definition.Exclusive, node)).ToArray());
+            await ExecutionScheduler.RunAsync(executionPlan, jobs, ct, stop,
+                new ExecutionSchedulerHooks<PlannedNode, NodeResult, bool>
                 {
-                    var state = states[node.Definition.Id];
-                    if (ct.IsCancellationRequested)
+                    GetStatus = id => states[id].Status switch
                     {
+                        "succeeded" => ExecutionStatus.Succeeded,
+                        "failed" => ExecutionStatus.Failed,
+                        "blocked" => ExecutionStatus.Blocked,
+                        "canceled" => ExecutionStatus.Canceled,
+                        "needs_attention" => ExecutionStatus.NeedsAttention,
+                        "outcome_unknown" => ExecutionStatus.OutcomeUnknown,
+                        "running" => ExecutionStatus.Running,
+                        _ => ExecutionStatus.Pending
+                    },
+                    Conflicts = (left, right) => Conflicts(left.Payload, right.Payload),
+                    MarkCanceled = item =>
+                    {
+                        var state = states[item.Id];
                         state.Status = "canceled";
                         state.Error = "Workflow canceled before this node started.";
-                        remaining.Remove(node);
-                    }
-                    else if (node.Dependencies.Any(d => states[d].Status is "failed" or "blocked" or "canceled"))
+                    },
+                    MarkBlocked = item =>
                     {
+                        var state = states[item.Id];
                         state.Status = "blocked";
                         state.Error = "A prerequisite did not succeed.";
-                        remaining.Remove(node);
-                    }
-                }
-
-                var ready = remaining.Where(n => n.Dependencies.All(d => states[d].Status == "succeeded")).ToArray();
-                var exclusive = ready.FirstOrDefault(n => n.Definition.Exclusive);
-                // Once an exclusive node is ready, drain existing work before starting it.
-                var candidates = exclusive is not null ? new[] { exclusive } : ready;
-                // Reserve admission slots before launching anything. A persisted `running`
-                // state is the write-ahead intent: after a crash its outcome is unknown.
-                var dispatch = new List<(PlannedNode Node, bool Snapshot)>();
-                foreach (var node in candidates)
-                {
-                    if (ct.IsCancellationRequested || active.Count + dispatch.Count >= jobs ||
-                        report.Nodes.Any(n => n.Status == "needs_attention")) break;
-                    if (active.Values.Any(a => Conflicts(node, a.Node)) ||
-                        dispatch.Any(a => Conflicts(node, a.Node))) continue;
-                    await RecoveryFaults.HitAsync("before-dispatch", node.Definition.Id, ct);
-                    var state = states[node.Definition.Id];
-                    state.Status = "running";
-                    state.StartedAt = DateTimeOffset.UtcNow;
-                    var logStem = LogStem(report, node.Definition.Id);
-                    state.Stdout = logStem + ".stdout.log";
-                    state.Stderr = logStem + ".stderr.log";
-                    remaining.Remove(node);
-                    Console.Error.WriteLine($"[CMakeWorkflow] START {node.Definition.Id}");
-                    // Execution works on a separate record; report snapshots are written
-                    // only by the scheduler, never concurrently with worker mutations.
-                    // Snapshot bytes only for builds that have a selected dependent run.
-                    // Build-only workflows need not hash potentially large binaries.
-                    var snapshot = node.Definition.Kind == "build" && plan.Nodes.Any(p =>
-                        p.Definition.Kind is "run" or "profile" && p.Definition.From == node.Definition.Id);
-                    dispatch.Add((node, snapshot));
-                }
-
-                await SaveAsync(report, output, events);
-                // The optional host-owned dispatch gate runs only after the runner's
-                // write-ahead checkpoint is durably committed, and strictly before
-                // any selected node starts an external process. CLI runs have no gate.
-                if (dispatch.Count != 0 && beforeExternalDispatch is not null)
-                    await beforeExternalDispatch(output, stop.Token);
-                foreach (var (node, snapshot) in dispatch)
-                {
-                    await RecoveryFaults.HitAsync("after-checkpoint", node.Definition.Id, ct);
-                    var sources = node.Definition.Inputs.Where(x => x.From is not null)
-                        .Select(x => x.From!).Distinct(StringComparer.Ordinal)
-                        .ToDictionary(id => id, id => states[id], StringComparer.Ordinal);
-                    active.Add(node.Definition.Id, (node, CMakeWorkflowNodeExecutor.ExecuteAsync(node,
-                        node.Definition.From is { } source ? states[source] : null,
-                        snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, node.Definition.Id),
-                        stop.Token, extension,
-                        toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources)));
-                }
-
-                if (active.Count == 0)
-                {
-                    if (report.Nodes.Any(n => n.Status == "needs_attention")) break;
-                    if (remaining.Count > 0)
-                        throw new InvalidOperationException("No schedulable workflow node.");
-                    break;
-                }
-
-                await Task.WhenAny(active.Values.Select(a => a.Task));
-                foreach (var pair in active.Where(p => p.Value.Task.IsCompleted).ToArray())
-                {
-                    var result = await pair.Value.Task;
-                    await RecoveryFaults.HitAsync("after-execution", pair.Key, ct);
-                    states[pair.Key] = result;
-                    report.Nodes[report.Nodes.FindIndex(n => n.Id == pair.Key)] = result;
-                    active.Remove(pair.Key);
-                    if (result.Status == "needs_attention")
+                    },
+                    BeforeReserve = (item, token) => RecoveryFaults.HitAsync("before-dispatch", item.Id, token),
+                    Reserve = item =>
                     {
-                        report.Findings.Add(new WorkflowFinding("TOOL_EXECUTABLE_MISSING", "error", pair.Key,
-                            result.Error ?? "Required executable is unavailable.",
-                            result.Kind == "ctest" ? ["cmake"] : ["native"]));
-                        // Independent work already launched is allowed to complete; no
-                        // additional nodes start after this finding.
-                    }
+                        var node = item.Payload;
+                        var state = states[item.Id];
+                        state.Status = "running";
+                        state.StartedAt = DateTimeOffset.UtcNow;
+                        var logStem = LogStem(report, item.Id);
+                        state.Stdout = logStem + ".stdout.log";
+                        state.Stderr = logStem + ".stderr.log";
+                        Console.Error.WriteLine($"[CMakeWorkflow] START {item.Id}");
+                        // Preserve the existing snapshot policy: only builds with
+                        // a selected dependent run or profile hash the executable.
+                        return node.Definition.Kind == "build" && plan.Nodes.Any(p =>
+                            p.Definition.Kind is "run" or "profile" && p.Definition.From == item.Id);
+                    },
+                    PersistCheckpoint = () => SaveAsync(report, output, events),
+                    ConfirmDispatch = beforeExternalDispatch is null
+                        ? null : token => beforeExternalDispatch(output, token),
+                    BeforeExecute = (item, token) => RecoveryFaults.HitAsync("after-checkpoint", item.Id, token),
+                    Execute = (item, snapshot, token) =>
+                    {
+                        var node = item.Payload;
+                        var sources = node.Definition.Inputs.Where(x => x.From is not null)
+                            .Select(x => x.From!).Distinct(StringComparer.Ordinal)
+                            .ToDictionary(id => id, id => states[id], StringComparer.Ordinal);
+                        return CMakeWorkflowNodeExecutor.ExecuteAsync(node,
+                            node.Definition.From is { } source ? states[source] : null,
+                            snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, item.Id),
+                            token, extension,
+                            toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources);
+                    },
+                    AfterExecute = (item, token) => RecoveryFaults.HitAsync("after-execution", item.Id, token),
+                    Complete = (item, result) =>
+                    {
+                        states[item.Id] = result;
+                        report.Nodes[report.Nodes.FindIndex(n => n.Id == item.Id)] = result;
+                        if (result.Status == "needs_attention")
+                        {
+                            report.Findings.Add(new WorkflowFinding("TOOL_EXECUTABLE_MISSING", "error", item.Id,
+                                result.Error ?? "Required executable is unavailable.",
+                                result.Kind == "ctest" ? ["cmake"] : ["native"]));
+                        }
 
-                    Console.Error.WriteLine($"[CMakeWorkflow] {result.Status.ToUpperInvariant()} {pair.Key}" +
-                                            (result.Error is null ? "" : $": {result.Error}"));
-                }
-
-                await SaveAsync(report, output, events);
-            }
+                        Console.Error.WriteLine($"[CMakeWorkflow] {result.Status.ToUpperInvariant()} {item.Id}" +
+                                                (result.Error is null ? "" : $": {result.Error}"));
+                    },
+                    DrainInFlight = (item, result) =>
+                        report.Nodes[report.Nodes.FindIndex(n => n.Id == item.Id)] = result
+                });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -300,14 +279,9 @@ public static class WorkflowRunner
         }
         finally
         {
-            // On report/IO failures, never leave launched processes or tree locks behind.
+            // The engine drains admitted workers before this domain lease is released.
+            // Cancel even if mutation-tree ownership failed before entering the engine.
             await stop.CancelAsync();
-            foreach (var pair in active)
-            {
-                var result = await pair.Value.Task;
-                report.Nodes[report.Nodes.FindIndex(n => n.Id == pair.Key)] = result;
-            }
-
             ownership?.Dispose();
         }
 

@@ -89,6 +89,12 @@ if (args.Length > 0 && args[0] == "--durable-persistence-tests")
     }
 }
 
+if (args.Length > 0 && args[0] == "--execution-engine-tests")
+{
+    await NeutralExecutionSchedulerTests.RunAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--workflow-dag-tests")
 {
     await WorkflowDagTests.RunAsync();

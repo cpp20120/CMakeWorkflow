@@ -7,10 +7,15 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="CommandExecution.cs" />
+        <Compile Include="Execution/*.cs" />
 
         <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj" />
     </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CMakeWorkflow.CMake" />
+    <InternalsVisibleTo Include="CMakeWorkflow.Host.Tests" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="CommandResult.cs" />
     <Compile Include="IWorkflowOperationExecutor.cs" />
