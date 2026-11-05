@@ -18,12 +18,12 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task DependentGraphAndGateAsync()
     {
-        var events = new List<string>();
-        var nodes = new[]
-        {
+        List<string> events = [];
+        ExecutionNode<string>[] nodes =
+        [
             Node("prepare"), Node("run", "prepare"), Node("verify", "run")
-        };
-        var states = await ExecuteAsync(nodes, events, _ => ExecutionStatus.Succeeded, jobs: 2);
+        ];
+        Dictionary<string, ExecutionStatus> states = await ExecuteAsync(nodes, events, _ => ExecutionStatus.Succeeded, jobs: 2);
         Check(states.Values.All(s => s == ExecutionStatus.Succeeded), "dependent graph must succeed");
         Equal(["reserve:prepare", "reserve:run", "reserve:verify"],
             events.Where(e => e.StartsWith("reserve:", StringComparison.Ordinal)),
@@ -36,8 +36,8 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task ParallelBatchAsync()
     {
-        var events = new List<string>();
-        var states = await ExecuteAsync([Node("first"), Node("second")], events,
+        List<string> events = [];
+        Dictionary<string, ExecutionStatus> states = await ExecuteAsync([Node("first"), Node("second")], events,
             _ => ExecutionStatus.Succeeded, jobs: 2);
         Check(states.Values.All(s => s == ExecutionStatus.Succeeded), "independent batch must succeed");
         Equal(["reserve:first", "reserve:second"],
@@ -52,9 +52,9 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task ExclusiveAndConflictAsync()
     {
-        var events = new List<string>();
-        var nodes = new[] { Node("alpha"), Node("beta"), Node("exclusive", exclusive: true) };
-        var states = await ExecuteAsync(nodes, events, _ => ExecutionStatus.Succeeded, jobs: 2,
+        List<string> events = [];
+        ExecutionNode<string>[] nodes = [Node("alpha"), Node("beta"), Node("exclusive", exclusive: true)];
+        Dictionary<string, ExecutionStatus> states = await ExecuteAsync(nodes, events, _ => ExecutionStatus.Succeeded, jobs: 2,
             conflict: (left, right) => (left == "alpha" && right == "beta") ||
                                        (left == "beta" && right == "alpha"));
         Check(states.Values.All(s => s == ExecutionStatus.Succeeded), "resource-conflict graph must succeed");
@@ -65,8 +65,8 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task FailureBlocksDependentAsync()
     {
-        var events = new List<string>();
-        var states = await ExecuteAsync([Node("fail"), Node("blocked", "fail"), Node("unrelated")],
+        List<string> events = [];
+        Dictionary<string, ExecutionStatus> states = await ExecuteAsync([Node("fail"), Node("blocked", "fail"), Node("unrelated")],
             events, id => id == "fail" ? ExecutionStatus.Failed : ExecutionStatus.Succeeded, jobs: 2);
         Check(states["fail"] == ExecutionStatus.Failed &&
               states["blocked"] == ExecutionStatus.Blocked &&
@@ -76,8 +76,8 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task NeedsAttentionStopsAdmissionAsync()
     {
-        var events = new List<string>();
-        var states = await ExecuteAsync(
+        List<string> events = [];
+        Dictionary<string, ExecutionStatus> states = await ExecuteAsync(
             [Node("missing"), Node("independent"), Node("downstream", "independent")],
             events, id => id == "missing" ? ExecutionStatus.NeedsAttention : ExecutionStatus.Succeeded,
             jobs: 2);
@@ -90,12 +90,12 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task FailedCheckpointBlocksDispatchAsync()
     {
-        var events = new List<string>();
+        List<string> events = [];
         try
         {
-            await ExecuteAsync([Node("unsafe")], events, _ => ExecutionStatus.Succeeded,
+            _ = await ExecuteAsync([Node("unsafe")], events, _ => ExecutionStatus.Succeeded,
                 jobs: 1, failOnCheckpoint: true);
-            throw new Exception("Expected checkpoint failure.");
+            throw new System.Diagnostics.UnreachableException("Expected checkpoint failure.");
         }
         catch (IOException error) when (error.Message == "injected checkpoint failure")
         {
@@ -108,12 +108,12 @@ internal static class NeutralExecutionSchedulerTests
 
     private static async Task FaultDrainsActiveTasksAsync()
     {
-        var events = new List<string>();
+        List<string> events = [];
         try
         {
-            await ExecuteAsync([Node("left"), Node("right")], events,
+            _ = await ExecuteAsync([Node("left"), Node("right")], events,
                 _ => ExecutionStatus.Succeeded, jobs: 2, failAfterExecution: true);
-            throw new Exception("Expected injected post-execution failure.");
+            throw new System.Diagnostics.UnreachableException("Expected injected post-execution failure.");
         }
         catch (InvalidOperationException error) when (error.Message == "injected post-execution failure")
         {
@@ -131,12 +131,12 @@ internal static class NeutralExecutionSchedulerTests
         Func<string, string, bool>? conflict = null, bool failOnCheckpoint = false,
         bool failAfterExecution = false)
     {
-        var states = nodes.ToDictionary(n => n.Id, _ => ExecutionStatus.Pending, StringComparer.Ordinal);
-        var committed = false;
-        var authorized = false;
-        using var stop = new CancellationTokenSource();
+        Dictionary<string, ExecutionStatus> states = nodes.ToDictionary(n => n.Id, _ => ExecutionStatus.Pending, StringComparer.Ordinal);
+        bool committed = false;
+        bool authorized = false;
+        using CancellationTokenSource stop = new();
         await ExecutionScheduler.RunAsync(new ExecutionPlan<string>(nodes), jobs,
-            CancellationToken.None, stop,
+stop,
             new ExecutionSchedulerHooks<string, ExecutionStatus, string>
             {
                 GetStatus = id => states[id],
@@ -157,7 +157,10 @@ internal static class NeutralExecutionSchedulerTests
                     committed = false;
                     authorized = false;
                     if (failOnCheckpoint)
+                    {
                         throw new IOException("injected checkpoint failure");
+                    }
+
                     committed = true;
                     return Task.CompletedTask;
                 },
@@ -185,18 +188,23 @@ internal static class NeutralExecutionSchedulerTests
                     events.Add("drain:" + node.Id);
                     states[node.Id] = result;
                 }
-            });
+            }, cancellation: CancellationToken.None);
         return states;
     }
 
     private static void Equal(IEnumerable<string> expected, IEnumerable<string> actual, string message)
     {
         if (!expected.SequenceEqual(actual))
-            throw new Exception($"{message}: expected {string.Join(",", expected)}, got {string.Join(",", actual)}");
+        {
+            throw new System.Diagnostics.UnreachableException($"{message}: expected {string.Join(",", expected)}, got {string.Join(",", actual)}");
+        }
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception("Neutral Execution Engine: " + message);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException("Neutral Execution Engine: " + message);
+        }
     }
 }

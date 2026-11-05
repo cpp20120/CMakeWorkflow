@@ -1,16 +1,17 @@
-using System.Diagnostics;
-using Microsoft.Win32;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
 public static class WindowsDevelopmentDoctor
 {
     public static IReadOnlyList<HostFinding> Inspect(HostRequirements requirements, IWindowsDevelopmentProbe probe)
     {
-        var findings = new List<HostFinding>();
+        ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(requirements);
+        List<HostFinding> findings = [];
         if (requirements.RequireWindowsMsvc)
         {
-            var path = probe.MsvcToolset();
+            string? path = probe.MsvcToolset();
             findings.Add(new("windows_msvc", path is null ? "missing" : "ready", path,
                 "Visual Studio C++ x64 toolset",
                 "Install the Desktop development with C++ workload (MSVC component)."));
@@ -18,7 +19,7 @@ public static class WindowsDevelopmentDoctor
 
         if (requirements.RequireWindowsSdk)
         {
-            var path = probe.WindowsSdk();
+            string? path = probe.WindowsSdk();
             findings.Add(new("windows_sdk", path is null ? "missing" : "ready", path,
                 "Windows SDK with x64 tools",
                 "Install Windows 10/11 SDK through Visual Studio Installer or standalone SDK."));
@@ -26,7 +27,7 @@ public static class WindowsDevelopmentDoctor
 
         if (requirements.RequireWindowsWpr)
         {
-            var path = probe.WindowsPerformanceRecorder();
+            string? path = probe.WindowsPerformanceRecorder();
             findings.Add(new("windows_wpr", path is null ? "missing" : "ready", path,
                 "Windows Performance Recorder",
                 "Install Windows Performance Toolkit from the Windows ADK; discovery does not prove ETW trace privileges."));

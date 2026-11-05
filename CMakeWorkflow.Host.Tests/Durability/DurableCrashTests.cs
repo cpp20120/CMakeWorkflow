@@ -10,24 +10,32 @@ internal static class DurableCrashTests
     // not implemented using timing or polling of an internal state transition.
     public static async Task WorkerAsync(string[] args)
     {
-        if (args.Length != 9) throw new ArgumentException("Invalid fault worker arguments.");
-        var workspace = args[1];
-        var operationId = args[2];
-        var requestId = args[3];
-        var manifest = args[4];
-        var hash = args[5];
-        var output = args[6];
-        var barrier = args[7];
-        var signal = args[8];
-        await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, operationId,
+        if (args.Length != 9)
+        {
+            throw new ArgumentException("Invalid fault worker arguments.");
+        }
+
+        string workspace = args[1];
+        string operationId = args[2];
+        string requestId = args[3];
+        string manifest = args[4];
+        string hash = args[5];
+        string output = args[6];
+        string barrier = args[7];
+        string signal = args[8];
+        _ = await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, operationId,
             requestId, manifest, hash, 1, output, CancellationToken.None,
             async (stage, ct) =>
             {
-                if (stage != barrier) return;
+                if (stage != barrier)
+                {
+                    return;
+                }
+
                 await File.WriteAllTextAsync(signal, stage, ct);
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             });
-        throw new Exception("Fault worker unexpectedly completed.");
+        throw new UnreachableException("Fault worker unexpectedly completed.");
     }
 
     public static async Task RunAsync(string parent)
@@ -38,93 +46,124 @@ internal static class DurableCrashTests
             return;
         }
 
-        foreach (var stage in new[] { "authorized", "checkpoint", "effect" })
+        foreach (string? stage in new[] { "authorized", "checkpoint", "effect" })
         {
-            var workspace = Path.Combine(parent, "durable-sigkill-" + stage + "-" + Guid.NewGuid().ToString("N"));
-            var source = Path.Combine(workspace, "src");
-            var build = Path.Combine(workspace, "build");
-            var output = Path.Combine(workspace, "results");
-            Directory.CreateDirectory(source);
-            Directory.CreateDirectory(build);
-            var marker = Path.Combine(source, "effects.txt");
+            string workspace = Path.Combine(parent, "durable-sigkill-" + stage + "-" + Guid.NewGuid().ToString("N"));
+            string source = Path.Combine(workspace, "src");
+            string build = Path.Combine(workspace, "build");
+            string output = Path.Combine(workspace, "results");
+            _ = Directory.CreateDirectory(source);
+            _ = Directory.CreateDirectory(build);
+            string marker = Path.Combine(source, "effects.txt");
             await File.WriteAllTextAsync(Path.Combine(source, "effect.cmake"),
                 "file(APPEND \"${CMAKE_CURRENT_LIST_DIR}/effects.txt\" \"effect\\n\")\n" +
                 (stage == "effect" ? "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E sleep 20)\n" : ""));
             await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"),
                 "cmake_minimum_required(VERSION 3.26)\nproject(crash NONE)\n" +
                 "add_custom_target(effect COMMAND \"${CMAKE_COMMAND}\" -P \"${CMAKE_CURRENT_SOURCE_DIR}/effect.cmake\")\n");
-            var query = Path.Combine(build, ".cmake", "api", "v1", "query");
-            Directory.CreateDirectory(query);
+            string query = Path.Combine(build, ".cmake", "api", "v1", "query");
+            _ = Directory.CreateDirectory(query);
             await File.WriteAllTextAsync(Path.Combine(query, "codemodel-v2"), "");
             await ProcessOk("cmake", ["-S", source, "-B", build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Debug"]);
-            var manifest = Path.Combine(workspace, "workflow.json");
-            var doc = JsonNode.Parse("""
+            string manifest = Path.Combine(workspace, "workflow.json");
+            JsonNode doc = JsonNode.Parse("""
                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
                                      """)!;
             doc["contexts"]!["w"]!["buildDirectory"] = build;
-            var bytes = Encoding.UTF8.GetBytes(doc.ToJsonString());
+            byte[] bytes = Encoding.UTF8.GetBytes(doc.ToJsonString());
             await File.WriteAllBytesAsync(manifest, bytes);
-            var hash = Convert.ToHexString(SHA256.HashData(bytes));
-            var requestId = "fault-" + stage;
+            string hash = Convert.ToHexString(SHA256.HashData(bytes));
+            string requestId = "fault-" + stage;
             string operationId;
-            using (var store = new DurableAcceptanceStore(workspace))
+            using (DurableAcceptanceStore store = new(workspace))
+            {
                 operationId = store.Accept(requestId, manifest, hash, 1, output).OperationId;
-            var signal = stage == "effect" ? marker : Path.Combine(workspace, "fault-signal");
-            var testAssembly = typeof(DurableCrashTests).Assembly.Location;
-            var psi = new ProcessStartInfo("dotnet")
+            }
+
+            string signal = stage == "effect" ? marker : Path.Combine(workspace, "fault-signal");
+            string testAssembly = typeof(DurableCrashTests).Assembly.Location;
+            ProcessStartInfo psi = new("dotnet")
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            foreach (var arg in new[]
+            foreach (string? arg in new[]
                      {
                          testAssembly, "--durable-fault-worker", workspace, operationId,
                          requestId, manifest, hash, output, stage, signal
-                     }) psi.ArgumentList.Add(arg);
-            using var child = Process.Start(psi) ?? throw new Exception("Cannot start fault worker.");
+                     })
+            {
+                psi.ArgumentList.Add(arg);
+            }
+
+            using Process child = Process.Start(psi) ?? throw new UnreachableException("Cannot start fault worker.");
             try
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+                using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
+#pragma warning restore CA2000
+
                 while (!File.Exists(signal))
                 {
                     if (child.HasExited)
-                        throw new Exception(
+                    {
+                        throw new UnreachableException(
                             $"Fault worker exited {child.ExitCode}: {await child.StandardError.ReadToEndAsync()}");
+                    }
+
                     await Task.Delay(25, deadline.Token);
                 }
 
                 if (stage != "effect" && await File.ReadAllTextAsync(signal) != stage)
-                    throw new Exception("Wrong fault boundary reached.");
+                {
+                    throw new UnreachableException("Wrong fault boundary reached.");
+                }
+
                 child.Kill(entireProcessTree: true); // SIGKILL on Linux, no graceful disposal
                 await child.WaitForExitAsync();
-                using (var reopened = new DurableAcceptanceStore(workspace, readOnly: true))
+                using (DurableAcceptanceStore reopened = new(workspace, readOnly: true))
                 {
-                    var state = reopened.Get(operationId)?.State;
-                    if (state != "dispatch_authorized") throw new Exception($"Crash lost authorization: {state}");
-                    var checkpoint = reopened.GetDispatchCheckpoint(operationId);
+                    string? state = reopened.Get(operationId)?.State;
+                    if (state != "dispatch_authorized")
+                    {
+                        throw new UnreachableException($"Crash lost authorization: {state}");
+                    }
+
+                    (string RunDirectory, string CheckpointSha256)? checkpoint = reopened.GetDispatchCheckpoint(operationId);
                     if ((checkpoint is not null) != (stage != "authorized"))
-                        throw new Exception("Checkpoint visibility violates crash boundary.");
+                    {
+                        throw new UnreachableException("Checkpoint visibility violates crash boundary.");
+                    }
+
                     if (reopened.Find(requestId)?.OperationId != operationId)
-                        throw new Exception("Crash lost deduplication identity.");
+                    {
+                        throw new UnreachableException("Crash lost deduplication identity.");
+                    }
                 }
 
                 if (File.Exists(marker) != (stage == "effect"))
-                    throw new Exception("Unexpected external effect at fault boundary.");
+                {
+                    throw new UnreachableException("Unexpected external effect at fault boundary.");
+                }
+
                 try
                 {
-                    await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, operationId, requestId,
+                    _ = await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, operationId, requestId,
                         manifest, hash, 1, output, CancellationToken.None);
-                    throw new Exception("Restart caused duplicate dispatch.");
+                    throw new UnreachableException("Restart caused duplicate dispatch.");
                 }
                 catch (InvalidOperationException e) when (e.Message.StartsWith("operation_already_authorized",
                                                               StringComparison.Ordinal))
                 {
                 }
 
-                if (stage == "effect" ? File.ReadAllLines(marker).Length != 1 : File.Exists(marker))
-                    throw new Exception("Retry executed external effect.");
+                if (stage == "effect" ? (await File.ReadAllLinesAsync(marker, CancellationToken.None)).Length != 1 : File.Exists(marker))
+                {
+                    throw new UnreachableException("Retry executed external effect.");
+                }
             }
             finally
             {
@@ -142,24 +181,36 @@ internal static class DurableCrashTests
 
     private static async Task ProcessOk(string executable, string[] args)
     {
-        var psi = new ProcessStartInfo(executable)
-            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
-        using var child = Process.Start(psi) ?? throw new Exception("Unable to configure fixture.");
-        var stdout = child.StandardOutput.ReadToEndAsync();
-        var stderr = child.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        ProcessStartInfo psi = new(executable)
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string arg in args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using Process child = Process.Start(psi) ?? throw new UnreachableException("Unable to configure fixture.");
+        Task<string> stdout = child.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = child.StandardError.ReadToEndAsync();
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
         try
         {
             await child.WaitForExitAsync(timeout.Token);
         }
         catch
         {
-            if (!child.HasExited) child.Kill(entireProcessTree: true);
+            if (!child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+            }
+
             throw;
         }
 
-        if (child.ExitCode != 0) throw new Exception($"Configure failed: {await stdout} {await stderr}");
-        await Task.WhenAll(stdout, stderr);
+        if (child.ExitCode != 0)
+        {
+            throw new UnreachableException($"Configure failed: {await stdout} {await stderr}");
+        }
+
+        _ = await Task.WhenAll(stdout, stderr);
     }
 }

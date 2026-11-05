@@ -1,12 +1,15 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
+
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 internal static class HostBridgeCommand
 {
     public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
         string? endpoint = null;
-        var stdio = false;
-        for (var i = 0; i < args.Length; i++)
+        bool stdio = false;
+        for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
@@ -17,9 +20,12 @@ internal static class HostBridgeCommand
         }
 
         if (!stdio || string.IsNullOrWhiteSpace(endpoint))
+        {
             throw new ArgumentException("host bridge requires --stdio --endpoint PATH.");
-        using var input = Console.OpenStandardInput();
-        using var output = Console.OpenStandardOutput();
+        }
+
+        using Stream input = Console.OpenStandardInput();
+        using Stream output = Console.OpenStandardOutput();
         await StdioBridge.RunAsync(endpoint, input, output, ct);
         return 0;
     }

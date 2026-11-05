@@ -1,11 +1,8 @@
-using System.Diagnostics;
-using System.IO.Pipes;
-using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
-using StreamJsonRpc;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 public sealed class WorkflowOperation(CMakeWorkflowClient client, string operationId)
 {
@@ -83,33 +80,59 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
         TimeSpan? pollInterval = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (afterSequence < 0) throw new ArgumentOutOfRangeException(nameof(afterSequence));
-        var delay = pollInterval ?? TimeSpan.FromMilliseconds(300);
-        if (delay <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(pollInterval));
-        var cursor = afterSequence;
+        ArgumentOutOfRangeException.ThrowIfNegative(afterSequence);
+
+        TimeSpan delay = pollInterval ?? TimeSpan.FromMilliseconds(300);
+        if (delay <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pollInterval));
+        }
+
+        long cursor = afterSequence;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var page = await ReadEventsAsync(cursor, 100, ct);
+            EventPage page = await ReadEventsAsync(cursor, 100, ct);
             if (page.NextSequence < cursor || (page.Events.Count > 0 && page.NextSequence <= cursor) ||
                 (page.HasMore && page.Events.Count == 0))
+            {
                 throw new InvalidDataException("Non-progressing event cursor from Host.");
-            foreach (var evt in page.Events) yield return evt;
-            cursor = page.NextSequence;
-            if (page.HasMore || page.Events.Count > 0) continue;
+            }
 
-            var operation = await GetSnapshotAsync(ct);
+            foreach (JsonElement evt in page.Events)
+            {
+                yield return evt;
+            }
+
+            cursor = page.NextSequence;
+            if (page.HasMore || page.Events.Count > 0)
+            {
+                continue;
+            }
+
+            OperationSnapshot operation = await GetSnapshotAsync(ct);
             if (operation.State is "succeeded" or "failed" or "canceled")
             {
                 // The journal is published before durable finalization; drain once
                 // again in case the first read raced with the final append.
-                var final = await ReadEventsAsync(cursor, 100, ct);
+                EventPage final = await ReadEventsAsync(cursor, 100, ct);
                 if (final.NextSequence < cursor || (final.Events.Count > 0 && final.NextSequence <= cursor) ||
                     (final.HasMore && final.Events.Count == 0))
+                {
                     throw new InvalidDataException("Non-progressing final event cursor from Host.");
-                foreach (var evt in final.Events) yield return evt;
+                }
+
+                foreach (JsonElement evt in final.Events)
+                {
+                    yield return evt;
+                }
+
                 cursor = final.NextSequence;
-                if (!final.HasMore && final.Events.Count == 0) yield break;
+                if (!final.HasMore && final.Events.Count == 0)
+                {
+                    yield break;
+                }
+
                 continue;
             }
             await Task.Delay(delay, ct);
@@ -119,11 +142,15 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
     public async Task<OperationSnapshot> WaitForCompletionAsync(TimeSpan? pollInterval = null,
         CancellationToken ct = default)
     {
-        var delay = pollInterval ?? TimeSpan.FromMilliseconds(300);
+        TimeSpan delay = pollInterval ?? TimeSpan.FromMilliseconds(300);
         while (true)
         {
-            var state = await GetSnapshotAsync(ct);
-            if (state.State is "succeeded" or "failed" or "canceled") return state;
+            OperationSnapshot state = await GetSnapshotAsync(ct);
+            if (state.State is "succeeded" or "failed" or "canceled")
+            {
+                return state;
+            }
+
             await Task.Delay(delay, ct);
         }
     }

@@ -79,5 +79,16 @@ comparisons cannot guarantee equal CPU temperature, frequencies or background lo
 match.
 
 `IWorkflowOperationExecutor` is an internal operation interface used for profiling. It is **not** a third-party plugin
-loader: manifest node kinds must also be registered in the planner. The existing scheduler is
-`WorkflowRunner`; [MSBuild as an alternative executor](adr/0001-msbuild-execution-backend.md) remains a proposal only.
+loader: manifest node kinds must also be registered in the planner. The neutral `ExecutionScheduler` in Core manages ready/active admission through domain hooks.
+`WorkflowRunner` is the CMake adapter; `ProcessWorkflowRunner` is a second actual consumer in Host.
+The shared process backend and durable byte writer also live in Core. Domain adapters own report schemas,
+leases, resource identity and dispatch evidence; the scheduler does not interpret or persist their reports.
+
+Process operations use the existing SQLite reconciliation/admission/one-shot resume claim protocol.
+Explicit resume preserves terminal results and runs only nodes proven never admitted by the bound dispatch
+checkpoint. Running or unknown results block resume, even after an operation-level `needs_attention` decision.
+The claim precedes runner mutation; a post-claim crash cannot redispatch. Legacy reports remain readable,
+but operations without retained dispatch evidence cannot be newly admitted for process resume.
+See [process execution and recovery](process-execution.md) for the protocol and limitations.
+
+[MSBuild as an alternative executor](adr/0001-msbuild-execution-backend.md) remains a proposal only.

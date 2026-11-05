@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Campaigns;
+#pragma warning restore IDE0130
 
 // Typed domain entry points; no argv parsing, subprocess CLI or transport dependency.
 public sealed record MutationOptions(

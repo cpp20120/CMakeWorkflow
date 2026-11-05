@@ -1,10 +1,6 @@
-using System.Text.Json.Serialization;
-using CMakeWorkflow;
-using CMakeWorkflow.History;
-using CMakeWorkflow.Profiling;
-using StreamJsonRpc;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 // Prepared native actions reuse the durable workflow engine and its operation API.
 public sealed record TargetPrepareRequest(
@@ -15,6 +11,14 @@ public sealed record TargetPrepareRequest(
     string? Target = null,
     string? SecondTarget = null,
     string? Configuration = null,
-    string[]? Arguments = null,
-    string[]? SecondArguments = null,
+
+#pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
+string[]? Arguments = null
+#pragma warning restore CA1819
+,
+
+#pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
+string[]? SecondArguments = null
+#pragma warning restore CA1819
+,
     WorkflowToolchainBinding? Toolchain = null);

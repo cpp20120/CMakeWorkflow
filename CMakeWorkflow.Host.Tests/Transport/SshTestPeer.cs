@@ -8,22 +8,28 @@ internal static class SshTestPeer
 {
     internal static async Task RunAsync(string[] args)
     {
-        if (args.Length != 5 || !args[..4].SequenceEqual(new[] { "host", "bridge", "--stdio", "--endpoint" }))
-            throw new Exception("Remote shell changed command arguments.");
+        if (args.Length != 5 || !args.AsSpan()[..4].SequenceEqual(["host", "bridge", "--stdio", "--endpoint"]))
+        {
+            throw new System.Diagnostics.UnreachableException("Remote shell changed command arguments.");
+        }
+
         if (args[4] != "/remote/host ' ;$(exit 44).sock")
-            throw new Exception("Remote shell expanded the endpoint.");
-        Console.Error.Write(new string('x', 64 * 1024));
-        Console.Error.Write("SSH_DIAGNOSTICS_TAIL");
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var fixes = new FixCoordinator();
-        using var downloads = VerifiedCMakeInstaller.CreateDownloadClient();
-        using var executions = new DurableExecutionCoordinator(stop.Token);
-        using var rpc = HostConnection.Create(Console.OpenStandardInput(), Console.OpenStandardOutput());
-        var session = new DoctorSession(
+        {
+            throw new System.Diagnostics.UnreachableException("Remote shell expanded the endpoint.");
+        }
+
+        await Console.Error.WriteAsync(new string('x', 64 * 1024));
+        await Console.Error.WriteAsync("SSH_DIAGNOSTICS_TAIL");
+        using CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
+        using FixCoordinator fixes = new();
+        using HttpClient downloads = VerifiedCMakeInstaller.CreateDownloadClient();
+        using DurableExecutionCoordinator executions = new(stop.Token);
+        using JsonRpc rpc = HostConnection.Create(Console.OpenStandardInput(), Console.OpenStandardOutput());
+        DoctorSession session = new(
             workspace => new ToolingService(new SystemToolingRuntime(workspace), new VerifiedCMakeInstaller(downloads)),
             _ => Task.CompletedTask, stop.Token, fixes, _ => Task.CompletedTask, durableExecutions: executions);
         rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<IHostRpc>(), session, null);
-        using var canceled = stop.Token.Register(rpc.Dispose);
+        using CancellationTokenRegistration canceled = stop.Token.Register(rpc.Dispose);
         rpc.StartListening();
         try { await rpc.Completion; }
         finally

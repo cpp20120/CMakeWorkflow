@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 // One typed request per capability. Neither SDK nor Host wraps an arbitrary CLI argv.
 public sealed class ProfileService(CMakeWorkflowClient client)

@@ -10,4 +10,4 @@ namespace CMakeWorkflow;
 [JsonSerializable(typeof(TestMatrixRecipeV1))]
 [JsonSerializable(typeof(BuildMatrixRecipeV1))]
 [JsonSerializable(typeof(BenchmarkMatrixRecipeV1))]
-internal partial class RecipeJson : JsonSerializerContext;
+internal sealed partial class RecipeJson : JsonSerializerContext;

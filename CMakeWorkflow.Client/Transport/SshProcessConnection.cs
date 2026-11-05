@@ -1,6 +1,8 @@
 using System.Diagnostics;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 // Owns only the local SSH transport process, never the remote persistent Host.
 internal sealed class SshProcessConnection : IRemoteSshConnection
@@ -24,13 +26,17 @@ internal sealed class SshProcessConnection : IRemoteSshConnection
 
     private async Task ReadDiagnosticsAsync()
     {
-        var buffer = new char[1024];
+        char[] buffer = new char[1024];
         try
         {
             while (true)
             {
-                var count = await process.StandardError.ReadAsync(buffer, stop.Token);
-                if (count == 0) return;
+                int count = await process.StandardError.ReadAsync(buffer, stop.Token);
+                if (count == 0)
+                {
+                    return;
+                }
+
                 diagnostics.Append(buffer.AsSpan(0, count));
             }
         }
@@ -42,11 +48,15 @@ internal sealed class SshProcessConnection : IRemoteSshConnection
 
     public async ValueTask DisposeAsync()
     {
-        if (disposed) return;
+        if (disposed)
+        {
+            return;
+        }
+
         disposed = true;
         // One budget for reaping AND diagnostics, rather than additive unbounded
         // waits. The connection deadline may be followed by at most this grace.
-        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using CancellationTokenSource cleanup = new(TimeSpan.FromSeconds(2));
         try
         {
             // Kill before closing streams: pending synchronous pipe operations

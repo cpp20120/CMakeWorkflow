@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 // One SDK entry for domain-qualified operations; existing Workflows stays intact.
 public sealed class ExecutionService(CMakeWorkflowClient client)
@@ -17,8 +19,11 @@ public sealed class ExecutionService(CMakeWorkflowClient client)
         ArgumentNullException.ThrowIfNull(options);
         client.RequireCapability("execution/start");
         if (string.IsNullOrWhiteSpace(options.ClientRequestId))
+        {
             throw new ArgumentException("A durable ClientRequestId is required.");
-        var accepted = await client.Proxy.ExecutionStartAsync(options, cancellationToken);
+        }
+
+        OperationSnapshot accepted = await client.Proxy.ExecutionStartAsync(options, cancellationToken);
         return new WorkflowOperation(client, accepted.OperationId);
     }
 }

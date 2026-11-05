@@ -1,12 +1,13 @@
-using CMakeWorkflow;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling;
+#pragma warning restore IDE0130
 
 // A view of the durable command journal, not a second owner of operation state.
 // The percentage counts finished command steps, never elapsed wall-clock time.
 internal sealed class HistoricalProgress : IDisposable
 {
-    private readonly object gate = new();
+    private readonly Lock gate = new();
     private readonly HashSet<string> completed = new(StringComparer.Ordinal);
     private readonly int total;
     private readonly DateTimeOffset started = DateTimeOffset.UtcNow;
@@ -29,52 +30,76 @@ internal sealed class HistoricalProgress : IDisposable
     }
 
     internal static int TotalOperations(int timingTrials, int statTrials) =>
-        checked(13 + 24 * (timingTrials + statTrials + 8));
+        checked(13 + (24 * (timingTrials + statTrials + 8)));
 
     public void Observe(WorkflowDispatchEvent item)
     {
         lock (gate)
         {
-            var currentStage = StageOf(item.Label);
-            if (item.Type == "started") active = item.Label;
-            if (item.Type is "succeeded" or "verified")
+            string currentStage = StageOf(item.Label);
+            if (item.Type == "started")
             {
-                completed.Add(item.Label);
-                if (active == item.Label) active = "";
+                active = item.Label;
             }
 
-            if (item.Type == "stopped" && active == item.Label) active = "";
-            var stageChanged = stage != currentStage;
+            if (item.Type is "succeeded" or "verified")
+            {
+                _ = completed.Add(item.Label);
+                if (active == item.Label)
+                {
+                    active = "";
+                }
+            }
+
+            if (item.Type == "stopped" && active == item.Label)
+            {
+                active = "";
+            }
+
+            bool stageChanged = stage != currentStage;
             stage = currentStage;
-            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
             // For pipes and CI, avoid hundreds of status lines. The periodic
             // heartbeat still makes long silent commands observable.
             if (!interactive && item.Type == "verified" && completed.Count % 25 != 0 && !stageChanged)
+            {
                 return;
+            }
+
             if (!interactive && item.Type == "started" && !stageChanged && lastLog != DateTimeOffset.MinValue)
+            {
                 return;
+            }
+
             if (!interactive && item.Type == "succeeded" && completed.Count % 25 != 0 && completed.Count != total)
+            {
                 return;
+            }
             // The process owner emits heartbeats every 10s. Do not suppress the
             // first one in redirected output: otherwise a 15s silent process
             // looks completely stalled to CI, IDE logs and the operator.
             if (!interactive && item.Type == "heartbeat" && now - lastLog < TimeSpan.FromSeconds(8))
+            {
                 return;
-            var elapsed = FormatElapsed(now - started);
-            var current = item.Type == "heartbeat" ? $" running {item.Label} ({FormatElapsed(item.Elapsed)})"
+            }
+
+            string elapsed = FormatElapsed(now - started);
+            string current = item.Type == "heartbeat" ? $" running {item.Label} ({FormatElapsed(item.Elapsed)})"
                 : item.Type == "started" ? $" running {item.Label}"
                 : item.Type == "stopped" ? $" stopped {item.Label}"
                 : "";
-            var line = $"[CMakeWorkflow] [{completed.Count}/{total} ops; {100.0 * completed.Count / total:0}%] " +
+            string line = $"[CMakeWorkflow] [{completed.Count}/{total} ops; {100.0 * completed.Count / total:0}%] " +
                        $"{stage}; elapsed {elapsed}{current}";
             if (interactive)
             {
                 // Keep updates on one terminal row even with long scenario IDs.
                 try
                 {
-                    var width = Console.WindowWidth - 1;
+                    int width = Console.WindowWidth - 1;
                     if (width > 10 && line.Length > width)
+                    {
                         line = line[..(width - 1)] + "…";
+                    }
                 }
                 catch (IOException)
                 {
@@ -84,9 +109,14 @@ internal sealed class HistoricalProgress : IDisposable
                 output.Write("\r\u001b[2K" + line);
                 activeLine = true;
                 if (item.Type == "stopped" || completed.Count == total)
+                {
                     FinishLine();
+                }
             }
-            else output.WriteLine(line);
+            else
+            {
+                output.WriteLine(line);
+            }
 
             lastLog = now;
         }
@@ -96,14 +126,21 @@ internal sealed class HistoricalProgress : IDisposable
     {
         lock (gate)
         {
-            if (activeLine) FinishLine();
+            if (activeLine)
+            {
+                FinishLine();
+            }
+
             output.WriteLine($"[CMakeWorkflow] {description}; {completed.Count}/{total} command operations verified.");
         }
     }
 
     public void Dispose()
     {
-        lock (gate) FinishLine();
+        lock (gate)
+        {
+            FinishLine();
+        }
     }
 
     private void FinishLine()
@@ -120,12 +157,17 @@ internal sealed class HistoricalProgress : IDisposable
 
     private static string StageOf(string label)
     {
-        if (label.StartsWith("time-", StringComparison.Ordinal)) return "Timing";
-        if (label.StartsWith("stat-", StringComparison.Ordinal)) return "Hardware counters";
-        if (label.StartsWith("periodic-", StringComparison.Ordinal)) return "DWARF capture and analysis";
-        if (label.StartsWith("fp-", StringComparison.Ordinal)) return "Frame-pointer diagnostics";
-        if (label.EndsWith("-configure", StringComparison.Ordinal) ||
-            label.EndsWith("-build", StringComparison.Ordinal)) return "CMake configuration and build";
-        return "Host preparation";
+        return label.StartsWith("time-", StringComparison.Ordinal)
+            ? "Timing"
+            : label.StartsWith("stat-", StringComparison.Ordinal)
+            ? "Hardware counters"
+            : label.StartsWith("periodic-", StringComparison.Ordinal)
+            ? "DWARF capture and analysis"
+            : label.StartsWith("fp-", StringComparison.Ordinal)
+            ? "Frame-pointer diagnostics"
+            : label.EndsWith("-configure", StringComparison.Ordinal) ||
+            label.EndsWith("-build", StringComparison.Ordinal)
+            ? "CMake configuration and build"
+            : "Host preparation";
     }
 }

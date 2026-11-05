@@ -9,12 +9,12 @@ internal static class HistoryWireModelParityTests
 
     private static void Check(Type host, Type client)
     {
-        var expected = host.GetProperties().Select(p => (p.Name, Type: Shape(p.PropertyType)))
-            .OrderBy(p => p.Name).ToArray();
-        var actual = client.GetProperties().Select(p => (p.Name, Type: Shape(p.PropertyType)))
-            .OrderBy(p => p.Name).ToArray();
+        (string Name, string Type)[] expected = [.. host.GetProperties().Select(p => (p.Name, Type: Shape(p.PropertyType))).OrderBy(p => p.Name)];
+        (string Name, string Type)[] actual = [.. client.GetProperties().Select(p => (p.Name, Type: Shape(p.PropertyType))).OrderBy(p => p.Name)];
         if (!expected.SequenceEqual(actual))
-            throw new Exception($"History wire contract drift: {host.Name} / {client.Name}");
+        {
+            throw new System.Diagnostics.UnreachableException($"History wire contract drift: {host.Name} / {client.Name}");
+        }
     }
 
     public static void Run()

@@ -1,8 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using PolyType;
-using StreamJsonRpc;
-using CMakeWorkflow;
 using CMakeWorkflow.Profiling;
 
 namespace CMakeWorkflow.Client;
@@ -130,4 +127,4 @@ namespace CMakeWorkflow.Client;
 // boxed StreamJsonRpc.RequestId. Source-generated metadata is required in AOT;
 // a pre-canceled invocation never exercises this path.
 [JsonSerializable(typeof(StreamJsonRpc.RequestId))]
-internal partial class ClientJson : JsonSerializerContext;
+internal sealed partial class ClientJson : JsonSerializerContext;

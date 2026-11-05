@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Campaigns;
+#pragma warning restore IDE0130
 
 public static class QueueMutationCampaign
 {
@@ -20,27 +22,30 @@ public static class QueueMutationCampaign
     {
         sourceRoot = Path.GetFullPath(sourceRoot);
         reportPath = Path.GetFullPath(reportPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
-        var header = Path.Combine(sourceRoot, "include/dagflow/detail/ring_mpmc.hpp");
-        var source = await File.ReadAllTextAsync(header, ct);
-        var variants = new[] { ("baseline", source) }.Concat(Mutants.Select(x =>
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+        string header = Path.Combine(sourceRoot, "include/dagflow/detail/ring_mpmc.hpp");
+        string source = await File.ReadAllTextAsync(header, ct);
+        IEnumerable<(string, string)> variants = new[] { ("baseline", source) }.Concat(Mutants.Select(x =>
             (x.Name, Mutate(source, x.Name, x.Before, x.After))));
-        var report = new JsonObject
+        JsonObject report = new()
         {
-            ["compiler"] = compiler, ["seed"] = seed,
-            ["cases"] = cases, ["steps"] = steps, ["results"] = new JsonObject()
+            ["compiler"] = compiler,
+            ["seed"] = seed,
+            ["cases"] = cases,
+            ["steps"] = steps,
+            ["results"] = new JsonObject()
         };
-        var temporary = Path.Combine(Path.GetTempPath(), "dagflow-queue-mutations-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(temporary);
+        string temporary = Path.Combine(Path.GetTempPath(), "dagflow-queue-mutations-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(temporary);
         try
         {
-            foreach (var (name, text) in variants)
+            foreach ((string? name, string? text) in variants)
             {
-                var overlay = Path.Combine(temporary, name, "include/dagflow/detail");
-                Directory.CreateDirectory(overlay);
+                string overlay = Path.Combine(temporary, name, "include/dagflow/detail");
+                _ = Directory.CreateDirectory(overlay);
                 await File.WriteAllTextAsync(Path.Combine(overlay, "ring_mpmc.hpp"), text, ct);
-                var binary = Path.Combine(temporary, name, "history_tests");
-                var build = await CommandExecution.RunAsync(compiler,
+                string binary = Path.Combine(temporary, name, "history_tests");
+                CommandResult build = await CommandExecution.RunAsync(compiler,
                     [
                         "-std=c++23", "-O0", "-pthread", "-I", Path.Combine(temporary, name, "include"),
                         "-I", Path.Combine(sourceRoot, "include"), "-I", Path.Combine(sourceRoot, "tests"),
@@ -49,29 +54,34 @@ public static class QueueMutationCampaign
                     sourceRoot, TimeSpan.FromSeconds(90), null, ct);
                 if (build.TimedOut || build.ExitCode != 0)
                 {
-                    Console.Error.WriteLine($"{name}: COMPILE_ERROR\n{build.Output}");
+                    await Console.Error.WriteLineAsync($"{name}: COMPILE_ERROR\n{build.Output}");
                     return 2;
                 }
 
-                var result = await CommandExecution.RunAsync(binary, [], sourceRoot,
+                CommandResult result = await CommandExecution.RunAsync(binary, [], sourceRoot,
                     TimeSpan.FromSeconds(timeoutSeconds), new Dictionary<string, string?>
                     {
-                        ["DAGFLOW_PROPERTY_SEED"] = seed, ["DAGFLOW_PROPERTY_CASES"] = cases.ToString(),
-                        ["DAGFLOW_PROPERTY_STEPS"] = steps.ToString()
+                        ["DAGFLOW_PROPERTY_SEED"] = seed,
+                        ["DAGFLOW_PROPERTY_CASES"] = cases.ToString(System.Globalization.CultureInfo.CurrentCulture),
+                        ["DAGFLOW_PROPERTY_STEPS"] = steps.ToString(System.Globalization.CultureInfo.CurrentCulture)
                     }, ct);
-                var status = result.TimedOut ? "TIMEOUT" : result.ExitCode == 0 ? "PASS" : "KILLED(assertion)";
+                string status = result.TimedOut ? "TIMEOUT" : result.ExitCode == 0 ? "PASS" : "KILLED(assertion)";
                 ((JsonObject)report["results"]!)[name] = new JsonObject
                 {
-                    ["status"] = status, ["output"] = result.Output
+                    ["status"] = status,
+                    ["output"] = result.Output
                 };
                 await File.WriteAllTextAsync(reportPath,
                     report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
                 Console.WriteLine($"{name}: {status}");
-                if (name == "baseline" && status != "PASS") return 2;
+                if (name == "baseline" && status != "PASS")
+                {
+                    return 2;
+                }
             }
 
-            var outcomes = (JsonObject)report["results"]!;
-            var killed = Mutants.Count(x => outcomes[x.Name]?["status"]?.GetValue<string>() == "KILLED(assertion)");
+            JsonObject outcomes = (JsonObject)report["results"]!;
+            int killed = Mutants.Count(x => outcomes[x.Name]?["status"]?.GetValue<string>() == "KILLED(assertion)");
             return outcomes["baseline"]?["status"]?.GetValue<string>() == "PASS" && killed == Mutants.Length ? 0 : 1;
         }
         finally
@@ -82,18 +92,23 @@ public static class QueueMutationCampaign
 
     private static string ReplaceOnce(string source, string before, string after)
     {
-        var index = source.IndexOf(before, StringComparison.Ordinal);
-        if (index < 0 || source.IndexOf(before, index + before.Length, StringComparison.Ordinal) >= 0)
-            throw new InvalidOperationException($"Expected one queue mutation anchor: {before}");
-        return source[..index] + after + source[(index + before.Length)..];
+        int index = source.IndexOf(before, StringComparison.Ordinal);
+        return index < 0 || source.IndexOf(before, index + before.Length, StringComparison.Ordinal) >= 0
+            ? throw new InvalidOperationException($"Expected one queue mutation anchor: {before}")
+            : source[..index] + after + source[(index + before.Length)..];
     }
 
     private static string Mutate(string source, string name, string before, string after)
     {
-        if (name != "lie-about-full-push") return ReplaceOnce(source, before, after);
+        if (name != "lie-about-full-push")
+        {
+            return ReplaceOnce(source, before, after);
+        }
+
         const string signature = "bool push_impl(U&& value) noexcept {";
-        var start = source.IndexOf(signature, StringComparison.Ordinal);
-        if (start < 0) throw new InvalidOperationException("Queue push implementation not found.");
-        return source[..start] + ReplaceOnce(source[start..], before, after);
+        int start = source.IndexOf(signature, StringComparison.Ordinal);
+        return start < 0
+            ? throw new InvalidOperationException("Queue push implementation not found.")
+            : source[..start] + ReplaceOnce(source[start..], before, after);
     }
 }

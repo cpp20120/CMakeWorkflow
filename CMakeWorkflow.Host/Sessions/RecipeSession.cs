@@ -9,7 +9,9 @@ public sealed partial class DoctorSession
     private static void ValidateRecipeRequest(string requestId)
     {
         if (requestId is not { Length: 32 } || !requestId.All(Uri.IsHexDigit))
+        {
             throw new ApplicationRefusal("invalid_argument", "RequestId must be 32 hexadecimal characters.");
+        }
     }
 
     private static async Task CommitRecipeAsync(WorkspaceReadPaths paths, string kind,
@@ -19,13 +21,17 @@ public sealed partial class DoctorSession
         // The existing commit-once writer persists the request binding before
         // the manifest. A retry can finish an interrupted write without changing
         // an already committed file. workflow/start remains a separate admission.
-        var bindingDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory,
+        string bindingDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory,
             ".cmakeworkflow", kind + "-preparations"));
-        Directory.CreateDirectory(bindingDirectory);
-        var binding = paths.Require(Path.Combine(bindingDirectory,
-            requestId.ToLowerInvariant() + ".json"));
+        _ = Directory.CreateDirectory(bindingDirectory);
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
+        string binding = paths.Require(Path.Combine(bindingDirectory,
+                    requestId.ToLowerInvariant() + ".json"));
+#pragma warning restore CA1308
+
         await CommitOnceAsync(binding, bindingBytes, ct);
-        Directory.CreateDirectory(Path.GetDirectoryName(manifest)!);
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(manifest)!);
         await CommitOnceAsync(manifest, WorkflowManifestBytes.Serialize(document), ct);
     }
 
@@ -37,20 +43,23 @@ public sealed partial class DoctorSession
     {
         ValidateRecipeRequest(request.RequestId);
         if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
-            throw new ArgumentException("Profile recipe variants are required.");
-        var manifest = paths.Require(request.OutputPath);
-        var recipe = request.Recipe with
         {
-            Variants = request.Recipe.Variants.Select(v => v with
+            throw new ArgumentException("Profile recipe variants are required.");
+        }
+
+        string manifest = paths.Require(request.OutputPath);
+        ProfileRecipeV1 recipe = request.Recipe with
+        {
+            Variants = [.. request.Recipe.Variants.Select(v => v with
             {
                 BuildDirectory = paths.Require(v.BuildDirectory)
-            }).ToArray(),
+            })],
             SourceDirectory = request.Recipe.SourceDirectory is null
                 ? null
                 : paths.Require(request.Recipe.SourceDirectory)
         };
-        var document = ProfileRecipeBuilder.Build(recipe);
-        var prepared = new ProfileRecipePreparation(1, manifest, Hash(document));
+        WorkflowDocument document = ProfileRecipeBuilder.Build(recipe);
+        ProfileRecipePreparation prepared = new(1, manifest, Hash(document));
         await CommitRecipeAsync(paths, "profile-recipe", request.RequestId, manifest,
             document, JsonSerializer.SerializeToUtf8Bytes(prepared,
                 HostJson.Default.ProfileRecipePreparation), ct);
@@ -61,14 +70,18 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) => ApplicationCallAsync(request, async (paths, ct) =>
     {
         ValidateRecipeRequest(request.RequestId);
-        if (request.Recipe is null) throw new ArgumentException("Test Matrix recipe is required.");
-        var manifest = paths.Require(request.OutputPath);
-        var recipe = request.Recipe with
+        if (request.Recipe is null)
+        {
+            throw new ArgumentException("Test Matrix recipe is required.");
+        }
+
+        string manifest = paths.Require(request.OutputPath);
+        TestMatrixRecipeV1 recipe = request.Recipe with
         {
             BuildDirectory = paths.Require(request.Recipe.BuildDirectory)
         };
-        var document = TestMatrixWorkflowBuilder.Build(recipe);
-        var prepared = new TestMatrixPreparation(1, manifest, Hash(document));
+        WorkflowDocument document = TestMatrixWorkflowBuilder.Build(recipe);
+        TestMatrixPreparation prepared = new(1, manifest, Hash(document));
         await CommitRecipeAsync(paths, "test-matrix", request.RequestId, manifest,
             document, JsonSerializer.SerializeToUtf8Bytes(prepared,
                 HostJson.Default.TestMatrixPreparation), ct);
@@ -80,15 +93,18 @@ public sealed partial class DoctorSession
     {
         ValidateRecipeRequest(request.RequestId);
         if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
-            throw new ArgumentException("Build Matrix variants are required.");
-        var manifest = paths.Require(request.OutputPath);
-        var recipe = request.Recipe with
         {
-            Variants = request.Recipe.Variants.Select(v =>
-                v with { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray()
+            throw new ArgumentException("Build Matrix variants are required.");
+        }
+
+        string manifest = paths.Require(request.OutputPath);
+        BuildMatrixRecipeV1 recipe = request.Recipe with
+        {
+            Variants = [.. request.Recipe.Variants.Select(v =>
+                v with { BuildDirectory = paths.Require(v.BuildDirectory) })]
         };
-        var document = BuildMatrixWorkflowBuilder.Build(recipe);
-        var prepared = new BuildMatrixPreparation(1, manifest, Hash(document));
+        WorkflowDocument document = BuildMatrixWorkflowBuilder.Build(recipe);
+        BuildMatrixPreparation prepared = new(1, manifest, Hash(document));
         await CommitRecipeAsync(paths, "build-matrix", request.RequestId, manifest,
             document, JsonSerializer.SerializeToUtf8Bytes(prepared,
                 HostJson.Default.BuildMatrixPreparation), ct);
@@ -100,15 +116,18 @@ public sealed partial class DoctorSession
     {
         ValidateRecipeRequest(request.RequestId);
         if (request.Recipe?.Variants is null || request.Recipe.Variants.Any(v => v is null))
-            throw new ArgumentException("Benchmark Matrix variants are required.");
-        var manifest = paths.Require(request.OutputPath);
-        var recipe = request.Recipe with
         {
-            Variants = request.Recipe.Variants.Select(v =>
-                v with { BuildDirectory = paths.Require(v.BuildDirectory) }).ToArray()
+            throw new ArgumentException("Benchmark Matrix variants are required.");
+        }
+
+        string manifest = paths.Require(request.OutputPath);
+        BenchmarkMatrixRecipeV1 recipe = request.Recipe with
+        {
+            Variants = [.. request.Recipe.Variants.Select(v =>
+                v with { BuildDirectory = paths.Require(v.BuildDirectory) })]
         };
-        var document = BenchmarkMatrixWorkflowBuilder.Build(recipe);
-        var prepared = new BenchmarkMatrixPreparation(1, manifest, Hash(document));
+        WorkflowDocument document = BenchmarkMatrixWorkflowBuilder.Build(recipe);
+        BenchmarkMatrixPreparation prepared = new(1, manifest, Hash(document));
         await CommitRecipeAsync(paths, "benchmark-matrix", request.RequestId, manifest,
             document, JsonSerializer.SerializeToUtf8Bytes(prepared,
                 HostJson.Default.BenchmarkMatrixPreparation), ct);

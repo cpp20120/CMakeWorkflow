@@ -1,5 +1,9 @@
-using System.Text.Json.Serialization;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
-public sealed record ToolProfile(string Id, string Description, string[] Tools);
+public sealed record ToolProfile(string Id, string Description,
+#pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
+string[] Tools
+#pragma warning restore CA1819
+);

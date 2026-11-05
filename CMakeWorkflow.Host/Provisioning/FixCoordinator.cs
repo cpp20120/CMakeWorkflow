@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 // Serializes Host installations for this user, including separate Host processes.
 // Native package managers retain their own locks; ordinary tooling setup is not
@@ -12,31 +14,40 @@ public sealed class FixCoordinator(string? lockDirectory = null) : IDisposable
 
     public IDisposable? TryAcquire()
     {
-        if (!gate.Wait(0)) return null;
+        if (!gate.Wait(0))
+        {
+            return null;
+        }
+
         try
         {
-            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(directory);
+            if (OperatingSystem.IsWindows())
+            {
+                _ = Directory.CreateDirectory(directory);
+            }
             else
             {
-                Directory.CreateDirectory(directory,
+                _ = Directory.CreateDirectory(directory,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 if (new DirectoryInfo(directory).LinkTarget is not null
                     || (File.GetUnixFileMode(directory) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+                {
                     throw new IOException("Host fix lock directory must not be a symlink or writable by other users.");
+                }
             }
 
-            var file = new FileStream(Path.Combine(directory, "installation.lock"), FileMode.OpenOrCreate,
+            FileStream file = new(Path.Combine(directory, "installation.lock"), FileMode.OpenOrCreate,
                 FileAccess.ReadWrite, FileShare.None);
             return new Lease(file, gate);
         }
         catch (IOException)
         {
-            gate.Release();
+            _ = gate.Release();
             return null;
         }
         catch
         {
-            gate.Release();
+            _ = gate.Release();
             throw;
         }
     }
@@ -48,7 +59,7 @@ public sealed class FixCoordinator(string? lockDirectory = null) : IDisposable
         public void Dispose()
         {
             file.Dispose();
-            gate.Release();
+            _ = gate.Release();
         }
     }
 }

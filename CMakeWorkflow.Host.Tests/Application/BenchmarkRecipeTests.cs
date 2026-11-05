@@ -6,29 +6,32 @@ internal static class BenchmarkRecipeTests
 {
     private static void Check(bool condition, string name)
     {
-        if (!condition) throw new Exception(name);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException(name);
+        }
     }
 
     private static void Reject(BenchmarkRecipeV1 recipe)
     {
         try
         {
-            BenchmarkWorkflowBuilder.Build(recipe);
+            _ = BenchmarkWorkflowBuilder.Build(recipe);
         }
         catch (ArgumentException)
         {
             return;
         }
 
-        throw new Exception("Invalid benchmark recipe accepted: " + recipe);
+        throw new System.Diagnostics.UnreachableException("Invalid benchmark recipe accepted: " + recipe);
     }
 
     public static void Run(string root)
     {
-        var build = Path.Combine(root, "pure benchmark build path");
-        var recipe = new BenchmarkRecipeV1("benchmark", 1, build, "worker", "Release", 1,
+        string build = Path.Combine(root, "pure benchmark build path");
+        BenchmarkRecipeV1 recipe = new("benchmark", 1, build, "worker", "Release", 1,
             300, ["--name", "a b", "", "--literal"]);
-        var one = BenchmarkWorkflowBuilder.Build(recipe);
+        WorkflowDocument one = BenchmarkWorkflowBuilder.Build(recipe);
         Check(!Directory.Exists(build), "pure builder created a build tree");
         Check(one.SchemaVersion == 2 && one.Contexts.Single().Value.Mode == "adopt"
                                      && one.Contexts.Single().Value.ProvenancePolicy == "allowUnverified"
@@ -38,12 +41,12 @@ internal static class BenchmarkRecipeTests
                                               && one.Nodes[1].DependsOn.SequenceEqual(["build"])
                                               && one.Nodes[1].Arguments.SequenceEqual(recipe.Arguments),
             "first timing node or argument preservation");
-        var ten = BenchmarkWorkflowBuilder.Build(recipe with { Repeats = 10 });
+        WorkflowDocument ten = BenchmarkWorkflowBuilder.Build(recipe with { Repeats = 10 });
         Check(ten.Nodes.Count == 11 && ten.Nodes.Select(n => n.Id).Distinct().Count() == 11
                                     && ten.Nodes.Last().Id == "timing_010", "ten deterministic timing IDs");
-        for (var i = 1; i <= 10; i++)
+        for (int i = 1; i <= 10; i++)
         {
-            var node = ten.Nodes[i];
+            WorkflowNode node = ten.Nodes[i];
             Check(node.Kind == "run" && node.From == "build"
                                      && node.DependsOn.SequenceEqual([i == 1 ? "build" : $"timing_{i - 1:D3}"])
                                      && node.Resources.SequenceEqual(["measurement-host"])
@@ -66,19 +69,23 @@ internal static class BenchmarkRecipeTests
         Reject(recipe with { TimeoutSeconds = 0 });
         Reject(recipe with { TimeoutSeconds = double.NaN });
         Reject(recipe with { Arguments = ["bad\0argument"] });
-        foreach (var json in new[]
+        foreach (string? json in new[]
                  {
-                     """{"kind":"benchmark","schemaVersion":2,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[]}""",
-                     """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":"ten","timeoutSeconds":1,"arguments":[]}""",
-                     """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[],"unknown":true}""",
-                     """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","repeats":1,"timeoutSeconds":1,"arguments":[]}"""
+            /*lang=json,strict*/
+                                          """{"kind":"benchmark","schemaVersion":2,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[]}""",
+            /*lang=json,strict*/
+                                          """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":"ten","timeoutSeconds":1,"arguments":[]}""",
+            /*lang=json,strict*/
+                                          """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[],"unknown":true}""",
+            /*lang=json,strict*/
+                                          """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","repeats":1,"timeoutSeconds":1,"arguments":[]}"""
                  })
         {
             try
             {
-                var parsed = JsonSerializer.Deserialize(json, HostJson.Default.BenchmarkRecipeV1)!;
-                BenchmarkWorkflowBuilder.Build(parsed);
-                throw new Exception("Malformed recipe accepted: " + json);
+                BenchmarkRecipeV1 parsed = JsonSerializer.Deserialize(json, HostJson.Default.BenchmarkRecipeV1)!;
+                _ = BenchmarkWorkflowBuilder.Build(parsed);
+                throw new System.Diagnostics.UnreachableException("Malformed recipe accepted: " + json);
             }
             catch (Exception error) when (error is JsonException or ArgumentException)
             {

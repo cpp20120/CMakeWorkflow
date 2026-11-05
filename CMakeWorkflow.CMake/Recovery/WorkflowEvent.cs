@@ -1,8 +1,9 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
+using System.Diagnostics.CodeAnalysis;
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record WorkflowEvent(
     int SchemaVersion,
     long Sequence,
@@ -14,4 +15,5 @@ public sealed record WorkflowEvent(
     string? Status,
     int? ExitCode,
     string? Error,
-    List<WorkflowArtifactView> Artifacts);
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<WorkflowArtifactView> Artifacts);

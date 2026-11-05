@@ -1,15 +1,17 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Text.Json;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public static class ProcessRunner
 {
     public static async Task RunAsync(string file, IReadOnlyList<string> args, string workingDirectory,
         CancellationToken ct)
     {
-        var info = new ProcessStartInfo(file)
+        ArgumentNullException.ThrowIfNull(args);
+        ProcessStartInfo info = new(file)
         {
             UseShellExecute = false,
             WorkingDirectory = workingDirectory,
@@ -18,8 +20,11 @@ public static class ProcessRunner
             RedirectStandardError = false,
             RedirectStandardInput = false
         };
-        foreach (var arg in args)
+        foreach (string arg in args)
+        {
             info.ArgumentList.Add(arg);
+        }
+
         BuildTreeOwnership.PropagateTo(info);
 
         Process started;
@@ -33,7 +38,7 @@ public static class ProcessRunner
             throw new MissingWorkflowToolException(file, error);
         }
 
-        using var process = started;
+        using Process process = started;
         try
         {
             await process.WaitForExitAsync(ct);
@@ -50,6 +55,8 @@ public static class ProcessRunner
         }
 
         if (process.ExitCode != 0)
+        {
             throw new InvalidOperationException($"Process '{file}' failed with exit code {process.ExitCode}.");
+        }
     }
 }

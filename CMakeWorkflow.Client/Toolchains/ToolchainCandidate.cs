@@ -1,11 +1,6 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using PolyType;
-using StreamJsonRpc;
-using CMakeWorkflow;
-using CMakeWorkflow.Profiling;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 // Independent SDK models: the client references only Contracts, never Host.
 public sealed record ToolchainCandidate(

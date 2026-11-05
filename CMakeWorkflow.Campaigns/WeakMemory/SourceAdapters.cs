@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Campaigns;
+#pragma warning restore IDE0130
 
 // DagFlow-specific source adaptation. The orchestration core never interprets C++.
 internal sealed class SourceAdapters(string root)
@@ -9,28 +11,40 @@ internal sealed class SourceAdapters(string root)
 
     internal static string Once(string source, string before, string after)
     {
-        var first = source.IndexOf(before, StringComparison.Ordinal);
-        if (first < 0 || source.IndexOf(before, first + before.Length, StringComparison.Ordinal) >= 0)
-            throw new InvalidDataException("Expected unique source anchor: " + before[..Math.Min(100, before.Length)]);
-        return source[..first] + after + source[(first + before.Length)..];
+        int first = source.IndexOf(before, StringComparison.Ordinal);
+        return first < 0 || source.IndexOf(before, first + before.Length, StringComparison.Ordinal) >= 0
+            ? throw new InvalidDataException("Expected unique source anchor: " + before[..Math.Min(100, before.Length)])
+            : source[..first] + after + source[(first + before.Length)..];
     }
 
     internal static string Definition(string source, string signature)
     {
-        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        int start = source.IndexOf(signature, StringComparison.Ordinal);
         if (start < 0 || source.IndexOf(signature, start + signature.Length, StringComparison.Ordinal) >= 0)
+        {
             throw new InvalidDataException("Expected unique definition: " + signature);
-        var opening = source.IndexOf('{', start);
-        if (opening < 0) throw new InvalidDataException("Missing definition body: " + signature);
-        var tokens = Regex.Matches(source[opening..],
+        }
+
+        int opening = source.IndexOf('{', start);
+        if (opening < 0)
+        {
+            throw new InvalidDataException("Missing definition body: " + signature);
+        }
+
+        MatchCollection tokens = Regex.Matches(source[opening..],
             @"//[^\n]*|/\*.*?\*/|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[{}]",
             RegexOptions.Singleline);
-        var depth = 0;
+        int depth = 0;
         foreach (Match match in tokens)
         {
-            if (match.Value == "{") depth++;
+            if (match.Value == "{")
+            {
+                depth++;
+            }
             else if (match.Value == "}" && --depth == 0)
+            {
                 return source[start..(opening + match.Index + match.Length)];
+            }
         }
 
         throw new InvalidDataException("Unbalanced definition: " + signature);
@@ -59,12 +73,12 @@ internal sealed class SourceAdapters(string root)
 
     private string Parking()
     {
-        var source = Read("src/parking_lot.cpp");
-        var header = Read("include/dagflow/detail/parking_lot.hpp");
-        var waiter = Definition(header, "struct Waiter {")
+        string source = Read("src/parking_lot.cpp");
+        string header = Read("include/dagflow/detail/parking_lot.hpp");
+        string waiter = Definition(header, "struct Waiter {")
             .Replace("WaitCondition", "UntimedCV", StringComparison.Ordinal);
-        var domain = Definition(header, "struct Domain {");
-        var prefix = """
+        string domain = Definition(header, "struct Domain {");
+        string prefix = """
                      #include "parking_fixture.hpp"
                      class ParkingLot {
                       public:
@@ -104,11 +118,11 @@ internal sealed class SourceAdapters(string root)
 
     private string Completion()
     {
-        var source = Read("src/thread_pool.cpp");
-        var header = Read("include/dagflow/handle.hpp");
-        var credit = Definition(header, "class CompletionCredit {")
+        string source = Read("src/thread_pool.cpp");
+        string header = Read("include/dagflow/handle.hpp");
+        string credit = Definition(header, "class CompletionCredit {")
             .Replace(" private:", " public:", StringComparison.Ordinal);
-        var state = Once(Definition(header, "struct CompletionState {"),
+        string state = Once(Definition(header, "struct CompletionState {"),
             "static void retire(CompletionState* state) noexcept;",
             "static void retire(CompletionState* state) noexcept;\n"
             + "  static void model_finish_terminal(CompletionState* state) noexcept;");
@@ -121,20 +135,24 @@ internal sealed class SourceAdapters(string root)
             "void detail::CompletionState::retire(", "void detail::CompletionState::wait(",
             "void detail::CompletionCredit::fail(", "void detail::CompletionCredit::finish("
         ];
-        var bodies = string.Join("\n", methods.Select(m => Definition(source, m)));
-        var retire = Definition(source, "void detail::CompletionState::retire(");
-        var offset = retire.IndexOf("  CompletionState* pending = state;", StringComparison.Ordinal);
-        if (offset < 0) throw new InvalidDataException("Completion retire anchor changed.");
-        var replacement = retire[..offset] + "  model_finish_terminal(state);\n}\n"
+        string bodies = string.Join("\n", methods.Select(m => Definition(source, m)));
+        string retire = Definition(source, "void detail::CompletionState::retire(");
+        int offset = retire.IndexOf("  CompletionState* pending = state;", StringComparison.Ordinal);
+        if (offset < 0)
+        {
+            throw new InvalidDataException("Completion retire anchor changed.");
+        }
+
+        string replacement = retire[..offset] + "  model_finish_terminal(state);\n}\n"
                                            + "void detail::CompletionState::model_finish_terminal(CompletionState* state) noexcept {\n"
                                            + retire[offset..];
         bodies = Once(bodies, retire, replacement);
-        var edge = Definition(retire, "for (auto& edge : edges)");
-        var edgeBody = edge[(edge.IndexOf('{') + 1)..^1];
+        string edge = Definition(retire, "for (auto& edge : edges)");
+        string edgeBody = edge[(edge.IndexOf('{', StringComparison.Ordinal) + 1)..^1];
         bodies += "\nvoid model_deliver_edge(CompletionCredit edge) {\n"
                   + "  CompletionState* pending = nullptr;\n  int failure = 0;\n"
                   + edgeBody + "\n  if (pending) CompletionState::model_finish_terminal(pending);\n}\n";
-        var ready = Once(Definition(header, "[[nodiscard]] bool ready() const noexcept"),
+        string ready = Once(Definition(header, "[[nodiscard]] bool ready() const noexcept"),
             "[[nodiscard]] bool ready() const noexcept",
             "bool model_ready(const CompletionState* state_) noexcept");
         bodies += "\n" + ready;
@@ -142,7 +160,7 @@ internal sealed class SourceAdapters(string root)
             .Replace("detail::CompletionCredit", "CompletionCredit", StringComparison.Ordinal);
         bodies = Regex.Replace(bodies, @"\berror\b", "error($)")
             .Replace("int failure;", "int failure{};", StringComparison.Ordinal);
-        var result = """
+        string result = """
                      #include "model_support.hpp"
                      #include <memory>
                      #include <utility>
@@ -182,9 +200,9 @@ internal sealed class SourceAdapters(string root)
 
     private string IdleAccounting()
     {
-        var source = Read("src/idle_accounting.cpp");
-        var header = Read("include/dagflow/detail/idle_accounting.hpp");
-        var state = Definition(header, "class IdleAccounting {")
+        string source = Read("src/idle_accounting.cpp");
+        string header = Read("include/dagflow/detail/idle_accounting.hpp");
+        string state = Definition(header, "class IdleAccounting {")
             .Replace(" private:", " public:", StringComparison.Ordinal);
         state = Once(state, "explicit IdleAccounting(uint32_t workers);",
             "explicit IdleAccounting(uint32_t workers) : identity_(1), workers_(workers) {}");
@@ -197,7 +215,7 @@ internal sealed class SourceAdapters(string root)
             "void IdleAccounting::publish_external(", "bool IdleAccounting::idle_locked(",
             "void IdleAccounting::worker_idle(", "void IdleAccounting::wait("
         ];
-        var result = "#include \"idle_accounting_fixture.hpp\"\n"
+        string result = "#include \"idle_accounting_fixture.hpp\"\n"
                      + Definition(source, "struct Total {") + ";\n" + state + ";\n"
                      + string.Join("\n", methods.Select(m => Definition(source, m)));
         return Atomics(result).Replace("std::condition_variable", "rl::condition_variable", StringComparison.Ordinal);
@@ -205,14 +223,18 @@ internal sealed class SourceAdapters(string root)
 
     private string Shutdown()
     {
-        var source = Read("src/thread_pool.cpp");
-        var header = Read("include/dagflow/thread_pool.hpp");
-        var guard = Definition(header, "class PublicationGuard {");
-        var start = header.IndexOf("  static constexpr uint64_t admission_closed_bit", StringComparison.Ordinal);
-        var end = header.IndexOf("\n};", start, StringComparison.Ordinal);
-        if (start < 0 || end < 0) throw new InvalidDataException("Shutdown field anchor changed.");
-        var fields = header[start..end];
-        var prefix = """
+        string source = Read("src/thread_pool.cpp");
+        string header = Read("include/dagflow/thread_pool.hpp");
+        string guard = Definition(header, "class PublicationGuard {");
+        int start = header.IndexOf("  static constexpr uint64_t admission_closed_bit", StringComparison.Ordinal);
+        int end = header.IndexOf("\n};", start, StringComparison.Ordinal);
+        if (start < 0 || end < 0)
+        {
+            throw new InvalidDataException("Shutdown field anchor changed.");
+        }
+
+        string fields = header[start..end];
+        string prefix = """
 
                      #include "shutdown_fixture.hpp"
                      class Pool {

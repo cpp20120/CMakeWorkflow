@@ -1,16 +1,18 @@
 using System.Text.Json;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 // run.json and its audit are a single commit. Callers must hold the run lease.
 internal static class WorkflowCheckpoint
 {
     public static Task SaveAsync(WorkflowReport report, string directory, CancellationToken ct)
     {
-        var path = Path.Combine(directory, "run.json");
-        var faultNode = report.Nodes.FirstOrDefault(n => n.Status == "running")?.Id
+        string path = Path.Combine(directory, "run.json");
+        string? faultNode = report.Nodes.FirstOrDefault(n => n.Status == "running")?.Id
                         ?? report.Reconciliations.LastOrDefault()?.NodeId;
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
         return WriteDurableBytesAsync(path, bytes, ct, faultNode, injectRecoveryFaults: true);
     }
 

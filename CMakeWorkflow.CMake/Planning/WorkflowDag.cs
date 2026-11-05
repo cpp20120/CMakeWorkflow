@@ -1,13 +1,19 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 internal static class WorkflowDag
 {
     internal static void ValidateDependencies(string nodeId, IEnumerable<string> dependencies,
         IReadOnlySet<string> nodeIds)
     {
-        foreach (var dependency in dependencies)
+        foreach (string dependency in dependencies)
+        {
             if (!nodeIds.Contains(dependency))
+            {
                 throw new ArgumentException($"{nodeId}: unknown dependency '{dependency}'.");
+            }
+        }
     }
 
     internal static (List<string> OrderedIds, HashSet<string> SelectedIds) Select(
@@ -16,32 +22,45 @@ internal static class WorkflowDag
         IReadOnlyList<string> only)
     {
         // Validate the whole graph, including unselected branches, before selection.
-        var orderedIds = new List<string>();
-        var remaining = orderedNodeIds.ToList();
-        var visited = new HashSet<string>(StringComparer.Ordinal);
+        List<string> orderedIds = [];
+        List<string> remaining = [.. orderedNodeIds];
+        HashSet<string> visited = new(StringComparer.Ordinal);
         while (remaining.Count > 0)
         {
-            var ready = remaining.Where(id => dependencies[id].All(visited.Contains)).ToArray();
+            string[] ready = [.. remaining.Where(id => dependencies[id].All(visited.Contains))];
             if (ready.Length == 0)
+            {
                 throw new ArgumentException(
                     $"Workflow contains a dependency cycle: {string.Join(", ", remaining)}");
+            }
 
-            foreach (var id in ready)
+            foreach (string? id in ready)
             {
                 orderedIds.Add(id);
-                visited.Add(id);
-                remaining.Remove(id);
+                _ = visited.Add(id);
+                _ = remaining.Remove(id);
             }
         }
 
-        var knownIds = new HashSet<string>(orderedNodeIds, StringComparer.Ordinal);
-        var selectedIds = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(only.Count == 0 ? orderedNodeIds : only);
-        while (pending.TryPop(out var id))
+        HashSet<string> knownIds = new(orderedNodeIds, StringComparer.Ordinal);
+        HashSet<string> selectedIds = new(StringComparer.Ordinal);
+        Stack<string> pending = new(only.Count == 0 ? orderedNodeIds : only);
+        while (pending.TryPop(out string? id))
         {
-            if (!knownIds.Contains(id)) throw new ArgumentException($"Unknown selected node '{id}'.");
-            if (!selectedIds.Add(id)) continue;
-            foreach (var dependency in dependencies[id]) pending.Push(dependency);
+            if (!knownIds.Contains(id))
+            {
+                throw new ArgumentException($"Unknown selected node '{id}'.");
+            }
+
+            if (!selectedIds.Add(id))
+            {
+                continue;
+            }
+
+            foreach (string dependency in dependencies[id])
+            {
+                pending.Push(dependency);
+            }
         }
 
         return (orderedIds, selectedIds);

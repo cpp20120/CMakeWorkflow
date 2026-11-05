@@ -8,7 +8,10 @@ internal static class TypedRecipeTests
 {
     private static void Check(bool valid, string message)
     {
-        if (!valid) throw new Exception(message);
+        if (!valid)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 
     private static void Reject(Func<WorkflowDocument> build)
@@ -22,25 +25,25 @@ internal static class TypedRecipeTests
             return;
         }
 
-        throw new Exception("Invalid recipe was accepted.");
+        throw new System.Diagnostics.UnreachableException("Invalid recipe was accepted.");
     }
 
     private static void RoundTrip<T>(T request, JsonTypeInfo<T> metadata)
     {
-        var json = JsonSerializer.Serialize(request, metadata);
-        var parsed = JsonSerializer.Deserialize(json, metadata);
+        string json = JsonSerializer.Serialize(request, metadata);
+        T? parsed = JsonSerializer.Deserialize(json, metadata);
         Check(parsed is not null && JsonSerializer.Serialize(parsed, metadata) == json,
             "Typed Host recipe JSON source generation mismatch");
     }
 
     public static void Run(string root)
     {
-        var a = Path.Combine(root, "recipe-a");
-        var b = Path.Combine(root, "recipe-b");
-        var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
-        var profile = new ProfileRecipeV1("profile", 1, [new("a", a), new("b", b)],
+        string a = Path.Combine(root, "recipe-a");
+        string b = Path.Combine(root, "recipe-b");
+        string platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+        ProfileRecipeV1 profile = new("profile", 1, [new("a", a), new("b", b)],
             "worker", "Debug", 2, 10, ["--case", "a b"], "auto", "diagnostic", platform);
-        var profileGraph = ProfileRecipeBuilder.Build(profile);
+        WorkflowDocument profileGraph = ProfileRecipeBuilder.Build(profile);
         Check(profileGraph.SchemaVersion == 2 && profileGraph.Nodes.Count(n => n.Kind == "build") == 2
                                               && profileGraph.Nodes.Count(n => n.Kind == "run") == 4
                                               && profileGraph.Nodes.Any(n => n.Kind == "profile")
@@ -52,8 +55,8 @@ internal static class TypedRecipeTests
             "Profile alternating variant order");
         Check(WorkflowManifestBytes.Serialize(profileGraph).SequenceEqual(WorkflowManifestBytes.Serialize(
             ProfileRecipeBuilder.Build(profile))), "Profile graph nondeterministic");
-        var otherPlatform = platform == "linux" ? "windows" : "linux";
-        var remoteGraph = ProfileRecipeBuilder.Build(profile with { Platform = otherPlatform, Mode = "cpu" });
+        string otherPlatform = platform == "linux" ? "windows" : "linux";
+        WorkflowDocument remoteGraph = ProfileRecipeBuilder.Build(profile with { Platform = otherPlatform, Mode = "cpu" });
         Check(remoteGraph.Nodes.Where(n => n.Kind == "profile").All(n =>
                 n.Options["backend"] == (otherPlatform == "linux" ? "perf" : "etw")),
             "Profile auto backend depended on generator host OS");
@@ -61,9 +64,9 @@ internal static class TypedRecipeTests
         Reject(() => ProfileRecipeBuilder.Build(profile with { Backend = platform == "linux" ? "etw" : "perf" }));
         Reject(() => ProfileRecipeBuilder.Build(profile with { Variants = [new("a", a), new("a", b)] }));
 
-        var tests = new TestMatrixRecipeV1("test-matrix", 1, a, "worker", "Debug",
+        TestMatrixRecipeV1 tests = new("test-matrix", 1, a, "worker", "Debug",
             [new("unit", LabelRegex: "unit"), new("stress", TestRegex: "stress_.*")], "parallel", 30);
-        var testGraph = TestMatrixWorkflowBuilder.Build(tests);
+        WorkflowDocument testGraph = TestMatrixWorkflowBuilder.Build(tests);
         Check(testGraph.Nodes.Count == 3 && testGraph.Nodes[0].Kind == "build"
                                          && testGraph.Nodes.Skip(1).All(n => n.Kind == "ctest"
                                                                              && n.DependsOn.SequenceEqual([
@@ -71,7 +74,7 @@ internal static class TypedRecipeTests
                                                                              ]))
                                          && testGraph.Nodes[1].LabelRegex == "unit"
                                          && testGraph.Nodes[2].TestRegex == "stress_.*", "Test Matrix parallel graph");
-        var serial = TestMatrixWorkflowBuilder.Build(tests with { ExecutionOrder = "sequential" });
+        WorkflowDocument serial = TestMatrixWorkflowBuilder.Build(tests with { ExecutionOrder = "sequential" });
         Check(serial.Nodes[2].DependsOn.SequenceEqual(["ctest_unit"]), "Test Matrix serial graph");
         Reject(() => TestMatrixWorkflowBuilder.Build(tests with { Groups = [] }));
         Reject(() => TestMatrixWorkflowBuilder.Build(tests with { Groups = [new("x", "foo", "bar")] }));
@@ -83,17 +86,16 @@ internal static class TypedRecipeTests
             }));
         Reject(() => TestMatrixWorkflowBuilder.Build(tests with
         {
-            Groups = Enumerable.Range(0, 65)
-                .Select(i => new TestMatrixGroupV1("g" + i, LabelRegex: "x")).ToArray()
+            Groups = [.. Enumerable.Range(0, 65).Select(i => new TestMatrixGroupV1("g" + i, LabelRegex: "x"))]
         }));
 
-        var variants = new[]
-        {
+        BuildVariantV1[] variants =
+        [
             new BuildVariantV1("debug", a, "Debug"),
             new BuildVariantV1("release", b, "Release")
-        };
-        var build = new BuildMatrixRecipeV1("build-matrix", 1, variants, ["worker", "other"]);
-        var buildGraph = BuildMatrixWorkflowBuilder.Build(build);
+        ];
+        BuildMatrixRecipeV1 build = new("build-matrix", 1, variants, ["worker", "other"]);
+        WorkflowDocument buildGraph = BuildMatrixWorkflowBuilder.Build(build);
         Check(buildGraph.Contexts.Count == 2 && buildGraph.Nodes.Count == 4
                                              && buildGraph.Nodes.All(n => n.Kind == "build" && n.DependsOn.Count == 0)
                                              && buildGraph.Nodes.Select(n => n.Id).SequenceEqual(
@@ -109,16 +111,16 @@ internal static class TypedRecipeTests
         Reject(() => BuildMatrixWorkflowBuilder.Build(build with { Targets = ["worker", "worker"] }));
         Reject(() => BuildMatrixWorkflowBuilder.Build(build with
         {
-            Targets = Enumerable.Range(0, 300).Select(i => "t" + i).ToArray()
+            Targets = [.. Enumerable.Range(0, 300).Select(i => "t" + i)]
         }));
 
-        var matrix = new BenchmarkMatrixRecipeV1("benchmark-matrix", 1, variants, "worker", 2, 30,
+        BenchmarkMatrixRecipeV1 matrix = new("benchmark-matrix", 1, variants, "worker", 2, 30,
             ["--literal", "a b"], [
                 new("case", "--case", ["chain", "noop"]),
                 new("workers", "--workers", ["1", "2"])
             ], "round-robin");
-        var graph = BenchmarkMatrixWorkflowBuilder.Build(matrix);
-        var timing = graph.Nodes.Where(n => n.Kind == "run").ToArray();
+        WorkflowDocument graph = BenchmarkMatrixWorkflowBuilder.Build(matrix);
+        WorkflowNode[] timing = [.. graph.Nodes.Where(n => n.Kind == "run")];
         Check(graph.SchemaVersion == 2 && graph.Nodes.Count == 18 && timing.Length == 16
               && timing.All(n => n.Resources.SequenceEqual(["measurement-host"])
                                  && n.Arguments.Take(2).SequenceEqual(["--literal", "a b"]))
@@ -129,17 +131,17 @@ internal static class TypedRecipeTests
             "Benchmark Matrix order, isolation or argv");
         Check(WorkflowManifestBytes.Serialize(graph).SequenceEqual(WorkflowManifestBytes.Serialize(
             BenchmarkMatrixWorkflowBuilder.Build(matrix))), "Benchmark Matrix graph nondeterministic");
-        var sequential = BenchmarkMatrixWorkflowBuilder.Build(matrix with { ExecutionOrder = "sequential" });
+        WorkflowDocument sequential = BenchmarkMatrixWorkflowBuilder.Build(matrix with { ExecutionOrder = "sequential" });
         Check(sequential.Nodes[2].Id == "timing_debug_0001_001"
               && sequential.Nodes[3].Id == "timing_debug_0001_002", "Benchmark Matrix sequential order");
         Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with { Repeats = 0 }));
         Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with { Axes = [new("bad", "workers", ["1"])] }));
         Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with
         {
-            Axes = [new("huge", "--huge", Enumerable.Range(0, 32).Select(i => i.ToString()).ToArray())],
+            Axes = [new("huge", "--huge", [.. Enumerable.Range(0, 32).Select(i => i.ToString(System.Globalization.CultureInfo.CurrentCulture))])],
             Repeats = 100
         }));
-        var id = Guid.NewGuid().ToString("N");
+        string id = Guid.NewGuid().ToString("N");
         RoundTrip(new ProfileRecipePrepareRequest(id, Path.Combine(root, "p.json"), profile),
             HostJson.Default.ProfileRecipePrepareRequest);
         RoundTrip(new TestMatrixPrepareRequest(id, Path.Combine(root, "t.json"), tests),

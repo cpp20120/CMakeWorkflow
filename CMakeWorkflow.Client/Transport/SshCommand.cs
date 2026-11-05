@@ -1,6 +1,8 @@
 using System.Diagnostics;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 internal static class SshCommand
 {
@@ -8,23 +10,34 @@ internal static class SshCommand
     {
         Text(options.Destination, nameof(options.Destination));
         if (options.Destination.StartsWith('-') || options.Destination.Any(char.IsWhiteSpace))
+        {
             throw new ArgumentException("SSH destination must be a host alias or user@host, not options.");
+        }
+
         Text(options.RemoteExecutable, nameof(options.RemoteExecutable));
         Text(options.SshExecutable, nameof(options.SshExecutable));
         RemotePath(options.Endpoint, nameof(options.Endpoint));
         RemotePath(options.Workspace, nameof(options.Workspace));
         if (options.ConnectionTimeout <= TimeSpan.Zero || options.ConnectionTimeout > TimeSpan.FromHours(1))
-            throw new ArgumentOutOfRangeException(nameof(options.ConnectionTimeout), "Use a timeout between zero and one hour.");
-
-        var start = new ProcessStartInfo(options.SshExecutable)
         {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+            throw new ArgumentOutOfRangeException(nameof(options), "Use a timeout between zero and one hour.");
+        }
+
+        ProcessStartInfo start = new(options.SshExecutable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
         // Host keys and authentication remain OpenSSH's responsibility. BatchMode
         // prevents credential prompts from hanging an SDK caller. No TTY/framing changes.
-        foreach (var arg in new[] { "-T", "-o", "BatchMode=yes", "--", options.Destination })
+        foreach (string? arg in new[] { "-T", "-o", "BatchMode=yes", "--", options.Destination })
+        {
             start.ArgumentList.Add(arg);
+        }
+
         start.ArgumentList.Add(BridgeCommand(options.RemoteExecutable, options.Endpoint));
         return start;
     }
@@ -48,7 +61,9 @@ internal static class SshCommand
     private static void Text(string value, string name)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
+        {
             throw new ArgumentException("A nonempty value without control characters is required.", name);
+        }
     }
 
     internal static void RemotePath(string path, string name)
@@ -56,6 +71,8 @@ internal static class SshCommand
         Text(path, name);
         if (!path.StartsWith('/') || path.StartsWith("//", StringComparison.Ordinal)
             || path.Split('/').Any(component => component is "." or ".."))
+        {
             throw new ArgumentException("Specify an absolute Linux remote path without dot segments; local paths are not translated.", name);
+        }
     }
 }

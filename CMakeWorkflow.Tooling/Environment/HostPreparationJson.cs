@@ -1,7 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json.Serialization;
-using System.Text.Json;
 
 namespace CMakeWorkflow.Tooling;
 
@@ -20,4 +17,4 @@ namespace CMakeWorkflow.Tooling;
 [JsonSerializable(typeof(HostPreparationResult))]
 [JsonSerializable(typeof(IReadOnlyList<HostSettingChange>))]
 [JsonSerializable(typeof(ProvisioningAuditEntry))]
-internal partial class HostPreparationJson : JsonSerializerContext;
+internal sealed partial class HostPreparationJson : JsonSerializerContext;

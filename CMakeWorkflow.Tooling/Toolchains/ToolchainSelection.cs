@@ -1,11 +1,8 @@
-using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Win32;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
 public sealed record ToolchainSelection(
     [property: JsonPropertyName("cmakeCandidateId")]

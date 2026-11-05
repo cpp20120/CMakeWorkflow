@@ -1,10 +1,6 @@
-using System.Text.Json.Serialization;
-using CMakeWorkflow;
-using CMakeWorkflow.History;
-using CMakeWorkflow.Profiling;
-using StreamJsonRpc;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 // These analysis/replay/campaign calls are request-scoped, unlike workflow/start.
 // A disconnect cancels their token; never assume durable acceptance or retry.

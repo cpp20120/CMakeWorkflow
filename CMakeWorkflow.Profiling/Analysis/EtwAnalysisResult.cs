@@ -1,11 +1,6 @@
-using System.Globalization;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Xml;
-using System.Xml.Linq;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling;
+#pragma warning restore IDE0130
 
 public sealed record EtwAnalysisResult(
     string EventDump,

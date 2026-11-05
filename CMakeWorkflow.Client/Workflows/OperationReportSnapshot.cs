@@ -1,6 +1,8 @@
 using System.Text.Json;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 /// <summary>
 /// An operation-bound terminal report. Report is the existing CMakeWorkflow

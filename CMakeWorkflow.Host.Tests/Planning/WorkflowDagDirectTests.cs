@@ -11,37 +11,37 @@ internal static class WorkflowDagDirectTests
 
     private static void OrderingAndClosure()
     {
-        var layers = Select([("a", "b"), ("b", ""), ("c", "")], []);
-        Equal(["b", "c", "a"], layers.OrderedIds, "stable layer order");
-        SetEqual(["a", "b", "c"], layers.SelectedIds, "empty selection selects all");
+        (List<string>? OrderedIds, HashSet<string>? SelectedIds) = Select([("a", "b"), ("b", ""), ("c", "")], []);
+        Equal(["b", "c", "a"], OrderedIds, "stable layer order");
+        SetEqual(["a", "b", "c"], SelectedIds, "empty selection selects all");
 
-        var diamond = Select([("a", "b,c"), ("b", "d"), ("c", "d"), ("d", ""), ("e", "")], []);
+        (List<string> OrderedIds, HashSet<string> SelectedIds) diamond = Select([("a", "b,c"), ("b", "d"), ("c", "d"), ("d", ""), ("e", "")], []);
         Equal(["d", "e", "b", "c", "a"], diamond.OrderedIds, "diamond and ready-root order");
 
-        var branches = Select([("left", "left-root"), ("left-root", ""), ("right", "right-root"),
+        (List<string> OrderedIds, HashSet<string> SelectedIds) branches = Select([("left", "left-root"), ("left-root", ""), ("right", "right-root"),
             ("right-root", "")], []);
         Equal(["left-root", "right-root", "left", "right"], branches.OrderedIds,
             "independent branches");
 
-        var selected = Select([("a", "b"), ("b", ""), ("c", "")], ["a"]);
+        (List<string> OrderedIds, HashSet<string> SelectedIds) selected = Select([("a", "b"), ("b", ""), ("c", "")], ["a"]);
         Equal(["b", "c", "a"], selected.OrderedIds, "full ordering does not depend on selection");
         SetEqual(["a", "b"], selected.SelectedIds, "single transitive closure");
 
-        var repeated = Select([("a", "b"), ("b", ""), ("c", "")], ["a", "a", "c"]);
+        (List<string> OrderedIds, HashSet<string> SelectedIds) repeated = Select([("a", "b"), ("b", ""), ("c", "")], ["a", "a", "c"]);
         SetEqual(["a", "b", "c"], repeated.SelectedIds, "multiple duplicate selection");
 
-        var deep = Select([("a", "b"), ("b", "c"), ("c", ""), ("unrelated", "")], ["a"]);
+        (List<string> OrderedIds, HashSet<string> SelectedIds) deep = Select([("a", "b"), ("b", "c"), ("c", ""), ("unrelated", "")], ["a"]);
         SetEqual(["a", "b", "c"], deep.SelectedIds, "multi-level transitive closure");
 
-        var caseDistinct = Select([("Alpha", ""), ("alpha", "")], ["Alpha"]);
+        (List<string> OrderedIds, HashSet<string> SelectedIds) caseDistinct = Select([("Alpha", ""), ("alpha", "")], ["Alpha"]);
         SetEqual(["Alpha"], caseDistinct.SelectedIds, "ordinal selection IDs");
         Equal(["Alpha", "alpha"], caseDistinct.OrderedIds, "case-distinct node IDs");
 
-        var singleton = Select([("solo", "")], ["solo"]);
+        (List<string> OrderedIds, HashSet<string> SelectedIds) singleton = Select([("solo", "")], ["solo"]);
         Equal(["solo"], singleton.OrderedIds, "singleton order");
         SetEqual(["solo"], singleton.SelectedIds, "singleton selection");
 
-        var opaqueIds = Select([("opaque node", "dependency / worker"), ("dependency / worker", "")],
+        (List<string> OrderedIds, HashSet<string> SelectedIds) opaqueIds = Select([("opaque node", "dependency / worker"), ("dependency / worker", "")],
             ["opaque node"]);
         Equal(["dependency / worker", "opaque node"], opaqueIds.OrderedIds,
             "graph IDs have no domain identifier validation");
@@ -79,10 +79,10 @@ internal static class WorkflowDagDirectTests
     private static (List<string> OrderedIds, HashSet<string> SelectedIds) Select(
         (string Id, string Dependencies)[] entries, IReadOnlyList<string> only)
     {
-        var ids = entries.Select(entry => entry.Id).ToArray();
-        var dependencies = entries.ToDictionary(entry => entry.Id,
+        string[] ids = [.. entries.Select(entry => entry.Id)];
+        Dictionary<string, string[]> dependencies = entries.ToDictionary(entry => entry.Id,
             entry => entry.Dependencies.Length == 0
-                ? Array.Empty<string>()
+                ? []
                 : entry.Dependencies.Split(',', StringSplitOptions.RemoveEmptyEntries),
             StringComparer.Ordinal);
         return WorkflowDag.Select(ids, dependencies, only);
@@ -101,25 +101,28 @@ internal static class WorkflowDagDirectTests
             return;
         }
 
-        throw new Exception(name + " expected " + typeof(T).Name);
+        throw new System.Diagnostics.UnreachableException(name + " expected " + typeof(T).Name);
     }
 
     private static void Equal(IEnumerable<string> expected, IEnumerable<string> actual, string name)
     {
-        var left = expected.ToArray();
-        var right = actual.ToArray();
+        string[] left = [.. expected];
+        string[] right = [.. actual];
         Check(left.SequenceEqual(right), name + ": expected [" + string.Join(", ", left) + "] got [" +
               string.Join(", ", right) + "]");
     }
 
     private static void SetEqual(IEnumerable<string> expected, IReadOnlySet<string> actual, string name)
     {
-        var expectedSet = new HashSet<string>(expected, StringComparer.Ordinal);
+        HashSet<string> expectedSet = new(expected, StringComparer.Ordinal);
         Check(expectedSet.SetEquals(actual), name + ": set did not match expected values");
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 }

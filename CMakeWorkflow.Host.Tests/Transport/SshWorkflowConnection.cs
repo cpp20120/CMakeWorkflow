@@ -9,14 +9,16 @@ internal sealed class SshWorkflowConnection : IDisposable
 
     internal SshWorkflowConnection(string endpoint, string workspace, bool dropStartReply = false)
     {
-        var assembly = SshTestPrograms.Quote(typeof(SshWorkflowConnection).Assembly.Location);
-        var command = dropStartReply
+        string assembly = SshTestPrograms.Quote(typeof(SshWorkflowConnection).Assembly.Location);
+        string command = dropStartReply
             ? $"exec dotnet {assembly} --ssh-drop-start-worker {SshTestPrograms.Quote(endpoint)} {SshTestPrograms.Quote(LostReply)}"
             : $"shift 2\nexec dotnet {assembly} --bridge-worker \"$@\"";
-        var remote = files.Script("remote host ' executable", "test \"$1\" = host\ntest \"$2\" = bridge\n" + command);
+        string remote = files.Script("remote host ' executable", "test \"$1\" = host\ntest \"$2\" = bridge\n" + command);
         Options = new("remote-workflow-fixture", endpoint, workspace)
         {
-            RemoteExecutable = remote, SshExecutable = files.Ssh(), ConnectionTimeout = TimeSpan.FromSeconds(5)
+            RemoteExecutable = remote,
+            SshExecutable = files.Ssh(),
+            ConnectionTimeout = TimeSpan.FromSeconds(5)
         };
     }
 

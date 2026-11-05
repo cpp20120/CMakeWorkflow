@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.Campaigns;
 
@@ -8,42 +7,57 @@ public static class CampaignCommand
 {
     public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(args);
         if (args.Length < 2)
+        {
             throw new ArgumentException(
                 "Usage: CMakeWorkflow dagflow <mutation run|weak-memory run|fuzz seed|fuzz run|fuzz triage|fuzz merge> ...");
-        var allowed = (args[0], args[1]) switch
+        }
+
+        string[] allowed = (args[0], args[1]) switch
         {
-            ("mutation", "run") => new[]
-            {
+            ("mutation", "run") =>
+            [
                 "--source-dir", "--suite", "--cxx", "--seed",
                 "--cases", "--steps", "--timeout", "--report"
-            },
-            ("weak-memory", "run") => new[]
-            {
+            ],
+            ("weak-memory", "run") =>
+            [
                 "--source-dir", "--protocol", "--relacy",
                 "--cxx", "--timeout", "--report", "--mutant"
-            },
-            ("fuzz", "seed") => new[] { "--source-dir", "--layer", "--output" },
-            ("fuzz", "run") => new[]
-            {
+            ],
+            ("fuzz", "seed") => ["--source-dir", "--layer", "--output"],
+            ("fuzz", "run") =>
+            [
                 "--build-dir", "--layer", "--backend", "--duration",
                 "--timeout", "--corpus", "--results-dir", "--config", "--max-len", "--replay-only"
-            },
-            ("fuzz", "triage") => new[] { "--run-dir" },
-            ("fuzz", "merge") => new[] { "--run-dir", "--output", "--coverage" },
+            ],
+            ("fuzz", "triage") => ["--run-dir"],
+            ("fuzz", "merge") => ["--run-dir", "--output", "--coverage"],
             _ => throw new ArgumentException($"Unknown DagFlow campaign: {args[0]} {args[1]}")
         };
-        for (var index = 2; index < args.Length; index++)
+        for (int index = 2; index < args.Length; index++)
         {
-            var option = args[index];
-            if (!allowed.Contains(option)) throw new ArgumentException($"Unknown option: {option}");
-            if (option is "--replay-only" or "--coverage") continue;
+            string option = args[index];
+            if (!allowed.Contains(option))
+            {
+                throw new ArgumentException($"Unknown option: {option}");
+            }
+
+            if (option is "--replay-only" or "--coverage")
+            {
+                continue;
+            }
+
             if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
                 throw new ArgumentException($"{option} requires a value.");
+            }
+
             index++;
         }
 
-        var source = Option(args, "--source-dir") ?? Directory.GetCurrentDirectory();
+        string source = Option(args, "--source-dir") ?? Directory.GetCurrentDirectory();
         source = Path.GetFullPath(source);
         return (args[0], args[1]) switch
         {
@@ -82,13 +96,17 @@ public static class CampaignCommand
         Func<Task<int>> execute)
     {
         reportPath = Path.GetFullPath(reportPath);
-        var started = DateTimeOffset.UtcNow;
-        var status = "failed";
-        var marker = Path.Combine(Path.GetDirectoryName(reportPath)!, "campaign-completion.json");
-        if (File.Exists(marker)) File.Delete(marker);
+        DateTimeOffset started = DateTimeOffset.UtcNow;
+        string status = "failed";
+        string marker = Path.Combine(Path.GetDirectoryName(reportPath)!, "campaign-completion.json");
+        if (File.Exists(marker))
+        {
+            File.Delete(marker);
+        }
+
         try
         {
-            var code = await execute();
+            int code = await execute();
             status = code == 0 ? "succeeded" : "failed";
             return code;
         }
@@ -102,11 +120,15 @@ public static class CampaignCommand
             if (File.Exists(reportPath)
                 && File.GetLastWriteTimeUtc(reportPath) >= started.UtcDateTime)
             {
-                var value = new CampaignCompletion(1, campaign, Path.GetFileName(reportPath),
-                    Convert.ToHexString(SHA256.HashData(
-                        await File.ReadAllBytesAsync(reportPath))).ToLowerInvariant(),
-                    started, DateTimeOffset.UtcNow, status);
-                var temporary = marker + ".tmp";
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
+                CampaignCompletion value = new(1, campaign, Path.GetFileName(reportPath),
+                                    Convert.ToHexString(SHA256.HashData(
+                                        await File.ReadAllBytesAsync(reportPath))).ToLowerInvariant(),
+                                    started, DateTimeOffset.UtcNow, status);
+#pragma warning restore CA1308
+
+                string temporary = marker + ".tmp";
                 await File.WriteAllTextAsync(temporary,
                     JsonSerializer.Serialize(value, CampaignCompletionJson.Default.CampaignCompletion) + "\n");
                 File.Move(temporary, marker, overwrite: true);
@@ -116,19 +138,26 @@ public static class CampaignCommand
 
     private static int Integer(string[] args, string name, int fallback) =>
         Option(args, name) is { } text
-            ? int.TryParse(text, out var value)
+            ? int.TryParse(text, out int value)
                 ? value
                 : throw new ArgumentException($"{name} must be an integer.")
             : fallback;
 
     private static string? Option(string[] args, string name)
     {
-        var result = (string?)null;
-        for (var index = 2; index < args.Length; index++)
+        string? result = null;
+        for (int index = 2; index < args.Length; index++)
         {
-            if (args[index] != name) continue;
+            if (args[index] != name)
+            {
+                continue;
+            }
+
             if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
                 throw new ArgumentException($"{name} requires a value.");
+            }
+
             result = args[index + 1];
         }
 

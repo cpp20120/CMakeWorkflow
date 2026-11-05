@@ -1,6 +1,6 @@
-using CMakeWorkflow;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling;
+#pragma warning restore IDE0130
 
 internal static class ProfileEnvironment
 {
@@ -10,6 +10,8 @@ internal static class ProfileEnvironment
     public static void RequireSuccess(CommandResult result, string operation)
     {
         if (result.TimedOut || result.ExitCode != 0)
+        {
             throw new InvalidOperationException($"{operation} failed: {result.Output}");
+        }
     }
 }

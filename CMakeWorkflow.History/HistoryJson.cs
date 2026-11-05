@@ -1,7 +1,3 @@
-using System.Security.Cryptography;
-using System.Globalization;
-using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.History;
@@ -15,4 +11,4 @@ namespace CMakeWorkflow.History;
 [JsonSerializable(typeof(List<HistoryBuildEnvironment>))]
 [JsonSerializable(typeof(HistoryImportResult))]
 [JsonSerializable(typeof(HistoryDetectionReport))]
-internal partial class HistoryJson : JsonSerializerContext;
+internal sealed partial class HistoryJson : JsonSerializerContext;

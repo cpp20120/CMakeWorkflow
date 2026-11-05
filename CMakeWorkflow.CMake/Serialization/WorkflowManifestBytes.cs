@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public static class WorkflowManifestBytes
 {
@@ -12,16 +14,19 @@ public static class WorkflowManifestBytes
     public static async Task WriteNewAsync(string output, WorkflowDocument document,
         CancellationToken ct)
     {
-        var bytes = Serialize(document);
+        byte[] bytes = Serialize(document);
         ct.ThrowIfCancellationRequested();
         if (File.Exists(output) || Directory.Exists(output))
+        {
             throw new IOException($"Manifest already exists: {output}");
-        var parent = Path.GetDirectoryName(output)!;
-        Directory.CreateDirectory(parent);
-        var temp = Path.Combine(parent, ".workflow-recipe-" + Guid.NewGuid().ToString("N") + ".tmp");
+        }
+
+        string parent = Path.GetDirectoryName(output)!;
+        _ = Directory.CreateDirectory(parent);
+        string temp = Path.Combine(parent, ".workflow-recipe-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            await using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write,
+            await using (FileStream file = new(temp, FileMode.CreateNew, FileAccess.Write,
                              FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
                 await file.WriteAsync(bytes, ct);
@@ -33,7 +38,10 @@ public static class WorkflowManifestBytes
         }
         finally
         {
-            if (File.Exists(temp)) File.Delete(temp);
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
         }
     }
 }

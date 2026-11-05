@@ -1,16 +1,21 @@
 using System.Globalization;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 internal static class BenchmarkGenerateCommand
 {
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
         if (args.Length == 0 || args[0] != "benchmark")
+        {
             throw new ArgumentException("workflow generate requires the benchmark recipe kind.");
-        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        Dictionary<string, string> options = new(StringComparer.Ordinal);
         string[] programArguments = [];
-        for (var i = 1; i < args.Length; i++)
+        for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--")
             {
@@ -18,28 +23,42 @@ internal static class BenchmarkGenerateCommand
                 break;
             }
 
-            var option = args[i];
+            string option = args[i];
             if (option is not ("--build-dir" or "--target" or "--config" or "--repeats"
                 or "--timeout-seconds" or "--output"))
+            {
                 throw new ArgumentException($"Unknown benchmark generation option: {option}");
+            }
+
             if (++i >= args.Length || args[i].StartsWith("--", StringComparison.Ordinal))
+            {
                 throw new ArgumentException($"{option} requires a value.");
+            }
+
             if (!options.TryAdd(option, args[i]))
+            {
                 throw new ArgumentException($"Duplicate benchmark generation option: {option}");
+            }
         }
 
         string Required(string name) => options.GetValueOrDefault(name)
                                         ?? throw new ArgumentException($"workflow generate benchmark requires {name}.");
 
         if (!int.TryParse(Required("--repeats"), NumberStyles.Integer,
-                CultureInfo.InvariantCulture, out var repeats))
+                CultureInfo.InvariantCulture, out int repeats))
+        {
             throw new ArgumentException("--repeats must be an integer.");
+        }
+
         if (!double.TryParse(Required("--timeout-seconds"), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var timeout))
+                CultureInfo.InvariantCulture, out double timeout))
+        {
             throw new ArgumentException("--timeout-seconds must be a number.");
-        var build = Path.GetFullPath(Required("--build-dir"));
-        var output = Path.GetFullPath(Required("--output"));
-        var recipe = new BenchmarkRecipeV1("benchmark", 1, build, Required("--target"),
+        }
+
+        string build = Path.GetFullPath(Required("--build-dir"));
+        string output = Path.GetFullPath(Required("--output"));
+        BenchmarkRecipeV1 recipe = new("benchmark", 1, build, Required("--target"),
             options.GetValueOrDefault("--config"), repeats, timeout, programArguments);
         await WorkflowManifestBytes.WriteNewAsync(output,
             BenchmarkWorkflowBuilder.Build(recipe), ct);

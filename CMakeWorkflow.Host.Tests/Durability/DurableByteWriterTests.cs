@@ -17,46 +17,43 @@ internal static class DurableByteWriterTests
 
     private static async Task CallbacksObserveDurabilityBoundaries(string root)
     {
-        var path = Path.Combine(root, "neutral-callbacks", "checkpoint.bin");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var original = Encoding.UTF8.GetBytes("original");
+        string path = Path.Combine(root, "neutral-callbacks", "checkpoint.bin");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        byte[] original = Encoding.UTF8.GetBytes("original");
         await File.WriteAllBytesAsync(path, original);
-        var surrounding = new byte[Payload.Length + 4];
+        byte[] surrounding = new byte[Payload.Length + 4];
         Array.Fill(surrounding, (byte)0xEE);
         Payload.CopyTo(surrounding.AsSpan(2, Payload.Length));
-        var calls = new List<string>();
+        List<string> calls = [];
 
         await DurableByteWriter.WriteAsync(path, surrounding.AsMemory(2, Payload.Length), CancellationToken.None,
-            afterFlushed: () =>
+            afterFlushed: async () =>
             {
                 calls.Add("flushed");
-                Check(File.ReadAllBytes(path + ".tmp").SequenceEqual(Payload),
+                Check((await File.ReadAllBytesAsync(path + ".tmp")).SequenceEqual(Payload),
                     "Flush callback did not see the complete temporary bytes.");
-                Check(File.ReadAllBytes(path).SequenceEqual(original),
+                Check((await File.ReadAllBytesAsync(path)).SequenceEqual(original),
                     "Flush callback ran after replacing the original destination.");
-                return Task.CompletedTask;
             },
-            afterReplaced: () =>
+            afterReplaced: async () =>
             {
                 calls.Add("replaced");
-                Check(File.ReadAllBytes(path).SequenceEqual(Payload),
+                Check((await File.ReadAllBytesAsync(path)).SequenceEqual(Payload),
                     "Replace callback did not see the committed payload.");
                 Check(!File.Exists(path + ".tmp"), "Replace callback saw a temporary path after rename.");
-                return Task.CompletedTask;
             },
-            beforeDirectorySync: () =>
+            beforeDirectorySync: async () =>
             {
                 calls.Add("directory-sync");
-                Check(File.ReadAllBytes(path).SequenceEqual(Payload),
+                Check((await File.ReadAllBytesAsync(path)).SequenceEqual(Payload),
                     "Directory sync callback ran before replacement.");
-                return Task.CompletedTask;
             });
 
-        var expectedCalls = OperatingSystem.IsWindows()
-            ? new[] { "flushed" }
+        string[] expectedCalls = OperatingSystem.IsWindows()
+            ? ["flushed"]
             : ["flushed", "replaced", "directory-sync"];
         Check(calls.SequenceEqual(expectedCalls), "Neutral writer callback order changed.");
-        var actual = await File.ReadAllBytesAsync(path);
+        byte[] actual = await File.ReadAllBytesAsync(path);
         Check(actual.SequenceEqual(Payload), "Neutral writer did not write the selected memory slice.");
         Check(Convert.ToHexString(SHA256.HashData(actual)) == PayloadSha256,
             "Neutral writer changed the exact payload SHA-256.");
@@ -64,54 +61,53 @@ internal static class DurableByteWriterTests
 
     private static async Task CallbackFailureIsPropagatedAndPreventsReplacement(string root)
     {
-        var path = Path.Combine(root, "neutral-callback-failure", "checkpoint.bin");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var original = Encoding.UTF8.GetBytes("original");
+        string path = Path.Combine(root, "neutral-callback-failure", "checkpoint.bin");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        byte[] original = Encoding.UTF8.GetBytes("original");
         await File.WriteAllBytesAsync(path, original);
-        var expected = new IOException("neutral callback failure");
+        IOException expected = new("neutral callback failure");
         try
         {
             await DurableByteWriter.WriteAsync(path, Payload, CancellationToken.None,
                 afterFlushed: () => Task.FromException(expected));
-            throw new Exception("Writer swallowed the callback exception.");
+            throw new System.Diagnostics.UnreachableException("Writer swallowed the callback exception.");
         }
         catch (IOException actual) when (ReferenceEquals(actual, expected))
         {
         }
 
-        Check(File.ReadAllBytes(path).SequenceEqual(original), "Callback failure replaced the original.");
-        Check(File.ReadAllBytes(path + ".tmp").SequenceEqual(Payload),
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(original), "Callback failure replaced the original.");
+        Check((await File.ReadAllBytesAsync(path + ".tmp", CancellationToken.None)).SequenceEqual(Payload),
             "Callback failure changed the flushed temporary bytes.");
     }
 
     private static async Task CancellationAfterFlushPreventsReplacement(string root)
     {
-        var path = Path.Combine(root, "neutral-canceled-callback", "checkpoint.bin");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var original = Encoding.UTF8.GetBytes("original");
+        string path = Path.Combine(root, "neutral-canceled-callback", "checkpoint.bin");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        byte[] original = Encoding.UTF8.GetBytes("original");
         await File.WriteAllBytesAsync(path, original);
-        using var cancellation = new CancellationTokenSource();
+        using CancellationTokenSource cancellation = new();
         try
         {
             await DurableByteWriter.WriteAsync(path, Payload, cancellation.Token,
-                afterFlushed: () =>
-                {
-                    cancellation.Cancel();
-                    return Task.CompletedTask;
-                });
-            throw new Exception("Writer committed after cancellation at the flush boundary.");
+                afterFlushed: cancellation.CancelAsync);
+            throw new System.Diagnostics.UnreachableException("Writer committed after cancellation at the flush boundary.");
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
         }
 
-        Check(File.ReadAllBytes(path).SequenceEqual(original), "Post-flush cancellation replaced the original.");
-        Check(File.ReadAllBytes(path + ".tmp").SequenceEqual(Payload),
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(original), "Post-flush cancellation replaced the original.");
+        Check((await File.ReadAllBytesAsync(path + ".tmp", CancellationToken.None)).SequenceEqual(Payload),
             "Post-flush cancellation changed the flushed temporary bytes.");
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 }

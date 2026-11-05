@@ -23,118 +23,124 @@ internal static class DurablePersistenceTests
 
     private static async Task WritesExactBytesAndReplacesOrphanTemporary(string root)
     {
-        var path = Path.Combine(root, "byte-write", "run.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + ".tmp";
+        string path = Path.Combine(root, "byte-write", "run.json");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temporary = path + ".tmp";
         await File.WriteAllBytesAsync(path, [1, 2, 3]);
         await File.WriteAllTextAsync(temporary, "orphaned previous temporary bytes");
 
         await WorkflowCheckpoint.WriteDurableBytesAsync(path, Payload, CancellationToken.None);
 
-        Check(File.ReadAllBytes(path).SequenceEqual(Payload), "Writer changed the supplied byte payload.");
-        Check(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) == PayloadSha256,
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(Payload), "Writer changed the supplied byte payload.");
+        Check(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path, CancellationToken.None))) == PayloadSha256,
             "Writer checkpoint SHA-256 changed.");
         Check(!File.Exists(temporary), "Writer left a stale temporary file after replacement.");
     }
 
     private static async Task InjectedFlushFailurePreservesOriginal(string root)
     {
-        var path = Path.Combine(root, "flush-failure", "run.json");
-        var original = await CreateCheckpoint(path);
-        var error = await InjectedFailure(path, "checkpoint-flushed");
+        string path = Path.Combine(root, "flush-failure", "run.json");
+        byte[] original = await CreateCheckpoint(path);
+        IOException error = await InjectedFailure(path, "checkpoint-flushed");
 
         Check(error.Message == "Injected checkpoint I/O failure at checkpoint-flushed",
             "Post-flush injected error changed.");
-        Check(File.ReadAllBytes(path).SequenceEqual(original), "Post-flush failure replaced the original checkpoint.");
-        Check(File.ReadAllBytes(path + ".tmp").SequenceEqual(Payload),
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(original), "Post-flush failure replaced the original checkpoint.");
+        Check((await File.ReadAllBytesAsync(path + ".tmp", CancellationToken.None)).SequenceEqual(Payload),
             "Post-flush failure changed the flushed temporary checkpoint.");
     }
 
     private static async Task InjectedPostReplaceFailureLeavesNewCheckpoint(string root)
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
 
-        var path = Path.Combine(root, "replace-failure", "run.json");
-        await CreateCheckpoint(path);
-        var error = await InjectedFailure(path, "checkpoint-replaced");
+        string path = Path.Combine(root, "replace-failure", "run.json");
+        _ = await CreateCheckpoint(path);
+        IOException error = await InjectedFailure(path, "checkpoint-replaced");
 
         Check(error.Message == "Injected checkpoint I/O failure at checkpoint-replaced",
             "Post-replace injected error changed.");
-        Check(File.ReadAllBytes(path).SequenceEqual(Payload),
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(Payload),
             "Post-replace failure did not leave the new checkpoint visible.");
         Check(!File.Exists(path + ".tmp"), "Post-replace failure recreated the temporary file.");
     }
 
     private static async Task FailedReplacePreservesDestinationAndTemporaryBytes(string root)
     {
-        var path = Path.Combine(root, "blocked-replacement", "run.json");
-        Directory.CreateDirectory(path);
-        var sentinel = Path.Combine(path, "original-checkpoint");
+        string path = Path.Combine(root, "blocked-replacement", "run.json");
+        _ = Directory.CreateDirectory(path);
+        string sentinel = Path.Combine(path, "original-checkpoint");
         await File.WriteAllTextAsync(sentinel, "preserve this destination");
 
         await ThrowsIOException(() => WorkflowCheckpoint.WriteDurableBytesAsync(
             path, Payload, CancellationToken.None));
 
-        Check(Directory.Exists(path) && File.ReadAllText(sentinel) == "preserve this destination",
+        Check(Directory.Exists(path) && (await File.ReadAllTextAsync(sentinel, CancellationToken.None)) == "preserve this destination",
             "Failed replacement changed the original destination.");
-        Check(File.ReadAllBytes(path + ".tmp").SequenceEqual(Payload),
+        Check((await File.ReadAllBytesAsync(path + ".tmp", CancellationToken.None)).SequenceEqual(Payload),
             "Failed replacement changed the durable temporary payload.");
     }
 
     private static async Task FailedTemporaryOpenPreservesOriginal(string root)
     {
-        var path = Path.Combine(root, "blocked-temporary", "run.json");
-        var original = await CreateCheckpoint(path);
-        Directory.CreateDirectory(path + ".tmp");
+        string path = Path.Combine(root, "blocked-temporary", "run.json");
+        byte[] original = await CreateCheckpoint(path);
+        _ = Directory.CreateDirectory(path + ".tmp");
 
         await ThrowsIOExceptionOrUnauthorized(() => WorkflowCheckpoint.WriteDurableBytesAsync(
             path, Payload, CancellationToken.None));
 
-        Check(File.ReadAllBytes(path).SequenceEqual(original), "Temporary-file open failure changed the original.");
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(original), "Temporary-file open failure changed the original.");
         Check(Directory.Exists(path + ".tmp"), "Temporary-file open failure removed the blocking entry.");
     }
 
     private static async Task CancellationPreservesOriginal(string root)
     {
-        var path = Path.Combine(root, "canceled-write", "run.json");
-        var original = await CreateCheckpoint(path);
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        string path = Path.Combine(root, "canceled-write", "run.json");
+        byte[] original = await CreateCheckpoint(path);
+        using CancellationTokenSource cancellation = new();
+        await cancellation.CancelAsync();
 
         try
         {
             await WorkflowCheckpoint.WriteDurableBytesAsync(path, Payload, cancellation.Token);
-            throw new Exception("Canceled write unexpectedly committed.");
+            throw new System.Diagnostics.UnreachableException("Canceled write unexpectedly committed.");
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
         }
 
-        Check(File.ReadAllBytes(path).SequenceEqual(original), "Canceled write changed the original checkpoint.");
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(original), "Canceled write changed the original checkpoint.");
         Check(File.Exists(path + ".tmp"), "Canceled write no longer leaves the opened temporary path.");
     }
 
     private static async Task RealWriteFailurePreservesOriginal(string root)
     {
-        if (!OperatingSystem.IsLinux() || !File.Exists("/dev/full")) return;
+        if (!OperatingSystem.IsLinux() || !File.Exists("/dev/full"))
+        {
+            return;
+        }
 
-        var path = Path.Combine(root, "device-write-failure", "run.json");
-        var original = await CreateCheckpoint(path);
-        var temporary = path + ".tmp";
-        File.CreateSymbolicLink(temporary, "/dev/full");
+        string path = Path.Combine(root, "device-write-failure", "run.json");
+        byte[] original = await CreateCheckpoint(path);
+        string temporary = path + ".tmp";
+        _ = File.CreateSymbolicLink(temporary, "/dev/full");
 
         await ThrowsIOException(() => WorkflowCheckpoint.WriteDurableBytesAsync(
             path, Payload, CancellationToken.None));
 
-        Check(File.ReadAllBytes(path).SequenceEqual(original), "Device write failure replaced the original.");
+        Check((await File.ReadAllBytesAsync(path, CancellationToken.None)).SequenceEqual(original), "Device write failure replaced the original.");
         Check(new FileInfo(temporary).LinkTarget == "/dev/full", "Device write failure changed the temporary link.");
         File.Delete(temporary);
     }
 
     private static async Task ReportSavePreservesSerializedBytes(string root)
     {
-        var directory = Directory.CreateDirectory(Path.Combine(root, "report-save")).FullName;
-        var report = new WorkflowReport
+        string directory = Directory.CreateDirectory(Path.Combine(root, "report-save")).FullName;
+        WorkflowReport report = new()
         {
             Workflow = "workflow.json",
             ManifestHash = new string('A', 64),
@@ -142,11 +148,11 @@ internal static class DurablePersistenceTests
             Status = "running",
             Nodes = [new NodeResult { Id = "node", Kind = "invoke", Status = "running" }]
         };
-        var expected = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
+        byte[] expected = JsonSerializer.SerializeToUtf8Bytes(report, WorkflowJson.Default.WorkflowReport);
 
         await WorkflowCheckpoint.SaveAsync(report, directory, CancellationToken.None);
 
-        var actual = await File.ReadAllBytesAsync(Path.Combine(directory, "run.json"));
+        byte[] actual = await File.ReadAllBytesAsync(Path.Combine(directory, "run.json"));
         Check(actual.SequenceEqual(expected), "Report checkpoint serialization bytes changed.");
         Check(Convert.ToHexString(SHA256.HashData(actual)) == Convert.ToHexString(SHA256.HashData(expected)),
             "Report checkpoint digest is not the exact serialized-byte SHA-256.");
@@ -154,15 +160,15 @@ internal static class DurablePersistenceTests
 
     private static async Task<byte[]> CreateCheckpoint(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var original = Encoding.UTF8.GetBytes("original checkpoint bytes\n");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        byte[] original = Encoding.UTF8.GetBytes("original checkpoint bytes\n");
         await File.WriteAllBytesAsync(path, original);
         return original;
     }
 
     private static async Task<IOException> InjectedFailure(string path, string point)
     {
-        var (priorFailure, priorNode) = SetFault(point, "node");
+        (string? priorFailure, string? priorNode) = SetFault(point, "node");
         try
         {
             try
@@ -175,7 +181,7 @@ internal static class DurablePersistenceTests
                 return error;
             }
 
-            throw new Exception($"Expected injected failure at {point}.");
+            throw new System.Diagnostics.UnreachableException($"Expected injected failure at {point}.");
         }
         finally
         {
@@ -185,7 +191,7 @@ internal static class DurablePersistenceTests
 
     private static (string? Failure, string? Node) SetFault(string point, string node)
     {
-        var previous = (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_TEST_FAILURE"),
+        (string?, string?) previous = (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_TEST_FAILURE"),
             Environment.GetEnvironmentVariable("CMAKEWORKFLOW_TEST_NODE"));
         Environment.SetEnvironmentVariable("CMAKEWORKFLOW_TEST_FAILURE", point);
         Environment.SetEnvironmentVariable("CMAKEWORKFLOW_TEST_NODE", node);
@@ -209,7 +215,7 @@ internal static class DurablePersistenceTests
             return;
         }
 
-        throw new Exception("Expected IOException.");
+        throw new System.Diagnostics.UnreachableException("Expected IOException.");
     }
 
     private static async Task ThrowsIOExceptionOrUnauthorized(Func<Task> action)
@@ -223,11 +229,14 @@ internal static class DurablePersistenceTests
             return;
         }
 
-        throw new Exception("Expected IOException or UnauthorizedAccessException.");
+        throw new System.Diagnostics.UnreachableException("Expected IOException or UnauthorizedAccessException.");
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 }

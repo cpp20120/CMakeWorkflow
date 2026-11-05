@@ -6,8 +6,22 @@ using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host;
 
+
+#pragma warning disable CA1001 // The session gate uses only managed async waiters, never AvailableWaitHandle; DrainAsync preserves the existing session lifecycle.
 public sealed partial class DoctorSession
 {
+    private static readonly string[] SqliteSidecarSuffixes =
+    [
+    "-wal",
+    "-shm",
+    "-journal"
+];
+    private static readonly string[] CompletedReportNames =
+    [
+    "run.json",
+    "report.json",
+    "campaign-completion.json"
+];
     private static readonly string[] ReadCapabilities =
     [
         "context/inspect", "target/resolve", "workflow/plan", "workflow/preflight", "runs/get",
@@ -29,12 +43,19 @@ public sealed partial class DoctorSession
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         if (workspace is null)
+        {
             throw new LocalRpcException("Call initialize first.")
-                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
-        if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
-        var paths = new WorkspaceReadPaths(workspace);
-        var manifest = paths.Require(request.Manifest);
-        var output = paths.Require(request.ResultsDirectory);
+            { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        }
+
+        if (durableExecutions is null)
+        {
+            throw new InvalidOperationException("durable_execution_unavailable");
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        string manifest = paths.Require(request.Manifest);
+        string output = paths.Require(request.ResultsDirectory);
         // Accept commits the immutable manifest before any response or scheduling.
         // Request cancellation is intentionally not propagated after acceptance.
         return Task.FromResult(durableExecutions.Start(paths.WorkspaceDirectory,
@@ -47,11 +68,18 @@ public sealed partial class DoctorSession
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         if (workspace is null)
+        {
             throw new LocalRpcException("Call initialize first.")
-                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
-        if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
-        var paths = new WorkspaceReadPaths(workspace);
-        var result = durableExecutions.Cancel(paths.WorkspaceDirectory, request.OperationId, request.ExpectedRevision);
+            { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        }
+
+        if (durableExecutions is null)
+        {
+            throw new InvalidOperationException("durable_execution_unavailable");
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        DurableAcceptanceStore.CancellationDecision result = durableExecutions.Cancel(paths.WorkspaceDirectory, request.OperationId, request.ExpectedRevision);
         return Task.FromResult(new OperationCancelResult(result.OperationId, result.State, result.Revision,
             result.Requested));
     }
@@ -65,9 +93,13 @@ public sealed partial class DoctorSession
         ReadAsync(request, (paths, ct) =>
         {
             ct.ThrowIfCancellationRequested();
-            var path = paths.Database(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite"));
-            if (!File.Exists(path)) throw new KeyNotFoundException("Unknown operation.");
-            using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory, readOnly: true);
+            string path = paths.Database(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite"));
+            if (!File.Exists(path))
+            {
+                throw new KeyNotFoundException("Unknown operation.");
+            }
+
+            using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);
             return Task.FromResult(RecoveryView(store.InspectRecovery(request.OperationId)));
         }, cancellationToken);
 
@@ -77,26 +109,40 @@ public sealed partial class DoctorSession
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         if (workspace is null)
+        {
             throw new LocalRpcException("Call initialize first.")
-                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+            { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        }
+
         if (!request.ConfirmedQuiescent)
+        {
             throw new ArgumentException("Operator must explicitly confirm external execution has stopped.");
-        if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
-        var paths = new WorkspaceReadPaths(workspace);
-        using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
+        }
+
+        if (durableExecutions is null)
+        {
+            throw new InvalidOperationException("durable_execution_unavailable");
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        using DurableAcceptanceStore store = new(paths.WorkspaceDirectory);
         if (durableExecutions.IsActive(store.WorkspaceId, request.OperationId))
+        {
             throw new InvalidOperationException("operation_execution_active");
+        }
         // Cross-process lease is held by the executor for its entire lifetime.
         // A departed host cannot prove that orphaned grandchildren have exited:
         // ConfirmedQuiescent is an explicit operator assertion, not automatic detection.
         if (string.IsNullOrWhiteSpace(request.OperationId) || request.OperationId.Length != 32 ||
             !request.OperationId.All(Uri.IsHexDigit))
+        {
             throw new ArgumentException("Invalid operation ID.");
-        var lockFile = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "execution-locks",
-            request.OperationId + ".lock");
-        using var lease = File.Exists(lockFile)
-            ? new FileStream(lockFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
-            : null;
+        }
+
+        string lockDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "execution-locks"));
+        _ = Directory.CreateDirectory(lockDirectory);
+        string lockFile = paths.Require(Path.Combine(lockDirectory, request.OperationId + ".lock"));
+        using FileStream lease = new(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         return Task.FromResult(RecoveryView(store.Reconcile(request.OperationId,
             request.ExpectedRevision, request.Decision, request.Note)));
     }
@@ -107,58 +153,133 @@ public sealed partial class DoctorSession
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         if (workspace is null)
+        {
             throw new LocalRpcException("Call initialize first.")
-                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+            { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        }
+
         if (!request.ConfirmedQuiescent)
+        {
             throw new ArgumentException("Explicit quiescence confirmation is required.");
-        if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
-        var paths = new WorkspaceReadPaths(workspace);
-        using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
-        if (store.GetDomainKind(request.OperationId) != "workflow")
+        }
+
+        if (durableExecutions is null)
+        {
+            throw new InvalidOperationException("durable_execution_unavailable");
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        using DurableAcceptanceStore store = new(paths.WorkspaceDirectory);
+        if (store.GetDomainKind(request.OperationId) is not ("workflow" or "process"))
+        {
             throw new InvalidOperationException("resume_unsupported_for_execution_domain");
+        }
+
         if (durableExecutions.IsActive(store.WorkspaceId, request.OperationId))
+        {
             throw new InvalidOperationException("operation_execution_active");
+        }
+
         if (string.IsNullOrWhiteSpace(request.OperationId) || request.OperationId.Length != 32 ||
-            !request.OperationId.All(Uri.IsHexDigit)) throw new ArgumentException("Invalid operation ID.");
-        var lockFile = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "execution-locks",
-            request.OperationId + ".lock");
-        using var lease = File.Exists(lockFile)
-            ? new FileStream(lockFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
-            : null;
+            !request.OperationId.All(Uri.IsHexDigit))
+        {
+            throw new ArgumentException("Invalid operation ID.");
+        }
+
+        string lockDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "execution-locks"));
+        _ = Directory.CreateDirectory(lockDirectory);
+        string lockFile = paths.Require(Path.Combine(lockDirectory, request.OperationId + ".lock"));
+        using FileStream lease = new(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        DurableAcceptanceStore.RecoveryInspection current = store.InspectRecovery(request.OperationId);
+        if (current.Revision != request.ExpectedRevision)
+        {
+            throw new InvalidOperationException("operation_revision_conflict");
+        }
+
+        if (store.GetDomainKind(request.OperationId) == "process")
+        {
+            ProcessWorkflowRecovery.Prepare(store, request.OperationId, paths);
+        }
+
         return Task.FromResult(RecoveryView(store.AdmitResume(request.OperationId, request.ExpectedRevision)));
     }
 
     // Execute an already admitted resume. Unlike workflow/resume, this is a mutation
     // that can launch external processes. The one-shot SQLite attempt claim is the
     // crash boundary; RPC cancellation must never cancel a committed dispatch.
-    public Task<RecoveryInspectionView> WorkflowResumeExecuteAsync(WorkflowResumeRequest request,
+    public async Task<RecoveryInspectionView> WorkflowResumeExecuteAsync(WorkflowResumeRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         if (workspace is null)
+        {
             throw new LocalRpcException("Call initialize first.")
-                { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+            { ErrorCode = 1001, ErrorData = new ApplicationError("not_initialized", "Call initialize first.") };
+        }
+
         if (!request.ConfirmedQuiescent)
+        {
             throw new ArgumentException("Explicit quiescence confirmation is required.");
+        }
+
         if (request.ExpectedRevision != 2)
+        {
             throw new InvalidOperationException("resume_execution_requires_admitted_revision");
-        if (durableExecutions is null) throw new InvalidOperationException("durable_execution_unavailable");
-        var paths = new WorkspaceReadPaths(workspace);
-        using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory);
-        if (store.GetDomainKind(request.OperationId) != "workflow")
+        }
+
+        if (durableExecutions is null)
+        {
+            throw new InvalidOperationException("durable_execution_unavailable");
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        using DurableAcceptanceStore store = new(paths.WorkspaceDirectory);
+        if (store.GetDomainKind(request.OperationId) is not ("workflow" or "process"))
+        {
             throw new InvalidOperationException("resume_unsupported_for_execution_domain");
-        var inspected = store.InspectRecovery(request.OperationId);
+        }
+
+        DurableAcceptanceStore.RecoveryInspection inspected = store.InspectRecovery(request.OperationId);
         if (inspected.Revision != 2 || inspected.Decision != "needs_attention" ||
             inspected.TerminalState is not null || inspected.CancellationRequested)
+        {
             throw new InvalidOperationException("resume_not_admitted_or_bound");
-        var binding = store.GetDispatchCheckpoint(request.OperationId)
+        }
+
+        (string? RunDirectory, string? CheckpointSha256) = store.GetDispatchCheckpoint(request.OperationId)
                       ?? throw new InvalidOperationException("resume_checkpoint_missing");
-        paths.Require(Path.Combine(binding.RunDirectory, "run.json"));
+        _ = paths.Require(Path.Combine(RunDirectory, "run.json"));
+        if (!durableExecutions.IsActive(store.WorkspaceId, request.OperationId))
+        {
+            if (request.OperationId.Length != 32 || !request.OperationId.All(Uri.IsHexDigit))
+            {
+                throw new ArgumentException("Invalid operation ID.");
+            }
+
+            string lockDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "execution-locks"));
+            _ = Directory.CreateDirectory(lockDirectory);
+            using FileStream lease = new(paths.Require(Path.Combine(lockDirectory, request.OperationId + ".lock")),
+                FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            if (store.GetDomainKind(request.OperationId) == "process")
+            {
+                // Read-only verification here: admission prepared the checkpoint.
+                // Claim and all mutation stay inside the executor's leases.
+                string checkpoint = paths.Require(Path.Combine(RunDirectory, "run.json"));
+                paths.Read(checkpoint);
+                byte[] bytes = await File.ReadAllBytesAsync(checkpoint, cancellationToken);
+                OperationCheckpointEvidence evidence = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
+                if (!string.Equals(evidence.ResumeSourceCheckpointSha256, CheckpointSha256,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("process_recovery_binding_changed");
+                }
+            }
+        }
         // The coordinator owns execution beyond this RPC connection. An already
         // active attempt is an idempotent retry, not a second dispatch.
         durableExecutions.Resume(paths.WorkspaceDirectory, request.OperationId);
-        return Task.FromResult(RecoveryView(inspected));
+        return RecoveryView(inspected);
     }
 
     public Task<OperationEventsPage> OperationEventsAsync(OperationEventsRequest request,
@@ -172,15 +293,15 @@ public sealed partial class DoctorSession
             ct.ThrowIfCancellationRequested();
             DurableAcceptanceStore.ValidateListQuery(request);
             // Listing is read-only. A fresh workspace must not get an SQLite store as a side effect.
-            var storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+            string storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
             if (!File.Exists(storePath))
             {
-                if (request.Cursor is not null)
-                    throw new ArgumentException("Cursor does not belong to this workspace.");
-                return Task.FromResult(new OperationListPage(1, [], null));
+                return request.Cursor is not null
+                    ? throw new ArgumentException("Cursor does not belong to this workspace.")
+                    : Task.FromResult(new OperationListPage(1, [], null));
             }
-            paths.Database(storePath);
-            using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory, readOnly: true);
+            _ = paths.Database(storePath);
+            using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);
             return Task.FromResult(store.ListOperations(request, ct));
         }, cancellationToken);
 
@@ -199,15 +320,22 @@ public sealed partial class DoctorSession
     {
         ct.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(id) || id.Length > 128)
+        {
             throw new ArgumentException("Operation identifier must contain 1..128 non-whitespace characters.");
+        }
         // A query must never initialize an operations store or mutate workspace state.
-        var storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
-        if (!File.Exists(storePath)) throw new KeyNotFoundException("Unknown operation.");
-        paths.Database(storePath);
-        using var store = new DurableAcceptanceStore(paths.WorkspaceDirectory, readOnly: true);
-        var accepted = byRequestId ? store.Find(id) : store.Get(id);
-        if (accepted is null) throw new KeyNotFoundException("Unknown operation.");
-        return Task.FromResult(new OperationReference(accepted.WorkspaceId, accepted.OperationId,
+        string storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+        if (!File.Exists(storePath))
+        {
+            throw new KeyNotFoundException("Unknown operation.");
+        }
+
+        _ = paths.Database(storePath);
+        using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);
+        AcceptedWorkflow? accepted = byRequestId ? store.Find(id) : store.Get(id);
+        return accepted is null
+            ? throw new KeyNotFoundException("Unknown operation.")
+            : Task.FromResult(new OperationReference(accepted.WorkspaceId, accepted.OperationId,
             accepted.ClientRequestId, store.GetDomainKind(accepted.OperationId), accepted.State,
             accepted.ManifestSha256,
             accepted.ManifestBaseDirectory));
@@ -250,11 +378,13 @@ public sealed partial class DoctorSession
         ReadAsync(request, async (paths, ct) =>
         {
             if (request.Only is { Length: > 1000 } || request.Only?.Any(string.IsNullOrWhiteSpace) == true)
+            {
                 throw new ArgumentException("only must contain at most 1000 nonempty node IDs.");
+            }
 #if RPC_CANCELLATION_TESTING
             await RpcCancellationTestGate.WaitAsync(paths, request.Manifest, cancellationToken, disconnected, ct);
 #endif
-            var controller = request.ControllerBuildDirectory is { } value ? paths.Require(value) : null;
+            string? controller = request.ControllerBuildDirectory is { } value ? paths.Require(value) : null;
             return WorkflowQueries.PlanView(await WorkflowPlanner.LoadAsync(paths.Require(request.Manifest),
                 request.Only ?? [], controller, ct, paths.Read));
         }, cancellationToken);
@@ -268,33 +398,45 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, (paths, ct) =>
         {
-            var database = paths.Require(request.DatabasePath);
-            foreach (var suffix in new[] { "-wal", "-shm", "-journal" }) paths.Require(database + suffix);
-            var directory = paths.Require(request.Directory);
+            string database = paths.Require(request.DatabasePath);
+            foreach (string? suffix in SqliteSidecarSuffixes)
+            {
+                _ = paths.Require(database + suffix);
+            }
+
+            string directory = paths.Require(request.Directory);
             ct.ThrowIfCancellationRequested();
-            using var store = new HistoryStore(database);
+            using HistoryStore store = new(database);
             HistoryImportResult? result = null;
-            store.Import(directory, request.Recursive, value => result = value,
+            _ = store.Import(directory, request.Recursive, value => result = value,
                 candidate =>
                 {
                     ct.ThrowIfCancellationRequested();
-                    paths.Require(candidate);
-                    foreach (var name in new[] { "run.json", "report.json", "campaign-completion.json" })
-                        paths.Require(Path.Combine(candidate, name));
-                    foreach (var file in Directory.EnumerateFiles(candidate, "*.results.json"))
-                        paths.Require(file);
+                    _ = paths.Require(candidate);
+                    foreach (string? name in CompletedReportNames)
+                    {
+                        _ = paths.Require(Path.Combine(candidate, name));
+                    }
+
+                    foreach (string file in Directory.EnumerateFiles(candidate, "*.results.json"))
+                    {
+                        _ = paths.Require(file);
+                    }
                 });
             return Task.FromResult(result ?? throw new InvalidDataException("Import produced no summary."));
         }, cancellationToken);
 
-    public Task<CMakeWorkflow.History.HistoryRunPage> HistoryRunsPageAsync(
+    public Task<HistoryRunPage> HistoryRunsPageAsync(
         HistoryRunsPageRequest request, CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
             if (request.Limit is < 1 or > 200)
+            {
                 throw new ArgumentException("limit must be between 1 and 200.");
-            var database = paths.Database(request.DatabasePath);
-            using var db = new HistoryStore(database, readOnly: true);
+            }
+
+            string database = paths.Database(request.DatabasePath);
+            using HistoryStore db = new(database, readOnly: true);
             return Task.FromResult(db.RunsPage(database, request.Limit, request.Status,
                 Date(request.Since), Date(request.Until), request.Workflow, request.Variant,
                 request.Cursor, paths.Contains, ct));
@@ -303,8 +445,12 @@ public sealed partial class DoctorSession
     public Task<List<HistoryRun>> HistoryRunsAsync(HistoryRunsRequest request, CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
-            if (request.Limit is < 1 or > 1000) throw new ArgumentException("limit must be between 1 and 1000.");
-            using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
+            if (request.Limit is < 1 or > 1000)
+            {
+                throw new ArgumentException("limit must be between 1 and 1000.");
+            }
+
+            using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
             return Task.FromResult(db.Runs(request.Limit, request.Status, Date(request.Since), Date(request.Until),
                 request.Workflow, request.Variant, paths.Contains, ct));
         }, cancellationToken);
@@ -312,7 +458,7 @@ public sealed partial class DoctorSession
     public Task<HistoryDetail> HistoryShowAsync(HistoryShowRequest request, CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
-            using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
+            using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
             return Task.FromResult(Detail(db, request.RunId, paths, ct));
         }, cancellationToken);
 
@@ -329,9 +475,16 @@ public sealed partial class DoctorSession
         ReadAsync(request, (paths, ct) =>
         {
             if (query ? string.IsNullOrWhiteSpace(request.Metric) : string.IsNullOrWhiteSpace(request.RunId))
+            {
                 throw new ArgumentException(query ? "metric is required." : "runId is required.");
-            using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
-            if (request.RunId is not null) Detail(db, request.RunId, paths, ct);
+            }
+
+            using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
+            if (request.RunId is not null)
+            {
+                _ = Detail(db, request.RunId, paths, ct);
+            }
+
             return Task.FromResult(db.Metrics(request.RunId, request.Metric, request.Variant, request.Scenario,
                 paths.Contains, MeasurementLimit, ct));
         }, cancellationToken);
@@ -340,7 +493,7 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
-            using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
+            using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
             return Task.FromResult(HistoryComparison.Compare(Detail(db, request.BaselineRunId, paths, ct),
                 Detail(db, request.CandidateRunId, paths, ct)));
         }, cancellationToken);
@@ -349,7 +502,7 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) =>
         {
-            using var db = new HistoryStore(paths.Database(request.DatabasePath), readOnly: true);
+            using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
             return Task.FromResult(HistoryDetector.Detect(Detail(db, request.BaselineRunId, paths, ct),
                 Detail(db, request.CandidateRunId, paths, ct), request.Metric, request.Variant, request.Scenario,
                 request.Direction, request.MinimumEffectPercent, request.Alpha, ct));
@@ -357,17 +510,19 @@ public sealed partial class DoctorSession
 
     private static HistoryDetail Detail(HistoryStore db, string id, WorkspaceReadPaths paths, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("runId is required.");
-        return db.Show(id, path => paths.Require(path), MeasurementLimit, ct, paths.Contains);
+        return string.IsNullOrWhiteSpace(id)
+            ? throw new ArgumentException("runId is required.")
+            : db.Show(id, path => paths.Require(path), MeasurementLimit, ct, paths.Contains);
     }
 
     private static string? Date(string? value)
     {
-        if (value is null) return null;
-        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
-                out var parsed))
-            throw new ArgumentException("History time filters require ISO timestamps.");
-        return parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+        return value is null
+            ? null
+            : !DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset parsed)
+            ? throw new ArgumentException("History time filters require ISO timestamps.")
+            : parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
     }
 
     private Task<T> ReadAsync<T>(object request, Func<WorkspaceReadPaths, CancellationToken, Task<T>> query,
@@ -377,11 +532,15 @@ public sealed partial class DoctorSession
     private async Task<T> ApplicationCallAsync<T>(object request,
         Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct)
     {
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, disconnected);
+        using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, disconnected);
         try
         {
             ArgumentNullException.ThrowIfNull(request);
-            if (workspace is null) throw new ApplicationRefusal("not_initialized", "Call initialize first.");
+            if (workspace is null)
+            {
+                throw new ApplicationRefusal("not_initialized", "Call initialize first.");
+            }
+
             await gate.WaitAsync(lifetime.Token);
             try
             {
@@ -391,7 +550,7 @@ public sealed partial class DoctorSession
             }
             finally
             {
-                gate.Release();
+                _ = gate.Release();
             }
         }
         catch (OperationCanceledException)
@@ -402,7 +561,7 @@ public sealed partial class DoctorSession
                                           or JsonException or InvalidDataException or InvalidOperationException
                                           or UnauthorizedAccessException or KeyNotFoundException or SqliteException)
         {
-            var code = error switch
+            string code = error switch
             {
                 ApplicationRefusal refusal => refusal.Code,
                 FileNotFoundException or DirectoryNotFoundException or KeyNotFoundException => "not_found",
@@ -413,7 +572,8 @@ public sealed partial class DoctorSession
                 _ => "read_failed"
             };
             throw new LocalRpcException(error.Message)
-                { ErrorCode = 1001, ErrorData = new ApplicationError(code, error.Message) };
+            { ErrorCode = 1001, ErrorData = new ApplicationError(code, error.Message) };
         }
     }
 }
+#pragma warning restore CA1001

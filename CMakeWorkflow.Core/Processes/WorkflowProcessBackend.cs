@@ -3,7 +3,9 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 // A neutral process lifecycle backend. Callers prepare the process and stream
 // destinations; this type only starts, drains, waits for and cleans up the child.
@@ -16,14 +18,13 @@ internal static class WorkflowProcessBackend
 
     internal sealed record Outcome(int? ExitCode, Exception? StartError);
 
-    public static async Task<Outcome> RunAsync(Specification specification, CancellationToken ct,
-        Action<TimeSpan>? heartbeat, Action<TimeSpan> durationCompleted)
+    public static async Task<Outcome> RunAsync(Specification specification, Action<TimeSpan>? heartbeat, Action<TimeSpan> durationCompleted, CancellationToken ct)
     {
-        var processTimer = Stopwatch.StartNew();
-        var stdoutCopy = new CopyState();
-        var stderrCopy = new CopyState();
-        var observerFailures = new List<Exception>();
-        var cleanupFailures = new List<Exception>();
+        Stopwatch processTimer = Stopwatch.StartNew();
+        CopyState stdoutCopy = new();
+        CopyState stderrCopy = new();
+        List<Exception> observerFailures = [];
+        List<Exception> cleanupFailures = [];
         Process process;
         try
         {
@@ -34,7 +35,9 @@ internal static class WorkflowProcessBackend
             return new(null, error);
         }
         if (process is null)
+        {
             return new(null, new IOException("Process.Start returned null."));
+        }
 
         WindowsProcessJob? windowsJob = null;
         CancellationTokenSource? heartbeatStop = null;
@@ -43,31 +46,47 @@ internal static class WorkflowProcessBackend
         Task heartbeatTask = Task.CompletedTask;
         Task? processWait = null;
         Task? copiesTask = null;
-        var copiesTaskObserved = false;
-        var durationEligible = false;
-        var cleanupStarted = 0;
+        bool copiesTaskObserved = false;
+        bool durationEligible = false;
+        int cleanupStarted = 0;
         Exception? primaryFailure = null;
         Outcome? outcome = null;
-        var elapsed = TimeSpan.Zero;
+        TimeSpan elapsed = TimeSpan.Zero;
 
         try
         {
             // Preserve Windows Job Object supervision. Setup failures after
             // Process.Start are covered by the same cleanup path as execution.
+
+#pragma warning disable CA2000 // These handles transfer into the monitored cleanup path, which stops workers and aggregates disposal failures.
             windowsJob = OperatingSystem.IsWindows() ? WindowsProcessJob.Attach(process) : null;
+#pragma warning restore CA2000
+
             process.StandardInput.Close();
-            var heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+#pragma warning disable CA2000 // These handles transfer into the monitored cleanup path, which stops workers and aggregates disposal failures.
+            CancellationTokenSource heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+#pragma warning restore CA2000
+
             heartbeatStop = heartbeatCancellation;
-            var operationWaitCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+#pragma warning disable CA2000 // These handles transfer into the monitored cleanup path, which stops workers and aggregates disposal failures.
+            CancellationTokenSource operationWaitCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+#pragma warning restore CA2000
+
             operationWaitStop = operationWaitCancellation;
-            var pumpCancellation = new CancellationTokenSource();
+
+#pragma warning disable CA2000 // These handles transfer into the monitored cleanup path, which stops workers and aggregates disposal failures.
+            CancellationTokenSource pumpCancellation = new();
+#pragma warning restore CA2000
+
             pumpStop = pumpCancellation;
 
             if (heartbeat is not null)
             {
                 heartbeatTask = Task.Run(async () =>
                 {
-                    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+                    using PeriodicTimer timer = new(TimeSpan.FromSeconds(10));
                     try
                     {
                         while (await timer.WaitForNextTickAsync(heartbeatCancellation.Token))
@@ -89,31 +108,43 @@ internal static class WorkflowProcessBackend
                     catch (OperationCanceledException) when (heartbeatCancellation.IsCancellationRequested)
                     {
                     }
-                });
+                }, CancellationToken.None);
             }
 
             // Start and retain each bounded pump separately. If stderr setup
             // fails, stdout is still known to cleanup and await.
             stdoutCopy.Task = PumpAsync(process.StandardOutput.BaseStream,
-                specification.StandardOutput, pumpCancellation.Token, stdoutCopy,
-                () => Volatile.Read(ref cleanupStarted) != 0);
+                specification.StandardOutput, stdoutCopy,
+                () => Volatile.Read(ref cleanupStarted) != 0, stopToken: pumpCancellation.Token);
             stderrCopy.Task = PumpAsync(process.StandardError.BaseStream,
-                specification.StandardError, pumpCancellation.Token, stderrCopy,
-                () => Volatile.Read(ref cleanupStarted) != 0);
-            var copyJoin = Task.WhenAll(stdoutCopy.Task!, stderrCopy.Task!);
+                specification.StandardError, stderrCopy,
+                () => Volatile.Read(ref cleanupStarted) != 0, stopToken: pumpCancellation.Token);
+            Task copyJoin = Task.WhenAll(stdoutCopy.Task!, stderrCopy.Task!);
             copiesTask = copyJoin;
             durationEligible = true;
-            var processExit = process.WaitForExitAsync(operationWaitCancellation.Token);
+            Task processExit = process.WaitForExitAsync(operationWaitCancellation.Token);
             processWait = processExit;
-            var processExited = false;
-            var stdoutDone = false;
-            var stderrDone = false;
+            bool processExited = false;
+            bool stdoutDone = false;
+            bool stderrDone = false;
             while (!processExited || !stdoutDone || !stderrDone)
             {
-                var waiters = new List<Task>(4);
-                if (!processExited) waiters.Add(processExit);
-                if (!stdoutDone) waiters.Add(stdoutCopy.Task!);
-                if (!stderrDone) waiters.Add(stderrCopy.Task!);
+                List<Task> waiters = new(4);
+                if (!processExited)
+                {
+                    waiters.Add(processExit);
+                }
+
+                if (!stdoutDone)
+                {
+                    waiters.Add(stdoutCopy.Task!);
+                }
+
+                if (!stderrDone)
+                {
+                    waiters.Add(stderrCopy.Task!);
+                }
+
                 Task completed;
                 try { completed = await Task.WhenAny(waiters).WaitAsync(ct); }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -151,10 +182,14 @@ internal static class WorkflowProcessBackend
             try { ct.ThrowIfCancellationRequested(); }
             catch (OperationCanceledException callerCancellation) { primaryFailure = callerCancellation; }
         }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error)
         {
             primaryFailure = error;
         }
+#pragma warning restore CA1031
+
 
         elapsed = processTimer.Elapsed;
         processTimer.Stop();
@@ -165,25 +200,33 @@ internal static class WorkflowProcessBackend
         TryCancel(heartbeatStop, cleanupFailures);
         TryCancel(operationWaitStop, cleanupFailures);
 
-        var processExitedDuringCleanup = false;
-        var terminationSucceeded = true;
+        bool processExitedDuringCleanup = false;
+        bool terminationSucceeded = true;
         try
         {
             processExitedDuringCleanup = process.HasExited;
         }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error)
         {
             cleanupFailures.Add(error);
         }
+#pragma warning restore CA1031
+
 
         if (windowsJob is not null && (ct.IsCancellationRequested || !processExitedDuringCleanup))
         {
             try { await windowsJob.TerminateAndWaitAsync(CancellationToken.None); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception error)
             {
                 cleanupFailures.Add(error);
                 terminationSucceeded = TryKillProcessTree(process, cleanupFailures);
             }
+#pragma warning restore CA1031
+
         }
         else if (windowsJob is null && !processExitedDuringCleanup)
         {
@@ -193,7 +236,11 @@ internal static class WorkflowProcessBackend
         if (terminationSucceeded)
         {
             try { await process.WaitForExitAsync(CancellationToken.None); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception error) { cleanupFailures.Add(error); }
+#pragma warning restore CA1031
+
         }
         else
         {
@@ -206,7 +253,7 @@ internal static class WorkflowProcessBackend
         // original stream behavior. Stop any remaining blocked pump only after
         // the child has been terminated or the termination failure is recorded.
         TryCancel(pumpStop, cleanupFailures);
-        var copiesIncomplete = (stdoutCopy.Task is not null && !stdoutCopy.Task.IsCompleted)
+        bool copiesIncomplete = (stdoutCopy.Task is not null && !stdoutCopy.Task.IsCompleted)
                                || (stderrCopy.Task is not null && !stderrCopy.Task.IsCompleted);
         if (copiesIncomplete)
         {
@@ -222,42 +269,66 @@ internal static class WorkflowProcessBackend
         if (copiesTask is not null && !copiesTaskObserved)
         {
             try { await copiesTask; }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch
             {
                 // WhenAll is derived only from the two pumps already classified
                 // above. Await it to observe its exception without reporting the
                 // same member failures a second time.
             }
+#pragma warning restore CA1031
+
         }
 
         if (processWait is not null)
         {
             try { await processWait; }
             catch (OperationCanceledException) when (operationWaitStop?.IsCancellationRequested == true) { }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception error) { AddUniqueFailure(cleanupFailures, primaryFailure, observerFailures, error); }
+#pragma warning restore CA1031
+
         }
 
         if (windowsJob is not null)
         {
             try { windowsJob.Dispose(); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception error) { cleanupFailures.Add(error); }
+#pragma warning restore CA1031
+
         }
         TryDispose(pumpStop, cleanupFailures);
         TryDispose(operationWaitStop, cleanupFailures);
         try { process.Dispose(); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error) { cleanupFailures.Add(error); }
+#pragma warning restore CA1031
+
 
         // The timer value preserves the old duration measurement boundary, but
         // callbacks run only after process, stream and supervision cleanup.
         if (heartbeatStop is not null)
         {
             try { await heartbeatTask; }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception error) { observerFailures.Add(error); }
+#pragma warning restore CA1031
+
         }
         if (durationEligible)
         {
             try { durationCompleted(elapsed); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception error) { observerFailures.Add(error); }
+#pragma warning restore CA1031
+
         }
 
         TryDispose(heartbeatStop, cleanupFailures);
@@ -266,13 +337,14 @@ internal static class WorkflowProcessBackend
         return outcome ?? throw new InvalidOperationException("Process execution produced no outcome.");
     }
 
-    private static async Task PumpAsync(Stream source, Stream destination, CancellationToken stopToken,
-        CopyState state, Func<bool> cleanupStarted)
+    private static async Task PumpAsync(Stream source, Stream destination, CopyState state, Func<bool> cleanupStarted, CancellationToken stopToken)
     {
         try
         {
             if (!destination.CanWrite)
+            {
                 throw new InvalidOperationException("The prepared process output stream is not writable.");
+            }
         }
         catch
         {
@@ -280,7 +352,7 @@ internal static class WorkflowProcessBackend
             throw;
         }
 
-        var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
         try
         {
             while (true)
@@ -294,7 +366,10 @@ internal static class WorkflowProcessBackend
                     state.FailureDuringCleanup = cleanupStarted();
                     throw;
                 }
-                if (count == 0) return;
+                if (count == 0)
+                {
+                    return;
+                }
 
                 try { await destination.WriteAsync(buffer.AsMemory(0, count), stopToken); }
                 catch
@@ -312,18 +387,30 @@ internal static class WorkflowProcessBackend
         CancellationTokenSource? pumpStop, Exception? primary,
         List<Exception> observers, List<Exception> cleanupFailures)
     {
-        if (state.Task is null) return;
+        if (state.Task is null)
+        {
+            return;
+        }
+
         try { await state.Task; }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error)
         {
-            var stoppedInternally = pumpStop?.IsCancellationRequested == true;
-            var expectedInternalTokenCancellation = stoppedInternally && IsPumpCancellation(error, pumpStop);
-            var expectedReadTeardown = state.FailurePhase == PumpPhase.Read
+            bool stoppedInternally = pumpStop?.IsCancellationRequested == true;
+            bool expectedInternalTokenCancellation = stoppedInternally && IsPumpCancellation(error, pumpStop);
+            bool expectedReadTeardown = state.FailurePhase == PumpPhase.Read
                 && (state.FailureDuringInternalStop || state.FailureDuringCleanup)
                 && (error is IOException or ObjectDisposedException);
-            if (expectedInternalTokenCancellation || expectedReadTeardown) return;
+            if (expectedInternalTokenCancellation || expectedReadTeardown)
+            {
+                return;
+            }
+
             AddUniqueFailure(cleanupFailures, primary, observers, error);
         }
+#pragma warning restore CA1031
+
     }
 
     private static bool IsPumpCancellation(Exception error, CancellationTokenSource? pumpStop) =>
@@ -342,56 +429,100 @@ internal static class WorkflowProcessBackend
         {
             return true;
         }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error)
         {
             failures.Add(error);
             return false;
         }
+#pragma warning restore CA1031
+
     }
 
     private static void TryCancel(CancellationTokenSource? source, List<Exception> failures)
     {
-        if (source is null) return;
+        if (source is null)
+        {
+            return;
+        }
+
         try { source.Cancel(); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error) { failures.Add(error); }
+#pragma warning restore CA1031
+
     }
 
-    private static void TryDispose(IDisposable? disposable, List<Exception> failures)
+    private static void TryDispose(CancellationTokenSource? disposable, List<Exception> failures)
     {
-        if (disposable is null) return;
+        if (disposable is null)
+        {
+            return;
+        }
+
         try { disposable.Dispose(); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error) { failures.Add(error); }
+#pragma warning restore CA1031
+
     }
 
     private static void TryCloseStandardOutput(Process process, List<Exception> failures)
     {
         try { process.StandardOutput.Close(); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error) { failures.Add(error); }
+#pragma warning restore CA1031
+
     }
 
     private static void TryCloseStandardError(Process process, List<Exception> failures)
     {
         try { process.StandardError.Close(); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error) { failures.Add(error); }
+#pragma warning restore CA1031
+
     }
 
     private static void AddUniqueFailure(List<Exception> target, Exception? primary,
         List<Exception> observers, Exception error)
     {
         if (ReferenceEquals(error, primary) || observers.Any(observer => ReferenceEquals(observer, error))
-            || target.Any(existing => ReferenceEquals(existing, error))) return;
+            || target.Any(existing => ReferenceEquals(existing, error)))
+        {
+            return;
+        }
+
         target.Add(error);
     }
 
     private static void ThrowFailures(Exception? primary, List<Exception> observers,
         List<Exception> cleanup)
     {
-        var failures = new List<Exception>();
-        if (primary is not null) failures.Add(primary);
+        List<Exception> failures = [];
+        if (primary is not null)
+        {
+            failures.Add(primary);
+        }
+
         failures.AddRange(observers);
         failures.AddRange(cleanup);
-        if (failures.Count == 0) return;
-        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count == 0)
+        {
+            return;
+        }
+
+        if (failures.Count == 1)
+        {
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        }
+
         throw new AggregateException("Process execution and cleanup reported multiple failures.", failures);
     }
 

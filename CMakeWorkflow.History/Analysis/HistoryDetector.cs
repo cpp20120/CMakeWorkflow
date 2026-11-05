@@ -2,7 +2,9 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History;
+#pragma warning restore IDE0130
 
 // This is a one-sided test for a user-declared regression direction. It does
 // not claim that sequential benchmark samples are independent or free of drift.
@@ -17,7 +19,9 @@ public static class HistoryDetector
         string direction,
         double minimumEffectPercent, double alpha, CancellationToken ct)
     {
-        var sign = direction switch
+        ArgumentNullException.ThrowIfNull(baseline);
+        ArgumentNullException.ThrowIfNull(candidate);
+        int sign = direction switch
         {
             "higher-worse" => 1,
             "lower-worse" => -1,
@@ -25,20 +29,28 @@ public static class HistoryDetector
                 "--direction must be higher-worse or lower-worse.")
         };
         if (string.IsNullOrWhiteSpace(metric))
+        {
             throw new ArgumentException("--metric requires a metric name.");
-        if (!double.IsFinite(minimumEffectPercent) || minimumEffectPercent <= 0)
-            throw new ArgumentException("--min-percent must be a positive finite number.");
-        if (!double.IsFinite(alpha) || alpha is <= 0 or >= 1)
-            throw new ArgumentException("--alpha must be between zero and one.");
+        }
 
-        var results = new List<HistoryDetection>();
-        foreach (var difference in HistoryComparison.Compare(baseline, candidate)
+        if (!double.IsFinite(minimumEffectPercent) || minimumEffectPercent <= 0)
+        {
+            throw new ArgumentException("--min-percent must be a positive finite number.");
+        }
+
+        if (!double.IsFinite(alpha) || alpha is <= 0 or >= 1)
+        {
+            throw new ArgumentException("--alpha must be between zero and one.");
+        }
+
+        List<HistoryDetection> results = [];
+        foreach (HistoryDifference? difference in HistoryComparison.Compare(baseline, candidate)
                      .Where(x => x.Metric == metric && (variant is null || x.Variant == variant)
                                                     && (scenario is null || x.Scenario == scenario)))
         {
             ct.ThrowIfCancellationRequested();
-            var status = difference.Status;
-            var reason = difference.Reason ?? "";
+            string status = difference.Status;
+            string reason = difference.Reason ?? "";
             double? p = null;
             int? permutations = null;
             bool? exact = null;
@@ -56,8 +68,8 @@ public static class HistoryDetector
                 }
                 else
                 {
-                    var left = Samples(baseline, difference);
-                    var right = Samples(candidate, difference);
+                    List<HistoryMeasurement> left = Samples(baseline, difference);
+                    List<HistoryMeasurement> right = Samples(candidate, difference);
                     if (left.Count < MinimumSamples || right.Count < MinimumSamples)
                     {
                         status = "insufficient";
@@ -76,12 +88,12 @@ public static class HistoryDetector
                     }
                     else
                     {
-                        var seed = Seed(baseline.Run.Id, candidate.Run.Id, difference);
-                        var test = PermutationTest(left.Select(x => x.Value).ToArray(),
-                            right.Select(x => x.Value).ToArray(), sign, seed, ct);
-                        p = test.PValue;
-                        permutations = test.Permutations;
-                        exact = test.Exact;
+                        int seed = Seed(baseline.Run.Id, candidate.Run.Id, difference);
+                        (double PValue, int Permutations, bool Exact) = PermutationTest([.. left.Select(x => x.Value)],
+                            [.. right.Select(x => x.Value)], sign, seed, ct);
+                        p = PValue;
+                        permutations = Permutations;
+                        exact = Exact;
                         status = "inconclusive";
                         reason = "Evidence has not met both the adjusted p-value and minimum effect requirements.";
                     }
@@ -95,23 +107,25 @@ public static class HistoryDetector
         }
 
         if (results.Count == 0)
+        {
             results.Add(new(metric, "", variant, scenario, "", "missing",
                 "Neither run contains this metric/variant/scenario selection.", null, null, null, null,
                 null, null, null, null));
+        }
 
         // Holm correction controls family-wise false positives across all
         // tested variant/scenario rows in this command invocation.
-        var tested = results.Select((row, index) => (row, index))
+        (HistoryDetection row, int index)[] tested = [.. results.Select((row, index) => (row, index))
             .Where(x => x.row.PValue is not null)
-            .OrderBy(x => x.row.PValue).ThenBy(x => x.index).ToArray();
-        var adjustedFloor = 0.0;
-        for (var i = 0; i < tested.Length; i++)
+            .OrderBy(x => x.row.PValue).ThenBy(x => x.index)];
+        double adjustedFloor = 0.0;
+        for (int i = 0; i < tested.Length; i++)
         {
-            var (row, index) = tested[i];
+            (HistoryDetection? row, int index) = tested[i];
             adjustedFloor = Math.Max(adjustedFloor,
                 Math.Min(1, row.PValue!.Value * (tested.Length - i)));
-            var effect = row.PercentChange!.Value * sign;
-            var regression = adjustedFloor <= alpha && effect >= minimumEffectPercent;
+            double effect = row.PercentChange!.Value * sign;
+            bool regression = adjustedFloor <= alpha && effect >= minimumEffectPercent;
             results[index] = row with
             {
                 AdjustedPValue = adjustedFloor,
@@ -129,13 +143,12 @@ public static class HistoryDetector
     }
 
     private static List<HistoryMeasurement> Samples(HistoryDetail run, HistoryDifference key) =>
-        run.Measurements.Where(x => x.Metric == key.Metric && x.Variant == key.Variant
-                                                           && x.Scenario == key.Scenario).OrderBy(x => x.SampleIndex)
-            .ToList();
+        [.. run.Measurements.Where(x => x.Metric == key.Metric && x.Variant == key.Variant
+                                                           && x.Scenario == key.Scenario).OrderBy(x => x.SampleIndex)];
 
     private static int Seed(string baseline, string candidate, HistoryDifference key)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u001f",
+        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u001f",
             baseline, candidate, key.Metric, key.Variant, key.Scenario)));
         return BinaryPrimitives.ReadInt32LittleEndian(bytes);
     }
@@ -143,54 +156,95 @@ public static class HistoryDetector
     private static (double PValue, int Permutations, bool Exact) PermutationTest(
         double[] baseline, double[] candidate, int sign, int seed, CancellationToken ct)
     {
-        var pooled = baseline.Concat(candidate).ToArray();
-        var left = new double[baseline.Length];
-        var right = new double[candidate.Length];
-        var observed = sign * (Median(candidate) - Median(baseline));
-        var extreme = 0;
-        var count = 0;
+        double[] pooled = [.. baseline, .. candidate];
+        double[] left = new double[baseline.Length];
+        double[] right = new double[candidate.Length];
+        double observed = sign * (Median(candidate) - Median(baseline));
+        int extreme = 0;
+        int count = 0;
         if (CombinationCount(pooled.Length, baseline.Length) <= MaximumExactPermutations)
         {
-            var chosen = Enumerable.Range(0, baseline.Length).ToArray();
-            var mask = new bool[pooled.Length];
+            int[] chosen = [.. Enumerable.Range(0, baseline.Length)];
+            bool[] mask = new bool[pooled.Length];
             while (true)
             {
-                if ((count & 1023) == 0) ct.ThrowIfCancellationRequested();
+                if ((count & 1023) == 0)
+                {
+                    ct.ThrowIfCancellationRequested();
+                }
+
                 Array.Clear(mask);
-                foreach (var index in chosen) mask[index] = true;
-                var li = 0;
-                var ri = 0;
-                for (var i = 0; i < pooled.Length; i++)
-                    if (mask[i]) left[li++] = pooled[i];
-                    else right[ri++] = pooled[i];
-                if (sign * (Median(right) - Median(left)) >= observed) extreme++;
+                foreach (int index in chosen)
+                {
+                    mask[index] = true;
+                }
+
+                int li = 0;
+                int ri = 0;
+                for (int i = 0; i < pooled.Length; i++)
+                {
+                    if (mask[i])
+                    {
+                        left[li++] = pooled[i];
+                    }
+                    else
+                    {
+                        right[ri++] = pooled[i];
+                    }
+                }
+
+                if (sign * (Median(right) - Median(left)) >= observed)
+                {
+                    extreme++;
+                }
+
                 count++;
-                var position = chosen.Length - 1;
+                int position = chosen.Length - 1;
                 while (position >= 0 && chosen[position] == pooled.Length - chosen.Length + position)
+                {
                     position--;
-                if (position < 0) break;
+                }
+
+                if (position < 0)
+                {
+                    break;
+                }
+
                 chosen[position]++;
-                for (var i = position + 1; i < chosen.Length; i++)
+                for (int i = position + 1; i < chosen.Length; i++)
+                {
                     chosen[i] = chosen[i - 1] + 1;
+                }
             }
 
             return ((double)extreme / count, count, true);
         }
 
-        var random = new Random(seed);
-        var shuffled = (double[])pooled.Clone();
-        for (var iteration = 0; iteration < MonteCarloPermutations; iteration++)
+        Random random = new(seed);
+        double[] shuffled = (double[])pooled.Clone();
+        for (int iteration = 0; iteration < MonteCarloPermutations; iteration++)
         {
-            if ((iteration & 1023) == 0) ct.ThrowIfCancellationRequested();
-            for (var i = shuffled.Length - 1; i > 0; i--)
+            if ((iteration & 1023) == 0)
             {
-                var swap = random.Next(i + 1);
+                ct.ThrowIfCancellationRequested();
+            }
+
+            for (int i = shuffled.Length - 1; i > 0; i--)
+            {
+
+#pragma warning disable CA5394 // Seeded randomness makes statistical permutation tests reproducible; it is not used for security.
+                int swap = random.Next(i + 1);
+#pragma warning restore CA5394
+
                 (shuffled[i], shuffled[swap]) = (shuffled[swap], shuffled[i]);
             }
 
             Array.Copy(shuffled, 0, left, 0, left.Length);
             Array.Copy(shuffled, left.Length, right, 0, right.Length);
-            if (sign * (Median(right) - Median(left)) >= observed) extreme++;
+            if (sign * (Median(right) - Median(left)) >= observed)
+            {
+                extreme++;
+            }
         }
 
         return ((double)(extreme + 1) / (MonteCarloPermutations + 1),
@@ -200,11 +254,14 @@ public static class HistoryDetector
     private static double CombinationCount(int total, int selected)
     {
         selected = Math.Min(selected, total - selected);
-        var count = 1.0;
-        for (var i = 1; i <= selected; i++)
+        double count = 1.0;
+        for (int i = 1; i <= selected; i++)
         {
             count *= (total - selected + i) / (double)i;
-            if (count > MaximumExactPermutations) return count;
+            if (count > MaximumExactPermutations)
+            {
+                return count;
+            }
         }
 
         return count;
@@ -214,7 +271,7 @@ public static class HistoryDetector
     {
         Array.Sort(values);
         return values.Length % 2 == 0
-            ? (values[values.Length / 2 - 1] + values[values.Length / 2]) / 2
+            ? (values[(values.Length / 2) - 1] + values[values.Length / 2]) / 2
             : values[values.Length / 2];
     }
 }

@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 // A request for toolchain binding, deliberately independent of Windows discovery DTOs.
 // The Host (or CLI) resolves IDs afresh against its own inventory. Never trust client paths.

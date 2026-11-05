@@ -1,7 +1,8 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 internal sealed class WorkflowEventJournal : IDisposable
 {
@@ -22,19 +23,24 @@ internal sealed class WorkflowEventJournal : IDisposable
         {
             // Replay only journal metadata, not previously completed node events.
             // The report is the checkpoint; the event file is a best-effort audit trail.
-            foreach (var node in resumed.Nodes.Where(n => n.Status == "succeeded"))
+            foreach (NodeResult? node in resumed.Nodes.Where(n => n.Status == "succeeded"))
+            {
                 previous[node.Id] = node.Status;
-            var file = Path.Combine(directory, "events.jsonl");
+            }
+
+            string file = Path.Combine(directory, "events.jsonl");
             if (File.Exists(file))
             {
-                foreach (var line in File.ReadLines(file))
+                foreach (string line in File.ReadLines(file))
                 {
                     try
                     {
-                        using var doc = JsonDocument.Parse(line);
-                        var value = doc.RootElement;
-                        if (value.TryGetProperty("sequence", out var number) && number.TryGetInt64(out var n))
+                        using JsonDocument doc = JsonDocument.Parse(line);
+                        JsonElement value = doc.RootElement;
+                        if (value.TryGetProperty("sequence", out JsonElement number) && number.TryGetInt64(out long n))
+                        {
                             sequence = Math.Max(sequence, n);
+                        }
                     }
                     catch (JsonException)
                     {
@@ -49,7 +55,8 @@ internal sealed class WorkflowEventJournal : IDisposable
         try
         {
             journal = new StreamWriter(new FileStream(Path.Combine(directory, "events.jsonl"),
-                FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+                FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            { AutoFlush = true };
         }
         catch (IOException error)
         {
@@ -79,12 +86,20 @@ internal sealed class WorkflowEventJournal : IDisposable
             ]);
         }
 
-        foreach (var node in report.Nodes)
+        foreach (NodeResult node in report.Nodes)
         {
-            previous.TryGetValue(node.Id, out var old);
-            if (old == node.Status) continue;
+            _ = previous.TryGetValue(node.Id, out string? old);
+            if (old == node.Status)
+            {
+                continue;
+            }
+
             previous[node.Id] = node.Status;
-            if (node.Status == "pending") continue;
+            if (node.Status == "pending")
+            {
+                continue;
+            }
+
             Emit(node.Status == "running" ? "node_started" : "node_finished", node,
                 node.Status, node.ExitCode, node.Error, Artifacts(node));
         }
@@ -99,27 +114,46 @@ internal sealed class WorkflowEventJournal : IDisposable
 
     private List<WorkflowArtifactView> Artifacts(NodeResult node)
     {
-        var artifacts = new List<WorkflowArtifactView>();
+        List<WorkflowArtifactView> artifacts = [];
 
         void Add(string type, string? path, string? hash = null)
         {
-            if (string.IsNullOrWhiteSpace(path)) return;
-            var full = Path.GetFullPath(Path.IsPathFullyQualified(path) ? path : Path.Combine(directory, path));
-            if (File.Exists(full) || Directory.Exists(full)) artifacts.Add(new(type, full, hash));
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            string full = Path.GetFullPath(Path.IsPathFullyQualified(path) ? path : Path.Combine(directory, path));
+            if (File.Exists(full) || Directory.Exists(full))
+            {
+                artifacts.Add(new(type, full, hash));
+            }
         }
 
         Add("stdout", node.Stdout);
         Add("stderr", node.Stderr);
         Add("executable", node.Artifact?.Executable, node.Artifact?.Sha256);
-        foreach (var item in node.DeclaredArtifacts)
+        foreach (WorkflowArtifactEvidence item in node.DeclaredArtifacts)
         {
-            if (item.Role == "output") Add("declared:" + item.Name, item.Path, item.Sha256);
-            if (item.SnapshotPath is not null) Add("snapshot:" + item.Name, item.SnapshotPath, item.Sha256);
+            if (item.Role == "output")
+            {
+                Add("declared:" + item.Name, item.Path, item.Sha256);
+            }
+
+            if (item.SnapshotPath is not null)
+            {
+                Add("snapshot:" + item.Name, item.SnapshotPath, item.Sha256);
+            }
         }
 
-        foreach (var (type, path) in node.Outputs)
+        foreach ((string? type, string? path) in node.Outputs)
+        {
             if (type is "rawTrace" || type.StartsWith("dagflow-", StringComparison.Ordinal))
+            {
                 Add(type, path);
+            }
+        }
+
         if (node.Kind == "profile")
         {
             Add("capture-manifest", node.Id + ".manifest.json");
@@ -132,10 +166,14 @@ internal sealed class WorkflowEventJournal : IDisposable
     private void Emit(string type, NodeResult? node, string? status, int? exitCode,
         string? error, List<WorkflowArtifactView> artifacts)
     {
-        var item = new WorkflowEvent(1, ++sequence, DateTimeOffset.UtcNow, type, directory,
+        WorkflowEvent item = new(1, ++sequence, DateTimeOffset.UtcNow, type, directory,
             node?.Id, node?.Kind, status, exitCode, error, artifacts);
-        var line = JsonSerializer.Serialize(item, WorkflowProtocolJson.Default.WorkflowEvent);
-        if (journal is null) return;
+        string line = JsonSerializer.Serialize(item, WorkflowProtocolJson.Default.WorkflowEvent);
+        if (journal is null)
+        {
+            return;
+        }
+
         try
         {
             journal.WriteLine(line);
@@ -148,6 +186,7 @@ internal sealed class WorkflowEventJournal : IDisposable
         }
 
         if (stdout)
+        {
             try
             {
                 Console.Out.WriteLine(line);
@@ -160,6 +199,7 @@ internal sealed class WorkflowEventJournal : IDisposable
             {
                 stdout = false;
             }
+        }
     }
 
     public void Dispose() => journal?.Dispose();

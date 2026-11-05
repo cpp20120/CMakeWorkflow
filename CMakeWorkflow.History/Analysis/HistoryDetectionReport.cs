@@ -1,11 +1,9 @@
-using System.Security.Cryptography;
-using System.Globalization;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
+using System.Diagnostics.CodeAnalysis;
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History;
+#pragma warning restore IDE0130
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record HistoryDetectionReport(
     int SchemaVersion,
     string BaselineRun,
@@ -15,4 +13,5 @@ public sealed record HistoryDetectionReport(
     double MinimumEffectPercent,
     double Alpha,
     string Test,
-    List<HistoryDetection> Results);
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<HistoryDetection> Results);

@@ -10,41 +10,44 @@ internal static class SshArtifactTests
     internal static async Task RunAsync()
     {
         if (OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException("Artifact fixture requires POSIX, CMake and Ninja.");
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(75));
-        var ct = deadline.Token;
-        await using var host = new TransportTestHost();
-        await host.ReadyAsync(ct);
-        var fixture = await RemoteWorkflowFixture.CreateAsync(host.Root, "artifacts", ct);
-        string operationId;
-        using (var bridge = new SshWorkflowConnection(host.Endpoint, fixture.Workspace))
         {
-            await using var client = await bridge.ConnectAsync(ct);
-            var op = await client.Workflows.StartAsync(fixture.Request, ct);
+            throw new PlatformNotSupportedException("Artifact fixture requires POSIX, CMake and Ninja.");
+        }
+
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(75));
+        CancellationToken ct = deadline.Token;
+        await using TransportTestHost host = new();
+        await host.ReadyAsync(ct);
+        RemoteWorkflowFixture fixture = await RemoteWorkflowFixture.CreateAsync(host.Root, "artifacts", ct);
+        string operationId;
+        using (SshWorkflowConnection bridge = new(host.Endpoint, fixture.Workspace))
+        {
+            await using CMakeWorkflowClient client = await bridge.ConnectAsync(ct);
+            WorkflowOperation op = await client.Workflows.StartAsync(fixture.Request, ct);
             operationId = op.OperationId;
             await fixture.WaitForStartAsync(ct);
-            await SshTransportTests.RejectAsync<RemoteInvocationException>(() => op.ListArtifactsAsync(ct));
+            _ = await SshTransportTests.RejectAsync<RemoteInvocationException>(() => op.ListArtifactsAsync(ct));
         }
         fixture.Finish();
-        using (var bridge = new SshWorkflowConnection(host.Endpoint, fixture.Workspace))
+        using (SshWorkflowConnection bridge = new(host.Endpoint, fixture.Workspace))
         {
-            await using var client = await bridge.ConnectAsync(ct);
-            var op = client.Operations.GetHandle(operationId);
+            await using CMakeWorkflowClient client = await bridge.ConnectAsync(ct);
+            WorkflowOperation op = client.Operations.GetHandle(operationId);
             Check((await op.WaitForCompletionAsync(ct: ct)).State == "succeeded", "Artifact fixture did not finish.");
-            var catalog = await op.ListArtifactsAsync(ct);
+            OperationArtifactList catalog = await op.ListArtifactsAsync(ct);
             Check(catalog.OperationId == operationId && catalog.ReportSha256.Length == 64,
                 "Invalid operation-bound artifact identity.");
-            var report = catalog.Artifacts.Single(x => x.ArtifactId == "report");
+            OperationArtifactInfo report = catalog.Artifacts.Single(x => x.ArtifactId == "report");
             Check(report.Size > 0 && report.Sha256 == catalog.ReportSha256,
                 "Report SHA-256 does not match durable finalization.");
             Check(catalog.Artifacts.Any(x => x.Kind == "stdout") && catalog.Artifacts.Any(x => x.Kind == "stderr"),
                 "Node logs missing from catalog.");
 
-            await using var received = new MemoryStream();
+            await using MemoryStream received = new();
             long offset = 0;
             do
             {
-                var chunk = await op.ReadArtifactChunkAsync(report, offset, 47, ct);
+                OperationArtifactChunk chunk = await op.ReadArtifactChunkAsync(report, offset, 47, ct);
                 Check(chunk.Offset == offset && chunk.TotalSize == report.Size &&
                       chunk.LastWriteUtcTicks == report.LastWriteUtcTicks,
                     "Chunk identity or offset mismatch.");
@@ -55,18 +58,18 @@ internal static class SshArtifactTests
             } while (offset < report.Size);
             Check(Convert.ToHexString(SHA256.HashData(received.ToArray())) == report.Sha256,
                 "Downloaded report digest mismatch.");
-            await SshTransportTests.RejectAsync<RemoteInvocationException>(
+            _ = await SshTransportTests.RejectAsync<RemoteInvocationException>(
                 () => op.ReadArtifactChunkAsync(report, -1, 10, ct));
-            await SshTransportTests.RejectAsync<RemoteInvocationException>(
+            _ = await SshTransportTests.RejectAsync<RemoteInvocationException>(
                 () => op.ReadArtifactChunkAsync(report, 0, 65537, ct));
-            await SshTransportTests.RejectAsync<RemoteInvocationException>(
+            _ = await SshTransportTests.RejectAsync<RemoteInvocationException>(
                 () => op.ReadArtifactChunkAsync(report with { ArtifactId = "../outside" }, 0, 10, ct));
 
-            var stdout = catalog.Artifacts.First(x => x.Kind == "stdout");
-            var stdoutPath = Path.Combine(fixture.Request.ResultsDirectory,
+            OperationArtifactInfo stdout = catalog.Artifacts.First(x => x.Kind == "stdout");
+            string stdoutPath = Path.Combine(fixture.Request.ResultsDirectory,
                 stdout.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            File.AppendAllText(stdoutPath, "altered after listing");
-            await SshTransportTests.RejectAsync<RemoteInvocationException>(
+            await File.AppendAllTextAsync(stdoutPath, "altered after listing", CancellationToken.None);
+            _ = await SshTransportTests.RejectAsync<RemoteInvocationException>(
                 () => op.ReadArtifactChunkAsync(stdout, 0, 16, ct));
             Check(fixture.Effects().SequenceEqual(["started", "finished"]),
                 "Reading artifacts redispatched the workflow.");

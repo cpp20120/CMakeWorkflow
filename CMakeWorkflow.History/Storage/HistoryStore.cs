@@ -3,8 +3,11 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics.CodeAnalysis;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History;
+#pragma warning restore IDE0130
 
 public sealed class HistoryStore : IDisposable
 {
@@ -22,34 +25,45 @@ public sealed class HistoryStore : IDisposable
     {
         SQLitePCL.Batteries.Init();
         path = Path.GetFullPath(path);
-        if (!readOnly) Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (!readOnly)
+        {
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        }
+
         db = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = path, Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
+            DataSource = path,
+            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
             Pooling = false
         }.ToString());
         try
         {
             db.Open();
-            using (var foreignKeys = db.CreateCommand())
+            using (SqliteCommand foreignKeys = db.CreateCommand())
             {
                 foreignKeys.CommandText = "PRAGMA foreign_keys=ON";
-                foreignKeys.ExecuteNonQuery();
+                _ = foreignKeys.ExecuteNonQuery();
             }
 
-            using var version = db.CreateCommand();
+            using SqliteCommand version = db.CreateCommand();
             version.CommandText = "PRAGMA user_version";
-            var current = Convert.ToInt32(version.ExecuteScalar());
+            int current = Convert.ToInt32(version.ExecuteScalar(), CultureInfo.CurrentCulture);
             if (readOnly)
             {
                 if (current != 4)
+                {
                     throw new InvalidDataException(
                         $"History schema {current} requires an explicit CLI migration; read-only API supports schema 4.");
+                }
+
                 return;
             }
 
             if (current > 4)
+            {
                 throw new InvalidDataException($"History database schema {current} is newer than supported version 4.");
+            }
+
             if (current == 0)
             {
                 Migrate0To1();
@@ -68,7 +82,10 @@ public sealed class HistoryStore : IDisposable
                 current = 3;
             }
 
-            if (current == 3) Migrate3To4();
+            if (current == 3)
+            {
+                Migrate3To4();
+            }
         }
         catch
         {
@@ -79,7 +96,7 @@ public sealed class HistoryStore : IDisposable
 
     private void Migrate0To1()
     {
-        using var tx = db.BeginTransaction();
+        using SqliteTransaction tx = db.BeginTransaction();
         Execute("""
                 CREATE TABLE IF NOT EXISTS runs (
                   id TEXT PRIMARY KEY, directory TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
@@ -107,7 +124,7 @@ public sealed class HistoryStore : IDisposable
 
     private void Migrate1To2()
     {
-        using var tx = db.BeginTransaction();
+        using SqliteTransaction tx = db.BeginTransaction();
         Execute("ALTER TABLE runs ADD COLUMN indexer_version INTEGER NOT NULL DEFAULT 0", tx);
         Execute("PRAGMA user_version=2", tx);
         tx.Commit();
@@ -115,7 +132,7 @@ public sealed class HistoryStore : IDisposable
 
     private void Migrate2To3()
     {
-        using var tx = db.BeginTransaction();
+        using SqliteTransaction tx = db.BeginTransaction();
         Execute("ALTER TABLE runs ADD COLUMN host_id TEXT", tx);
         Execute("ALTER TABLE runs ADD COLUMN environment_fingerprint TEXT", tx);
         Execute("ALTER TABLE runs ADD COLUMN environment_json TEXT", tx);
@@ -125,7 +142,7 @@ public sealed class HistoryStore : IDisposable
 
     private void Migrate3To4()
     {
-        using var tx = db.BeginTransaction();
+        using SqliteTransaction tx = db.BeginTransaction();
         Execute("ALTER TABLE runs ADD COLUMN build_environment_json TEXT", tx);
         Execute("PRAGMA user_version=4", tx);
         tx.Commit();
@@ -133,11 +150,19 @@ public sealed class HistoryStore : IDisposable
 
     private void Execute(string sql, SqliteTransaction? tx = null, params object?[] args)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.Transaction = tx;
+
+#pragma warning disable CA2100 // SQL structure comes only from trusted internal statements; external values are bound as SQLite parameters.
         cmd.CommandText = sql;
-        for (var i = 0; i < args.Length; i++) cmd.Parameters.AddWithValue("$p" + i, args[i] ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
+#pragma warning restore CA2100
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            _ = cmd.Parameters.AddWithValue("$p" + i, args[i] ?? DBNull.Value);
+        }
+
+        _ = cmd.ExecuteNonQuery();
     }
 
     private static string? S(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
@@ -149,24 +174,30 @@ public sealed class HistoryStore : IDisposable
         directory = Path.GetFullPath(directory);
         if (File.Exists(directory))
         {
-            var file = Path.GetFileName(directory);
+            string file = Path.GetFileName(directory);
             if (file is not ("run.json" or "report.json" or "campaign-completion.json")
                 && !file.EndsWith(".results.json", StringComparison.Ordinal))
+            {
                 throw new InvalidDataException($"Unsupported history input file: {directory}");
+            }
+
             directory = Path.GetDirectoryName(directory)!;
         }
 
         if (!Directory.Exists(directory))
+        {
             throw new DirectoryNotFoundException($"Result directory is missing: {directory}");
-        var dirs = recursive ? CandidateDirectories(directory) : [directory];
-        var imported = 0;
-        var unchanged = 0;
-        var skipped = 0;
-        var parsedRuns = new List<ParsedRun>();
-        foreach (var path in dirs)
+        }
+
+        IEnumerable<string> dirs = recursive ? CandidateDirectories(directory) : [directory];
+        int imported = 0;
+        int unchanged = 0;
+        int skipped = 0;
+        List<ParsedRun> parsedRuns = [];
+        foreach (string path in dirs)
         {
             pathGuard?.Invoke(path);
-            var parsed = HistoryReports.Parse(path);
+            ParsedRun? parsed = HistoryReports.Parse(path);
             if (parsed is null)
             {
                 skipped++;
@@ -176,23 +207,28 @@ public sealed class HistoryStore : IDisposable
             parsedRuns.Add(parsed);
         }
 
-        var changed = new List<ParsedRun>();
-        foreach (var parsed in parsedRuns)
+        List<ParsedRun> changed = [];
+        foreach (ParsedRun parsed in parsedRuns)
         {
-            var old = ExistingHash(parsed.Run.Id);
-            if (old.Hash == parsed.Run.SourceHash && old.IndexerVersion == CurrentIndexerVersion
+            (string? Hash, int IndexerVersion) = ExistingHash(parsed.Run.Id);
+            if (Hash == parsed.Run.SourceHash && IndexerVersion == CurrentIndexerVersion
                                                   && !ProfileMetadataChanged(parsed))
+            {
                 unchanged++;
-            else changed.Add(parsed);
+            }
+            else
+            {
+                changed.Add(parsed);
+            }
         }
 
-        using var tx = db.BeginTransaction();
-        foreach (var parsed in changed)
+        using SqliteTransaction tx = db.BeginTransaction();
+        foreach (ParsedRun parsed in changed)
         {
             Execute(
                 "DELETE FROM measurements WHERE run_id=$p0; DELETE FROM artifacts WHERE run_id=$p0; DELETE FROM nodes WHERE run_id=$p0; DELETE FROM runs WHERE id=$p0;",
                 tx, parsed.Run.Id);
-            var r = parsed.Run;
+            HistoryRun r = parsed.Run;
             Execute(
                 "INSERT INTO runs (id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,indexer_version,host_id,environment_fingerprint,environment_json,build_environment_json) VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11,$p12,$p13,$p14)",
                 tx,
@@ -206,17 +242,26 @@ public sealed class HistoryStore : IDisposable
                     ? null
                     : JsonSerializer.Serialize(r.BuildEnvironments,
                         HistoryJson.Default.ListHistoryBuildEnvironment));
-            foreach (var n in parsed.Nodes)
+            foreach (HistoryNode n in parsed.Nodes)
+            {
                 Execute("INSERT INTO nodes VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8)", tx,
                     n.RunId, n.Id, n.Kind, n.Status, n.DurationSeconds, n.Dependencies,
                     n.BuildDirectory, n.Configuration, n.Target);
-            foreach (var m in parsed.Measurements)
+            }
+
+            foreach (HistoryMeasurement m in parsed.Measurements)
+            {
                 Execute("INSERT INTO measurements VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11)", tx,
                     m.RunId, m.NodeId, m.Metric, m.Unit, m.Value, m.Variant, m.Scenario,
                     m.Source, m.Method, m.SampleIndex, m.Workload, m.Environment);
-            foreach (var a in parsed.Artifacts.Distinct())
+            }
+
+            foreach (HistoryArtifact? a in parsed.Artifacts.Distinct())
+            {
                 Execute("INSERT INTO artifacts VALUES ($p0,$p1,$p2,$p3,$p4,$p5)", tx,
                     a.RunId, a.NodeId, a.Type, a.Path, a.Sha256, a.Metadata);
+            }
+
             imported++;
         }
 
@@ -227,38 +272,43 @@ public sealed class HistoryStore : IDisposable
 
     private static IEnumerable<string> CandidateDirectories(string root)
     {
-        var pending = new Stack<string>();
+        Stack<string> pending = new();
         pending.Push(root);
         while (pending.Count > 0)
         {
-            var path = pending.Pop();
+            string path = pending.Pop();
             yield return path;
             if (File.Exists(Path.Combine(path, "run.json"))
                 || File.Exists(Path.Combine(path, "campaign-completion.json"))
                 || File.Exists(Path.Combine(path, "report.json"))
                 || Directory.GetFiles(path, "*.results.json", SearchOption.TopDirectoryOnly).Length > 0)
+            {
                 continue;
-            foreach (var child in Directory.EnumerateDirectories(path)
+            }
+
+            foreach (string? child in Directory.EnumerateDirectories(path)
                          .Where(x => Path.GetFileName(x) is not ("corpus" or "traces" or "raw" or "artifacts"))
                          .OrderByDescending(x => x, StringComparer.Ordinal))
+            {
                 pending.Push(child);
+            }
         }
     }
 
     private bool ProfileMetadataChanged(ParsedRun run)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = "SELECT count(*) FROM artifacts WHERE run_id=$p0";
-        cmd.Parameters.AddWithValue("$p0", run.Run.Id);
-        return Convert.ToInt32(cmd.ExecuteScalar()) != run.Artifacts.Distinct().Count();
+        _ = cmd.Parameters.AddWithValue("$p0", run.Run.Id);
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.CurrentCulture) != run.Artifacts.Distinct().Count();
     }
 
     private (string? Hash, int IndexerVersion) ExistingHash(string id)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = "SELECT source_hash,indexer_version FROM runs WHERE id=$p0";
-        cmd.Parameters.AddWithValue("$p0", id);
-        using var reader = cmd.ExecuteReader();
+        _ = cmd.Parameters.AddWithValue("$p0", id);
+        using SqliteDataReader reader = cmd.ExecuteReader();
         return reader.Read() ? (reader.GetString(0), reader.GetInt32(1)) : (null, 0);
     }
 
@@ -273,10 +323,11 @@ public sealed class HistoryStore : IDisposable
                 HistoryJson.Default.ListHistoryBuildEnvironment)
             : null);
 
+    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
     public List<HistoryRun> Runs(int limit, string? status, string? since, string? until,
         string? workflow, string? variant, Func<string, bool>? includeDirectory = null, CancellationToken ct = default)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
                           SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json
                           FROM runs WHERE ($p0 IS NULL OR status=$p0)
@@ -287,15 +338,26 @@ public sealed class HistoryStore : IDisposable
                           ORDER BY started_at DESC, id LIMIT $p5
                           """;
         object?[] values = [status, since, until, workflow, variant, includeDirectory is null ? limit : int.MaxValue];
-        for (var i = 0; i < values.Length; i++) cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);
-        using var reader = cmd.ExecuteReader();
-        var result = new List<HistoryRun>();
+        for (int i = 0; i < values.Length; i++)
+        {
+            _ = cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);
+        }
+
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        List<HistoryRun> result = [];
         while (reader.Read())
         {
             ct.ThrowIfCancellationRequested();
-            if (includeDirectory is not null && !includeDirectory(reader.GetString(1))) continue;
+            if (includeDirectory is not null && !includeDirectory(reader.GetString(1)))
+            {
+                continue;
+            }
+
             result.Add(Run(reader));
-            if (result.Count >= limit) break;
+            if (result.Count >= limit)
+            {
+                break;
+            }
         }
 
         return result;
@@ -310,9 +372,12 @@ public sealed class HistoryStore : IDisposable
     {
         if (limit is < 1 or > 200 || string.IsNullOrWhiteSpace(databaseIdentity) ||
             cursor is { Length: < 1 or > 2048 })
+        {
             throw new ArgumentException("Invalid history page request.");
+        }
+
         ct.ThrowIfCancellationRequested();
-        var binding = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\0",
+        string binding = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\0",
             databaseIdentity, status ?? "", since ?? "", until ?? "", workflow ?? "", variant ?? ""))));
         long watermark;
         string? lastStarted = null;
@@ -322,16 +387,22 @@ public sealed class HistoryStore : IDisposable
             try
             {
                 if (cursor.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+                {
                     throw new FormatException();
-                var input = cursor.Replace('-', '+').Replace('_', '/');
-                var encoded = Convert.FromBase64String(input + new string('=', (4 - input.Length % 4) % 4));
-                var fields = Encoding.UTF8.GetString(encoded).Split('\n');
+                }
+
+                string input = cursor.Replace('-', '+').Replace('_', '/');
+                byte[] encoded = Convert.FromBase64String(input + new string('=', (4 - (input.Length % 4)) % 4));
+                string[] fields = Encoding.UTF8.GetString(encoded).Split('\n');
                 if (fields.Length != 5 || fields[0] != "v1" || fields[1] != binding ||
                     !long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out watermark) ||
                     watermark <= 0 || fields[4].Length is < 1 or > 256)
+                {
                     throw new FormatException();
+                }
+
                 lastStarted = fields[3] == "-" ? null : Encoding.UTF8.GetString(
-                    Convert.FromBase64String(fields[3] + new string('=', (4 - fields[3].Length % 4) % 4)));
+                    Convert.FromBase64String(fields[3] + new string('=', (4 - (fields[3].Length % 4)) % 4)));
                 lastId = fields[4];
             }
             catch (Exception error) when (error is FormatException or ArgumentException or DecoderFallbackException)
@@ -341,13 +412,16 @@ public sealed class HistoryStore : IDisposable
         }
         else
         {
-            using var max = db.CreateCommand();
+            using SqliteCommand max = db.CreateCommand();
             max.CommandText = "SELECT COALESCE(MAX(rowid),0) FROM runs;";
             watermark = (long)max.ExecuteScalar()!;
         }
-        if (watermark == 0) return new(1, [], null);
+        if (watermark == 0)
+        {
+            return new(1, [], null);
+        }
 
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
             SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json
             FROM runs
@@ -364,74 +438,91 @@ public sealed class HistoryStore : IDisposable
                      (started_at = $lastStarted AND id > $lastId))))
             ORDER BY started_at DESC, id ASC;
             """;
-        cmd.Parameters.AddWithValue("$watermark", watermark);
-        cmd.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$since", (object?)since ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$until", (object?)until ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$workflow", (object?)workflow ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$variant", (object?)variant ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$lastId", (object?)lastId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$lastStarted", (object?)lastStarted ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$watermark", watermark);
+        _ = cmd.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$since", (object?)since ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$until", (object?)until ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$workflow", (object?)workflow ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$variant", (object?)variant ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$lastId", (object?)lastId ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$lastStarted", (object?)lastStarted ?? DBNull.Value);
 
-        var items = new List<HistoryRun>(limit);
+        List<HistoryRun> items = new(limit);
         string? continuationId = null;
         string? continuationStart = null;
         bool hasMore = false;
-        using (var reader = cmd.ExecuteReader())
+        using (SqliteDataReader reader = cmd.ExecuteReader())
         {
             while (reader.Read())
             {
                 ct.ThrowIfCancellationRequested();
-                if (includeDirectory is not null && !includeDirectory(reader.GetString(1))) continue;
+                if (includeDirectory is not null && !includeDirectory(reader.GetString(1)))
+                {
+                    continue;
+                }
+
                 if (items.Count == limit) { hasMore = true; break; }
                 items.Add(Run(reader));
                 continuationId = reader.GetString(0);
                 continuationStart = reader.IsDBNull(5) ? null : reader.GetString(5);
             }
         }
-        if (!hasMore) return new(1, items, null);
-        var startedToken = continuationStart is null ? "-" : Convert.ToBase64String(
+        if (!hasMore)
+        {
+            return new(1, items, null);
+        }
+
+        string startedToken = continuationStart is null ? "-" : Convert.ToBase64String(
             Encoding.UTF8.GetBytes(continuationStart)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var value = string.Join("\n", "v1", binding,
+        string value = string.Join("\n", "v1", binding,
             watermark.ToString(CultureInfo.InvariantCulture), startedToken, continuationId);
-        var next = Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=')
+        string next = Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=')
             .Replace('+', '-').Replace('/', '_');
         return new(1, items, next);
     }
 
+    [SuppressMessage("Design", "CA1068", Justification = "Preserve the existing positional and named argument order for public callers.")]
     public HistoryDetail Show(string id, Action<string>? validateDirectory = null,
         int maxMeasurements = int.MaxValue, CancellationToken ct = default, Func<string, bool>? artifactAllowed = null)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText =
             "SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json FROM runs WHERE id=$p0";
-        cmd.Parameters.AddWithValue("$p0", id);
-        using var r = cmd.ExecuteReader();
-        if (!r.Read()) throw new KeyNotFoundException($"Unknown run ID: {id}");
+        _ = cmd.Parameters.AddWithValue("$p0", id);
+        using SqliteDataReader r = cmd.ExecuteReader();
+        if (!r.Read())
+        {
+            throw new KeyNotFoundException($"Unknown run ID: {id}");
+        }
+
         validateDirectory?.Invoke(r.GetString(1));
-        var run = Run(r);
+        HistoryRun run = Run(r);
         return new(run, Nodes(id), Metrics(id, null, null, null, maxRows: maxMeasurements, ct: ct),
             Artifacts(id, artifactAllowed));
     }
 
     private List<HistoryNode> Nodes(string id)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText =
             "SELECT run_id,id,kind,status,duration_seconds,dependencies,build_directory,configuration,target FROM nodes WHERE run_id=$p0 ORDER BY id";
-        cmd.Parameters.AddWithValue("$p0", id);
-        using var r = cmd.ExecuteReader();
-        var list = new List<HistoryNode>();
+        _ = cmd.Parameters.AddWithValue("$p0", id);
+        using SqliteDataReader r = cmd.ExecuteReader();
+        List<HistoryNode> list = [];
         while (r.Read())
+        {
             list.Add(new(r.GetString(0), r.GetString(1), r.GetString(2),
                 r.GetString(3), D(r, 4), S(r, 5), S(r, 6), S(r, 7), S(r, 8)));
+        }
+
         return list;
     }
 
+    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
     public List<HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario,
         Func<string, bool>? includeDirectory = null, int maxRows = int.MaxValue, CancellationToken ct = default)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
                           SELECT run_id,node_id,metric,unit,value,variant,scenario,source,method,sample_index,workload,environment,
                             (SELECT directory FROM runs WHERE id=measurements.run_id)
@@ -440,15 +531,26 @@ public sealed class HistoryStore : IDisposable
                           ORDER BY metric,unit,method,variant,scenario,run_id,sample_index,node_id
                           """;
         object?[] values = [run, metric, variant, scenario];
-        for (var i = 0; i < values.Length; i++) cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);
-        using var r = cmd.ExecuteReader();
-        var list = new List<HistoryMeasurement>();
+        for (int i = 0; i < values.Length; i++)
+        {
+            _ = cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);
+        }
+
+        using SqliteDataReader r = cmd.ExecuteReader();
+        List<HistoryMeasurement> list = [];
         while (r.Read())
         {
             ct.ThrowIfCancellationRequested();
-            if (includeDirectory is not null && !includeDirectory(r.GetString(12))) continue;
+            if (includeDirectory is not null && !includeDirectory(r.GetString(12)))
+            {
+                continue;
+            }
+
             if (list.Count >= maxRows)
+            {
                 throw new InvalidDataException($"Measurement limit {maxRows} exceeded; narrow the query.");
+            }
+
             list.Add(new(r.GetString(0), S(r, 1), r.GetString(2), r.GetString(3),
                 r.GetDouble(4), S(r, 5), S(r, 6), r.GetString(7), r.GetString(8), r.GetInt32(9),
                 S(r, 10), S(r, 11)));
@@ -459,17 +561,20 @@ public sealed class HistoryStore : IDisposable
 
     private List<HistoryArtifact> Artifacts(string id, Func<string, bool>? allowed = null)
     {
-        using var cmd = db.CreateCommand();
+        using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText =
             "SELECT run_id,node_id,type,path,sha256,metadata FROM artifacts WHERE run_id=$p0 ORDER BY type,path";
-        cmd.Parameters.AddWithValue("$p0", id);
-        using var r = cmd.ExecuteReader();
-        var list = new List<HistoryArtifact>();
+        _ = cmd.Parameters.AddWithValue("$p0", id);
+        using SqliteDataReader r = cmd.ExecuteReader();
+        List<HistoryArtifact> list = [];
         while (r.Read())
+        {
             list.Add(new(r.GetString(0), S(r, 1), r.GetString(2), r.GetString(3),
                 S(r, 4), S(r, 5),
                 (allowed is null || allowed(r.GetString(3))) &&
                 (File.Exists(r.GetString(3)) || Directory.Exists(r.GetString(3)))));
+        }
+
         return list;
     }
 

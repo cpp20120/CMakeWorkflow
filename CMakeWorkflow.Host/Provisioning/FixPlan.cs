@@ -1,11 +1,8 @@
-using System.Text.Json.Serialization;
 using CMakeWorkflow.Tooling;
-using CMakeWorkflow.History;
-using CMakeWorkflow.Profiling;
-using PolyType;
-using StreamJsonRpc;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 public sealed record FixPlan(
     int SchemaVersion,

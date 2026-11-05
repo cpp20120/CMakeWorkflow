@@ -1,11 +1,6 @@
-using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Microsoft.Win32;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
 // Discovery is evidence, not a promise that a particular compiler/SDK ABI works.
 // Candidate IDs derive from role + canonical location; they are not client-supplied paths.

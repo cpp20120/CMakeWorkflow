@@ -1,7 +1,4 @@
-using System.Text.Json.Serialization;
-using CMakeWorkflow;
 using CMakeWorkflow.History;
-using CMakeWorkflow.Profiling;
 using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host;
@@ -141,7 +138,7 @@ public partial interface IHostRpc
     Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request, CancellationToken cancellationToken);
 
     [JsonRpcMethod("history/runsPage")]
-    Task<CMakeWorkflow.History.HistoryRunPage> HistoryRunsPageAsync(HistoryRunsPageRequest request,
+    Task<HistoryRunPage> HistoryRunsPageAsync(HistoryRunsPageRequest request,
         CancellationToken cancellationToken);
 
     [JsonRpcMethod("history/runs")]

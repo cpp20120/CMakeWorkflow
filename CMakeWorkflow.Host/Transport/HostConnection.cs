@@ -1,7 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using StreamJsonRpc;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 public static class HostConnection
 {
@@ -9,7 +11,11 @@ public static class HostConnection
 
     public static JsonRpc Create(Stream input, Stream output)
     {
-        var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(output, input, CreateFormatter()));
+
+#pragma warning disable CA2000 // The returned JsonRpc owns its message handler; the caller owns and disposes the connection.
+        ApplicationRpc rpc = new(new HeaderDelimitedMessageHandler(output, input, CreateFormatter()));
+#pragma warning restore CA2000
+
 #if RPC_CANCELLATION_TESTING
         rpc.TraceSource.Switch.Level = System.Diagnostics.SourceLevels.All;
         rpc.TraceSource.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(Console.Error));

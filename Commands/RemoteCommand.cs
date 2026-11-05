@@ -11,6 +11,14 @@ namespace CMakeWorkflow;
 /// </summary>
 internal static class RemoteCommand
 {
+    private static readonly string[] SshNetOnlyOptions =
+    [
+    "--host",
+    "--user",
+    "--key-file",
+    "--host-key-sha256",
+    "--port"
+];
     private static readonly HashSet<string> ConnectionFlags =
     [
         "--destination", "--endpoint", "--workspace", "--ssh-executable",
@@ -44,22 +52,25 @@ internal static class RemoteCommand
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
         if (args.Length > 0 && args[0] == "provision")
+        {
             return RemoteProvisionCommand.Execute(args[1..], ct);
+        }
+
         if (args is [] or ["help"] or ["--help"])
         {
             Console.WriteLine(Usage);
             return 0;
         }
 
-        var action = args[0];
-        var values = Parse(action, args[1..]);
+        string action = args[0];
+        Dictionary<string, string> values = Parse(action, args[1..]);
         // Reject malformed input before spawning SSH or accepting any workflow.
         Validate(action, values);
-        var timeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600));
-        var transport = Get(values, "--transport") ?? "openssh";
+        TimeSpan timeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600));
+        string transport = Get(values, "--transport") ?? "openssh";
         // Both paths connect to the same durable Host and identical RPC surface.
         // No auto-reconnect or retry of an uncertain workflow/start response.
-        await using var client = transport == "sshnet"
+        await using CMakeWorkflowClient client = transport == "sshnet"
             ? await CMakeWorkflowClient.ConnectSshNetAsync(new SshNetHostOptions(
                 Require(values, "--host"), Require(values, "--user"),
                 Require(values, "--key-file"), Require(values, "--host-key-sha256"),
@@ -80,17 +91,17 @@ internal static class RemoteCommand
         switch (action)
         {
             case "start":
-            {
-                // ClientRequestId and manifest digest are caller-supplied and stable.
-                // An ambiguous transport failure must be resolved with 'find'.
-                var operation = await client.Workflows.StartAsync(new StartWorkflowOptions(
-                    Require(values, "--request-id"), Require(values, "--manifest"),
-                    Require(values, "--manifest-sha256"), (int)Number(values, "--jobs", 1, 1, 4096),
-                    Require(values, "--results-dir")), ct);
-                Print(new RemoteStartReceipt(operation.OperationId, Require(values, "--request-id")),
-                    RemoteCliJson.Default.RemoteStartReceipt);
-                return 0;
-            }
+                {
+                    // ClientRequestId and manifest digest are caller-supplied and stable.
+                    // An ambiguous transport failure must be resolved with 'find'.
+                    WorkflowOperation operation = await client.Workflows.StartAsync(new StartWorkflowOptions(
+                        Require(values, "--request-id"), Require(values, "--manifest"),
+                        Require(values, "--manifest-sha256"), (int)Number(values, "--jobs", 1, 1, 4096),
+                        Require(values, "--results-dir")), ct);
+                    Print(new RemoteStartReceipt(operation.OperationId, Require(values, "--request-id")),
+                        RemoteCliJson.Default.RemoteStartReceipt);
+                    return 0;
+                }
             case "find":
                 Print(await client.Operations.FindAsync(Require(values, "--request-id"), ct),
                     RemoteCliJson.Default.OperationSnapshot);
@@ -104,13 +115,13 @@ internal static class RemoteCommand
                     RemoteCliJson.Default.RecoverySnapshot);
                 return 0;
             case "events":
-            {
-                var op = client.Operations.GetHandle(Require(values, "--operation"));
-                Print(await op.ReadEventsAsync(Number(values, "--after", 0, 0, long.MaxValue),
-                        (int)Number(values, "--limit", 100, 1, 500), ct),
-                    RemoteCliJson.Default.EventPage);
-                return 0;
-            }
+                {
+                    WorkflowOperation op = client.Operations.GetHandle(Require(values, "--operation"));
+                    Print(await op.ReadEventsAsync(Number(values, "--after", 0, 0, long.MaxValue),
+                            (int)Number(values, "--limit", 100, 1, 500), ct),
+                        RemoteCliJson.Default.EventPage);
+                    return 0;
+                }
             case "report":
                 Print(await client.Operations.GetHandle(Require(values, "--operation")).GetReportAsync(ct),
                     RemoteCliJson.Default.OperationReportSnapshot);
@@ -120,17 +131,17 @@ internal static class RemoteCommand
                     RemoteCliJson.Default.OperationArtifactList);
                 return 0;
             case "download":
-            {
-                var op = client.Operations.GetHandle(Require(values, "--operation"));
-                var id = Require(values, "--artifact-id");
-                var catalog = await op.ListArtifactsAsync(ct);
-                var artifact = catalog.Artifacts.SingleOrDefault(item => item.ArtifactId == id)
-                               ?? throw new KeyNotFoundException($"No artifact '{id}' belongs to this operation.");
-                var local = await op.DownloadArtifactAsync(artifact, Require(values, "--output"), ct: ct);
-                Print(new RemoteDownloadReceipt(op.OperationId, id, local, artifact.Size, artifact.Sha256),
-                    RemoteCliJson.Default.RemoteDownloadReceipt);
-                return 0;
-            }
+                {
+                    WorkflowOperation op = client.Operations.GetHandle(Require(values, "--operation"));
+                    string id = Require(values, "--artifact-id");
+                    OperationArtifactList catalog = await op.ListArtifactsAsync(ct);
+                    OperationArtifactInfo artifact = catalog.Artifacts.SingleOrDefault(item => item.ArtifactId == id)
+                                   ?? throw new KeyNotFoundException($"No artifact '{id}' belongs to this operation.");
+                    string local = await op.DownloadArtifactAsync(artifact, Require(values, "--output"), ct: ct);
+                    Print(new RemoteDownloadReceipt(op.OperationId, id, local, artifact.Size, artifact.Sha256),
+                        RemoteCliJson.Default.RemoteDownloadReceipt);
+                    return 0;
+                }
             case "cancel":
                 Print(await client.Operations.GetHandle(Require(values, "--operation"))
                         .RequestCancellationAsync(Number(values, "--revision", 0, 0, long.MaxValue), ct),
@@ -144,15 +155,23 @@ internal static class RemoteCommand
     private static Dictionary<string, string> Parse(string action, string[] args)
     {
         if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "cancel"))
+        {
             throw new ArgumentException($"Unknown remote command '{action}'.\n{Usage}");
-        var options = new Dictionary<string, string>(StringComparer.Ordinal);
-        for (var i = 0; i < args.Length; i += 2)
+        }
+
+        Dictionary<string, string> options = new(StringComparer.Ordinal);
+        for (int i = 0; i < args.Length; i += 2)
         {
             if (i + 1 >= args.Length || !args[i].StartsWith("--", StringComparison.Ordinal) ||
                 args[i + 1].StartsWith("--", StringComparison.Ordinal))
+            {
                 throw new ArgumentException($"Remote CLI expects --option VALUE pairs.\n{Usage}");
+            }
+
             if (!options.TryAdd(args[i], args[i + 1]))
+            {
                 throw new ArgumentException($"Duplicate option '{args[i]}'.");
+            }
         }
         return options;
     }
@@ -161,7 +180,7 @@ internal static class RemoteCommand
     {
         string[] actionFlags = action switch
         {
-            "start" => new[] { "--request-id", "--manifest", "--manifest-sha256", "--results-dir", "--jobs" },
+            "start" => ["--request-id", "--manifest", "--manifest-sha256", "--results-dir", "--jobs"],
             "find" => ["--request-id"],
             "status" or "inspect" or "report" or "artifacts" => ["--operation"],
             "events" => ["--operation", "--after", "--limit"],
@@ -169,65 +188,91 @@ internal static class RemoteCommand
             "cancel" => ["--operation", "--revision"],
             _ => throw new ArgumentException("Unknown remote command.")
         };
-        foreach (var (key, value) in values)
+        foreach ((string? key, string? value) in values)
         {
             if (!ConnectionFlags.Contains(key) && !actionFlags.Contains(key, StringComparer.Ordinal))
+            {
                 throw new ArgumentException($"Option '{key}' is invalid for remote {action}.");
+            }
+
             if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
+            {
                 throw new ArgumentException($"Option '{key}' must be nonempty and contain no control characters.");
+            }
         }
-        var transport = Get(values, "--transport") ?? "openssh";
+        string transport = Get(values, "--transport") ?? "openssh";
         if (transport is not ("openssh" or "sshnet"))
+        {
             throw new ArgumentException("--transport must be openssh or sshnet.");
-        foreach (var key in new[] { "--endpoint", "--workspace" }) Require(values, key);
+        }
+
+        foreach (string? key in new[] { "--endpoint", "--workspace" })
+        {
+            _ = Require(values, key);
+        }
+
         if (transport == "sshnet")
         {
-            foreach (var key in new[] { "--host", "--user", "--key-file", "--host-key-sha256" })
-                Require(values, key);
+            foreach (string? key in new[] { "--host", "--user", "--key-file", "--host-key-sha256" })
+            {
+                _ = Require(values, key);
+            }
+
             if (values.ContainsKey("--destination") || values.ContainsKey("--ssh-executable"))
+            {
                 throw new ArgumentException("--destination/--ssh-executable are OpenSSH-only options.");
-            Number(values, "--port", 22, 1, 65535);
+            }
+
+            _ = Number(values, "--port", 22, 1, 65535);
         }
         else
         {
-            Require(values, "--destination");
-            if (new[] { "--host", "--user", "--key-file", "--host-key-sha256", "--port" }
+            _ = Require(values, "--destination");
+            if (SshNetOnlyOptions
                 .Any(values.ContainsKey))
+            {
                 throw new ArgumentException("SSH.NET options require --transport sshnet.");
+            }
         }
         switch (action)
         {
             case "start":
-                foreach (var key in new[] { "--request-id", "--manifest", "--manifest-sha256", "--results-dir" })
-                    Require(values, key);
-                var sha = Require(values, "--manifest-sha256");
+                foreach (string? key in new[] { "--request-id", "--manifest", "--manifest-sha256", "--results-dir" })
+                {
+                    _ = Require(values, key);
+                }
+
+                string sha = Require(values, "--manifest-sha256");
                 if (sha.Length != 64 || !sha.All(Uri.IsHexDigit))
+                {
                     throw new ArgumentException("--manifest-sha256 must contain exactly 64 hexadecimal characters.");
-                Number(values, "--jobs", 1, 1, 4096);
+                }
+
+                _ = Number(values, "--jobs", 1, 1, 4096);
                 break;
-            case "find": Require(values, "--request-id"); break;
-            default: Require(values, "--operation"); break;
+            case "find": _ = Require(values, "--request-id"); break;
+            default: _ = Require(values, "--operation"); break;
         }
         if (action == "events")
         {
-            Number(values, "--after", 0, 0, long.MaxValue);
-            Number(values, "--limit", 100, 1, 500);
+            _ = Number(values, "--after", 0, 0, long.MaxValue);
+            _ = Number(values, "--limit", 100, 1, 500);
         }
         if (action == "download")
         {
-            Require(values, "--artifact-id");
-            Require(values, "--output");
+            _ = Require(values, "--artifact-id");
+            _ = Require(values, "--output");
         }
         if (action == "cancel")
         {
-            Require(values, "--revision");
-            Number(values, "--revision", 0, 0, long.MaxValue);
+            _ = Require(values, "--revision");
+            _ = Number(values, "--revision", 0, 0, long.MaxValue);
         }
-        Number(values, "--connect-timeout-seconds", 15, 1, 3600);
+        _ = Number(values, "--connect-timeout-seconds", 15, 1, 3600);
     }
 
     private static string Require(Dictionary<string, string> values, string key) =>
-        values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+        values.TryGetValue(key, out string? value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : throw new ArgumentException($"Missing required remote option {key}.");
 
@@ -236,11 +281,12 @@ internal static class RemoteCommand
 
     private static long Number(Dictionary<string, string> values, string key, long fallback, long minimum, long maximum)
     {
-        if (!values.TryGetValue(key, out var raw)) return fallback;
-        if (!long.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ||
-            value < minimum || value > maximum)
-            throw new ArgumentException($"{key} must be an integer from {minimum} through {maximum}.");
-        return value;
+        return !values.TryGetValue(key, out string? raw)
+            ? fallback
+            : !long.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out long value) ||
+            value < minimum || value > maximum
+            ? throw new ArgumentException($"{key} must be an integer from {minimum} through {maximum}.")
+            : value;
     }
 
     private static void Print<T>(T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> info) =>
@@ -260,4 +306,4 @@ internal sealed record RemoteDownloadReceipt(string OperationId, string Artifact
 [JsonSerializable(typeof(CancellationReceipt))]
 [JsonSerializable(typeof(RemoteStartReceipt))]
 [JsonSerializable(typeof(RemoteDownloadReceipt))]
-internal partial class RemoteCliJson : JsonSerializerContext;
+internal sealed partial class RemoteCliJson : JsonSerializerContext;

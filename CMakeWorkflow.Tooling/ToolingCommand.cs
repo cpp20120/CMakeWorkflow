@@ -6,20 +6,29 @@ public static class ToolingCommand
 {
     public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(args);
         try
         {
-            if (args.Length == 0) throw new ArgumentException(Usage);
-            var action = args[0];
-            if (action is not ("list" or "doctor" or "plan" or "setup"))
+            if (args.Length == 0)
+            {
                 throw new ArgumentException(Usage);
-            var profiles = new List<string>();
-            var manager = PackageManagerKind.Auto;
-            var fallback = true;
-            var json = false;
-            var dryRun = false;
-            var yes = false;
+            }
+
+            string action = args[0];
+            if (action is not ("list" or "doctor" or "plan" or "setup"))
+            {
+                throw new ArgumentException(Usage);
+            }
+
+            List<string> profiles = [];
+            PackageManagerKind manager = PackageManagerKind.Auto;
+            bool fallback = true;
+            bool json = false;
+            bool dryRun = false;
+            bool yes = false;
             string? installDirectory = null;
-            for (var i = 1; i < args.Length; i++)
+            for (int i = 1; i < args.Length; i++)
+            {
                 switch (args[i])
                 {
                     case "--json": json = true; break;
@@ -27,8 +36,11 @@ public static class ToolingCommand
                     case "--yes": yes = true; break;
                     case "--no-fallback": fallback = false; break;
                     case "--profile":
-                        if (i + 1 >= args.Length || args[i + 1].StartsWith("-", StringComparison.Ordinal))
+                        if (i + 1 >= args.Length || args[i + 1].StartsWith('-'))
+                        {
                             throw new ArgumentException("--profile requires a profile name.");
+                        }
+
                         profiles.Add(args[++i]);
                         break;
                     case "--pm" or "--package-manager" when i + 1 < args.Length:
@@ -36,29 +48,43 @@ public static class ToolingCommand
                     case "--install-dir" when i + 1 < args.Length:
                         installDirectory = args[++i]; break;
                     default:
-                        if (args[i].StartsWith("-", StringComparison.Ordinal))
+                        if (args[i].StartsWith('-'))
+                        {
                             throw new ArgumentException($"Unknown tooling option: {args[i]}");
+                        }
+
                         profiles.Add(args[i]);
                         break;
                 }
+            }
 
             if (action == "list")
             {
-                if (profiles.Count > 0) throw new ArgumentException("tooling list does not accept profiles.");
-                var listing = new ToolingProfileList(1, ToolCatalog.AllProfiles
-                    .Select(x => new ToolingProfileView(x.Id, x.Description, x.Tools)).ToList());
+                if (profiles.Count > 0)
+                {
+                    throw new ArgumentException("tooling list does not accept profiles.");
+                }
+
+                ToolingProfileList listing = new(1, [.. ToolCatalog.AllProfiles.Select(x => new ToolingProfileView(x.Id, x.Description, x.Tools))]);
                 if (json)
-                    Console.Out.WriteLine(JsonSerializer.Serialize(listing,
+                {
+                    await Console.Out.WriteLineAsync(JsonSerializer.Serialize(listing,
                         ToolingJson.Default.ToolingProfileList));
+                }
                 else
-                    foreach (var profile in listing.Profiles)
-                        Console.Out.WriteLine(
+                {
+                    foreach (ToolingProfileView profile in listing.Profiles)
+                    {
+                        await Console.Out.WriteLineAsync(
                             $"{profile.Id,-12} {profile.Description}: {string.Join(", ", profile.Tools)}");
+                    }
+                }
+
                 return 0;
             }
 
-            var service = new ToolingService(new SystemToolingRuntime(), new VerifiedCMakeInstaller());
-            var plan = await service.PlanAsync(profiles, manager, fallback, installDirectory, ct);
+            ToolingService service = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller());
+            ToolingPlan plan = await service.PlanAsync(profiles, manager, fallback, installDirectory, ct);
             if (action is "doctor" or "plan" || dryRun)
             {
                 PrintPlan(plan, json);
@@ -67,27 +93,53 @@ public static class ToolingCommand
 
             if (plan.Ready)
             {
-                var complete = new ToolingResult(1, true,
-                    plan.Tools.Select(x => x.Id).ToArray(), [], []);
+                ToolingResult complete = new(1, true,
+                    [.. plan.Tools.Select(x => x.Id)], [], []);
                 if (json)
-                    Console.Out.WriteLine(JsonSerializer.Serialize(complete,
+                {
+                    await Console.Out.WriteLineAsync(JsonSerializer.Serialize(complete,
                         ToolingJson.Default.ToolingResult));
-                else Console.Out.WriteLine("All requested tools are already available.");
+                }
+                else
+                {
+                    await Console.Out.WriteLineAsync("All requested tools are already available.");
+                }
+
                 return 0;
             }
 
             if (!yes)
+            {
                 throw new ArgumentException(
                     "tooling setup changes the machine; inspect `tooling plan` and pass --yes to apply it.");
-            var result = await service.ExecuteAsync(plan, ct);
-            if (json) Console.Out.WriteLine(JsonSerializer.Serialize(result, ToolingJson.Default.ToolingResult));
+            }
+
+            ToolingResult result = await service.ExecuteAsync(plan, ct);
+            if (json)
+            {
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(result, ToolingJson.Default.ToolingResult));
+            }
             else
             {
-                foreach (var tool in result.Ready) Console.Out.WriteLine($"Ready: {tool}");
-                foreach (var failure in result.Failed) Console.Out.WriteLine($"Failed: {failure}");
-                foreach (var diagnostic in result.Diagnostics) Console.Error.WriteLine(diagnostic);
+                foreach (string tool in result.Ready)
+                {
+                    await Console.Out.WriteLineAsync($"Ready: {tool}");
+                }
+
+                foreach (string failure in result.Failed)
+                {
+                    await Console.Out.WriteLineAsync($"Failed: {failure}");
+                }
+
+                foreach (string diagnostic in result.Diagnostics)
+                {
+                    await Console.Error.WriteLineAsync(diagnostic);
+                }
+
                 if (result.Success && !PathContains(plan.InstallDirectory))
-                    Console.Error.WriteLine($"Add {plan.InstallDirectory} to PATH for future sessions.");
+                {
+                    await Console.Error.WriteLineAsync($"Add {plan.InstallDirectory} to PATH for future sessions.");
+                }
             }
 
             return result.Success ? 0 : 2;
@@ -96,7 +148,7 @@ public static class ToolingCommand
                                           or UnauthorizedAccessException or InvalidDataException or HttpRequestException
                                           or TimeoutException)
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Tooling: {error.Message}");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Tooling: {error.Message}");
             return 1;
         }
     }
@@ -111,45 +163,61 @@ public static class ToolingCommand
 
         Console.Out.WriteLine(
             $"Profiles: {string.Join(", ", plan.Profiles)}; platform: {plan.Platform}; package manager: {plan.PackageManager}");
-        foreach (var tool in plan.Tools)
+        foreach (ToolStatus tool in plan.Tools)
         {
             Console.Out.WriteLine(
                 $"{(tool.Installed ? "ready" : "missing"),-7} {tool.Id,-12} {tool.Command ?? tool.Diagnostic ?? ""} {tool.Version ?? ""}");
             if (tool.Installed && tool.Diagnostic is not null)
+            {
                 Console.Out.WriteLine($"  {tool.Id}: {tool.Diagnostic}");
+            }
         }
 
-        foreach (var step in plan.Steps)
+        foreach (ToolingStep step in plan.Steps)
+        {
             Console.Out.WriteLine(
                 $"  {step.Tool}: {step.Method} {step.Executable} {string.Join(" ", step.Arguments)} {step.Source} {step.Diagnostic}");
+        }
     }
 
     private static bool PathContains(string directory)
     {
-        foreach (var path in (Environment.GetEnvironmentVariable("PATH") ?? "")
+        foreach (string path in (Environment.GetEnvironmentVariable("PATH") ?? "")
                  .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
             try
             {
                 if (string.Equals(Path.GetFullPath(path), directory,
                         OperatingSystem.IsWindows()
                             ? StringComparison.OrdinalIgnoreCase
-                            : StringComparison.Ordinal)) return true;
+                            : StringComparison.Ordinal))
+                {
+                    return true;
+                }
             }
             catch (Exception error) when (error is ArgumentException or NotSupportedException)
             {
             }
+        }
 
         return false;
     }
 
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
     private static PackageManagerKind ParseManager(string value) => value.ToLowerInvariant() switch
     {
-        "auto" => PackageManagerKind.Auto, "none" => PackageManagerKind.None,
-        "apt" => PackageManagerKind.Apt, "pacman" => PackageManagerKind.Pacman,
-        "dnf" => PackageManagerKind.Dnf, "brew" => PackageManagerKind.Brew,
+        "auto" => PackageManagerKind.Auto,
+        "none" => PackageManagerKind.None,
+        "apt" => PackageManagerKind.Apt,
+        "pacman" => PackageManagerKind.Pacman,
+        "dnf" => PackageManagerKind.Dnf,
+        "brew" => PackageManagerKind.Brew,
         "winget" => PackageManagerKind.Winget,
         _ => throw new ArgumentException("Package manager must be auto, none, apt, pacman, dnf, brew or winget.")
     };
+#pragma warning restore CA1308
+
 
     private const string Usage =
         "tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]";

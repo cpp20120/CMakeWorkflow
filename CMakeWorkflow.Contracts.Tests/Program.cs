@@ -3,7 +3,10 @@ using CMakeWorkflow;
 
 static void Check(bool condition, string description)
 {
-    if (!condition) throw new Exception(description);
+    if (!condition)
+    {
+        throw new System.Diagnostics.UnreachableException(description);
+    }
 }
 
 static void Refused(Action operation, string description)
@@ -17,19 +20,19 @@ static void Refused(Action operation, string description)
         return;
     }
 
-    throw new Exception(description);
+    throw new System.Diagnostics.UnreachableException(description);
 }
 
-var workflow = WorkflowBuilder.Create()
+WorkflowBuilder workflow = WorkflowBuilder.Create()
     .Context("release", c => c.BuildDirectory("/tmp/cmwf-test/release")
         .Configuration("Release").AdoptExisting().AllowUnverified());
-var build = workflow.BuildTarget("compile", "release", "dagflow_bench",
+BuildNodeRef build = workflow.BuildTarget("compile", "release", "dagflow_bench",
     n => n.Output("binary", "bin/dagflow_bench"));
-var run = workflow.Run("measure", build, n => n.Arguments("--case", "chain")
+WorkflowNodeRef run = workflow.Run("measure", build, n => n.Arguments("--case", "chain")
     .Timeout(TimeSpan.FromSeconds(12)).Resource("measurement-host")
     .InputFrom(build, "binary").RequireCpuSet("2"));
 workflow.CTest("unit", "release", build, n => n.LabelRegex("unit").DependsOn(run));
-var snapshot = workflow.ToDocument();
+WorkflowDocument snapshot = workflow.ToDocument();
 Check(snapshot.SchemaVersion == 2 && snapshot.Contexts["release"].Mode == "adopt"
                                   && snapshot.Contexts["release"].ProvenancePolicy == "allowUnverified",
     "Context construction");
@@ -53,8 +56,8 @@ Check(workflow.ToDocument().Nodes[1].Arguments.Count == 2
     "Document snapshots share mutable state");
 
 // Uses the same camelCase JSON shape as the engine's workflow manifest source generator.
-var json = JsonSerializer.Serialize(workflow.ToDocument(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
-using var parsed = JsonDocument.Parse(json);
+string json = JsonSerializer.Serialize(workflow.ToDocument(), JsonSerializerOptions.Web);
+using JsonDocument parsed = JsonDocument.Parse(json);
 Check(parsed.RootElement.GetProperty("schemaVersion").GetInt32() == 2
       && parsed.RootElement.GetProperty("nodes")[1].GetProperty("from").GetString() == "compile"
       && parsed.RootElement.GetProperty("contexts").GetProperty("release")

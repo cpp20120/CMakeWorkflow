@@ -1,7 +1,8 @@
 using System.Text.Json;
-using CMakeWorkflow;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 // Non-authoritative event projection. A failed journal append cannot change a
 // durable checkpoint or license a retry of any external effect.
@@ -14,13 +15,42 @@ internal sealed class ProcessEventJournal : IDisposable
     private bool started;
     private bool finished;
 
-    internal ProcessEventJournal(string directory)
+    internal ProcessEventJournal(string directory, bool resume = false)
     {
         this.directory = directory;
         try
         {
+            bool needsSeparator = false;
+            if (resume && File.Exists(Path.Combine(directory, "events.jsonl")))
+            {
+                foreach (string line in File.ReadLines(Path.Combine(directory, "events.jsonl")))
+                {
+                    try
+                    {
+                        WorkflowEvent? evt = JsonSerializer.Deserialize(line, WorkflowProtocolJson.Default.WorkflowEvent);
+                        if (evt is not null)
+                        {
+                            sequence = Math.Max(sequence, evt.Sequence);
+                        }
+                    }
+                    catch (JsonException) { }
+                }
+                using FileStream tail = File.OpenRead(Path.Combine(directory, "events.jsonl"));
+                if (tail.Length > 0)
+                {
+                    _ = tail.Seek(-1, SeekOrigin.End);
+                    needsSeparator = tail.ReadByte() != '\n';
+                }
+            }
             writer = new StreamWriter(new FileStream(Path.Combine(directory, "events.jsonl"),
-                FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+                FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            { AutoFlush = true };
+            // Preserve an interrupted final line without merging the first new
+            // event into it. Replay skips that incomplete historical record.
+            if (needsSeparator)
+            {
+                writer.WriteLine();
+            }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -33,9 +63,13 @@ internal sealed class ProcessEventJournal : IDisposable
             started = true;
             Emit("workflow_started", null, "running", null, null);
         }
-        foreach (var node in report.Nodes)
+        foreach (ProcessNodeReport node in report.Nodes)
         {
-            if (node.Status == "pending" || last.GetValueOrDefault(node.Id) == node.Status) continue;
+            if (node.Status == "pending" || last.GetValueOrDefault(node.Id) == node.Status)
+            {
+                continue;
+            }
+
             last[node.Id] = node.Status;
             Emit(node.Status == "running" ? "node_started" : "node_finished", node.Id,
                 node.Status, node.ExitCode, node.Error);
@@ -49,8 +83,12 @@ internal sealed class ProcessEventJournal : IDisposable
 
     private void Emit(string type, string? id, string status, int? exitCode, string? error)
     {
-        if (writer is null) return;
-        var evt = new WorkflowEvent(1, ++sequence, DateTimeOffset.UtcNow, type,
+        if (writer is null)
+        {
+            return;
+        }
+
+        WorkflowEvent evt = new(1, ++sequence, DateTimeOffset.UtcNow, type,
             directory, id, id is null ? null : "process", status, exitCode, error, []);
         try
         {

@@ -15,26 +15,37 @@ public sealed partial class DoctorSession
         ApplicationCallAsync(request, async (paths, ct) =>
         {
             if (request.RequestId is not { Length: 32 } || !request.RequestId.All(Uri.IsHexDigit))
+            {
                 throw new ApplicationRefusal("invalid_argument", "RequestId must be a 32-digit hex identifier.");
-            var output = paths.Require(request.ResultsDirectory);
-            var build = paths.Require(request.BuildDirectory);
-            var workflow = TargetWorkflowBuilder.Build(request.Action, build, request.Target,
+            }
+
+            string output = paths.Require(request.ResultsDirectory);
+            string build = paths.Require(request.BuildDirectory);
+            WorkflowDocument workflow = TargetWorkflowBuilder.Build(request.Action, build, request.Target,
                 request.SecondTarget, request.Configuration, request.Arguments, request.SecondArguments,
                 request.Toolchain);
-            var bytes = Encoding.UTF8.GetBytes(
+            byte[] bytes = Encoding.UTF8.GetBytes(
                 JsonSerializer.Serialize(workflow, WorkflowJson.Default.WorkflowDocument) + "\n");
-            var hash = Convert.ToHexString(SHA256.HashData(bytes));
-            var manifest = paths.Require(Path.Combine(output,
-                "target-workflow-" + request.RequestId.ToLowerInvariant() + ".json"));
-            var bindingDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory,
+            string hash = Convert.ToHexString(SHA256.HashData(bytes));
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
+            string manifest = paths.Require(Path.Combine(output,
+                            "target-workflow-" + request.RequestId.ToLowerInvariant() + ".json"));
+#pragma warning restore CA1308
+
+            string bindingDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory,
                 ".cmakeworkflow", "target-preparations"));
-            Directory.CreateDirectory(bindingDirectory);
-            var binding = paths.Require(Path.Combine(bindingDirectory,
-                request.RequestId.ToLowerInvariant() + ".json"));
-            var prepared = new TargetPreparation(1, manifest, hash, output);
+            _ = Directory.CreateDirectory(bindingDirectory);
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
+            string binding = paths.Require(Path.Combine(bindingDirectory,
+                            request.RequestId.ToLowerInvariant() + ".json"));
+#pragma warning restore CA1308
+
+            TargetPreparation prepared = new(1, manifest, hash, output);
             await CommitOnceAsync(binding,
                 JsonSerializer.SerializeToUtf8Bytes(prepared, HostJson.Default.TargetPreparation), ct);
-            Directory.CreateDirectory(output);
+            _ = Directory.CreateDirectory(output);
             await CommitOnceAsync(manifest, bytes, ct);
             return prepared;
         }, cancellationToken);
@@ -45,11 +56,11 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, async (paths, ct) =>
         {
-            var result = await ProfileReplayCommand.ReplayAsync(new ProfileReplayOptions(
+            ProfileReplayOutcome result = await ProfileReplayCommand.ReplayAsync(new ProfileReplayOptions(
                     paths.Require(request.BaselineDirectory), paths.Require(request.CandidateDirectory),
                     request.NodeId, request.CaseName, request.HarnessIndex, request.Backend,
                     paths.Require(request.ResultsDirectory), request.TimeoutSeconds), ct,
-                pathGuard: path => { paths.Require(path); });
+                pathGuard: path => { _ = paths.Require(path); });
             return new ProfileReplayResponse(result.SchemaVersion,
                 paths.Require(result.RunDirectory), paths.Require(result.AnalysisFile));
         }, cancellationToken);
@@ -61,12 +72,12 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, async (paths, ct) =>
         {
-            var source = paths.Require(request.SourceDirectory);
-            var report = paths.Require(request.ReportPath ?? Path.Combine(source,
+            string source = paths.Require(request.SourceDirectory);
+            string report = paths.Require(request.ReportPath ?? Path.Combine(source,
                 request.Suite == "queue" ? "out/queue-mutations/report.json" : "out/protocol-mutations/report.json"));
-            paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json"));
-            paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json.tmp"));
-            var code = await CampaignService.MutationAsync(new MutationOptions(source, request.Suite,
+            _ = paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json"));
+            _ = paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json.tmp"));
+            int code = await CampaignService.MutationAsync(new MutationOptions(source, request.Suite,
                 request.Compiler, request.Seed, request.Cases, request.Steps, request.TimeoutSeconds, report), ct);
             return Result("mutation", code, Path.GetDirectoryName(report));
         }, cancellationToken);
@@ -75,12 +86,12 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, async (paths, ct) =>
         {
-            var source = paths.Require(request.SourceDirectory);
-            var relacy = paths.Require(request.RelacyDirectory);
-            var report = paths.Require(request.ReportPath ?? Path.Combine(source, "out/weak-memory/report.json"));
-            paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json"));
-            paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json.tmp"));
-            var code = await CampaignService.WeakMemoryAsync(new WeakMemoryOptions(source,
+            string source = paths.Require(request.SourceDirectory);
+            string relacy = paths.Require(request.RelacyDirectory);
+            string report = paths.Require(request.ReportPath ?? Path.Combine(source, "out/weak-memory/report.json"));
+            _ = paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json"));
+            _ = paths.Require(Path.Combine(Path.GetDirectoryName(report)!, "campaign-completion.json.tmp"));
+            int code = await CampaignService.WeakMemoryAsync(new WeakMemoryOptions(source,
                 request.Protocol, relacy, request.Compiler, request.TimeoutSeconds, report), ct);
             return Result("weak-memory", code, Path.GetDirectoryName(report));
         }, cancellationToken);
@@ -90,10 +101,13 @@ public sealed partial class DoctorSession
         ApplicationCallAsync(request, async (paths, ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.Layer) || request.Layer.IndexOfAny(['/', '\\', '.', ':']) >= 0)
+            {
                 throw new ArgumentException("Invalid fuzz layer.");
-            var output = paths.Require(request.OutputDirectory);
-            var directory = paths.Require(Path.Combine(output, request.Layer));
-            var code = await CampaignService.FuzzSeedAsync(new(request.Layer, output), ct);
+            }
+
+            string output = paths.Require(request.OutputDirectory);
+            string directory = paths.Require(Path.Combine(output, request.Layer));
+            int code = await CampaignService.FuzzSeedAsync(new(request.Layer, output), ct);
             return Result("fuzz-seed", code, directory);
         }, cancellationToken);
 
@@ -101,15 +115,15 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, async (paths, ct) =>
         {
-            var build = paths.Require(request.BuildDirectory);
-            var output = paths.Require(request.ResultsDirectory);
-            var corpus = request.CorpusDirectory is null ? null : paths.Require(request.CorpusDirectory);
+            string build = paths.Require(request.BuildDirectory);
+            string output = paths.Require(request.ResultsDirectory);
+            string? corpus = request.CorpusDirectory is null ? null : paths.Require(request.CorpusDirectory);
             string? run = null;
-            var code = await CampaignService.FuzzRunAsync(new FuzzRunOptions(build, request.Layer,
+            int code = await CampaignService.FuzzRunAsync(new FuzzRunOptions(build, request.Layer,
                     request.Backend, corpus, output, request.Configuration, request.DurationSeconds,
                     request.InputTimeoutSeconds, request.MaxLength, request.ReplayOnly), ct,
                 directory => run = paths.Require(directory),
-                path => { paths.Require(path); });
+                path => { _ = paths.Require(path); });
             return Result("fuzz-run", code, run);
         }, cancellationToken);
 
@@ -117,8 +131,8 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, async (paths, ct) =>
         {
-            var directory = paths.Require(request.RunDirectory);
-            var code = await CampaignService.FuzzTriageAsync(new(directory), ct, path => { paths.Require(path); });
+            string directory = paths.Require(request.RunDirectory);
+            int code = await CampaignService.FuzzTriageAsync(new(directory), ct, path => { _ = paths.Require(path); });
             return Result("fuzz-triage", code, directory);
         }, cancellationToken);
 
@@ -126,10 +140,10 @@ public sealed partial class DoctorSession
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, async (paths, ct) =>
         {
-            var directory = paths.Require(request.RunDirectory);
-            var output = request.OutputDirectory is null ? null : paths.Require(request.OutputDirectory);
-            var code = await CampaignService.FuzzMergeAsync(new(directory, output, request.Coverage), ct,
-                path => { paths.Require(path); });
+            string directory = paths.Require(request.RunDirectory);
+            string? output = request.OutputDirectory is null ? null : paths.Require(request.OutputDirectory);
+            int code = await CampaignService.FuzzMergeAsync(new(directory, output, request.Coverage), ct,
+                path => { _ = paths.Require(path); });
             return Result("fuzz-merge", code, directory);
         }, cancellationToken);
 }

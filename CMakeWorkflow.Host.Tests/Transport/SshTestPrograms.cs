@@ -6,12 +6,19 @@ internal sealed class SshTestPrograms : IDisposable
     internal string Arguments => Path.Combine(Root, "arguments");
     internal string PidFile => Path.Combine(Root, "pid");
 
-    internal SshTestPrograms() => Directory.CreateDirectory(Root);
+    internal SshTestPrograms()
+    {
+        _ = Directory.CreateDirectory(Root);
+    }
 
     internal string Script(string name, string body)
     {
-        if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("POSIX SSH-shell test fixture.");
-        var path = Path.Combine(Root, name);
+        if (OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("POSIX SSH-shell test fixture.");
+        }
+
+        string path = Path.Combine(Root, name);
         File.WriteAllText(path, "#!/bin/sh\nset -eu\n" + body + "\n");
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return path;
@@ -38,12 +45,19 @@ internal sealed class SshTestPrograms : IDisposable
     internal void AssertExited(string? pidFile = null)
     {
         pidFile ??= PidFile;
-        if (!File.Exists(pidFile)) throw new Exception("Fixture never started its process.");
-        var pid = int.Parse(File.ReadAllText(pidFile));
+        if (!File.Exists(pidFile))
+        {
+            throw new UnreachableException("Fixture never started its process.");
+        }
+
+        int pid = int.Parse(File.ReadAllText(pidFile), System.Globalization.CultureInfo.CurrentCulture);
         try
         {
-            using var process = Process.GetProcessById(pid);
-            if (!process.HasExited) throw new Exception("SSH process was not reaped.");
+            using Process process = Process.GetProcessById(pid);
+            if (!process.HasExited)
+            {
+                throw new UnreachableException("SSH process was not reaped.");
+            }
         }
         catch (ArgumentException) { }
     }

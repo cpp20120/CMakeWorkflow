@@ -22,6 +22,7 @@ then use an existing CMake build directory.
 | [CLI reference](cli.md)                               | Build/publish, commands and exit/JSON contracts                        |
 | [Results and History](results-and-history.md)         | JSONL, `run.json`, SQLite, comparisons and regression detection        |
 | [Recovery](recovery.md)                               | Unknown effects, explicit reconciliation, audit and durability         |
+| [Process execution](process-execution.md)              | Process DAGs, explicit resume, recovery evidence and one-shot claims    |
 | [Profiling and campaigns](profiling-and-campaigns.md) | perf, ETW, Instruments, replay and DagFlow harness/fuzz                |
 | [Provisioning and IDE integration](integrations.md)   | Doctor/Setup, CMake bridge, VS Code, limits of tests                   |
 | [Local Host IPC](host-ipc.md)                         | Local JSON-RPC, NativeAOT, Doctor/Fix, operation lifecycle             |

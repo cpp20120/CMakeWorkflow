@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 /// <summary>
 /// A direct SSH.NET connection to a persistent Linux Host, without spawning OpenSSH.

@@ -1,6 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 // SDK wire projections of CMakeWorkflow.History records. Keep properties/constructors in sync with Host DTOs.
 // Do NOT reference CMakeWorkflow.History from the SDK: that assembly also contains SQLite storage.
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 public sealed record HistoryArtifact(
     string RunId,
@@ -21,11 +24,15 @@ public sealed record HistoryBuildEnvironment(
     string? Flags,
     string Fingerprint);
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record HistoryDetail(
     HistoryRun Run,
-    List<HistoryNode> Nodes,
-    List<HistoryMeasurement> Measurements,
-    List<HistoryArtifact> Artifacts);
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<HistoryNode> Nodes,
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<HistoryMeasurement> Measurements,
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<HistoryArtifact> Artifacts);
 
 public sealed record HistoryHostEnvironment(
     string? HostId,
@@ -66,6 +73,7 @@ public sealed record HistoryNode(
     string? Configuration,
     string? Target);
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record HistoryRun(
     string Id,
     string Directory,
@@ -81,7 +89,8 @@ public sealed record HistoryRun(
     string? HostId = null,
     string? EnvironmentFingerprint = null,
     HistoryHostEnvironment? Environment = null,
-    List<HistoryBuildEnvironment>? BuildEnvironments = null);
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<HistoryBuildEnvironment>? BuildEnvironments = null);
 
 public sealed record HistoryStats(
     int Count,
@@ -121,6 +130,7 @@ public sealed record HistoryDetection(
     int? Permutations,
     bool? Exact);
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record HistoryDetectionReport(
     int SchemaVersion,
     string BaselineRun,
@@ -130,4 +140,5 @@ public sealed record HistoryDetectionReport(
     double MinimumEffectPercent,
     double Alpha,
     string Test,
-    List<HistoryDetection> Results);
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<HistoryDetection> Results);

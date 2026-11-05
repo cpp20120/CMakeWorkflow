@@ -9,56 +9,61 @@ internal static class SshNetProvisionTests
     {
         static string Env(string name) => Environment.GetEnvironmentVariable(name)
             ?? throw new ArgumentException("Missing F2 live setting: " + name);
-        var workspace = Env("CMWF_SSHNET_WORKSPACE");
-        var root = workspace.TrimEnd('/') + "/f2-provision-" + Guid.NewGuid().ToString("N")[..12];
-        var options = new SshNetProvisionOptions(Env("CMWF_SSHNET_HOST"), Env("CMWF_SSHNET_USER"),
+        string workspace = Env("CMWF_SSHNET_WORKSPACE");
+        string root = workspace.TrimEnd('/') + "/f2-provision-" + Guid.NewGuid().ToString("N")[..12];
+        SshNetProvisionOptions options = new(Env("CMWF_SSHNET_HOST"), Env("CMWF_SSHNET_USER"),
             Env("CMWF_SSHNET_KEY"), Env("CMWF_SSHNET_PIN"), workspace,
             Env("CMWF_SSHNET_PUBLISH"), root, "linux-x64")
         {
-            Port = int.Parse(Environment.GetEnvironmentVariable("CMWF_SSHNET_PORT") ?? "22"),
+            Port = int.Parse(Environment.GetEnvironmentVariable("CMWF_SSHNET_PORT") ?? "22", System.Globalization.CultureInfo.CurrentCulture),
             ConnectionTimeout = TimeSpan.FromSeconds(12)
         };
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(110));
-        var ct = deadline.Token;
-        using var key = new PrivateKeyFile(options.PrivateKeyPath);
-        using var ssh = new SshClient(new PrivateKeyConnectionInfo(options.Host, options.Port, options.Username, key)
-            { Timeout = options.ConnectionTimeout });
-        var pin = options.HostKeySha256.StartsWith("SHA256:", StringComparison.Ordinal)
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(110));
+        CancellationToken ct = deadline.Token;
+        using PrivateKeyFile key = new(options.PrivateKeyPath);
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+        using SshClient ssh = new(new PrivateKeyConnectionInfo(options.Host, options.Port, options.Username, key)
+        { Timeout = options.ConnectionTimeout });
+#pragma warning restore CA2000
+
+        string pin = options.HostKeySha256.StartsWith("SHA256:", StringComparison.Ordinal)
             ? options.HostKeySha256[7..] : options.HostKeySha256;
-        var expected = Convert.FromBase64String(pin + "=");
+        byte[] expected = Convert.FromBase64String(pin + "=");
         ssh.HostKeyReceived += (_, args) =>
             args.CanTrust = CryptographicOperations.FixedTimeEquals(SHA256.HashData(args.HostKey), expected);
         ssh.Connect();
         try
         {
-            using (var check = ssh.CreateCommand("test ! -e " + Q(root)))
+            using (SshCommand check = ssh.CreateCommand("test ! -e " + Q(root)))
             {
-                check.Execute();
+                await check.ExecuteAsync(ct);
                 Check(check.ExitStatus == 0, "F2 test install root already exists.");
             }
-            var plan = SshNetHostProvisioner.Plan(options, ct);
+            SshNetProvisionPlan plan = SshNetHostProvisioner.Plan(options, ct);
             Check(plan.Files.Length > 0 && !plan.AlreadyActive && plan.ToolProbes.Length == 4,
                 "Initial read-only provision plan is invalid.");
-            var rejected = false;
+            bool rejected = false;
             try
             {
-                SshNetHostProvisioner.Apply(options, new string('0', 64), ct);
+                _ = SshNetHostProvisioner.Apply(options, new string('0', 64), ct);
             }
             catch (InvalidOperationException) { rejected = true; }
             Check(rejected, "Wrong approval digest was not rejected.");
-            using (var check = ssh.CreateCommand("test ! -e " + Q(root)))
+            using (SshCommand check = ssh.CreateCommand("test ! -e " + Q(root)))
             {
-                check.Execute();
+                await check.ExecuteAsync(ct);
                 Check(check.ExitStatus == 0, "Rejected approval mutated the remote target.");
             }
-            var installed = SshNetHostProvisioner.Apply(options, plan.ApprovalSha256, ct);
+            SshNetProvisionReceipt installed = SshNetHostProvisioner.Apply(options, plan.ApprovalSha256, ct);
             Check(!installed.AlreadyActive && installed.Executable == root + "/current/CMakeWorkflow",
                 "First F2 application failed to activate versioned Host.");
-            await using (var client = await CMakeWorkflowClient.LaunchSshNetAsync(
+            await using (CMakeWorkflowClient client = await CMakeWorkflowClient.LaunchSshNetAsync(
                 new SshNetLaunchOptions(options.Host, options.Username, options.PrivateKeyPath,
                     options.HostKeySha256, workspace)
                 {
-                    RemoteExecutable = installed.Executable, Port = options.Port,
+                    RemoteExecutable = installed.Executable,
+                    Port = options.Port,
                     ConnectionTimeout = options.ConnectionTimeout
                 }, ct))
             {
@@ -66,7 +71,7 @@ internal static class SshNetProvisionTests
                 Check((await client.Toolchains.DiscoverAsync(ct)).SchemaVersion == 1,
                     "Provisioned Host cannot perform typed RPC.");
             }
-            var repeated = SshNetHostProvisioner.Apply(options, plan.ApprovalSha256, ct);
+            SshNetProvisionReceipt repeated = SshNetHostProvisioner.Apply(options, plan.ApprovalSha256, ct);
             Check(repeated.AlreadyActive && repeated.ReleaseDirectory == installed.ReleaseDirectory,
                 "Repeated application was not idempotent.");
             Console.WriteLine("PASS F2 provisioning: read-only plan, approval, SFTP SHA256, activation, executable Host RPC, idempotence");
@@ -74,10 +79,18 @@ internal static class SshNetProvisionTests
         finally
         {
             // The test owns exactly this random child, not its parent workspace.
-            using var cleanup = ssh.CreateCommand("rm -rf -- " + Q(root));
+            using SshCommand cleanup = ssh.CreateCommand("rm -rf -- " + Q(root));
             cleanup.CommandTimeout = TimeSpan.FromSeconds(10);
-            cleanup.Execute();
-            if (cleanup.ExitStatus != 0) throw new IOException("Cannot remove isolated F2 test deployment.");
+            using CancellationTokenSource cleanupTimeout = new(cleanup.CommandTimeout);
+            await cleanup.ExecuteAsync(cleanupTimeout.Token);
+            if (cleanup.ExitStatus != 0)
+            {
+
+#pragma warning disable CA2219 // An owned-session or test cleanup failure must surface rather than report successful cleanup.
+                throw new IOException("Cannot remove isolated F2 test deployment.");
+#pragma warning restore CA2219
+
+            }
         }
     }
 
@@ -85,6 +98,9 @@ internal static class SshNetProvisionTests
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 }

@@ -1,8 +1,6 @@
-using System.Security.Cryptography;
-using System.Text;
-using Microsoft.Data.Sqlite;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 // Durable admission only. This store never dispatches or resumes a workflow.
 // Snapshot bytes and admission are committed in the same SQLite transaction.

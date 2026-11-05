@@ -1,5 +1,34 @@
+using CMakeWorkflow;
 using CMakeWorkflow.Host;
+using CMakeWorkflow.Profiling;
 using CMakeWorkflow.Tooling;
+using StreamJsonRpc;
+
+if (args.Length > 0 && args[0] == "--process-recovery-child")
+{
+    await ProcessRecoveryTests.ChildAsync(args[1..]);
+    return;
+}
+if (args.Length > 0 && args[0] == "--process-recovery-worker")
+{
+    await ProcessRecoveryTests.WorkerAsync(args[1..]);
+    return;
+}
+if (args.Length > 0 && args[0] == "--process-recovery-tests")
+{
+    string recoveryRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-recovery-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(recoveryRoot);
+    try
+    {
+        await ProcessRecoveryTests.RunAsync(recoveryRoot);
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(120));
+        await using TransportTestHost host = new();
+        await host.ReadyAsync(deadline.Token);
+        await ProcessRecoveryTests.WireAsync(host.Endpoint, host.Root, deadline.Token);
+    }
+    finally { Directory.Delete(recoveryRoot, true); }
+    return;
+}
 
 if (args.Length > 0 && args[0] == "--workflow-process-worker")
 {
@@ -9,8 +38,8 @@ if (args.Length > 0 && args[0] == "--workflow-process-worker")
 
 if (args.Length > 0 && args[0] == "--workflow-process-characterization")
 {
-    var processRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-test-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(processRoot);
+    string processRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-test-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(processRoot);
     try
     {
         await WorkflowProcessCharacterization.RunAsync(processRoot);
@@ -18,14 +47,17 @@ if (args.Length > 0 && args[0] == "--workflow-process-characterization")
     }
     finally
     {
-        if (Directory.Exists(processRoot)) Directory.Delete(processRoot, recursive: true);
+        if (Directory.Exists(processRoot))
+        {
+            Directory.Delete(processRoot, recursive: true);
+        }
     }
 }
 
 if (args.Length > 0 && args[0] == "--workflow-process-backend-tests")
 {
-    var backendRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-backend-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(backendRoot);
+    string backendRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-backend-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(backendRoot);
     try
     {
         await WorkflowProcessBackendTests.RunAsync(backendRoot);
@@ -33,14 +65,17 @@ if (args.Length > 0 && args[0] == "--workflow-process-backend-tests")
     }
     finally
     {
-        if (Directory.Exists(backendRoot)) Directory.Delete(backendRoot, recursive: true);
+        if (Directory.Exists(backendRoot))
+        {
+            Directory.Delete(backendRoot, recursive: true);
+        }
     }
 }
 
 if (args.Length > 0 && args[0] == "--workflow-process-cleanup-tests")
 {
-    var cleanupRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-cleanup-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(cleanupRoot);
+    string cleanupRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-cleanup-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(cleanupRoot);
     try
     {
         await WorkflowProcessCleanupTests.RunAsync(cleanupRoot,
@@ -49,14 +84,17 @@ if (args.Length > 0 && args[0] == "--workflow-process-cleanup-tests")
     }
     finally
     {
-        if (Directory.Exists(cleanupRoot)) Directory.Delete(cleanupRoot, recursive: true);
+        if (Directory.Exists(cleanupRoot))
+        {
+            Directory.Delete(cleanupRoot, recursive: true);
+        }
     }
 }
 
 if (args.Length > 0 && args[0] == "--workflow-domain-tests")
 {
-    var domainRoot = Path.Combine(Path.GetTempPath(), "cmwf-domain-tests-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(domainRoot);
+    string domainRoot = Path.Combine(Path.GetTempPath(), "cmwf-domain-tests-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(domainRoot);
     try
     {
         await WorkflowRunnerDomainCharacterizationTests.RunAsync(domainRoot);
@@ -64,14 +102,17 @@ if (args.Length > 0 && args[0] == "--workflow-domain-tests")
     }
     finally
     {
-        if (Directory.Exists(domainRoot)) Directory.Delete(domainRoot, recursive: true);
+        if (Directory.Exists(domainRoot))
+        {
+            Directory.Delete(domainRoot, recursive: true);
+        }
     }
 }
 
 if (args.Length > 0 && args[0] == "--read-api-wire-tests")
 {
-    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-    await using var host = new TransportTestHost();
+    using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(120));
+    await using TransportTestHost host = new();
     await host.ReadyAsync(deadline.Token);
     await ApplicationTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
     return;
@@ -79,8 +120,8 @@ if (args.Length > 0 && args[0] == "--read-api-wire-tests")
 
 if (args.Length > 0 && args[0] == "--operation-query-tests")
 {
-    var queryRoot = Path.Combine(Path.GetTempPath(), "cmwf-operation-query-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(queryRoot);
+    string queryRoot = Path.Combine(Path.GetTempPath(), "cmwf-operation-query-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(queryRoot);
     try
     {
         OperationListTests.Run(queryRoot);
@@ -90,14 +131,17 @@ if (args.Length > 0 && args[0] == "--operation-query-tests")
     }
     finally
     {
-        if (Directory.Exists(queryRoot)) Directory.Delete(queryRoot, recursive: true);
+        if (Directory.Exists(queryRoot))
+        {
+            Directory.Delete(queryRoot, recursive: true);
+        }
     }
 }
 
 if (args.Length > 0 && args[0] == "--durable-operation-tests")
 {
-    var neutralRoot = Path.Combine(Path.GetTempPath(), "cmwf-neutral-operation-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(neutralRoot);
+    string neutralRoot = Path.Combine(Path.GetTempPath(), "cmwf-neutral-operation-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(neutralRoot);
     try
     {
         DurableOperationNeutralTests.Run(neutralRoot);
@@ -105,14 +149,17 @@ if (args.Length > 0 && args[0] == "--durable-operation-tests")
     }
     finally
     {
-        if (Directory.Exists(neutralRoot)) Directory.Delete(neutralRoot, recursive: true);
+        if (Directory.Exists(neutralRoot))
+        {
+            Directory.Delete(neutralRoot, recursive: true);
+        }
     }
 }
 
 if (args.Length > 0 && args[0] == "--durable-persistence-tests")
 {
-    var persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(persistenceRoot);
+    string persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(persistenceRoot);
     try
     {
         await DurableByteWriterTests.RunAsync(persistenceRoot);
@@ -126,7 +173,10 @@ if (args.Length > 0 && args[0] == "--durable-persistence-tests")
     }
     finally
     {
-        if (Directory.Exists(persistenceRoot)) Directory.Delete(persistenceRoot, recursive: true);
+        if (Directory.Exists(persistenceRoot))
+        {
+            Directory.Delete(persistenceRoot, recursive: true);
+        }
     }
 }
 
@@ -145,8 +195,8 @@ if (args.Length > 0 && args[0] == "--workflow-dag-tests")
 
 if (args.Length > 0 && args[0] == "--durable-workflow-wire-tests")
 {
-    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-    await using var host = new TransportTestHost();
+    using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
+    await using TransportTestHost host = new();
     await host.ReadyAsync(deadline.Token);
     await DurableWorkflowWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
     return;
@@ -154,8 +204,8 @@ if (args.Length > 0 && args[0] == "--durable-workflow-wire-tests")
 
 if (args.Length > 0 && args[0] == "--process-domain-wire-tests")
 {
-    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-    await using var host = new TransportTestHost();
+    using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
+    await using TransportTestHost host = new();
     await host.ReadyAsync(deadline.Token);
     await ProcessWorkflowWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
     return;
@@ -261,11 +311,15 @@ if (args.Length > 0 && args[0] == "--bridge-worker")
     {
         Environment.ExitCode = await HostCommand.ExecuteAsync(["bridge", .. args[1..]], default);
     }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
     catch (Exception error)
     {
-        Console.Error.WriteLine(error.Message);
+        await Console.Error.WriteLineAsync(error.Message);
         Environment.ExitCode = 1;
     }
+#pragma warning restore CA1031
+
     return;
 }
 
@@ -274,13 +328,19 @@ static void SetPrivateUnixDirectory(string path) => SetUnixDirectoryMode(path,
 
 static void SetUnixDirectoryMode(string path, UnixFileMode mode)
 {
-    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, mode);
+    if (!OperatingSystem.IsWindows())
+    {
+        File.SetUnixFileMode(path, mode);
+    }
 }
 
 
 static void Check(bool condition, string name)
 {
-    if (!condition) throw new Exception(name);
+    if (!condition)
+    {
+        throw new System.Diagnostics.UnreachableException(name);
+    }
 }
 
 static async Task Reject<T>(Func<Task> action, string name) where T : Exception
@@ -294,7 +354,7 @@ static async Task Reject<T>(Func<Task> action, string name) where T : Exception
         return;
     }
 
-    throw new Exception(name);
+    throw new System.Diagnostics.UnreachableException(name);
 }
 
 if (args.Length > 0 && args[0] == "--durable-fault-worker")
@@ -303,17 +363,17 @@ if (args.Length > 0 && args[0] == "--durable-fault-worker")
     return;
 }
 
-var root = Path.Combine(Path.GetTempPath(), "cmwf-tests-" + Guid.NewGuid().ToString("N"));
+string root = Path.Combine(Path.GetTempPath(), "cmwf-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 // Keep Unix socket endpoints short even when the CI workspace/temp path is long.
-var socketDirectory = OperatingSystem.IsWindows()
+string? socketDirectory = OperatingSystem.IsWindows()
     ? null
     : Path.Combine("/tmp", "cw-" + Guid.NewGuid().ToString("N")[..12]);
 try
 {
     if (socketDirectory is not null)
     {
-        Directory.CreateDirectory(socketDirectory);
+        _ = Directory.CreateDirectory(socketDirectory);
         SetPrivateUnixDirectory(socketDirectory);
     }
 
@@ -325,11 +385,11 @@ try
     await DurableExecutionProcessTests.RunAsync(root);
     await DurableCrashTests.RunAsync(root);
     await FixTests.RunAsync(root);
-    using var fixes = new FixCoordinator(Path.Combine(root, "locks"));
-    var runtime = new FakeRuntime();
-    var service = new ToolingService(runtime, new NoInstaller());
-    var events = new List<DoctorProgress>();
-    var session = new DoctorSession(directory =>
+    using FixCoordinator fixes = new(Path.Combine(root, "locks"));
+    FakeRuntime runtime = new();
+    ToolingService service = new(runtime, new NoInstaller());
+    List<DoctorProgress> events = [];
+    DoctorSession session = new(directory =>
         {
             Check(directory == root, "workspace passed to runtime factory");
             return service;
@@ -339,34 +399,34 @@ try
             events.Add(p);
             return Task.CompletedTask;
         }, default, fixes, _ => Task.CompletedTask);
-    var request = new DoctorRequest("test", ["cmake"], Path.Combine(root, "bin with spaces"));
+    DoctorRequest request = new("test", ["cmake"], Path.Combine(root, "bin with spaces"));
     await Reject<InvalidOperationException>(() => session.DoctorAsync(request, default), "handshake required");
     await Reject<ArgumentException>(() => session.InitializeAsync(new(2, root), default), "protocol mismatch");
     await Reject<ArgumentException>(() => session.InitializeAsync(new(1, "relative"), default),
         "absolute workspace required");
-    var hello = await session.InitializeAsync(new(1, root), default);
+    HostInfo hello = await session.InitializeAsync(new(1, root), default);
     Check(hello.ProtocolVersion == 1 && hello.Capabilities.Contains("tooling/doctor"), "handshake capabilities");
     Check(hello.Capabilities.Contains("benchmark/prepare"), "Benchmark preparation capability missing");
-    var benchmarkOutput = Path.Combine(root, "benchmark definitions", "chain.json");
-    var benchmarkRequest = new BenchmarkPrepareRequest(Guid.NewGuid().ToString("N"),
-        benchmarkOutput, new CMakeWorkflow.BenchmarkRecipeV1("benchmark", 1,
+    string benchmarkOutput = Path.Combine(root, "benchmark definitions", "chain.json");
+    BenchmarkPrepareRequest benchmarkRequest = new(Guid.NewGuid().ToString("N"),
+        benchmarkOutput, new BenchmarkRecipeV1("benchmark", 1,
             Path.Combine(root, "unconfigured build"), "worker", "Release", 2, 30, ["a b"]));
-    var benchmarkPrepared = await session.BenchmarkPrepareAsync(benchmarkRequest, default);
+    BenchmarkPreparation benchmarkPrepared = await session.BenchmarkPrepareAsync(benchmarkRequest, default);
     // Host resolves filesystem aliases (on macOS, /var is often /private/var).
     // Verify the committed bytes through both paths, not lexical path equality.
-    var preparedBytes = File.ReadAllBytes(benchmarkPrepared.Manifest);
+    byte[] preparedBytes = await File.ReadAllBytesAsync(benchmarkPrepared.Manifest, CancellationToken.None);
     Check(File.Exists(benchmarkOutput)
-          && File.ReadAllBytes(benchmarkOutput).SequenceEqual(preparedBytes),
+          && (await File.ReadAllBytesAsync(benchmarkOutput, CancellationToken.None)).SequenceEqual(preparedBytes),
         "Direct Host Benchmark returned a different manifest than requested");
     Check(benchmarkPrepared.ManifestSha256 == Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(preparedBytes)),
         "Direct Host Benchmark committed manifest hash mismatch");
     Check(await session.BenchmarkPrepareAsync(benchmarkRequest, default) == benchmarkPrepared,
         "Direct Host Benchmark retry is not idempotent");
-    await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkPrepareAsync(
+    await Reject<LocalRpcException>(() => session.BenchmarkPrepareAsync(
             benchmarkRequest with { Recipe = benchmarkRequest.Recipe with { Repeats = 3 } }, default),
         "Benchmark request ID conflict not rejected");
-    await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkPrepareAsync(
+    await Reject<LocalRpcException>(() => session.BenchmarkPrepareAsync(
             benchmarkRequest with
             {
                 RequestId = Guid.NewGuid().ToString("N"),
@@ -374,57 +434,57 @@ try
             }, default),
         "Benchmark output escaped initialized workspace");
     Console.WriteLine("Direct Host Benchmark preparation checks passed.");
-    var newCapabilities = new[]
-    {
+    string[] newCapabilities =
+    [
         "profileRecipe/prepare", "testMatrix/prepare",
         "buildMatrix/prepare", "benchmarkMatrix/prepare"
-    };
+    ];
     Check(newCapabilities.All(hello.Capabilities.Contains), "Typed recipe Host capability missing");
-    var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
-    var profileRecipe = new CMakeWorkflow.Profiling.ProfileRecipeV1("profile", 1,
+    string platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+    ProfileRecipeV1 profileRecipe = new("profile", 1,
         [new("main", benchmarkRequest.Recipe.BuildDirectory)], "worker", "Release", 1, 30,
         ["literal argument"], "auto", "cpu", platform);
-    var profileOutput = Path.Combine(root, "profile-recipe.json");
-    var profileRecipeRequest = new ProfileRecipePrepareRequest(Guid.NewGuid().ToString("N"),
+    string profileOutput = Path.Combine(root, "profile-recipe.json");
+    ProfileRecipePrepareRequest profileRecipeRequest = new(Guid.NewGuid().ToString("N"),
         profileOutput, profileRecipe);
-    var profileRecipeReady = await session.ProfileRecipePrepareAsync(profileRecipeRequest, default);
+    ProfileRecipePreparation profileRecipeReady = await session.ProfileRecipePrepareAsync(profileRecipeRequest, default);
     Check(profileRecipeReady == await session.ProfileRecipePrepareAsync(profileRecipeRequest, default)
           && profileRecipeReady.ManifestSha256 == Convert.ToHexString(
-              System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(profileOutput))),
+              System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(profileOutput, CancellationToken.None))),
         "Profile recipe Host prepare/hash/replay");
-    var testRecipe = new CMakeWorkflow.TestMatrixRecipeV1("test-matrix", 1,
+    TestMatrixRecipeV1 testRecipe = new("test-matrix", 1,
         benchmarkRequest.Recipe.BuildDirectory, "worker", "Release",
         [new("unit", LabelRegex: "unit")], "parallel", 30);
-    var testOutput = Path.Combine(root, "test-matrix.json");
-    var testRequest = new TestMatrixPrepareRequest(Guid.NewGuid().ToString("N"), testOutput, testRecipe);
-    var testReady = await session.TestMatrixPrepareAsync(testRequest, default);
+    string testOutput = Path.Combine(root, "test-matrix.json");
+    TestMatrixPrepareRequest testRequest = new(Guid.NewGuid().ToString("N"), testOutput, testRecipe);
+    TestMatrixPreparation testReady = await session.TestMatrixPrepareAsync(testRequest, default);
     Check(testReady == await session.TestMatrixPrepareAsync(testRequest, default)
           && testReady.ManifestSha256 == Convert.ToHexString(
-              System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(testOutput))),
+              System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(testOutput, CancellationToken.None))),
         "Test Matrix Host prepare/hash/replay");
-    var variants = new[] { new CMakeWorkflow.BuildVariantV1("one", benchmarkRequest.Recipe.BuildDirectory, "Release") };
-    var buildRecipe = new CMakeWorkflow.BuildMatrixRecipeV1("build-matrix", 1, variants, ["worker"]);
-    var buildOutput = Path.Combine(root, "build-matrix.json");
-    var buildRequest = new BuildMatrixPrepareRequest(Guid.NewGuid().ToString("N"), buildOutput, buildRecipe);
-    var buildReady = await session.BuildMatrixPrepareAsync(buildRequest, default);
+    BuildVariantV1[] variants = [new BuildVariantV1("one", benchmarkRequest.Recipe.BuildDirectory, "Release")];
+    BuildMatrixRecipeV1 buildRecipe = new("build-matrix", 1, variants, ["worker"]);
+    string buildOutput = Path.Combine(root, "build-matrix.json");
+    BuildMatrixPrepareRequest buildRequest = new(Guid.NewGuid().ToString("N"), buildOutput, buildRecipe);
+    BuildMatrixPreparation buildReady = await session.BuildMatrixPrepareAsync(buildRequest, default);
     Check(buildReady == await session.BuildMatrixPrepareAsync(buildRequest, default)
           && buildReady.ManifestSha256 == Convert.ToHexString(
-              System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(buildOutput))),
+              System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(buildOutput, CancellationToken.None))),
         "Build Matrix Host prepare/hash/replay");
-    var matrixRecipe = new CMakeWorkflow.BenchmarkMatrixRecipeV1("benchmark-matrix", 1,
+    BenchmarkMatrixRecipeV1 matrixRecipe = new("benchmark-matrix", 1,
         variants, "worker", 2, 30, ["a b"], [new("case", "--case", ["x", "y"])], "round-robin");
-    var matrixOutput = Path.Combine(root, "benchmark-matrix.json");
-    var matrixRequest = new BenchmarkMatrixPrepareRequest(Guid.NewGuid().ToString("N"),
+    string matrixOutput = Path.Combine(root, "benchmark-matrix.json");
+    BenchmarkMatrixPrepareRequest matrixRequest = new(Guid.NewGuid().ToString("N"),
         matrixOutput, matrixRecipe);
-    var matrixReady = await session.BenchmarkMatrixPrepareAsync(matrixRequest, default);
+    BenchmarkMatrixPreparation matrixReady = await session.BenchmarkMatrixPrepareAsync(matrixRequest, default);
     Check(matrixReady == await session.BenchmarkMatrixPrepareAsync(matrixRequest, default)
           && matrixReady.ManifestSha256 == Convert.ToHexString(
-              System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(matrixOutput))),
+              System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(matrixOutput, CancellationToken.None))),
         "Benchmark Matrix Host prepare/hash/replay");
-    await Reject<StreamJsonRpc.LocalRpcException>(() => session.BenchmarkMatrixPrepareAsync(
+    await Reject<LocalRpcException>(() => session.BenchmarkMatrixPrepareAsync(
             matrixRequest with { Recipe = matrixRecipe with { Repeats = 3 } }, default),
         "Benchmark Matrix conflicting request ID was accepted");
-    await Reject<StreamJsonRpc.LocalRpcException>(() => session.TestMatrixPrepareAsync(
+    await Reject<LocalRpcException>(() => session.TestMatrixPrepareAsync(
             testRequest with
             {
                 RequestId = Guid.NewGuid().ToString("N"),
@@ -435,9 +495,9 @@ try
     await Reject<InvalidOperationException>(() => session.InitializeAsync(new(1, Path.GetTempPath()), default),
         "session cannot change workspace");
     // Provisioning RPC contract: workspace confinement, plan hash and non-mutating apply.
-    var environmentFile = Path.Combine(root, "host-environment.json");
-    File.WriteAllText(environmentFile, """{"schemaVersion":1,"toolProfiles":["cmake"]}""");
-    var environmentPlan = await session.EnvironmentPlanAsync(new(environmentFile), default);
+    string environmentFile = Path.Combine(root, "host-environment.json");
+    await File.WriteAllTextAsync(environmentFile, /*lang=json,strict*/ """{"schemaVersion":1,"toolProfiles":["cmake"]}""", CancellationToken.None);
+    HostPreparationPlan environmentPlan = await session.EnvironmentPlanAsync(new(environmentFile), default);
     Check(environmentPlan.Ready && environmentPlan.ApprovalSha256.Length == 64,
         "environment/plan readiness and approval hash");
     await Reject<ArgumentException>(() => session.EnvironmentPlanAsync(
@@ -446,14 +506,14 @@ try
     await Reject<InvalidOperationException>(() => session.EnvironmentApplyAsync(
             new(environmentFile, new string('0', 64), false), default),
         "environment/apply accepted wrong approval hash");
-    var environmentResult = await session.EnvironmentApplyAsync(
+    HostPreparationResult environmentResult = await session.EnvironmentApplyAsync(
         new(environmentFile, environmentPlan.ApprovalSha256, false), default);
     Check(environmentResult.Ready && environmentResult.AppliedSystemChanges?.Count is null or 0,
         "environment/apply no-op recheck");
     Console.WriteLine("Environment Host contract checks passed.");
-    var cwd = Directory.GetCurrentDirectory();
-    var probesBeforeDoctor = runtime.Calls;
-    var plan = await session.DoctorAsync(request, default);
+    string cwd = Directory.GetCurrentDirectory();
+    int probesBeforeDoctor = runtime.Calls;
+    ToolingPlan plan = await session.DoctorAsync(request, default);
     Check(plan.Ready && runtime.Calls - probesBeforeDoctor == 3, "same tooling service probes");
     Check(events.Select(e => e.Sequence).SequenceEqual(Enumerable.Range(1, 5))
           && events[0].Stage == "started" && events[^1].Stage == "finished", "ordered progress");
@@ -467,24 +527,24 @@ try
 
     runtime.Missing = false;
     runtime.Delay = true;
-    using var cancel = new CancellationTokenSource();
-    var checking = session.DoctorAsync(request, cancel.Token);
+    using CancellationTokenSource cancel = new();
+    Task<ToolingPlan> checking = session.DoctorAsync(request, cancel.Token);
     await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-    cancel.Cancel();
+    await cancel.CancelAsync();
     await Reject<OperationCanceledException>(() => checking, "cancel active doctor");
     await session.DrainAsync();
     runtime.Delay = false;
     Check((await session.DoctorAsync(request, default)).Ready, "connection can check again after cancellation");
 
-    using var disconnect = new CancellationTokenSource();
-    var disconnectedSession = new DoctorSession(_ => service, _ => Task.CompletedTask, disconnect.Token, fixes,
+    using CancellationTokenSource disconnect = new();
+    DoctorSession disconnectedSession = new(_ => service, _ => Task.CompletedTask, disconnect.Token, fixes,
         _ => Task.CompletedTask);
-    await disconnectedSession.InitializeAsync(new(1, root), default);
+    _ = await disconnectedSession.InitializeAsync(new(1, root), default);
     runtime.Delay = true;
     runtime.Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    var active = disconnectedSession.DoctorAsync(request, default);
+    Task<ToolingPlan> active = disconnectedSession.DoctorAsync(request, default);
     await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-    disconnect.Cancel();
+    await disconnect.CancelAsync();
     await Reject<OperationCanceledException>(() => active, "disconnect cancels probe");
     await disconnectedSession.DrainAsync();
 
@@ -503,19 +563,19 @@ try
         SetPrivateUnixDirectory(socketDirectory!);
     }
 
-    var endpoint = OperatingSystem.IsWindows()
+    string endpoint = OperatingSystem.IsWindows()
         ? @"\\.\pipe\cmakeworkflow-" + Guid.NewGuid().ToString("N")
         : Path.Combine(socketDirectory!, "rpc.sock");
     // This is the budget for the entire sequential Host IPC suite, not for a single
     // operation. Individual cancellation/recovery assertions retain their own short deadlines.
     // A 30-second suite-wide budget could expire while Windows is configuring a later fixture.
-    using (var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(3)))
+    using (CancellationTokenSource lifetime = new(TimeSpan.FromMinutes(3)))
     {
-        var server = HostServer.RunAsync(endpoint, lifetime.Token);
+        Task server = HostServer.RunAsync(endpoint, lifetime.Token);
         try
         {
-            var second = Directory.CreateDirectory(Path.Combine(root, "second workspace")).FullName;
-            var codes = await Task.WhenAll(HostCommand.ExecuteAsync([
+            string second = Directory.CreateDirectory(Path.Combine(root, "second workspace")).FullName;
+            int[] codes = await Task.WhenAll(HostCommand.ExecuteAsync([
                     "doctor", "--endpoint", endpoint,
                     "--workspace", root, "--profile", "cmake"
                 ], lifetime.Token),
@@ -524,24 +584,24 @@ try
                     "--profile", "ninja"
                 ], lifetime.Token));
             Check(codes.All(code => code is 0 or 2), "real IPC sessions and readiness exit codes");
-            var again = await HostCommand.ExecuteAsync([
+            int again = await HostCommand.ExecuteAsync([
                 "doctor", "--endpoint", endpoint,
                 "--workspace", root, "--profile", "cmake"
             ], lifetime.Token);
             Check(again is 0 or 2, "real IPC reconnect");
             // Exercise the actual RPC framing, generated JSON metadata and method dispatch.
             // The requirements request tools only: no sysctl/cpufreq writes on the test host.
-            using (var wire = await LocalTransport.ConnectAsync(endpoint, lifetime.Token))
-            using (var rpc = HostConnection.Create(wire))
+            using (Stream wire = await LocalTransport.ConnectAsync(endpoint, lifetime.Token))
+            using (JsonRpc rpc = HostConnection.Create(wire))
             {
-                var remote = rpc.Attach<IHostRpc>();
+                IHostRpc remote = rpc.Attach<IHostRpc>();
                 rpc.StartListening();
-                var info = await remote.InitializeAsync(new(1, root), lifetime.Token);
+                HostInfo info = await remote.InitializeAsync(new(1, root), lifetime.Token);
                 Check(info.Capabilities.Contains("environment/plan") &&
                       info.Capabilities.Contains("environment/apply") &&
                       info.WorkspaceDirectory == root, "wire environment capabilities and workspace");
 
-                var wirePlan = await remote.EnvironmentPlanAsync(new(environmentFile), lifetime.Token);
+                HostPreparationPlan wirePlan = await remote.EnvironmentPlanAsync(new(environmentFile), lifetime.Token);
                 // The RPC must report actual host readiness, not assume that an
                 // interactive Windows session has an activated MSVC environment.
                 // `cmake` profile includes cxx: an installed but inactive cl.exe
@@ -553,11 +613,11 @@ try
                       (wirePlan.SystemChanges?.Count ?? 0) == 0 &&
                       wirePlan.ApprovalSha256.Length == 64, "wire environment/plan response");
 
-                await Reject<StreamJsonRpc.RemoteInvocationException>(
+                await Reject<RemoteInvocationException>(
                     () => remote.EnvironmentApplyAsync(
                         new(environmentFile, new string('0', 64), false), lifetime.Token),
                     "wire environment/apply accepted invalid fingerprint");
-                await Reject<StreamJsonRpc.RemoteInvocationException>(
+                await Reject<RemoteInvocationException>(
                     () => remote.EnvironmentPlanAsync(
                         new(Path.Combine(Path.GetTempPath(), "outside-environment.json")), lifetime.Token),
                     "wire environment/plan accepted path outside workspace");
@@ -567,7 +627,7 @@ try
                 // a read-only transport test must not execute on the host.
                 if (wirePlan.Ready)
                 {
-                    var wireResult = await remote.EnvironmentApplyAsync(
+                    HostPreparationResult wireResult = await remote.EnvironmentApplyAsync(
                         new(environmentFile, wirePlan.ApprovalSha256, false), lifetime.Token);
                     Check(wireResult.Ready && (wireResult.AppliedSystemChanges?.Count ?? 0) == 0,
                         "wire environment/apply no-op verified");
@@ -592,12 +652,16 @@ try
         }
         finally
         {
-            lifetime.Cancel();
+            await lifetime.CancelAsync();
             await server;
         }
     }
 
-    if (!OperatingSystem.IsWindows()) Check(!File.Exists(endpoint), "socket removed after shutdown");
+    if (!OperatingSystem.IsWindows())
+    {
+        Check(!File.Exists(endpoint), "socket removed after shutdown");
+    }
+
     Console.WriteLine("Host contract, session isolation, progress, cancellation and transport validation passed.");
 }
 finally
@@ -611,13 +675,13 @@ finally
     Directory.Delete(root, recursive: true);
 }
 
-sealed class NoInstaller : ICMakeInstaller
+internal sealed class NoInstaller : ICMakeInstaller
 {
     public Task InstallAsync(string directory, CancellationToken ct) =>
-        throw new Exception("Doctor must never install");
+        throw new System.Diagnostics.UnreachableException("Doctor must never install");
 }
 
-sealed class FakeRuntime : IToolingRuntime
+internal sealed class FakeRuntime : IToolingRuntime
 {
     public ToolPlatform Platform => ToolPlatform.Linux;
     public bool IsAdministrator => false;
@@ -632,10 +696,18 @@ sealed class FakeRuntime : IToolingRuntime
     public async Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> args, TimeSpan timeout,
         CancellationToken ct)
     {
-        if (!args.SequenceEqual(["--version"])) throw new Exception("Doctor performed mutation");
+        if (!args.SequenceEqual(["--version"]))
+        {
+            throw new System.Diagnostics.UnreachableException("Doctor performed mutation");
+        }
+
         Calls++;
-        Started.TrySetResult();
-        if (Delay) await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        _ = Started.TrySetResult();
+        if (Delay)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        }
+
         return new(0, "version 15.0.0", "");
     }
 }

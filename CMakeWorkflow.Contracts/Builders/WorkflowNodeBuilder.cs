@@ -1,15 +1,19 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public sealed class WorkflowNodeBuilder(WorkflowNode node, WorkflowBuilder owner)
 {
     public WorkflowNodeBuilder DependsOn(params WorkflowNodeRef[] prerequisites)
     {
         ArgumentNullException.ThrowIfNull(prerequisites);
-        foreach (var predecessor in prerequisites)
+        foreach (WorkflowNodeRef predecessor in prerequisites)
         {
             owner.RequireNode(predecessor);
             if (!node.DependsOn.Contains(predecessor.Id, StringComparer.Ordinal))
+            {
                 node.DependsOn.Add(predecessor.Id);
+            }
         }
 
         return this;
@@ -25,7 +29,10 @@ public sealed class WorkflowNodeBuilder(WorkflowNode node, WorkflowBuilder owner
     public WorkflowNodeBuilder Timeout(TimeSpan value)
     {
         if (value <= TimeSpan.Zero || !double.IsFinite(value.TotalSeconds))
+        {
             throw new ArgumentOutOfRangeException(nameof(value));
+        }
+
         node.TimeoutSeconds = value.TotalSeconds;
         return this;
     }
@@ -87,7 +94,7 @@ public sealed class WorkflowNodeBuilder(WorkflowNode node, WorkflowBuilder owner
     public WorkflowNodeBuilder RequireProfiler(string backend, string mode, string? eventSource = null)
     {
         (node.Constraints ??= new()).Profiler = new()
-            { Backend = backend, Mode = mode, EventSource = eventSource };
+        { Backend = backend, Mode = mode, EventSource = eventSource };
         return this;
     }
 

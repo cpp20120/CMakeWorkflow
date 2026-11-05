@@ -1,7 +1,14 @@
+using System.Diagnostics.CodeAnalysis;
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 /// <summary>A typed reference usable as the source of a run or profile node.</summary>
 public readonly record struct BuildNodeRef(string Id)
 {
-    public static implicit operator WorkflowNodeRef(BuildNodeRef value) => new(value.Id);
+    [SuppressMessage("Usage", "CA2225", Justification = "Preserve the established implicit builder conversion without expanding the public API during a style migration.")]
+    public static implicit operator WorkflowNodeRef(BuildNodeRef value)
+    {
+        return new(value.Id);
+    }
 }

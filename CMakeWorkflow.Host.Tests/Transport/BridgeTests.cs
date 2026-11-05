@@ -2,39 +2,54 @@ using System.Diagnostics;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Host;
 using Nerdbank.Streams;
+using StreamJsonRpc;
 
 internal static class BridgeTests
 {
     public static async Task RunAsync()
     {
         await RunUnitAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        var ct = deadline.Token;
-        await using var host = new TransportTestHost();
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(45));
+        CancellationToken ct = deadline.Token;
+        await using TransportTestHost host = new();
         await host.ReadyAsync(ct);
-        using var child = Start(host.Endpoint);
-        var errors = child.StandardError.ReadToEndAsync(ct);
+        using Process child = Start(host.Endpoint);
+        Task<string> errors = child.StandardError.ReadToEndAsync(ct);
         try
         {
-            using (var rpc = HostConnection.Create(child.StandardOutput.BaseStream, child.StandardInput.BaseStream))
+            using (JsonRpc rpc = HostConnection.Create(child.StandardOutput.BaseStream, child.StandardInput.BaseStream))
             {
-                var proxy = rpc.Attach<IHostRpc>();
+                IHostRpc proxy = rpc.Attach<IHostRpc>();
                 rpc.StartListening();
-                for (var i = 0; i < 3; i++)
+                for (int i = 0; i < 3; i++)
                 {
-                    var info = await proxy.InitializeAsync(new(1, host.Root), ct);
-                    if (info.ProcessId != Environment.ProcessId) throw new Exception("Wrong persistent Host.");
+                    HostInfo info = await proxy.InitializeAsync(new(1, host.Root), ct);
+                    if (info.ProcessId != Environment.ProcessId)
+                    {
+                        throw new UnreachableException("Wrong persistent Host.");
+                    }
                 }
             }
 
             await child.WaitForExitAsync(ct);
-            if (child.ExitCode != 0) throw new Exception("Bridge failed: " + await errors);
-            await using var reconnected = await CMakeWorkflowClient.ConnectAsync(new(host.Endpoint, host.Root), ct);
-            if (reconnected.Host.ProcessId != Environment.ProcessId) throw new Exception("Bridge stopped Host.");
+            if (child.ExitCode != 0)
+            {
+                throw new UnreachableException("Bridge failed: " + await errors);
+            }
+
+            await using CMakeWorkflowClient reconnected = await CMakeWorkflowClient.ConnectAsync(new(host.Endpoint, host.Root), ct);
+            if (reconnected.Host.ProcessId != Environment.ProcessId)
+            {
+                throw new UnreachableException("Bridge stopped Host.");
+            }
         }
         finally
         {
-            if (!child.HasExited) child.Kill(entireProcessTree: true);
+            if (!child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+            }
+
             await child.WaitForExitAsync(CancellationToken.None);
         }
 
@@ -43,21 +58,21 @@ internal static class BridgeTests
 
     public static async Task RunUnitAsync()
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var ct = deadline.Token;
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(10));
+        CancellationToken ct = deadline.Token;
         await CopyAsync(false, false, ct);
         await CopyAsync(false, true, ct);
         await CopyAsync(true, false, ct);
         try
         {
             await StdioBridge.RunAsync("invalid endpoint", Stream.Null, Stream.Null, ct);
-            throw new Exception("Malformed endpoint accepted.");
+            throw new UnreachableException("Malformed endpoint accepted.");
         }
         catch (ArgumentException) { }
         try
         {
-            await HostCommand.ExecuteAsync(["bridge", "--endpoint", "unused"], ct);
-            throw new Exception("Missing --stdio accepted.");
+            _ = await HostCommand.ExecuteAsync(["bridge", "--endpoint", "unused"], ct);
+            throw new UnreachableException("Missing --stdio accepted.");
         }
         catch (ArgumentException) { }
         Console.WriteLine("Bridge unit checks passed: binary transfer, client EOF, Host EOF, cancellation, invalid endpoint/options.");
@@ -65,32 +80,57 @@ internal static class BridgeTests
 
     private static async Task CopyAsync(bool cancel, bool hostEof, CancellationToken ct)
     {
-        var (client, bridgeInput) = FullDuplexStream.CreatePair();
-        var (bridgeHost, host) = FullDuplexStream.CreatePair();
+        (Stream? client, Stream? bridgeInput) = FullDuplexStream.CreatePair();
+        (Stream? bridgeHost, Stream? host) = FullDuplexStream.CreatePair();
         using (client)
         using (bridgeInput)
         using (bridgeHost)
         using (host)
-        using (var stop = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        using (CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
-            var forwarding = StdioBridge.ForwardAsync(bridgeInput, bridgeInput, bridgeHost, stop.Token);
-            var payload = Enumerable.Range(0, 65537).Select(i => (byte)i).ToArray();
-            var receive = new byte[payload.Length];
-            var read = host.ReadExactlyAsync(receive, ct).AsTask();
+
+#pragma warning disable CA2025 // Disposing the transport intentionally signals EOF; the forwarding/server task is awaited before leaving the ownership scope.
+            Task forwarding = StdioBridge.ForwardAsync(bridgeInput, bridgeInput, bridgeHost, stop.Token);
+#pragma warning restore CA2025
+
+            byte[] payload = [.. Enumerable.Range(0, 65537).Select(i => (byte)i)];
+            byte[] receive = new byte[payload.Length];
+            Task read = host.ReadExactlyAsync(receive, ct).AsTask();
             await client.WriteAsync(payload, ct);
             await read;
-            if (!payload.SequenceEqual(receive)) throw new Exception("Upstream bytes changed.");
+            if (!payload.SequenceEqual(receive))
+            {
+                throw new UnreachableException("Upstream bytes changed.");
+            }
+
             read = client.ReadExactlyAsync(receive, ct).AsTask();
             await host.WriteAsync(payload, ct);
             await read;
-            if (!payload.SequenceEqual(receive)) throw new Exception("Downstream bytes changed.");
-            if (cancel) await stop.CancelAsync();
-            else if (hostEof) host.Dispose();
-            else client.Dispose();
+            if (!payload.SequenceEqual(receive))
+            {
+                throw new UnreachableException("Downstream bytes changed.");
+            }
+
+            if (cancel)
+            {
+                await stop.CancelAsync();
+            }
+            else if (hostEof)
+            {
+                await host.DisposeAsync();
+            }
+            else
+            {
+                await client.DisposeAsync();
+            }
+
             try
             {
                 await forwarding.WaitAsync(ct);
-                if (cancel) throw new Exception("Cancellation was not propagated.");
+                if (cancel)
+                {
+                    throw new UnreachableException("Cancellation was not propagated.");
+                }
             }
             catch (OperationCanceledException) when (cancel && !ct.IsCancellationRequested) { }
         }
@@ -98,13 +138,18 @@ internal static class BridgeTests
 
     private static Process Start(string endpoint)
     {
-        var start = new ProcessStartInfo("dotnet")
+        ProcessStartInfo start = new("dotnet")
         {
-            UseShellExecute = false, RedirectStandardInput = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
-        foreach (var arg in new[] { typeof(BridgeTests).Assembly.Location, "--bridge-worker", "--stdio", "--endpoint", endpoint })
+        foreach (string? arg in new[] { typeof(BridgeTests).Assembly.Location, "--bridge-worker", "--stdio", "--endpoint", endpoint })
+        {
             start.ArgumentList.Add(arg);
+        }
+
         return Process.Start(start) ?? throw new IOException("Cannot start bridge worker.");
     }
 }

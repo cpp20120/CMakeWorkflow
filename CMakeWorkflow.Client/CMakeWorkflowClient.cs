@@ -12,7 +12,6 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
 {
     private readonly Stream transport;
     private readonly JsonRpc rpc;
-    private readonly IClientRpc proxy;
     private readonly Process? ownedHost;
     private readonly string? ownedSocketDirectory;
     private readonly IRemoteSshConnection? sshConnection;
@@ -23,7 +22,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     {
         transport = stream;
         rpc = connection;
-        proxy = target;
+        Proxy = target;
         Host = identity;
         this.ownedHost = ownedHost;
         this.ownedSocketDirectory = ownedSocketDirectory;
@@ -57,8 +56,8 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     public static async Task<CMakeWorkflowClient> ConnectAsync(ClientOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var workspace = Path.GetFullPath(options.Workspace);
-        var stream = await ConnectTransportAsync(options.Endpoint, ct);
+        string workspace = Path.GetFullPath(options.Workspace);
+        Stream stream = await ConnectTransportAsync(options.Endpoint, ct);
         try
         {
             return await InitializeAsync(stream, workspace, null, null, ct);
@@ -74,21 +73,23 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     public static async Task<CMakeWorkflowClient> LaunchAsync(LaunchOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var workspace = Path.GetFullPath(options.Workspace);
-        var dir = OperatingSystem.IsWindows()
+        string workspace = Path.GetFullPath(options.Workspace);
+        string? dir = OperatingSystem.IsWindows()
             ? null
             : Path.Combine(Path.GetTempPath(), "cmw-sdk-" + Guid.NewGuid().ToString("N"));
         if (dir is not null)
         {
-            Directory.CreateDirectory(dir);
+            _ = Directory.CreateDirectory(dir);
             if (!OperatingSystem.IsWindows())
+            {
                 File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
         }
 
-        var endpoint = options.Endpoint ?? (OperatingSystem.IsWindows()
+        string endpoint = options.Endpoint ?? (OperatingSystem.IsWindows()
             ? @"\\.\pipe\cmakeworkflow-" + Guid.NewGuid().ToString("N")
             : Path.Combine(dir!, "host.sock"));
-        var start = new ProcessStartInfo(options.Executable) { UseShellExecute = false, CreateNoWindow = true };
+        ProcessStartInfo start = new(options.Executable) { UseShellExecute = false, CreateNoWindow = true };
         start.ArgumentList.Add("host");
         start.ArgumentList.Add("serve");
         start.ArgumentList.Add("--endpoint");
@@ -97,18 +98,25 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         try
         {
             process = Process.Start(start) ?? throw new InvalidOperationException("Host did not start.");
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(15));
             while (true)
             {
                 timeout.Token.ThrowIfCancellationRequested();
                 if (process.HasExited)
+                {
                     throw new IOException($"Host exited with code {process.ExitCode} before accepting connections.");
+                }
+
                 try
                 {
-                    using var connect = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+                    using CancellationTokenSource connect = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+#pragma warning restore CA2000
+
                     connect.CancelAfter(TimeSpan.FromMilliseconds(150));
-                    var stream = await ConnectTransportAsync(endpoint, connect.Token);
+                    Stream stream = await ConnectTransportAsync(endpoint, connect.Token);
                     try
                     {
                         return await InitializeAsync(stream, workspace, process, dir, timeout.Token);
@@ -122,20 +130,34 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
                 catch (Exception e) when (e is IOException or SocketException or TimeoutException
                                               or OperationCanceledException)
                 {
-                    if (timeout.IsCancellationRequested) throw;
+                    if (timeout.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+
                     await Task.Delay(50, timeout.Token);
                 }
             }
         }
         catch
         {
+#pragma warning disable CA1508 // Process.Start may throw before assignment; retain the exceptional-path cleanup guard.
             if (process is not null)
+#pragma warning restore CA1508
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+
                 process.Dispose();
             }
 
-            if (dir is not null && Directory.Exists(dir)) Directory.Delete(dir, true);
+            if (dir is not null && Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+
             throw;
         }
     }
@@ -154,37 +176,49 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         Process? process, string? directory, CancellationToken ct, Stream? output = null,
         IRemoteSshConnection? ssh = null)
     {
-        var formatter = new SystemTextJsonFormatter
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+        SystemTextJsonFormatter formatter = new()
         {
             JsonSerializerOptions = new(ClientJson.Default.Options) { TypeInfoResolver = ClientJson.Default }
         };
-        var rpc = new ApplicationRpc(new HeaderDelimitedMessageHandler(output ?? stream, stream, formatter));
+#pragma warning restore CA2000
+
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+        ApplicationRpc rpc = new(new HeaderDelimitedMessageHandler(output ?? stream, stream, formatter));
+#pragma warning restore CA2000
+
         // Diagnostic opt-in for NativeAOT RPC smoke. A lost $/cancelRequest is
         // otherwise invisible when StreamJsonRpc dispatches it asynchronously.
         if (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_RPC_TRACE") == "1")
         {
             rpc.TraceSource.Switch.Level = SourceLevels.All;
-            rpc.TraceSource.Listeners.Add(new TextWriterTraceListener(Console.Error));
+            _ = rpc.TraceSource.Listeners.Add(new TextWriterTraceListener(Console.Error));
         }
 
         Task<HostIdentity>? initialization = null;
         try
         {
-            var proxy = rpc.Attach<IClientRpc>();
+            IClientRpc proxy = rpc.Attach<IClientRpc>();
             rpc.StartListening();
             initialization = proxy.InitializeAsync(new(1, workspace), ct);
             // RPC cancellation is cooperative: a silent peer may never acknowledge
             // it. SSH connection establishment also needs a local deadline.
-            var info = ssh is null ? await initialization : await initialization.WaitAsync(ct);
-            if (info.ProtocolVersion != 1) throw new InvalidDataException("Unsupported Host protocol version.");
-            return new(stream, rpc, proxy, info, process, directory, ssh);
+            HostIdentity info = ssh is null ? await initialization : await initialization.WaitAsync(ct);
+            return info.ProtocolVersion != 1
+                ? throw new InvalidDataException("Unsupported Host protocol version.")
+                : new(stream, rpc, proxy, info, process, directory, ssh);
         }
         catch
         {
             // Terminate/reap SSH before disposing handlers with pending pipe I/O.
             try
             {
-                if (ssh is not null) await ssh.DisposeAsync();
+                if (ssh is not null)
+                {
+                    await ssh.DisposeAsync();
+                }
             }
             finally
             {
@@ -193,7 +227,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
                 {
                     // Dispose completes pending RPC invocations; observe the failed
                     // handshake even when process teardown itself reported an error.
-                    try { await initialization; }
+                    try { _ = await initialization; }
                     catch (Exception error) when (error is not OutOfMemoryException) { }
                 }
             }
@@ -215,8 +249,11 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         {
             const string prefix = @"\\.\pipe\cmakeworkflow-";
             if (!endpoint.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
                 throw new ArgumentException("Invalid named pipe endpoint.", nameof(endpoint));
-            var pipe = new NamedPipeClientStream(".", endpoint[@"\\.\pipe\".Length..], PipeDirection.InOut,
+            }
+
+            NamedPipeClientStream pipe = new(".", endpoint[@"\\.\pipe\".Length..], PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             try
             {
@@ -225,15 +262,22 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
             }
             catch
             {
-                pipe.Dispose();
+                await pipe.DisposeAsync();
                 throw;
             }
         }
 
         if (!Path.IsPathFullyQualified(endpoint) || Encoding.UTF8.GetByteCount(endpoint) > 100)
+        {
             throw new ArgumentException("Unix socket endpoint must be absolute and at most 100 UTF-8 bytes.",
                 nameof(endpoint));
-        var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        }
+
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+        Socket socket = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+#pragma warning restore CA2000
+
         try
         {
             await socket.ConnectAsync(new UnixDomainSocketEndPoint(endpoint), ct);
@@ -251,7 +295,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         get
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            return proxy;
+            return field;
         }
     }
 
@@ -264,17 +308,26 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     internal void RequireCapability(string capability)
     {
         if (!Host.Capabilities.Contains(capability, StringComparer.Ordinal))
+        {
             throw new NotSupportedException($"Host does not advertise {capability}.");
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (disposed) return;
+        if (disposed)
+        {
+            return;
+        }
+
         disposed = true;
         // Closing a remote connection owns only SSH, not persistent Host work.
         try
         {
-            if (sshConnection is not null) await sshConnection.DisposeAsync();
+            if (sshConnection is not null)
+            {
+                await sshConnection.DisposeAsync();
+            }
         }
         finally
         {
@@ -298,6 +351,8 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         }
 
         if (ownedSocketDirectory is not null && Directory.Exists(ownedSocketDirectory))
+        {
             Directory.Delete(ownedSocketDirectory, recursive: true);
+        }
     }
 }

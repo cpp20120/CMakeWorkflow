@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
 public static class ToolCatalog
 {
@@ -8,29 +10,44 @@ public static class ToolCatalog
     public static IReadOnlyList<ToolProfile> AllProfiles => Profiles.Values.OrderBy(x => x.Id,
         StringComparer.Ordinal).ToArray();
 
-    public static ToolDefinition GetTool(string id) => Tools.TryGetValue(id, out var value)
+    public static ToolDefinition GetTool(string id) => Tools.TryGetValue(id, out ToolDefinition? value)
         ? value
         : throw new ArgumentException($"Unknown tool '{id}'.");
 
     public static IReadOnlyList<ToolDefinition> ResolveProfiles(IEnumerable<string> profileIds,
         ToolPlatform platform)
     {
-        var ids = profileIds.Select(x => x.Trim().ToLowerInvariant()).ToArray();
-        if (ids.Length == 0) ids = ["cmake"];
-        var tools = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var id in ids)
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
+        string[] ids = [.. profileIds.Select(x => x.Trim().ToLowerInvariant())];
+#pragma warning restore CA1308
+
+        if (ids.Length == 0)
         {
-            if (!Profiles.TryGetValue(id, out var profile))
+            ids = ["cmake"];
+        }
+
+        HashSet<string> tools = new(StringComparer.Ordinal);
+        foreach (string? id in ids)
+        {
+            if (!Profiles.TryGetValue(id, out ToolProfile? profile))
+            {
                 throw new ArgumentException(
                     $"Unknown tooling profile '{id}'. Available: {string.Join(", ", Profiles.Keys.Order(StringComparer.Ordinal))}.");
-            foreach (var tool in profile.Tools)
-                tools.Add(tool == "native-profiler"
+            }
+
+            foreach (string tool in profile.Tools)
+            {
+                _ = tools.Add(tool == "native-profiler"
                     ? platform switch
                     {
-                        ToolPlatform.Linux => "perf", ToolPlatform.Windows => "wpr",
+                        ToolPlatform.Linux => "perf",
+                        ToolPlatform.Windows => "wpr",
+                        ToolPlatform.MacOS => "xctrace",
                         _ => "xctrace"
                     }
                     : tool);
+            }
         }
 
         return tools.Order(StringComparer.Ordinal).Select(GetTool).ToArray();
@@ -58,12 +75,32 @@ public static class ToolCatalog
         static Dictionary<PackageManagerKind, string[]> Packages(string? apt = null,
             string? pacman = null, string? dnf = null, string? brew = null, string? winget = null)
         {
-            var result = new Dictionary<PackageManagerKind, string[]>();
-            if (apt is not null) result.Add(PackageManagerKind.Apt, [apt]);
-            if (pacman is not null) result.Add(PackageManagerKind.Pacman, [pacman]);
-            if (dnf is not null) result.Add(PackageManagerKind.Dnf, [dnf]);
-            if (brew is not null) result.Add(PackageManagerKind.Brew, [brew]);
-            if (winget is not null) result.Add(PackageManagerKind.Winget, [winget]);
+            Dictionary<PackageManagerKind, string[]> result = [];
+            if (apt is not null)
+            {
+                result.Add(PackageManagerKind.Apt, [apt]);
+            }
+
+            if (pacman is not null)
+            {
+                result.Add(PackageManagerKind.Pacman, [pacman]);
+            }
+
+            if (dnf is not null)
+            {
+                result.Add(PackageManagerKind.Dnf, [dnf]);
+            }
+
+            if (brew is not null)
+            {
+                result.Add(PackageManagerKind.Brew, [brew]);
+            }
+
+            if (winget is not null)
+            {
+                result.Add(PackageManagerKind.Winget, [winget]);
+            }
+
             return result;
         }
 

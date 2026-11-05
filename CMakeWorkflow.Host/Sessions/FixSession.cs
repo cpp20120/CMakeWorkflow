@@ -16,51 +16,64 @@ public sealed partial class DoctorSession
 
     public async Task<FixPlan> PlanFixAsync(PlanFixRequest request, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         RequireWorkspace();
         ValidateProfiles(request.Profiles, request.InstallDirectory);
-        var boundRun = request.RunDirectory is null
+        RecoveryRunBinding? boundRun = request.RunDirectory is null
             ? null
             : await RecoveryRunBinding.ReadAsync(
                 workspace!, request.RunDirectory, request.Profiles, cancellationToken);
-        if (!Enum.IsDefined(request.PackageManager)) throw new ArgumentException("Unknown package manager.");
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, disconnected);
+        if (!Enum.IsDefined(request.PackageManager))
+        {
+            throw new ArgumentException("Unknown package manager.");
+        }
+
+        using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, disconnected);
         await gate.WaitAsync(lifetime.Token);
         try
         {
             pendingFix = null;
-            var plan = await createTooling(workspace!).PlanAsync(request.Profiles, request.PackageManager,
+            ToolingPlan plan = await createTooling(workspace!).PlanAsync(request.Profiles, request.PackageManager,
                 request.AllowFallback, request.InstallDirectory, lifetime.Token);
-            var expires = (timeProvider ?? TimeProvider.System).GetUtcNow().AddMinutes(10);
-            var id = Guid.NewGuid().ToString("N");
-            pendingFix = new(id, expires, request with { Profiles = request.Profiles.ToArray() }, Snapshot(plan),
+            DateTimeOffset expires = (timeProvider ?? TimeProvider.System).GetUtcNow().AddMinutes(10);
+            string id = Guid.NewGuid().ToString("N");
+            pendingFix = new(id, expires, request with { Profiles = [.. request.Profiles] }, Snapshot(plan),
                 boundRun?.Snapshot);
             return new(1, id, expires, plan, boundRun?.Directory, boundRun?.Snapshot);
         }
         finally
         {
-            gate.Release();
+            _ = gate.Release();
         }
     }
 
     public async Task<FixResult> ApplyFixAsync(ApplyFixRequest request, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         RequireWorkspace();
         ValidateOperation(request.OperationId);
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, disconnected);
+        using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, disconnected);
         await gate.WaitAsync(lifetime.Token);
         try
         {
-            var saved = pendingFix;
+            PendingFix? saved = pendingFix;
             if (saved is null || saved.Id != request.PlanId ||
                 saved.ExpiresAt <= (timeProvider ?? TimeProvider.System).GetUtcNow())
+            {
                 throw new ArgumentException(
                     "Fix plan is unknown, expired or already consumed. Review a new plan on this connection.");
+            }
+
             pendingFix = null; // single use, including failed/canceled attempts
-            var sequence = 0;
+            int sequence = 0;
 
             async Task Notify(string stage, string? tool = null, string? message = null)
             {
-                if (disconnected.IsCancellationRequested) return;
+                if (disconnected.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 try
                 {
                     await fixProgress(new(request.OperationId, ++sequence, stage, tool, message));
@@ -73,25 +86,29 @@ public sealed partial class DoctorSession
 
             await Notify("started");
             FixResult result;
-            using var lease = fixes.TryAcquire();
+            using IDisposable? lease = fixes.TryAcquire();
             if (lease is null)
+            {
                 result = new(1, "busy", null, null,
                 [
                     "Another Host Fix may be running, or its lock is unavailable. No installation was attempted. Review a new plan later."
                 ]);
+            }
             else
             {
                 // Hold WorkflowRunner's run lease through installation and re-check.
-                using var runLease = saved.Request.RunDirectory is null
+                using FileStream? runLease = saved.Request.RunDirectory is null
                     ? null
                     : TryAcquireRunLease(saved.Request.RunDirectory);
                 if (saved.Request.RunDirectory is not null && runLease is null)
+                {
                     result = new(1, "run_busy", null, null,
                         ["The suspended run is active. No installation was attempted."]);
+                }
                 else
                 {
                     // The reviewed run must still be the same suspended execution.
-                    var runUnchanged = saved.RunSnapshot is null || await RecoveryRunBinding.MatchesAsync(
+                    bool runUnchanged = saved.RunSnapshot is null || await RecoveryRunBinding.MatchesAsync(
                         workspace!, saved.Request.RunDirectory!, saved.Request.Profiles, saved.RunSnapshot,
                         lifetime.Token);
                     if (!runUnchanged)
@@ -103,19 +120,21 @@ public sealed partial class DoctorSession
                     }
                     else
                     {
-                        var service = createTooling(workspace!);
-                        var current = await service.PlanAsync(saved.Request.Profiles, saved.Request.PackageManager,
+                        ToolingService service = createTooling(workspace!);
+                        ToolingPlan current = await service.PlanAsync(saved.Request.Profiles, saved.Request.PackageManager,
                             saved.Request.AllowFallback, saved.Request.InstallDirectory, lifetime.Token);
                         if (Snapshot(current) != saved.Snapshot)
+                        {
                             result = new(1, "plan_changed", null, current,
                             [
                                 "Tools or installation steps changed after review. No installation was attempted. Review the new plan."
                             ]);
+                        }
                         else
                         {
                             ToolingResult? installation = null;
-                            var diagnostics = new List<string>();
-                            var canceled = false;
+                            List<string> diagnostics = [];
+                            bool canceled = false;
                             try
                             {
                                 installation = await service.ExecuteAsync(current, lifetime.Token,
@@ -136,7 +155,7 @@ public sealed partial class DoctorSession
                             await Notify("verifying");
                             ToolingPlan? verification = null;
                             // Re-probe even after failure/cancel, without restarting installation.
-                            using var verifyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                            using CancellationTokenSource verifyTimeout = new(TimeSpan.FromMinutes(2));
                             try
                             {
                                 verification = await service.PlanAsync(saved.Request.Profiles,
@@ -149,16 +168,19 @@ public sealed partial class DoctorSession
                             }
 
                             if (verification is { Ready: true })
+                            {
                                 diagnostics.Add("Tools are available to Doctor. Use installation directory '" +
                                                 verification.InstallDirectory
                                                 + "' in the execution environment if it is not already on PATH; existing CMake trees retain their recorded toolchain.");
-                            var ready = !canceled && installation?.Success == true && verification?.Ready == true
+                            }
+
+                            bool ready = !canceled && installation?.Success == true && verification?.Ready == true
                                         && (saved.RunSnapshot is null || await RecoveryRunBinding.MatchesAsync(
                                             workspace!, saved.Request.RunDirectory!, saved.Request.Profiles,
                                             saved.RunSnapshot,
                                             CancellationToken.None));
                             result = new(1, canceled ? "canceled" : ready ? "succeeded" : "failed",
-                                installation, verification, diagnostics.ToArray(),
+                                installation, verification, [.. diagnostics],
                                 ready && saved.RunSnapshot is not null);
                         }
                     }
@@ -170,7 +192,7 @@ public sealed partial class DoctorSession
         }
         finally
         {
-            gate.Release();
+            _ = gate.Release();
         }
     }
 
@@ -195,19 +217,30 @@ public sealed partial class DoctorSession
 
     private void RequireWorkspace()
     {
-        if (workspace is null) throw new InvalidOperationException("Call initialize first.");
+        if (workspace is null)
+        {
+            throw new InvalidOperationException("Call initialize first.");
+        }
     }
 
     private static void ValidateOperation(string id)
     {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > 128) throw new ArgumentException("Invalid operation ID.");
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 128)
+        {
+            throw new ArgumentException("Invalid operation ID.");
+        }
     }
 
     private static void ValidateProfiles(string[] profiles, string? directory)
     {
         if (profiles is null || profiles.Length > 32 || profiles.Any(string.IsNullOrWhiteSpace))
+        {
             throw new ArgumentException("Invalid tool profiles.");
+        }
+
         if (directory is not null && !Path.IsPathFullyQualified(directory))
+        {
             throw new ArgumentException("installDirectory must be absolute.");
+        }
     }
 }

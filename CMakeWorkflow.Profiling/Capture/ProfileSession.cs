@@ -1,10 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Security.Cryptography;
-using System.Text;
-using CMakeWorkflow.Profiling.Backends;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling;
+#pragma warning restore IDE0130
 
 public sealed class ProfileSession(string outputDirectory, string captureId)
 {
@@ -14,13 +13,17 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
 
     public async Task StartAsync(ProfileCapabilities capabilities, ProfileRequest request, CancellationToken ct)
     {
-        Directory.CreateDirectory(outputDirectory);
-        Directory.CreateDirectory(Path.Combine(outputDirectory, "traces", "normalized"));
+        ArgumentNullException.ThrowIfNull(capabilities);
+        ArgumentNullException.ThrowIfNull(request);
+        _ = Directory.CreateDirectory(outputDirectory);
+        _ = Directory.CreateDirectory(Path.Combine(outputDirectory, "traces", "normalized"));
         startedAt = DateTimeOffset.UtcNow;
-        var manifest = new JsonObject
+        JsonObject manifest = new()
         {
-            ["schemaVersion"] = 1, ["captureId"] = captureId,
-            ["backend"] = capabilities.Backend, ["mode"] = request.Mode,
+            ["schemaVersion"] = 1,
+            ["captureId"] = captureId,
+            ["backend"] = capabilities.Backend,
+            ["mode"] = request.Mode,
             ["eventSource"] = capabilities.EventSource,
             ["launchModel"] = capabilities.LaunchModel,
             ["startGuarantee"] = capabilities.StartGuarantee,
@@ -39,12 +42,15 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
 
     public async Task CompleteAsync(ProfileResult result, CancellationToken ct)
     {
-        var rawRelative = Path.GetRelativePath(outputDirectory, result.RawTrace);
-        var rawHash = await ProfileArtifactHash.Sha256Async(result.RawTrace, ct);
-        var record = new JsonObject
+        ArgumentNullException.ThrowIfNull(result);
+        string rawRelative = Path.GetRelativePath(outputDirectory, result.RawTrace);
+        string rawHash = await ProfileArtifactHash.Sha256Async(result.RawTrace, ct);
+        JsonObject record = new()
         {
-            ["captureId"] = captureId, ["backend"] = result.Backend,
-            ["mode"] = result.Mode, ["status"] = result.CaptureStatus,
+            ["captureId"] = captureId,
+            ["backend"] = result.Backend,
+            ["mode"] = result.Mode,
+            ["status"] = result.CaptureStatus,
             ["exitCode"] = result.ExitCode,
             ["startedAt"] = result.StartedAt.ToString("O"),
             ["finishedAt"] = result.FinishedAt.ToString("O"),
@@ -61,13 +67,16 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
         await File.AppendAllTextAsync(Path.Combine(outputDirectory, "runs.jsonl"),
             record.ToJsonString() + "\n", ct);
         await File.WriteAllTextAsync(Path.Combine(outputDirectory, captureId + ".profiler.log"), result.Output, ct);
-        var normalized = new JsonObject
+        JsonObject normalized = new()
         {
-            ["rawTrace"] = rawRelative, ["backend"] = result.Backend,
+            ["rawTrace"] = rawRelative,
+            ["backend"] = result.Backend,
             ["rawTraceSha256"] = rawHash,
             ["eventSource"] = result.Capabilities.EventSource,
             ["normalization"] = "metadata-only",
-            ["samples"] = null, ["threads"] = null, ["callStacks"] = null
+            ["samples"] = null,
+            ["threads"] = null,
+            ["callStacks"] = null
         };
         await File.WriteAllTextAsync(Path.Combine(outputDirectory, "traces", "normalized", captureId + ".json"),
             normalized.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", ct);
@@ -75,9 +84,11 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
 
     public async Task FailAsync(Exception error, CancellationToken ct)
     {
-        var record = new JsonObject
+        ArgumentNullException.ThrowIfNull(error);
+        JsonObject record = new()
         {
-            ["captureId"] = captureId, ["status"] = error is OperationCanceledException ? "canceled" : "failed",
+            ["captureId"] = captureId,
+            ["status"] = error is OperationCanceledException ? "canceled" : "failed",
             ["startedAt"] = startedAt.ToString("O"),
             ["finishedAt"] = DateTimeOffset.UtcNow.ToString("O"),
             ["error"] = error.Message

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow;
 
 internal static class WorkflowDagTests
 {
@@ -15,8 +16,8 @@ internal static class WorkflowDagTests
 
     private static async Task OrderingAndSelection()
     {
-        var cases = new (string Name, string[] Nodes, string[] Only, string[] Expected)[]
-        {
+        (string Name, string[] Nodes, string[] Only, string[] Expected)[] cases =
+        [
             ("stable layers", [Inspect("a", "b"), Inspect("b"), Inspect("c")], [], ["b", "c", "a"]),
             ("multiple roots and diamond", [Inspect("a", "b", "c"), Inspect("b", "d"), Inspect("c", "d"), Inspect("d"), Inspect("e")], [], ["d", "e", "b", "c", "a"]),
             ("independent branches", [Inspect("a", "b"), Inspect("b"), Inspect("c", "d"), Inspect("d")], [], ["b", "d", "a", "c"]),
@@ -26,22 +27,25 @@ internal static class WorkflowDagTests
             ("multiple duplicate selection", [Inspect("a", "b"), Inspect("b"), Inspect("c")], ["a", "a", "c"], ["b", "c", "a"]),
             ("transitive selection closure", [Inspect("a", "b"), Inspect("b", "c"), Inspect("c"), Inspect("other")], ["a"], ["c", "b", "a"]),
             ("case-distinct IDs", [Inspect("Alpha"), Inspect("alpha")], ["Alpha"], ["Alpha"]),
-        };
+        ];
 
-        foreach (var item in cases)
+        foreach ((string? Name, string[]? Nodes, string[]? Only, string[]? Expected) in cases)
         {
-            var plan = await Load(Document(item.Nodes), item.Only);
-            Equal(item.Expected, plan.Nodes.Select(n => n.Definition.Id), item.Name + " order/closure");
-            Check(plan.ManifestHash == Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Document(item.Nodes)))), item.Name + " manifest hash");
-            Check(plan.Nodes.All(n => n.Definition.Kind == "inspect"), item.Name + " projection kind");
+            WorkflowPlan plan = await Load(Document(Nodes), Only);
+            Equal(Expected, plan.Nodes.Select(n => n.Definition.Id), Name + " order/closure");
+            Check(plan.ManifestHash == Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Document(Nodes)))), Name + " manifest hash");
+            Check(plan.Nodes.All(n => n.Definition.Kind == "inspect"), Name + " projection kind");
             Check(plan.Nodes.All(n => n.Target.BuildDirectory.EndsWith("missing-build", StringComparison.Ordinal)),
-                item.Name + " target projection");
+                Name + " target projection");
             Check(plan.Nodes.All(n => n.Diagnostics.Select(d => d.Severity).SequenceEqual(["Observed", "Unverified", "Unverified"])
                                       && n.Diagnostics[0].Message == "Session mode=observe; policy=strict; generation=Unknown; provenance=Unknown."
                                       && n.Diagnostics[1].Message == "Configuration freshness and native output freshness are Unverified; inspection does not run CMake."
                                       && n.Diagnostics[2].Message == "Build directory does not exist. Explicit configure is required."),
-                item.Name + " public plan diagnostic projection");
-            if (item.Name == "stable layers") AssertPlanView(plan, item.Expected);
+                Name + " public plan diagnostic projection");
+            if (Name == "stable layers")
+            {
+                AssertPlanView(plan, Expected);
+            }
         }
 
         await Throws<ArgumentException>([Inspect("self", "self")], [], "Workflow contains a dependency cycle: self", "self cycle");
@@ -52,7 +56,7 @@ internal static class WorkflowDagTests
         await Throws<ArgumentException>([Inspect("a")], ["missing"], "Unknown selected node 'missing'.", "unknown selection");
         await Throws<ArgumentException>([Inspect("ok")], ["first-missing", "last-missing"],
             "Unknown selected node 'last-missing'.", "last invalid selection wins");
-        var edgeOrder = await Load(Document([Inspect("a", "b", "c", "b"), Inspect("b"), Inspect("c")]), []);
+        WorkflowPlan edgeOrder = await Load(Document([Inspect("a", "b", "c", "b"), Inspect("b"), Inspect("c")]), []);
         Equal(["b", "c"], edgeOrder.Nodes.Single(n => n.Definition.Id == "a").Dependencies,
             "dependency deduplication preserves first occurrence");
     }
@@ -60,53 +64,57 @@ internal static class WorkflowDagTests
     private static async Task ValidationPrecedence()
     {
         await Throws<ArgumentException>(
-            [Inspect("first", "missing"), "{\"id\":\"later\",\"kind\":\"inspect\",\"context\":\"absent\"}"], [],
+            [Inspect("first", "missing"), /*lang=json,strict*/ "{\"id\":\"later\",\"kind\":\"inspect\",\"context\":\"absent\"}"], [],
             "first: unknown dependency 'missing'.", "dependency before later context error");
         await Throws<ArgumentException>([Inspect("first", "missing")], ["also-missing"],
             "first: unknown dependency 'missing'.", "dependency before unknown selection");
         await Throws<ArgumentException>(
-            [Inspect("first", "missing"), "{\"id\":\"later\",\"kind\":\"run\",\"from\":\"no-build\"}"], [],
+            [Inspect("first", "missing"), /*lang=json,strict*/ "{\"id\":\"later\",\"kind\":\"run\",\"from\":\"no-build\"}"], [],
             "first: unknown dependency 'missing'.", "dependency before later invalid from");
         await Throws<ArgumentException>([Inspect("lower", "Upper"), Inspect("upper")], [],
             "lower: unknown dependency 'Upper'.", "dependency IDs are ordinal");
         await Throws<ArgumentException>([Inspect("a", "b"), Inspect("b", "a")], ["missing"],
             "Workflow contains a dependency cycle: a, b", "cycle before unknown selection");
-        await Throws<ArgumentException>(["{\"id\":\"job\",\"kind\":\"run\",\"from\":\"no-build\"}"], [],
+        await Throws<ArgumentException>([/*lang=json,strict*/ "{\"id\":\"job\",\"kind\":\"run\",\"from\":\"no-build\"}"], [],
             "job: from must refer to a build node.", "invalid from reference");
     }
 
     private static async Task ImplicitEdges()
     {
-        var fromNodes = new[]
-        {
-            "{\"id\":\"run\",\"kind\":\"run\",\"from\":\"build\",\"arguments\":[]}",
-            "{\"id\":\"build\",\"kind\":\"build\",\"context\":\"ctx\",\"target\":\"app\"}",
+        string[] fromNodes =
+        [
+            /*lang=json,strict*/
+                                 "{\"id\":\"run\",\"kind\":\"run\",\"from\":\"build\",\"arguments\":[]}",
+            /*lang=json,strict*/
+                                 "{\"id\":\"build\",\"kind\":\"build\",\"context\":\"ctx\",\"target\":\"app\"}",
             Inspect("independent")
-        };
-        var plan = await Load(Document(fromNodes), ["run"]);
+        ];
+        WorkflowPlan plan = await Load(Document(fromNodes), ["run"]);
         Equal(["build", "run"], plan.Nodes.Select(n => n.Definition.Id), "from implicit edge selection");
         Equal(["build"], plan.Nodes[1].Dependencies, "from implicit dependency");
-        fromNodes[0] = "{\"id\":\"run\",\"kind\":\"run\",\"from\":\"build\",\"dependsOn\":[\"build\"],\"arguments\":[]}";
-        var deduplicatedFromPlan = await Load(Document(fromNodes), ["run"]);
+        fromNodes[0] = /*lang=json,strict*/ "{\"id\":\"run\",\"kind\":\"run\",\"from\":\"build\",\"dependsOn\":[\"build\"],\"arguments\":[]}";
+        WorkflowPlan deduplicatedFromPlan = await Load(Document(fromNodes), ["run"]);
         Equal(["build"], deduplicatedFromPlan.Nodes[1].Dependencies, "from edge deduplication");
 
-        var artifactNodes = new[]
-        {
-            "{\"id\":\"consumer\",\"kind\":\"inspect\",\"context\":\"ctx\",\"inputs\":[{\"from\":\"producer\",\"artifact\":\"result\"}]}",
-            "{\"id\":\"producer\",\"kind\":\"configure\",\"context\":\"ctx\",\"outputs\":[{\"name\":\"result\",\"path\":\"result.txt\",\"root\":\"manifest\"}]}",
+        string[] artifactNodes =
+        [
+            /*lang=json,strict*/
+                                 "{\"id\":\"consumer\",\"kind\":\"inspect\",\"context\":\"ctx\",\"inputs\":[{\"from\":\"producer\",\"artifact\":\"result\"}]}",
+            /*lang=json,strict*/
+                                 "{\"id\":\"producer\",\"kind\":\"configure\",\"context\":\"ctx\",\"outputs\":[{\"name\":\"result\",\"path\":\"result.txt\",\"root\":\"manifest\"}]}",
             Inspect("independent")
-        };
-        var artifactPlan = await Load(Document(artifactNodes), ["consumer"]);
+        ];
+        WorkflowPlan artifactPlan = await Load(Document(artifactNodes), ["consumer"]);
         Equal(["producer", "consumer"], artifactPlan.Nodes.Select(n => n.Definition.Id), "artifact implicit edge selection");
         Equal(["producer"], artifactPlan.Nodes[1].Dependencies, "artifact implicit dependency");
-        artifactNodes[0] = "{\"id\":\"consumer\",\"kind\":\"inspect\",\"context\":\"ctx\",\"dependsOn\":[\"producer\"],\"inputs\":[{\"from\":\"producer\",\"artifact\":\"result\"}]}";
-        var deduplicatedArtifactPlan = await Load(Document(artifactNodes), ["consumer"]);
+        artifactNodes[0] = /*lang=json,strict*/ "{\"id\":\"consumer\",\"kind\":\"inspect\",\"context\":\"ctx\",\"dependsOn\":[\"producer\"],\"inputs\":[{\"from\":\"producer\",\"artifact\":\"result\"}]}";
+        WorkflowPlan deduplicatedArtifactPlan = await Load(Document(artifactNodes), ["consumer"]);
         Equal(["producer"], deduplicatedArtifactPlan.Nodes[1].Dependencies, "artifact edge deduplication");
     }
 
     private static string Inspect(string id, params string[] dependencies)
     {
-        var deps = string.Join(",", dependencies.Select(d => "\"" + d + "\""));
+        string deps = string.Join(",", dependencies.Select(d => "\"" + d + "\""));
         return "{\"id\":\"" + id + "\",\"kind\":\"inspect\",\"context\":\"ctx\",\"dependsOn\":[" + deps + "]}";
     }
 
@@ -114,14 +122,14 @@ internal static class WorkflowDagTests
         "{\"schemaVersion\":1,\"contexts\":{\"ctx\":{\"buildDirectory\":\"missing-build\"}},\"nodes\":[" +
         string.Join(",", nodes) + "]}";
 
-    private static async Task<CMakeWorkflow.WorkflowPlan> Load(string json, IReadOnlyList<string> only)
+    private static async Task<WorkflowPlan> Load(string json, IReadOnlyList<string> only)
     {
         _caseCount++;
-        var root = Path.Combine(Path.GetTempPath(), "workflow-dag-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        string root = Path.Combine(Path.GetTempPath(), "workflow-dag-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(root);
         try
         {
-            return await CMakeWorkflow.WorkflowPlanner.LoadSnapshotAsync(Path.Combine(root, "manifest.json"),
+            return await WorkflowPlanner.LoadSnapshotAsync(Path.Combine(root, "manifest.json"),
                 Encoding.UTF8.GetBytes(json), only, null, CancellationToken.None);
         }
         finally
@@ -130,20 +138,20 @@ internal static class WorkflowDagTests
         }
     }
 
-    private static void AssertPlanView(CMakeWorkflow.WorkflowPlan plan, string[] expectedIds)
+    private static void AssertPlanView(WorkflowPlan plan, string[] expectedIds)
     {
         Check(plan.ManifestHash == "175D95D3E79689D92F2DC683B2C39D9A4D29FAB43185EA06CCBC60AED888CC75",
             "stable-layer manifest hash");
-        var view = CMakeWorkflow.WorkflowQueries.PlanView(plan);
+        WorkflowPlanView view = WorkflowQueries.PlanView(plan);
         Check(view.SchemaVersion == 1 && view.Workflow == plan.File && view.ManifestHash == plan.ManifestHash
               && view.Valid, "public plan view identity/validity");
         Equal(expectedIds, view.Nodes.Select(node => node.Id), "public plan view order");
-        Check(view.Nodes.All(node => node.Kind == "inspect" && node.Target == "" && node.Configuration is null
+        Check(view.Nodes.All(node => node.Kind == "inspect" && string.IsNullOrEmpty(node.Target) && node.Configuration is null
                                       && node.BuildDirectory.EndsWith("missing-build", StringComparison.Ordinal)
                                       && node.ObservedState == "Unknown" && node.Resources.Count == 0
                                       && !node.Exclusive && node.Inputs.Count == 0 && node.Outputs.Count == 0
                                       && node.Constraints is null), "public plan view node projection");
-        var first = view.Nodes[0];
+        WorkflowPlanNodeView first = view.Nodes[0];
         Check(first.Diagnostics.Select(d => d.Severity).SequenceEqual(["Observed", "Unverified", "Unverified"])
               && first.Diagnostics[0].Message == "Session mode=observe; policy=strict; generation=Unknown; provenance=Unknown."
               && first.Diagnostics[1].Message == "Configuration freshness and native output freshness are Unverified; inspection does not run CMake."
@@ -159,7 +167,7 @@ internal static class WorkflowDagTests
     {
         try
         {
-            await Load(Document(nodes), only);
+            _ = await Load(Document(nodes), only);
         }
         catch (T error)
         {
@@ -168,18 +176,21 @@ internal static class WorkflowDagTests
             return;
         }
 
-        throw new Exception(name + " expected " + typeof(T).Name);
+        throw new System.Diagnostics.UnreachableException(name + " expected " + typeof(T).Name);
     }
 
     private static void Equal(IEnumerable<string> expected, IEnumerable<string> actual, string name)
     {
-        var left = expected.ToArray();
-        var right = actual.ToArray();
+        string[] left = [.. expected];
+        string[] right = [.. actual];
         Check(left.SequenceEqual(right), name + ": expected [" + string.Join(", ", left) + "] got [" + string.Join(", ", right) + "]");
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 }

@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
 /// <summary>Explicit, short-lived ETW session admission probe; never stops sessions it does not own.</summary>
 public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
@@ -39,30 +41,42 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
     }
 
     [DllImport("advapi32.dll", EntryPoint = "StartTraceW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern uint StartTrace(out ulong session, string name, IntPtr properties);
 
     [DllImport("advapi32.dll", EntryPoint = "ControlTraceW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern uint ControlTrace(ulong session, string? name, IntPtr properties, uint controlCode);
 
     public EtwProbeResult Probe(string capability, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
+        {
             return new(capability, "unsupported", null, "ETW requires Windows.");
+        }
+
         if (capability is not ("user" or "kernel.cpu" or "kernel.scheduler"))
+        {
             throw new ArgumentException("Unknown ETW capability.", nameof(capability));
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
-        var kernel = capability != "user";
-        var name = "CMakeWorkflow-Doctor-" + Guid.NewGuid().ToString("N");
-        var nameBytes = (name.Length + 1) * sizeof(char);
-        var structSize = Marshal.SizeOf<Properties>();
-        var size = checked(structSize + nameBytes);
-        var buffer = Marshal.AllocHGlobal(size);
+        bool kernel = capability != "user";
+        string name = "CMakeWorkflow-Doctor-" + Guid.NewGuid().ToString("N");
+        int nameBytes = (name.Length + 1) * sizeof(char);
+        int structSize = Marshal.SizeOf<Properties>();
+        int size = checked(structSize + nameBytes);
+        nint buffer = Marshal.AllocHGlobal(size);
         ulong handle = 0;
         bool started = false;
         try
         {
-            for (var i = 0; i < size; i++) Marshal.WriteByte(buffer, i, 0);
-            var properties = new Properties
+            for (int i = 0; i < size; i++)
+            {
+                Marshal.WriteByte(buffer, i, 0);
+            }
+
+            Properties properties = new()
             {
                 Wnode = new Wnode
                 {
@@ -84,8 +98,12 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
                 LoggerNameOffset = (uint)structSize
             };
             Marshal.StructureToPtr(properties, buffer, false);
-            var rc = StartTrace(out handle, name, buffer);
-            if (rc != 0) return new(capability, Classify(rc), (int)rc, new Win32Exception((int)rc).Message);
+            uint rc = StartTrace(out handle, name, buffer);
+            if (rc != 0)
+            {
+                return new(capability, Classify(rc), (int)rc, new Win32Exception((int)rc).Message);
+            }
+
             started = true;
             // Admission only: this proves that the OS accepted the requested session settings,
             // not that a consumer can retrieve events or that providers emitted samples.
@@ -96,10 +114,16 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
             if (started)
             {
                 // Never stop by global name alone; use only the handle acquired by this invocation.
-                var stopCode = ControlTrace(handle, null, buffer, Stop);
+                uint stopCode = ControlTrace(handle, null, buffer, Stop);
                 if (stopCode != 0)
+                {
+
+#pragma warning disable CA2219 // An owned-session or test cleanup failure must surface rather than report successful cleanup.
                     throw new InvalidOperationException(
-                        $"ETW probe session cleanup failed (Win32 {stopCode}); session {name} may remain active.");
+                                            $"ETW probe session cleanup failed (Win32 {stopCode}); session {name} may remain active.");
+#pragma warning restore CA2219
+
+                }
             }
 
             Marshal.FreeHGlobal(buffer);

@@ -2,7 +2,9 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 /// <summary>
 /// Opens a report-bound artifact relative to an already opened workspace directory.
@@ -13,29 +15,39 @@ internal static class OperationArtifactFile
 {
     internal static FileStream OpenRead(string workspace, string path)
     {
-        var root = Path.GetFullPath(workspace);
-        var full = Path.GetFullPath(path);
-        var relative = Path.GetRelativePath(root, full);
+        string root = Path.GetFullPath(workspace);
+        string full = Path.GetFullPath(path);
+        string relative = Path.GetRelativePath(root, full);
         if (Path.IsPathRooted(relative) || relative is "." or ".." ||
             relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
             throw new ApplicationRefusal("path_not_allowed", "Artifact is outside the workspace.");
+        }
 
-        var components = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        string[] components = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
         if (components.Length == 0 || components.Any(p => p is "." or ".." || p.Length is 0 or > 255))
+        {
             throw new ApplicationRefusal("path_not_allowed", "Invalid artifact path.");
+        }
 
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
         SafeFileHandle handle = OperatingSystem.IsWindows()
-            ? OpenWindows(root, components)
-            : OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
-                ? OpenUnix(root, components)
-                : throw new PlatformNotSupportedException("Secure artifact reads are unsupported on this OS.");
+                    ? OpenWindows(root, components)
+                    : OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+                        ? OpenUnix(root, components)
+                        : throw new PlatformNotSupportedException("Secure artifact reads are unsupported on this OS.");
+#pragma warning restore CA2000
+
         try
         {
-            var attrs = File.GetAttributes(handle);
+            FileAttributes attrs = File.GetAttributes(handle);
             if ((attrs & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            {
                 throw new ApplicationRefusal("path_not_allowed", "Artifact is not a regular, unlinked file.");
+            }
             // The descriptor is the authority for all subsequent reads and metadata.
-            var stream = new FileStream(handle, FileAccess.Read, 64 * 1024, isAsync: false);
+            FileStream stream = new(handle, FileAccess.Read, 64 * 1024, isAsync: false);
             if (!stream.CanSeek)
             {
                 stream.Dispose();
@@ -59,21 +71,28 @@ internal static class OperationArtifactFile
         int fileFlags = OperatingSystem.IsLinux() ? 0x20000 | 0x80000 | 0x800 :
             0x100 | 0x1000000 | 0x4;
         int fd = UnixOpen(root, directoryFlags);
-        if (fd == -1) throw UnixOpenError(Marshal.GetLastPInvokeError());
+        if (fd == -1)
+        {
+            throw UnixOpenError(Marshal.GetLastPInvokeError());
+        }
+
         SafeFileHandle parent = new(new IntPtr(fd), ownsHandle: true);
         try
         {
-            foreach (var part in components[..^1])
+            foreach (string part in components[..^1])
             {
                 fd = UnixOpenAt(parent.DangerousGetHandle().ToInt32(), part, directoryFlags);
-                if (fd == -1) throw UnixOpenError(Marshal.GetLastPInvokeError());
-                var next = new SafeFileHandle(new IntPtr(fd), ownsHandle: true);
+                if (fd == -1)
+                {
+                    throw UnixOpenError(Marshal.GetLastPInvokeError());
+                }
+
+                SafeFileHandle next = new(new IntPtr(fd), ownsHandle: true);
                 parent.Dispose();
                 parent = next;
             }
             fd = UnixOpenAt(parent.DangerousGetHandle().ToInt32(), components[^1], fileFlags);
-            if (fd == -1) throw UnixOpenError(Marshal.GetLastPInvokeError());
-            return new SafeFileHandle(new IntPtr(fd), ownsHandle: true);
+            return fd == -1 ? throw UnixOpenError(Marshal.GetLastPInvokeError()) : new SafeFileHandle(new IntPtr(fd), ownsHandle: true);
         }
         finally
         {
@@ -101,16 +120,16 @@ internal static class OperationArtifactFile
             shareAll, IntPtr.Zero, openExisting, openReparsePoint | backupSemantics, IntPtr.Zero);
         if (parent.IsInvalid)
         {
-            var error = Marshal.GetLastPInvokeError();
+            int error = Marshal.GetLastPInvokeError();
             parent.Dispose();
             throw new IOException($"Cannot anchor artifact workspace (win32={error}).", new Win32Exception(error));
         }
         try
         {
             RequireRealDirectory(parent);
-            foreach (var part in components[..^1])
+            foreach (string part in components[..^1])
             {
-                var next = OpenWindowsChild(parent, part, directory: true);
+                SafeFileHandle next = OpenWindowsChild(parent, part, directory: true);
                 try { RequireRealDirectory(next); }
                 catch { next.Dispose(); throw; }
                 parent.Dispose();
@@ -126,10 +145,12 @@ internal static class OperationArtifactFile
 
     private static void RequireRealDirectory(SafeFileHandle handle)
     {
-        var attributes = File.GetAttributes(handle);
+        FileAttributes attributes = File.GetAttributes(handle);
         if ((attributes & FileAttributes.Directory) == 0 ||
             (attributes & FileAttributes.ReparsePoint) != 0)
+        {
             throw new ApplicationRefusal("path_not_allowed", "Linked or non-directory artifact ancestor.");
+        }
     }
 
     private static SafeFileHandle OpenWindowsChild(SafeFileHandle parent, string part, bool directory)
@@ -139,30 +160,40 @@ internal static class OperationArtifactFile
         // OBJ_DONT_REPARSE + FILE_OPEN_REPARSE_POINT reject reparse traversal.
         const uint objectCaseInsensitive = 0x40, objectDontReparse = 0x1000;
         // FILE_TRAVERSE is requested only for directory components, not data files.
-        var access = 1u | 0x80u | 0x00100000u | (directory ? 0x20u : 0u);
+        uint access = 1u | 0x80u | 0x00100000u | (directory ? 0x20u : 0u);
         const uint shareAll = 1 | 2 | 4;
         const uint openExisting = 1; // FILE_OPEN (NT create disposition)
         const uint synchronous = 0x20, openReparsePoint = 0x00200000;
-        var data = Marshal.StringToHGlobalUni(part);
-        var name = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
+        nint data = Marshal.StringToHGlobalUni(part);
+        nint name = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
         try
         {
-            var length = checked((ushort)(part.Length * 2));
-            Marshal.StructureToPtr(new UnicodeString { Length = length,
-                MaximumLength = checked((ushort)(length + 2)), Buffer = data }, name, fDeleteOld: false);
-            var attrs = new ObjectAttributes
+            ushort length = checked((ushort)(part.Length * 2));
+            Marshal.StructureToPtr(new UnicodeString
+            {
+                Length = length,
+                MaximumLength = checked((ushort)(length + 2)),
+                Buffer = data
+            }, name, fDeleteOld: false);
+            ObjectAttributes attrs = new()
             {
                 Length = Marshal.SizeOf<ObjectAttributes>(),
-                RootDirectory = parent.DangerousGetHandle(), ObjectName = name,
+                RootDirectory = parent.DangerousGetHandle(),
+                ObjectName = name,
                 Attributes = objectCaseInsensitive | objectDontReparse
             };
-            var status = NtCreateFile(out var handle, access, ref attrs, out _, IntPtr.Zero,
+            int status = NtCreateFile(out SafeFileHandle? handle, access, ref attrs, out _, IntPtr.Zero,
                 0, shareAll, openExisting, synchronous | openReparsePoint, IntPtr.Zero, 0);
             if (status < 0)
             {
                 handle?.Dispose();
-                if (status == unchecked((int)0xC0000034) || status == unchecked((int)0xC000003A))
+                const int statusObjectNameNotFound = unchecked((int)0xC0000034);
+                const int statusObjectPathNotFound = unchecked((int)0xC000003A);
+                if (status is statusObjectNameNotFound or statusObjectPathNotFound)
+                {
                     throw new FileNotFoundException("Operation artifact no longer exists.");
+                }
+
                 throw new IOException($"Secure artifact open failed (NTSTATUS=0x{status:X8}).");
             }
             if (handle.IsInvalid)
@@ -205,17 +236,29 @@ internal static class OperationArtifactFile
         public IntPtr Information;
     }
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int UnixOpen([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
+#pragma warning disable CA2101 // Unix open/openat paths are explicitly marshaled as UTF-8; Unicode marshaling would change the native filesystem ABI.
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static extern int UnixOpen([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+#pragma warning restore CA2101
+
+
+
+#pragma warning disable CA2101 // Unix open/openat paths are explicitly marshaled as UTF-8; Unicode marshaling would change the native filesystem ABI.
     [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern int UnixOpenAt(int dirfd, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags);
+#pragma warning restore CA2101
+
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern SafeFileHandle CreateFileW(string path, uint desiredAccess, uint shareMode,
         IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 
     [DllImport("ntdll.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int NtCreateFile(out SafeFileHandle fileHandle, uint desiredAccess,
         ref ObjectAttributes objectAttributes, out IoStatusBlock ioStatusBlock, IntPtr allocationSize,
         uint fileAttributes, uint shareAccess, uint createDisposition, uint createOptions,

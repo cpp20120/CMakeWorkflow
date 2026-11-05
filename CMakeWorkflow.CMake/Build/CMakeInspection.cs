@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public static class CMakeInspection
 {
@@ -9,7 +11,7 @@ public static class CMakeInspection
         Action<string>? readGuard = null)
     {
         readGuard?.Invoke(buildDirectory);
-        var result = new ObservedBuildContext { BuildDirectory = buildDirectory };
+        ObservedBuildContext result = new() { BuildDirectory = buildDirectory };
         result.Diagnostics.Add(
             "Configuration freshness and native output freshness are Unverified; inspection does not run CMake.");
         if (!Directory.Exists(buildDirectory))
@@ -19,11 +21,11 @@ public static class CMakeInspection
         }
 
         // Retry only a disappearing File API reply (CMake may replace its reply set).
-        for (var attempt = 0; attempt < 3; ++attempt)
+        for (int attempt = 0; attempt < 3; ++attempt)
         {
             try
             {
-                return await ReadAsync(buildDirectory, ct, readGuard);
+                return await ReadAsync(buildDirectory, readGuard, ct: ct);
             }
             catch (FileNotFoundException) when (attempt < 2)
             {
@@ -41,16 +43,15 @@ public static class CMakeInspection
         return result;
     }
 
-    private static async Task<ObservedBuildContext> ReadAsync(string directory, CancellationToken ct,
-        Action<string>? readGuard)
+    private static async Task<ObservedBuildContext> ReadAsync(string directory, Action<string>? readGuard, CancellationToken ct)
     {
-        var result = new ObservedBuildContext { BuildDirectory = directory };
+        ObservedBuildContext result = new() { BuildDirectory = directory };
         result.Diagnostics.Add(
             "Configuration freshness and native output freshness are Unverified; inspection does not run CMake.");
-        var cache = ReadObservedCache(directory, readGuard);
-        var reply = Path.Combine(directory, ".cmake", "api", "v1", "reply");
+        Dictionary<string, string> cache = ReadObservedCache(directory, readGuard);
+        string reply = Path.Combine(directory, ".cmake", "api", "v1", "reply");
         readGuard?.Invoke(reply);
-        var indexPath = Directory.Exists(reply)
+        string? indexPath = Directory.Exists(reply)
             ? Directory.EnumerateFiles(reply, "*.json")
                 .Where(p => Path.GetFileName(p).StartsWith("index-", StringComparison.Ordinal)
                             || Path.GetFileName(p).StartsWith("error-", StringComparison.Ordinal))
@@ -60,9 +61,9 @@ public static class CMakeInspection
         {
             result.IndexFile = indexPath;
             readGuard?.Invoke(indexPath);
-            var bytes = await File.ReadAllBytesAsync(indexPath, ct);
+            byte[] bytes = await File.ReadAllBytesAsync(indexPath, ct);
             result.IndexHash = Convert.ToHexString(SHA256.HashData(bytes));
-            using var index = JsonDocument.Parse(bytes);
+            using JsonDocument index = JsonDocument.Parse(bytes);
             if (Path.GetFileName(indexPath).StartsWith("error-", StringComparison.Ordinal))
             {
                 result.State = "ConfigureFailed";
@@ -71,48 +72,54 @@ public static class CMakeInspection
                 return result;
             }
 
-            var cmake = index.RootElement.GetProperty("cmake");
-            var generator = cmake.GetProperty("generator");
+            JsonElement cmake = index.RootElement.GetProperty("cmake");
+            JsonElement generator = cmake.GetProperty("generator");
             result.Generator = generator.GetProperty("name").GetString();
             result.MultiConfig = generator.GetProperty("multiConfig").GetBoolean();
-            if (cmake.TryGetProperty("paths", out var tools))
+            if (cmake.TryGetProperty("paths", out JsonElement tools))
             {
                 result.CMakeExecutable = tools.GetProperty("cmake").GetString();
                 result.CTestExecutable = tools.GetProperty("ctest").GetString();
             }
 
-            var objects = index.RootElement.GetProperty("objects");
-            using var model = await ReadObjectAsync(reply, objects, "codemodel", 2, ct, readGuard);
+            JsonElement objects = index.RootElement.GetProperty("objects");
+            using JsonDocument? model = await ReadObjectAsync(reply, objects, "codemodel", 2, readGuard, ct: ct);
             if (model is not null)
             {
                 result.HasCodeModel = true;
-                var paths = model.RootElement.GetProperty("paths");
+                JsonElement paths = model.RootElement.GetProperty("paths");
                 result.SourceDirectory = paths.GetProperty("source").GetString();
-                var modelBuild = paths.GetProperty("build").GetString()!;
+                string modelBuild = paths.GetProperty("build").GetString()!;
                 if (!WorkflowPlanner.PathComparer.Equals(BuildTreeOwnership.CanonicalPath(modelBuild), directory))
-                    throw new InvalidOperationException("File API build path does not match this build tree.");
-                foreach (var configuration in model.RootElement.GetProperty("configurations").EnumerateArray())
                 {
-                    var name = configuration.GetProperty("name").GetString()!;
+                    throw new InvalidOperationException("File API build path does not match this build tree.");
+                }
+
+                foreach (JsonElement configuration in model.RootElement.GetProperty("configurations").EnumerateArray())
+                {
+                    string name = configuration.GetProperty("name").GetString()!;
                     result.Configurations.Add(name);
-                    foreach (var entry in configuration.GetProperty("targets").EnumerateArray())
+                    foreach (JsonElement entry in configuration.GetProperty("targets").EnumerateArray())
                     {
-                        using var target =
-                            await ReadJsonAsync(ReplyPath(reply, entry.GetProperty("jsonFile").GetString()), ct,
-                                readGuard);
-                        var data = target.RootElement;
-                        var type = data.GetProperty("type").GetString()!;
-                        var targetName = data.GetProperty("name").GetString()!;
+                        using JsonDocument target =
+                            await ReadJsonAsync(ReplyPath(reply, entry.GetProperty("jsonFile").GetString()), readGuard, ct: ct);
+                        JsonElement data = target.RootElement;
+                        string type = data.GetProperty("type").GetString()!;
+                        string targetName = data.GetProperty("name").GetString()!;
                         if (targetName != entry.GetProperty("name").GetString())
-                            throw new InvalidOperationException("File API target identity mismatch.");
-                        string? executable = null;
-                        if (type == "EXECUTABLE" && data.TryGetProperty("artifacts", out var artifacts))
                         {
-                            var diskName = data.TryGetProperty("nameOnDisk", out var disk) ? disk.GetString() : null;
-                            var candidates = artifacts.EnumerateArray().Select(a => a.GetProperty("path").GetString()!)
-                                .Where(p => diskName is not null && Path.GetFileName(p) == diskName).ToArray();
+                            throw new InvalidOperationException("File API target identity mismatch.");
+                        }
+
+                        string? executable = null;
+                        if (type == "EXECUTABLE" && data.TryGetProperty("artifacts", out JsonElement artifacts))
+                        {
+                            string? diskName = data.TryGetProperty("nameOnDisk", out JsonElement disk) ? disk.GetString() : null;
+                            string[] candidates = [.. artifacts.EnumerateArray().Select(a => a.GetProperty("path").GetString()!).Where(p => diskName is not null && Path.GetFileName(p) == diskName)];
                             if (candidates.Length == 1)
+                            {
                                 executable = Path.GetFullPath(candidates[0], directory);
+                            }
                         }
 
                         result.Targets.Add(new(targetName, name, type, executable, "FileApi"));
@@ -120,45 +127,61 @@ public static class CMakeInspection
                 }
             }
 
-            using var cacheReply = await ReadObjectAsync(reply, objects, "cache", 2, ct, readGuard);
+            using JsonDocument? cacheReply = await ReadObjectAsync(reply, objects, "cache", 2, readGuard, ct: ct);
             if (cacheReply is not null)
             {
                 result.HasCacheReply = true;
                 // Expose only observed identity values, never reinterpret flags or presets.
-                var apiCache = cacheReply.RootElement.GetProperty("entries").EnumerateArray()
+                Dictionary<string, string> apiCache = cacheReply.RootElement.GetProperty("entries").EnumerateArray()
                     .ToDictionary(e => e.GetProperty("name").GetString()!, e => e.GetProperty("value").GetString()!);
-                if (apiCache.TryGetValue("CMAKE_HOME_DIRECTORY", out var home)) result.SourceDirectory ??= home;
+                if (apiCache.TryGetValue("CMAKE_HOME_DIRECTORY", out string? home))
+                {
+                    result.SourceDirectory ??= home;
+                }
             }
 
-            using var toolchains = await ReadObjectAsync(reply, objects, "toolchains", 1, ct, readGuard);
+            using JsonDocument? toolchains = await ReadObjectAsync(reply, objects, "toolchains", 1, readGuard, ct: ct);
             if (toolchains is not null)
-                foreach (var toolchain in toolchains.RootElement.GetProperty("toolchains").EnumerateArray())
+            {
+                foreach (JsonElement toolchain in toolchains.RootElement.GetProperty("toolchains").EnumerateArray())
                 {
-                    var language = toolchain.GetProperty("language").GetString();
-                    var compiler = toolchain.TryGetProperty("compiler", out var c) &&
-                                   c.TryGetProperty("path", out var p)
+                    string? language = toolchain.GetProperty("language").GetString();
+                    string? compiler = toolchain.TryGetProperty("compiler", out JsonElement c) &&
+                                   c.TryGetProperty("path", out JsonElement p)
                         ? p.GetString()
                         : "Unknown";
                     result.Toolchains.Add($"{language}: {compiler}");
                 }
+            }
 
             if (result.HasCodeModel)
             {
-                if (cache.TryGetValue("CMAKE_GENERATOR", out var cachedGenerator) &&
+                if (cache.TryGetValue("CMAKE_GENERATOR", out string? cachedGenerator) &&
                     cachedGenerator != result.Generator)
+                {
                     throw new InvalidOperationException("Cache and File API generator observations disagree.");
-                if (result.MultiConfig == false && cache.TryGetValue("CMAKE_BUILD_TYPE", out var buildType)
+                }
+
+                if (result.MultiConfig == false && cache.TryGetValue("CMAKE_BUILD_TYPE", out string? buildType)
                                                 && !result.Configurations.SequenceEqual([buildType]))
+                {
                     throw new InvalidOperationException("Cache and File API configuration observations disagree.");
-                if (result.MultiConfig == true && cache.TryGetValue("CMAKE_CONFIGURATION_TYPES", out var types)
+                }
+
+                if (result.MultiConfig == true && cache.TryGetValue("CMAKE_CONFIGURATION_TYPES", out string? types)
                                                && !result.Configurations.ToHashSet(StringComparer.Ordinal)
                                                    .SetEquals(types.Split(';', StringSplitOptions.RemoveEmptyEntries)))
+                {
                     throw new InvalidOperationException("Cache and File API multi-config observations disagree.");
-                if (cache.TryGetValue("CMAKE_HOME_DIRECTORY", out var source)
+                }
+
+                if (cache.TryGetValue("CMAKE_HOME_DIRECTORY", out string? source)
                     && result.SourceDirectory is not null
                     && !WorkflowPlanner.PathComparer.Equals(BuildTreeOwnership.CanonicalPath(source),
                         BuildTreeOwnership.CanonicalPath(result.SourceDirectory)))
+                {
                     throw new InvalidOperationException("Cache and File API source observations disagree.");
+                }
             }
         }
 
@@ -167,12 +190,12 @@ public static class CMakeInspection
             result.Generator ??= cache.GetValueOrDefault("CMAKE_GENERATOR");
             result.SourceDirectory ??= cache.GetValueOrDefault("CMAKE_HOME_DIRECTORY");
             result.CMakeExecutable ??= cache.GetValueOrDefault("CMAKE_COMMAND");
-            if (cache.TryGetValue("CMAKE_CONFIGURATION_TYPES", out var configurations) && configurations.Length > 0)
+            if (cache.TryGetValue("CMAKE_CONFIGURATION_TYPES", out string? configurations) && configurations.Length > 0)
             {
                 result.MultiConfig = true;
-                result.Configurations = configurations.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
+                result.Configurations = [.. configurations.Split(';', StringSplitOptions.RemoveEmptyEntries)];
             }
-            else if (cache.TryGetValue("CMAKE_BUILD_TYPE", out var buildType) && result.Generator is not null)
+            else if (cache.TryGetValue("CMAKE_BUILD_TYPE", out string? buildType) && result.Generator is not null)
             {
                 result.MultiConfig ??= false;
                 result.Configurations = [buildType];
@@ -180,35 +203,45 @@ public static class CMakeInspection
 
             result.Diagnostics.Add(
                 "No codemodel: limited cache/bridge observations only; absent targets have Unknown type.");
-            var manifests = Path.Combine(directory, "cmake-workflow", "targets");
+            string manifests = Path.Combine(directory, "cmake-workflow", "targets");
             readGuard?.Invoke(manifests);
             if (Directory.Exists(manifests))
-                foreach (var path in BridgeFiles(manifests, readGuard, ct))
+            {
+                foreach (string path in BridgeFiles(manifests, readGuard, ct))
                 {
-                    using var json = await ReadJsonAsync(path, ct, readGuard);
-                    var data = json.RootElement;
-                    var target = data.GetProperty("target").GetString()!;
-                    var configuration = data.GetProperty("configuration").GetString()!;
+                    using JsonDocument json = await ReadJsonAsync(path, readGuard, ct: ct);
+                    JsonElement data = json.RootElement;
+                    string target = data.GetProperty("target").GetString()!;
+                    string configuration = data.GetProperty("configuration").GetString()!;
                     if (data.GetProperty("schemaVersion").GetInt32() != 1
                         || Path.GetFileNameWithoutExtension(path) != target
-                        || Path.GetFileName(Path.GetDirectoryName(path)) != configuration && configuration.Length > 0
+                        || (Path.GetFileName(Path.GetDirectoryName(path)) != configuration && configuration.Length > 0)
                         || !result.Configurations.Contains(configuration))
+                    {
                         throw new InvalidOperationException("Bridge manifest identity/configuration mismatch.");
-                    var executable = data.GetProperty("executable").GetString()!;
+                    }
+
+                    string executable = data.GetProperty("executable").GetString()!;
                     if (!Path.IsPathFullyQualified(executable))
+                    {
                         throw new InvalidOperationException("Bridge executable path is not absolute.");
+                    }
+
                     result.Targets.Add(new(target, configuration, "EXECUTABLE", executable, "BridgeManifest"));
                 }
+            }
         }
 
         if (result.MultiConfig is not null && result.Configurations.Count > 0)
+        {
             result.State = result.HasCodeModel ? "Observed" : "ObservedLimited";
+        }
 
-        var provenance = ProvenancePath(directory);
+        string provenance = ProvenancePath(directory);
         readGuard?.Invoke(provenance);
         if (File.Exists(provenance))
         {
-            var json = await File.ReadAllBytesAsync(provenance, ct);
+            byte[] json = await File.ReadAllBytesAsync(provenance, ct);
             result.ManagedConfigure = JsonSerializer.Deserialize(json, WorkflowJson.Default.ConfigureProvenance);
             if (result.ManagedConfigure is { } managed)
             {
@@ -222,7 +255,9 @@ public static class CMakeInspection
                                                        && managed.IndexFile is not null && result.IndexFile is not null
                                                        && WorkflowPlanner.PathComparer.Equals(managed.IndexFile,
                                                            result.IndexFile))
+                {
                     result.PresetState = "RecordedInvocation";
+                }
                 else
                 {
                     // A new File API generation is not evidence of a *different*
@@ -242,80 +277,108 @@ public static class CMakeInspection
 
     public static void ValidateIdentity(RequestedBuildContext request, ObservedBuildContext observed)
     {
+        ArgumentNullException.ThrowIfNull(observed);
+        ArgumentNullException.ThrowIfNull(request);
         if (observed.State is not ("Observed" or "ObservedLimited"))
+        {
             throw new InvalidOperationException(
                 $"Build context is {observed.State}/Unverified: {string.Join(" ", observed.Diagnostics)}");
+        }
+
         if (request.SourceDirectory is not null && (observed.SourceDirectory is null
                                                     || !WorkflowPlanner.PathComparer.Equals(
                                                         BuildTreeOwnership.CanonicalPath(request.SourceDirectory),
                                                         BuildTreeOwnership.CanonicalPath(observed.SourceDirectory))))
+        {
             throw new InvalidOperationException(
                 "Requested source directory disagrees with the observed build context.");
+        }
+
         if (request.Generator is not null && request.Generator != observed.Generator)
+        {
             throw new InvalidOperationException(
                 "Requested generator disagrees with the observed build context (or is Unknown).");
+        }
+
         if (request.ConfigurePreset is not null)
         {
-            var invocationMatches = observed.PresetState == "RecordedInvocation"
+            bool invocationMatches = observed.PresetState == "RecordedInvocation"
                                     && observed.ManagedConfigure is { } managed
                                     && managed.Preset == request.ConfigurePreset
                                     && WorkflowPlanner.PathComparer.Equals(managed.BuildDirectory,
                                         request.BuildDirectory);
             if (observed.PresetState == "RecordedInvocation" && !invocationMatches)
+            {
                 throw new InvalidOperationException(
                     $"Requested preset '{request.ConfigurePreset}' conflicts with the last recorded configure invocation.");
+            }
+
             if (!invocationMatches && request.ProvenancePolicy != "allowUnverified")
+            {
                 throw new InvalidOperationException(
                     $"Requested preset '{request.ConfigurePreset}' is Unverified. Add an explicit configure node or explicitly adopt it with provenancePolicy: allowUnverified.");
+            }
         }
     }
 
     public static CMakeTargetRef Resolve(RequestedBuildContext request, ObservedBuildContext observed,
         string target = "")
     {
+        ArgumentNullException.ThrowIfNull(observed);
+        ArgumentNullException.ThrowIfNull(request);
         ValidateIdentity(request, observed);
-        var configuration = request.Configuration;
+        string? configuration = request.Configuration;
         if (configuration is null)
         {
             if (observed.MultiConfig == true)
+            {
                 throw new InvalidOperationException(
                     "Multi-config build: pass --config or context.configuration explicitly.");
+            }
+
             if (observed.Configurations.Count != 1)
+            {
                 throw new InvalidOperationException("Configuration selection is Unknown/Unverified.");
+            }
+
             configuration = observed.Configurations[0];
         }
 
-        if (!observed.Configurations.Contains(configuration, StringComparer.Ordinal))
-            throw new InvalidOperationException(
-                $"Requested configuration '{configuration}' disagrees with observed configurations [{string.Join(", ", observed.Configurations)}].");
-        return new CMakeTargetRef(request.BuildDirectory, target, configuration);
+        return !observed.Configurations.Contains(configuration, StringComparer.Ordinal)
+            ? throw new InvalidOperationException(
+                $"Requested configuration '{configuration}' disagrees with observed configurations [{string.Join(", ", observed.Configurations)}].")
+            : new CMakeTargetRef(request.BuildDirectory, target, configuration);
     }
 
     public static NativeTargetObservation RequireTarget(ObservedBuildContext observed, CMakeTargetRef target,
         bool executableOnly = false)
     {
-        var matches = observed.Targets.Where(t => t.Name == target.Target && t.Configuration == target.Configuration)
-            .ToArray();
+        ArgumentNullException.ThrowIfNull(observed);
+        ArgumentNullException.ThrowIfNull(target);
+        NativeTargetObservation[] matches = [.. observed.Targets.Where(t => t.Name == target.Target && t.Configuration == target.Configuration)];
         if (matches.Length != 1)
+        {
             throw new InvalidOperationException(
                 $"Target '{target.Target}' is {(observed.HasCodeModel ? "absent or ambiguous" : "Unknown")}. Explicit configure with File API metadata is required before Build/Run; use invoke only for an intentional target execution.");
-        var item = matches[0];
-        var allowed = executableOnly
+        }
+
+        NativeTargetObservation item = matches[0];
+        bool allowed = executableOnly
             ? item.Type == "EXECUTABLE"
             : item.Type is "EXECUTABLE" or "STATIC_LIBRARY" or "SHARED_LIBRARY" or "MODULE_LIBRARY" or "OBJECT_LIBRARY";
-        if (!allowed)
-            throw new InvalidOperationException(
-                $"Target '{target.Target}' has type {item.Type}; Build/Run will not invoke it. Migrate intentional utility/campaign execution to kind: invoke (CLI: target invoke).");
-        return item;
+        return !allowed
+            ? throw new InvalidOperationException(
+                $"Target '{target.Target}' has type {item.Type}; Build/Run will not invoke it. Migrate intentional utility/campaign execution to kind: invoke (CLI: target invoke).")
+            : item;
     }
 
     internal static string ProvenancePath(string tree) => Path.Combine(tree, "cmake-workflow", "configure.json");
 
     internal static async Task WriteProvenanceAsync(string tree, ConfigureProvenance provenance)
     {
-        var path = ProvenancePath(tree);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + ".tmp";
+        string path = ProvenancePath(tree);
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temporary = path + ".tmp";
         await File.WriteAllBytesAsync(temporary,
             JsonSerializer.SerializeToUtf8Bytes(provenance, WorkflowJson.Default.ConfigureProvenance));
         File.Move(temporary, path, true);
@@ -323,57 +386,83 @@ public static class CMakeInspection
 
     private static Dictionary<string, string> ReadObservedCache(string directory, Action<string>? readGuard)
     {
-        var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        var path = Path.Combine(directory, "CMakeCache.txt");
+        Dictionary<string, string> values = new(StringComparer.Ordinal);
+        string path = Path.Combine(directory, "CMakeCache.txt");
         readGuard?.Invoke(path);
-        if (!File.Exists(path)) return values;
-        foreach (var line in File.ReadLines(path))
+        if (!File.Exists(path))
         {
-            var colon = line.IndexOf(':');
-            var equals = line.IndexOf('=');
-            if (colon <= 0 || equals < colon) continue;
-            var key = line[..colon];
+            return values;
+        }
+
+        foreach (string line in File.ReadLines(path))
+        {
+            int colon = line.IndexOf(':', StringComparison.Ordinal);
+            int equals = line.IndexOf('=', StringComparison.Ordinal);
+            if (colon <= 0 || equals < colon)
+            {
+                continue;
+            }
+
+            string key = line[..colon];
             if (key is "CMAKE_BUILD_TYPE" or "CMAKE_CONFIGURATION_TYPES" or "CMAKE_GENERATOR"
-                or "CMAKE_HOME_DIRECTORY" or "CMAKE_COMMAND") values[key] = line[(equals + 1)..];
+                or "CMAKE_HOME_DIRECTORY" or "CMAKE_COMMAND")
+            {
+                values[key] = line[(equals + 1)..];
+            }
         }
 
         return values;
     }
 
     private static async Task<JsonDocument?> ReadObjectAsync(string directory, JsonElement objects, string kind,
-        int version, CancellationToken ct, Action<string>? readGuard)
+        int version, Action<string>? readGuard, CancellationToken ct)
     {
-        foreach (var item in objects.EnumerateArray())
+        foreach (JsonElement item in objects.EnumerateArray())
+        {
             if (item.GetProperty("kind").GetString() == kind &&
                 item.GetProperty("version").GetProperty("major").GetInt32() == version)
-                return await ReadJsonAsync(ReplyPath(directory, item.GetProperty("jsonFile").GetString()), ct,
-                    readGuard);
+            {
+                return await ReadJsonAsync(ReplyPath(directory, item.GetProperty("jsonFile").GetString()), readGuard, ct: ct);
+            }
+        }
+
         return null;
     }
 
     private static string ReplyPath(string directory, string? file)
     {
-        if (string.IsNullOrEmpty(file) || Path.GetFileName(file) != file || file is "." or "..")
-            throw new InvalidOperationException("Invalid File API reply filename.");
-        return Path.Combine(directory, file);
+        return string.IsNullOrEmpty(file) || Path.GetFileName(file) != file || file is "." or ".."
+            ? throw new InvalidOperationException("Invalid File API reply filename.")
+            : Path.Combine(directory, file);
     }
 
     private static IEnumerable<string> BridgeFiles(string directory, Action<string>? readGuard, CancellationToken ct)
     {
-        var pending = new Stack<string>();
-        var visited = new HashSet<string>(WorkflowPlanner.PathComparer);
+        Stack<string> pending = new();
+        HashSet<string> visited = new(WorkflowPlanner.PathComparer);
         pending.Push(directory);
-        while (pending.TryPop(out var current))
+        while (pending.TryPop(out string? current))
         {
             ct.ThrowIfCancellationRequested();
             readGuard?.Invoke(current);
-            if (!visited.Add(BuildTreeOwnership.CanonicalPath(current))) continue;
-            foreach (var file in Directory.EnumerateFiles(current, "*.json")) yield return file;
-            foreach (var child in Directory.EnumerateDirectories(current)) pending.Push(child);
+            if (!visited.Add(BuildTreeOwnership.CanonicalPath(current)))
+            {
+                continue;
+            }
+
+            foreach (string file in Directory.EnumerateFiles(current, "*.json"))
+            {
+                yield return file;
+            }
+
+            foreach (string child in Directory.EnumerateDirectories(current))
+            {
+                pending.Push(child);
+            }
         }
     }
 
-    private static async Task<JsonDocument> ReadJsonAsync(string path, CancellationToken ct, Action<string>? readGuard)
+    private static async Task<JsonDocument> ReadJsonAsync(string path, Action<string>? readGuard, CancellationToken ct)
     {
         readGuard?.Invoke(path);
         return JsonDocument.Parse(await File.ReadAllBytesAsync(path, ct));

@@ -1,25 +1,28 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Client;
+using StreamJsonRpc;
 
 internal static class ProcessWorkflowWireTests
 {
     private static void Check(bool valid, string message)
     {
-        if (!valid) throw new Exception(message);
+        if (!valid)
+        {
+            throw new System.Diagnostics.UnreachableException(message);
+        }
     }
 
     internal static async Task RunAsync(string endpoint, string parent, CancellationToken ct)
     {
-        var workspace = Path.Combine(parent, "process-domain-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(workspace);
-        var marker = Path.Combine(workspace, "effect.txt");
-        var output = Path.Combine(workspace, "results");
-        var testAssembly = typeof(WorkflowProcessTestWorker).Assembly.Location;
-        var dotnet = Environment.ProcessPath ?? throw new Exception("Missing .NET test host executable.");
+        string workspace = Path.Combine(parent, "process-domain-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(workspace);
+        string marker = Path.Combine(workspace, "effect.txt");
+        string output = Path.Combine(workspace, "results");
+        string testAssembly = typeof(WorkflowProcessTestWorker).Assembly.Location;
+        string dotnet = Environment.ProcessPath ?? throw new System.Diagnostics.UnreachableException("Missing .NET test host executable.");
         var doc = new
         {
             schemaVersion = 1,
@@ -35,93 +38,103 @@ internal static class ProcessWorkflowWireTests
                 }
             }
         };
-        var path = Path.Combine(workspace, "process-plan.json");
-        var manifest = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(doc));
+        string path = Path.Combine(workspace, "process-plan.json");
+        byte[] manifest = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(doc));
         await File.WriteAllBytesAsync(path, manifest, ct);
-        var request = new ExecutionStartRequest("process", "process-wire-1", path,
+        ExecutionStartRequest request = new("process", "process-wire-1", path,
             Convert.ToHexString(SHA256.HashData(manifest)), 2, output);
 
         string operationId;
-        using (var wire = await LocalTransport.ConnectAsync(endpoint, ct))
-        using (var rpc = HostConnection.Create(wire))
+        using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
+        using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            var client = rpc.Attach<IHostRpc>();
+            IHostRpc client = rpc.Attach<IHostRpc>();
             rpc.StartListening();
-            await client.InitializeAsync(new(1, workspace), ct);
-            var operation = await client.ExecutionStartAsync(request, ct);
+            _ = await client.InitializeAsync(new(1, workspace), ct);
+            OperationReference operation = await client.ExecutionStartAsync(request, ct);
             Check(operation.Kind == "process", "Wrong process operation kind.");
             operationId = operation.OperationId;
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(12));
             while (!File.Exists(marker) ||
-                   !(await ReadMarkerAsync(marker, deadline.Token)).Contains("started"))
+                   !(await ReadMarkerAsync(marker, deadline.Token)).Contains("started", StringComparison.Ordinal))
+            {
                 await Task.Delay(20, deadline.Token);
+            }
         }
 
-        using (var wire = await LocalTransport.ConnectAsync(endpoint, ct))
-        using (var rpc = HostConnection.Create(wire))
+        using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
+        using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            var client = rpc.Attach<IHostRpc>();
+            IHostRpc client = rpc.Attach<IHostRpc>();
             rpc.StartListening();
-            await client.InitializeAsync(new(1, workspace), ct);
-            var retried = await client.ExecutionStartAsync(request, ct);
+            _ = await client.InitializeAsync(new(1, workspace), ct);
+            OperationReference retried = await client.ExecutionStartAsync(request, ct);
             Check(retried.OperationId == operationId, "Retry created a different operation.");
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(20));
             OperationReference current;
             do
             {
                 current = await client.OperationGetAsync(new(operationId), deadline.Token);
                 Check(current.Kind == "process", "Operation kind was lost across RPC sessions.");
-                if (current.State == "succeeded") break;
+                if (current.State == "succeeded")
+                {
+                    break;
+                }
+
                 Check(current.State is "accepted_not_dispatched" or "dispatch_authorized",
                     "Process domain did not complete: " + current.State);
                 await Task.Delay(40, deadline.Token);
             } while (true);
 
-            var found = await client.OperationFindAsync(new(request.ClientRequestId), ct);
-            var terminal = await client.ExecutionStartAsync(request, ct);
+            OperationReference found = await client.OperationFindAsync(new(request.ClientRequestId), ct);
+            OperationReference terminal = await client.ExecutionStartAsync(request, ct);
             Check(found.OperationId == operationId && terminal.OperationId == operationId &&
                   terminal.State == "succeeded", "Lost-reply recovery/terminal retry failed.");
-            var overview = await client.OperationOverviewAsync(new(operationId), ct);
+            CMakeWorkflow.Host.OperationOverview overview = await client.OperationOverviewAsync(new(operationId), ct);
             Check(overview.IsFinalized && overview.ReportSha256 is { Length: 64 } &&
                   overview.Operation.Kind == "process" && overview.Operation.State == "succeeded" &&
                   overview.Nodes.Count == 1 && overview.Nodes[0].Id == "effect" &&
                   overview.Nodes[0].Kind == "process" && overview.Nodes[0].Status == "succeeded",
                 "Process domain-neutral terminal overview lost verified node evidence.");
-            var report = await client.ExecutionReportAsync(new(operationId), ct);
+            JsonElement report = await client.ExecutionReportAsync(new(operationId), ct);
             Check(report.GetProperty("status").GetString() == "succeeded" &&
                   report.GetProperty("nodes")[0].GetProperty("status").GetString() == "succeeded",
                 "Process report did not contain verified domain result.");
-            var page = await client.OperationEventsAsync(new(operationId, 0, 100), ct);
+            OperationEventsPage page = await client.OperationEventsAsync(new(operationId, 0, 100), ct);
             Check(page.Events.Count > 0, "Process event replay was empty.");
-            var artifacts = await client.OperationArtifactListAsync(new(operationId), ct);
-            var outputLog = artifacts.Artifacts.Single(a => a.ArtifactId == "stdout:effect");
-            var chunk = await client.OperationArtifactReadAsync(new(operationId,
+            CMakeWorkflow.Host.OperationArtifactList artifacts = await client.OperationArtifactListAsync(new(operationId), ct);
+            CMakeWorkflow.Host.OperationArtifactInfo outputLog = artifacts.Artifacts.Single(a => a.ArtifactId == "stdout:effect");
+            CMakeWorkflow.Host.OperationArtifactChunk chunk = await client.OperationArtifactReadAsync(new(operationId,
                 outputLog.ArtifactId, 0, 1024, outputLog.Size, outputLog.LastWriteUtcTicks), ct);
             Check(chunk.TotalSize == outputLog.Size && chunk.ArtifactId == outputLog.ArtifactId,
                 "Verified process artifact chunk unavailable.");
         }
 
         // Use the public SDK rather than only the raw Host RPC proxy.
-        await using (var sdk = await CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct))
+        await using (CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct))
         {
-            var handle = await sdk.Executions.StartAsync(new ExecutionStartOptions("process",
+            WorkflowOperation handle = await sdk.Executions.StartAsync(new ExecutionStartOptions("process",
                 request.ClientRequestId, request.Manifest, request.ManifestSha256,
                 request.Jobs, request.ResultsDirectory), ct);
             Check(handle.OperationId == operationId, "SDK retry returned a new operation identity.");
             Check((await handle.GetSnapshotAsync(ct)).Kind == "process", "SDK lost domain kind.");
             Check((await sdk.Executions.GetReportAsync(operationId, ct)).GetProperty("status")
                   .GetString() == "succeeded", "SDK could not retrieve verified process report.");
-            var overview = await handle.GetOverviewAsync(ct);
+            CMakeWorkflow.Client.OperationOverview overview = await handle.GetOverviewAsync(ct);
             Check(overview.IsFinalized && overview.Nodes.Single().Id == "effect" &&
                   overview.Operation.Kind == "process", "SDK operation overview projection failed.");
-            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            using (CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 deadline.CancelAfter(TimeSpan.FromSeconds(8));
-                var events = 0;
-                await foreach (var _ in handle.WatchEventsAsync(pollInterval: TimeSpan.FromMilliseconds(20),
-                                   ct: deadline.Token)) ++events;
+                int events = 0;
+                await foreach (JsonElement _ in handle.WatchEventsAsync(pollInterval: TimeSpan.FromMilliseconds(20),
+                                   ct: deadline.Token))
+                {
+                    ++events;
+                }
+
                 Check(events > 0, "Watching a finalized process operation yielded no replay events.");
             }
             Check((await handle.ListArtifactsAsync(ct)).Artifacts.Any(x => x.ArtifactId == "report"),
@@ -131,7 +144,7 @@ internal static class ProcessWorkflowWireTests
         Check((await ReadMarkerAsync(marker, ct)).Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.TrimEnd('\r')).SequenceEqual(["started", "finished"]),
             "Non-CMake process was dispatched more than once or incompletely.");
-        using (var restarted = new DurableAcceptanceStore(workspace, readOnly: true))
+        using (DurableAcceptanceStore restarted = new(workspace, readOnly: true))
         {
             Check(restarted.GetDomainKind(operationId) == "process" &&
                   restarted.GetFinalization(operationId) is { State: "succeeded", ExitCode: 0 },

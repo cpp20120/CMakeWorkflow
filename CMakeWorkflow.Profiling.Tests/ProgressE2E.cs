@@ -13,10 +13,12 @@ internal static class ProgressE2E
     public static async Task RunAsync()
     {
         if (!OperatingSystem.IsLinux())
+        {
             throw new PlatformNotSupportedException("Progress E2E fixture currently requires Linux /bin/sh and /proc.");
+        }
 
-        var root = Path.Combine(Path.GetTempPath(), "cmw-progress-e2e-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        string root = Path.Combine(Path.GetTempPath(), "cmw-progress-e2e-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(root);
         try
         {
             await SilentProcessAndResumeAsync(Path.Combine(root, "silent"));
@@ -32,14 +34,14 @@ internal static class ProgressE2E
 
     private static async Task SilentProcessAndResumeAsync(string directory)
     {
-        Directory.CreateDirectory(Path.Combine(directory, "logs"));
-        var entries = new JsonArray();
-        var events = new ConcurrentQueue<WorkflowDispatchEvent>();
-        using var transcript = new StringWriter(CultureInfo.InvariantCulture);
-        using var progress = new HistoricalProgress(1, 1, false,
+        _ = Directory.CreateDirectory(Path.Combine(directory, "logs"));
+        JsonArray entries = [];
+        ConcurrentQueue<WorkflowDispatchEvent> events = new();
+        using StringWriter transcript = new(CultureInfo.InvariantCulture);
+        using HistoricalProgress progress = new(1, 1, false,
             TextWriter.Synchronized(transcript), interactive: false);
-        using var terminalTranscript = new StringWriter(CultureInfo.InvariantCulture);
-        using var terminalProgress = new HistoricalProgress(1, 1, false,
+        using StringWriter terminalTranscript = new(CultureInfo.InvariantCulture);
+        using HistoricalProgress terminalProgress = new(1, 1, false,
             TextWriter.Synchronized(terminalTranscript), interactive: true);
 
         void Observe(WorkflowDispatchEvent update)
@@ -49,11 +51,11 @@ internal static class ProgressE2E
             terminalProgress.Observe(update);
         }
 
-        var dispatcher = new WorkflowCommandDispatcher(directory, entries, false,
+        WorkflowCommandDispatcher dispatcher = new(directory, entries, false,
             new Dictionary<string, string>(), Observe);
         string[] argv = ["-c", "sleep 14; printf 'silent-process-finished'"];
-        var clock = Stopwatch.StartNew();
-        var execution = dispatcher.RunAsync("stat-e2e-silent", "/bin/sh", argv, null, 30,
+        Stopwatch clock = Stopwatch.StartNew();
+        Task<string> execution = dispatcher.RunAsync("stat-e2e-silent", "/bin/sh", argv, null, 30,
             CancellationToken.None);
 
         // An actual silent child must remain alive long enough to deliver its
@@ -77,14 +79,14 @@ internal static class ProgressE2E
                 == "silent-process-finished", "Process stdout capture was incomplete.");
         Require(events.Any(x => x.Type == "succeeded"), "Success event missing.");
 
-        var saved = JsonNode.Parse(await File.ReadAllTextAsync(
+        JsonArray saved = JsonNode.Parse(await File.ReadAllTextAsync(
             Path.Combine(directory, "commands.json")))!.AsArray();
         Require(saved.Count == 1 && saved[0]!["returncode"]!.GetValue<int>() == 0,
             "Completed process result was not durably journalled.");
-        var replayEvents = new ConcurrentQueue<WorkflowDispatchEvent>();
-        var replay = new WorkflowCommandDispatcher(directory, saved, true,
+        ConcurrentQueue<WorkflowDispatchEvent> replayEvents = new();
+        WorkflowCommandDispatcher replay = new(directory, saved, true,
             new Dictionary<string, string>(), replayEvents.Enqueue);
-        var replayClock = Stopwatch.StartNew();
+        Stopwatch replayClock = Stopwatch.StartNew();
         Require(await replay.RunAsync("stat-e2e-silent", "/bin/sh", argv, null, 30,
                 CancellationToken.None) == "silent-process-finished",
             "Resume did not reuse the successful recorded output.");
@@ -99,35 +101,35 @@ internal static class ProgressE2E
 
     private static async Task CancellationAndNoReplayAsync(string directory)
     {
-        Directory.CreateDirectory(Path.Combine(directory, "logs"));
-        var pidPath = Path.Combine(directory, "pids.txt");
+        _ = Directory.CreateDirectory(Path.Combine(directory, "logs"));
+        string pidPath = Path.Combine(directory, "pids.txt");
         // Intentionally no output on stdout/stderr. The shell waits on a real
         // descendant, exercising shared process-tree cancellation.
-        var script = $"sleep 60 & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{pidPath}'; wait \"$child\"";
+        string script = $"sleep 60 & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{pidPath}'; wait \"$child\"";
         string[] argv = ["-c", script];
-        var entries = new JsonArray();
-        var events = new ConcurrentQueue<WorkflowDispatchEvent>();
-        var dispatcher = new WorkflowCommandDispatcher(directory, entries, false,
+        JsonArray entries = [];
+        ConcurrentQueue<WorkflowDispatchEvent> events = new();
+        WorkflowCommandDispatcher dispatcher = new(directory, entries, false,
             new Dictionary<string, string>(), events.Enqueue);
-        using var cancel = new CancellationTokenSource();
-        var operation = dispatcher.RunAsync("stat-e2e-cancel", "/bin/sh", argv, null, 90, cancel.Token);
+        using CancellationTokenSource cancel = new();
+        Task<string> operation = dispatcher.RunAsync("stat-e2e-cancel", "/bin/sh", argv, null, 90, cancel.Token);
         (int parent, int child) pids;
         try
         {
             await UntilAsync(() => File.Exists(pidPath) && File.ReadAllText(pidPath).Split([' ', '\n'],
                     StringSplitOptions.RemoveEmptyEntries).Length == 2,
                 TimeSpan.FromSeconds(8), "Descendant process was not started.");
-            var fields = (await File.ReadAllTextAsync(pidPath))
+            string[] fields = (await File.ReadAllTextAsync(pidPath))
                 .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             pids = (int.Parse(fields[0], CultureInfo.InvariantCulture),
                 int.Parse(fields[1], CultureInfo.InvariantCulture));
             Require(IsRunning(pids.parent) && IsRunning(pids.child),
                 "Fixture parent and child were not both running before cancellation.");
-            cancel.Cancel();
+            await cancel.CancelAsync();
             try
             {
-                await operation.WaitAsync(TimeSpan.FromSeconds(12));
-                throw new Exception("Cancellation incorrectly completed successfully.");
+                _ = await operation.WaitAsync(TimeSpan.FromSeconds(12));
+                throw new UnreachableException("Cancellation incorrectly completed successfully.");
             }
             catch (OperationCanceledException) when (cancel.IsCancellationRequested)
             {
@@ -140,17 +142,17 @@ internal static class ProgressE2E
                 TimeSpan.FromSeconds(8), "Cancellation left a running child or parent process.");
             Require(entries.Count == 1 && entries[0]!["returncode"] is null,
                 "Canceled external effect was marked as successfully completed.");
-            var saved = JsonNode.Parse(await File.ReadAllTextAsync(
+            JsonArray saved = JsonNode.Parse(await File.ReadAllTextAsync(
                 Path.Combine(directory, "commands.json")))!.AsArray();
             Require(saved.Count == 1 && saved[0]!["returncode"] is null,
                 "Unknown-effect status was not durably recorded.");
-            var replay = new WorkflowCommandDispatcher(directory, saved, true,
+            WorkflowCommandDispatcher replay = new(directory, saved, true,
                 new Dictionary<string, string>());
             try
             {
-                await replay.RunAsync("stat-e2e-cancel", "/bin/sh", argv, null, 90,
+                _ = await replay.RunAsync("stat-e2e-cancel", "/bin/sh", argv, null, 90,
                     CancellationToken.None);
-                throw new Exception("Resume replayed a canceled operation with unknown outcome.");
+                throw new UnreachableException("Resume replayed a canceled operation with unknown outcome.");
             }
             catch (InvalidDataException ex) when (ex.Message.Contains("outcome is unknown", StringComparison.Ordinal))
             {
@@ -161,24 +163,28 @@ internal static class ProgressE2E
         }
         finally
         {
-            cancel.Cancel();
+            await cancel.CancelAsync();
             // Cleanup is best-effort only if an assertion fails. Avoid leaving a
             // fixture process running after a failed test.
             try
             {
-                await operation.WaitAsync(TimeSpan.FromSeconds(5));
+                _ = await operation.WaitAsync(TimeSpan.FromSeconds(5));
             }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch
             {
                 /* failure is reported by the preceding assertions */
             }
+#pragma warning restore CA1031
+
 
             if (File.Exists(pidPath))
             {
-                foreach (var text in File.ReadAllText(pidPath).Split((char[]?)null,
+                foreach (string text in (await File.ReadAllTextAsync(pidPath, CancellationToken.None)).Split((char[]?)null,
                              StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (int.TryParse(text, out var pid) && IsRunning(pid))
+                    if (int.TryParse(text, out int pid) && IsRunning(pid))
                     {
                         try
                         {
@@ -198,12 +204,16 @@ internal static class ProgressE2E
 
     private static bool IsRunning(int pid)
     {
-        var path = $"/proc/{pid}/stat";
-        if (!File.Exists(path)) return false;
+        string path = $"/proc/{pid}/stat";
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
         try
         {
-            var stat = File.ReadAllText(path);
-            var close = stat.LastIndexOf(')');
+            string stat = File.ReadAllText(path);
+            int close = stat.LastIndexOf(')');
             return close >= 0 && close + 2 < stat.Length && stat[close + 2] is not ('Z' or 'X' or 'x');
         }
         catch (FileNotFoundException)
@@ -218,16 +228,23 @@ internal static class ProgressE2E
 
     private static async Task UntilAsync(Func<bool> ready, TimeSpan timeout, string failure)
     {
-        var watch = Stopwatch.StartNew();
+        Stopwatch watch = Stopwatch.StartNew();
         while (!ready())
         {
-            if (watch.Elapsed > timeout) throw new Exception(failure);
+            if (watch.Elapsed > timeout)
+            {
+                throw new UnreachableException(failure);
+            }
+
             await Task.Delay(80);
         }
     }
 
     private static void Require(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new UnreachableException(message);
+        }
     }
 }

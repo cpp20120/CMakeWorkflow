@@ -1,7 +1,9 @@
 using System.Text.Json;
 using CMakeWorkflow.Engine;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public static class WorkflowRunner
 {
@@ -10,47 +12,61 @@ public static class WorkflowRunner
         Func<string, CancellationToken, Task>? beforeExternalDispatch = null,
         IReadOnlyDictionary<string, WorkflowToolchainRuntime>? toolchains = null)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         toolchains ??= new Dictionary<string, WorkflowToolchainRuntime>(WorkflowPlanner.PathComparer);
         if (plan.Nodes.Any(n => n.Toolchain is not null && n.Definition.Kind != "inspect"
                                                         && !toolchains.ContainsKey(n.Target.BuildDirectory)))
+        {
             throw new InvalidOperationException("Selected toolchain was not materialized before workflow admission.");
+        }
         // The run lease spans validation, the recovery checkpoint, execution and final persistence.
         // No second runner may inspect/commit the same persisted run concurrently.
-        Directory.CreateDirectory(output);
-        await using var runLease = new FileStream(Path.Combine(output, ".workflow-run.lock"),
+        _ = Directory.CreateDirectory(output);
+        await using FileStream runLease = new(Path.Combine(output, ".workflow-run.lock"),
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         // Validate resume observations under the same ownership used for dispatch.
         // Otherwise another cooperating runner can change the tree in between.
-        using var resumedOwnership = resume
+        using BuildTreeOwnership? resumedOwnership = resume
             ? await BuildTreeOwnership.AcquireAsync(
                 plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory), ct)
             : null;
-        var report = new WorkflowReport
+        WorkflowReport report = new()
         {
             Workflow = plan.File,
             ManifestHash = plan.ManifestHash,
             Toolchains = WorkflowToolchainAdmission.Identities(toolchains),
-            Nodes = plan.Nodes.Select(n => new NodeResult
+            Nodes = [.. plan.Nodes.Select(n => new NodeResult
             {
-                Id = n.Definition.Id, Kind = n.Definition.Kind,
-                Dependencies = n.Dependencies.ToList(), BuildDirectory = n.Target.BuildDirectory,
-                Configuration = n.Target.Configuration, Target = n.Target.Target,
-                WorkingDirectory = n.WorkingDirectory, RequestedContext = n.Requested
-            }).ToList()
+                Id = n.Definition.Id,
+                Kind = n.Definition.Kind,
+                Dependencies = [.. n.Dependencies],
+                BuildDirectory = n.Target.BuildDirectory,
+                Configuration = n.Target.Configuration,
+                Target = n.Target.Target,
+                WorkingDirectory = n.WorkingDirectory,
+                RequestedContext = n.Requested
+            })]
         };
         if (resume)
         {
-            var file = Path.Combine(output, "run.json");
-            if (!File.Exists(file)) throw new InvalidDataException("Run report not found for resume.");
-            var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct),
+            string file = Path.Combine(output, "run.json");
+            if (!File.Exists(file))
+            {
+                throw new InvalidDataException("Run report not found for resume.");
+            }
+
+            WorkflowReport saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct),
                             WorkflowJson.Default.WorkflowReport)
                         ?? throw new InvalidDataException("Invalid resume report.");
             if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") ||
                 saved.ManifestHash != plan.ManifestHash ||
                 !WorkflowPlanner.PathComparer.Equals(
                     BuildTreeOwnership.CanonicalPath(saved.Workflow), BuildTreeOwnership.CanonicalPath(plan.File)))
+            {
                 throw new InvalidDataException(
                     "Resume requires a needs_attention checkpoint with identical workflow and manifest; interrupted running checkpoints can only be quarantined.");
+            }
+
             if (saved.Nodes.Count != report.Nodes.Count ||
                 saved.Nodes.Where((n, i) => n.Id != report.Nodes[i].Id || n.Kind != report.Nodes[i].Kind ||
                                             n.Target != report.Nodes[i].Target ||
@@ -59,7 +75,10 @@ public static class WorkflowRunner
                                                 BuildTreeOwnership.CanonicalPath(report.Nodes[i].BuildDirectory)) ||
                                             n.Configuration != report.Nodes[i].Configuration ||
                                             !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
+            {
                 throw new InvalidDataException("Resume graph differs from saved execution.");
+            }
+
             WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
             // A write-ahead admission is not proof that a process started, nor
             // that it did not produce side effects. Classify before validating
@@ -68,7 +87,7 @@ public static class WorkflowRunner
             if (saved.Status == "running" || saved.Nodes.Any(n => n.Status is "running" or "outcome_unknown") ||
                 saved.RecoveryPhase is "resuming" or "running")
             {
-                foreach (var node in saved.Nodes.Where(n => n.Status == "running"))
+                foreach (NodeResult? node in saved.Nodes.Where(n => n.Status == "running"))
                 {
                     node.Status = "outcome_unknown";
                     node.Error =
@@ -79,42 +98,49 @@ public static class WorkflowRunner
                 saved.Error = "Interrupted execution requires manual reconciliation; automatic resume is prohibited.";
                 saved.RecoveryPhase = "interrupted";
                 await WorkflowCheckpoint.SaveAsync(saved, output, ct);
-                Console.Error.WriteLine($"[CMakeWorkflow] {saved.Error}");
+                await Console.Error.WriteLineAsync($"[CMakeWorkflow] {saved.Error}");
                 return 4;
             }
 
             // Compare the latest successful observation for each physical tree;
             // earlier configure/build nodes may legitimately observe older generations.
-            foreach (var tree in saved.Nodes.Where(n => n.Status == "succeeded" && n.Kind != "inspect")
+            foreach (IGrouping<string, NodeResult> tree in saved.Nodes.Where(n => n.Status == "succeeded" && n.Kind != "inspect")
                          .GroupBy(n => n.BuildDirectory, WorkflowPlanner.PathComparer))
             {
-                var last = tree.LastOrDefault(n => n.ObservationAfter is not null || n.ObservedContext is not null);
-                var expected = last?.ObservationAfter ?? last?.ObservedContext;
-                if (expected is null) throw new InvalidDataException($"Missing tree observation for '{tree.Key}'.");
-                var observed = await CMakeInspection.InspectAsync(tree.Key, ct);
+                NodeResult? last = tree.LastOrDefault(n => n.ObservationAfter is not null || n.ObservedContext is not null);
+                ObservedBuildContext expected = (last?.ObservationAfter ?? last?.ObservedContext) ?? throw new InvalidDataException($"Missing tree observation for '{tree.Key}'.");
+                ObservedBuildContext observed = await CMakeInspection.InspectAsync(tree.Key, ct);
                 if (GenerationObservation.From(expected) != GenerationObservation.From(observed) ||
                     expected.SourceDirectory != observed.SourceDirectory ||
                     expected.Generator != observed.Generator ||
                     expected.MultiConfig != observed.MultiConfig ||
                     !expected.Configurations.SequenceEqual(observed.Configurations))
+                {
                     throw new InvalidDataException($"Build tree changed since node '{last!.Id}'; resume refused.");
+                }
             }
 
-            foreach (var node in saved.Nodes.Where(n => n.Status == "succeeded"))
+            foreach (NodeResult? node in saved.Nodes.Where(n => n.Status == "succeeded"))
             {
                 if (node.Artifact is { } artifact)
                 {
                     if (!File.Exists(artifact.Executable) ||
                         await CMakeWorkflowNodeExecutor.HashExecutableAsync(artifact.Executable, ct) != artifact.Sha256)
+                    {
                         throw new InvalidDataException($"Artifact changed since node '{node.Id}'; resume refused.");
+                    }
                 }
 
-                foreach (var evidence in node.DeclaredArtifacts)
+                foreach (WorkflowArtifactEvidence evidence in node.DeclaredArtifacts)
+                {
                     if (await WorkflowArtifacts.HashAsync(evidence.Path, ct) != evidence.Sha256
-                        || evidence.SnapshotPath is { } snapshot
-                        && await WorkflowArtifacts.HashAsync(snapshot, ct) != evidence.Sha256)
+                        || (evidence.SnapshotPath is { } snapshot
+                        && await WorkflowArtifacts.HashAsync(snapshot, ct) != evidence.Sha256))
+                    {
                         throw new InvalidDataException(
                             $"Declared artifact changed since node '{node.Id}'; resume refused.");
+                    }
+                }
             }
 
             saved.ResumeCount++;
@@ -123,12 +149,15 @@ public static class WorkflowRunner
             saved.FinishedAt = null;
             saved.Error = null;
             saved.Findings.Clear();
-            foreach (var node in saved.Nodes.Where(n => n.Status != "succeeded"))
+            foreach (NodeResult? node in saved.Nodes.Where(n => n.Status != "succeeded"))
             {
                 // A run can only be resumed after a pre-execution admission failure.
                 // Downstream nodes were never launched.
                 if (node.Status is not ("needs_attention" or "pending" or "blocked"))
+                {
                     throw new InvalidDataException($"Unexpected non-resumable node '{node.Id}': {node.Status}.");
+                }
+
                 node.Status = "pending";
                 node.Error = null;
                 node.StartedAt = null;
@@ -144,47 +173,58 @@ public static class WorkflowRunner
         }
         catch (IOException error)
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
         }
         catch (UnauthorizedAccessException error)
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
         }
 
-        var states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
-        var sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
+        Dictionary<string, NodeResult> states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
+        Dictionary<string, BuildContextSession> sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
             .ToDictionary(p => p, _ => new BuildContextSession(), WorkflowPlanner.PathComparer);
         if (resume)
         {
             // Restore per-tree session admission state from the verified observations.
-            foreach (var node in plan.Nodes.Where(n => states[n.Definition.Id].Status == "succeeded"))
+            foreach (PlannedNode? node in plan.Nodes.Where(n => states[n.Definition.Id].Status == "succeeded"))
             {
-                var saved = states[node.Definition.Id];
-                var observed = saved.ObservationAfter ?? saved.ObservedContext;
-                if (observed is null || node.Definition.Kind == "inspect") continue;
-                var session = sessions[node.Target.BuildDirectory];
-                if (node.Definition.Kind == "configure") session.Configured(node.Requested, observed);
-                else session.Observe(node.Requested, observed, "Resume");
+                NodeResult saved = states[node.Definition.Id];
+                ObservedBuildContext? observed = saved.ObservationAfter ?? saved.ObservedContext;
+                if (observed is null || node.Definition.Kind == "inspect")
+                {
+                    continue;
+                }
+
+                BuildContextSession session = sessions[node.Target.BuildDirectory];
+                if (node.Definition.Kind == "configure")
+                {
+                    session.Configured(node.Requested, observed);
+                }
+                else
+                {
+                    _ = session.Observe(node.Requested, observed, "Resume");
+                }
             }
         }
 
         BuildTreeOwnership? ownership = null;
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        using var events = new WorkflowEventJournal(output, eventsToStdout, resume ? report : null);
+        using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using WorkflowEventJournal events = new(output, eventsToStdout, resume ? report : null);
         await SaveAsync(report, output, events);
         try
         {
-            var mutationTrees = plan.Nodes.Where(n => n.Definition.Kind != "inspect")
-                .Select(n => n.Target.BuildDirectory).ToArray();
+            string[] mutationTrees = [.. plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory)];
             if (mutationTrees.Length != 0 && !resume)
+            {
                 ownership = await BuildTreeOwnership.AcquireAsync(mutationTrees, stop.Token);
+            }
 
             // The engine owns ready/active admission; CMake owns persistence,
             // resource identity, node execution and authoritative report states.
-            var executionPlan = new ExecutionPlan<PlannedNode>(plan.Nodes.Select(node =>
+            ExecutionPlan<PlannedNode> executionPlan = new(plan.Nodes.Select(node =>
                 new ExecutionNode<PlannedNode>(node.Definition.Id, node.Dependencies,
                     node.Definition.Exclusive, node)).ToArray());
-            await ExecutionScheduler.RunAsync(executionPlan, jobs, ct, stop,
+            await ExecutionScheduler.RunAsync(executionPlan, jobs, stop,
                 new ExecutionSchedulerHooks<PlannedNode, NodeResult, bool>
                 {
                     GetStatus = id => states[id].Status switch
@@ -201,24 +241,24 @@ public static class WorkflowRunner
                     Conflicts = (left, right) => Conflicts(left.Payload, right.Payload),
                     MarkCanceled = item =>
                     {
-                        var state = states[item.Id];
+                        NodeResult state = states[item.Id];
                         state.Status = "canceled";
                         state.Error = "Workflow canceled before this node started.";
                     },
                     MarkBlocked = item =>
                     {
-                        var state = states[item.Id];
+                        NodeResult state = states[item.Id];
                         state.Status = "blocked";
                         state.Error = "A prerequisite did not succeed.";
                     },
                     BeforeReserve = (item, token) => RecoveryFaults.HitAsync("before-dispatch", item.Id, token),
                     Reserve = item =>
                     {
-                        var node = item.Payload;
-                        var state = states[item.Id];
+                        PlannedNode node = item.Payload;
+                        NodeResult state = states[item.Id];
                         state.Status = "running";
                         state.StartedAt = DateTimeOffset.UtcNow;
-                        var logStem = LogStem(report, item.Id);
+                        string logStem = LogStem(report, item.Id);
                         state.Stdout = logStem + ".stdout.log";
                         state.Stderr = logStem + ".stderr.log";
                         Console.Error.WriteLine($"[CMakeWorkflow] START {item.Id}");
@@ -233,15 +273,15 @@ public static class WorkflowRunner
                     BeforeExecute = (item, token) => RecoveryFaults.HitAsync("after-checkpoint", item.Id, token),
                     Execute = (item, snapshot, token) =>
                     {
-                        var node = item.Payload;
-                        var sources = node.Definition.Inputs.Where(x => x.From is not null)
+                        PlannedNode node = item.Payload;
+                        Dictionary<string, NodeResult> sources = node.Definition.Inputs.Where(x => x.From is not null)
                             .Select(x => x.From!).Distinct(StringComparer.Ordinal)
                             .ToDictionary(id => id, id => states[id], StringComparer.Ordinal);
                         return CMakeWorkflowNodeExecutor.ExecuteAsync(node,
                             node.Definition.From is { } source ? states[source] : null,
                             snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, item.Id),
-                            token, extension,
-                            toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources);
+extension,
+                            toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources, ct: token);
                     },
                     AfterExecute = (item, token) => RecoveryFaults.HitAsync("after-execution", item.Id, token),
                     Complete = (item, result) =>
@@ -260,23 +300,29 @@ public static class WorkflowRunner
                     },
                     DrainInFlight = (item, result) =>
                         report.Nodes[report.Nodes.FindIndex(n => n.Id == item.Id)] = result
-                });
+                }, cancellation: ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            foreach (var node in report.Nodes.Where(n => n.Status == "pending"))
+            foreach (NodeResult? node in report.Nodes.Where(n => n.Status == "pending"))
+            {
                 node.Status = "canceled";
+            }
         }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
         catch (Exception error)
         {
             report.Error = error.Message;
-            Console.Error.WriteLine($"[CMakeWorkflow] Workflow infrastructure failed: {error.Message}");
-            foreach (var node in report.Nodes.Where(n => n.Status == "pending"))
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Workflow infrastructure failed: {error.Message}");
+            foreach (NodeResult? node in report.Nodes.Where(n => n.Status == "pending"))
             {
                 node.Status = "blocked";
                 node.Error = "Workflow infrastructure failed: " + error.Message;
             }
         }
+#pragma warning restore CA1031
+
         finally
         {
             // The engine drains admitted workers before this domain lease is released.
@@ -291,7 +337,7 @@ public static class WorkflowRunner
         // replayable. No new worker starts before SaveAsync succeeds.
         if (report.Nodes.Any(n => n.Status == "running"))
         {
-            foreach (var node in report.Nodes.Where(n => n.Status == "running"))
+            foreach (NodeResult? node in report.Nodes.Where(n => n.Status == "running"))
             {
                 node.Status = "outcome_unknown";
                 node.Error = "Admission did not commit reliably; manual reconciliation is required.";
@@ -307,18 +353,18 @@ public static class WorkflowRunner
         try
         {
             report.EnvironmentAtEnd = EnvironmentProvenance.CaptureHost();
-            report.BuildEnvironments = report.Nodes.Select(n => (n.BuildDirectory, n.Configuration))
+            report.BuildEnvironments = [.. report.Nodes.Select(n => (n.BuildDirectory, n.Configuration))
                 .Where(x => !string.IsNullOrWhiteSpace(x.BuildDirectory)).Distinct()
                 .Select(x => EnvironmentProvenance.CaptureBuild(x.BuildDirectory, x.Configuration))
-                .OfType<BuildEnvironment>().ToList();
+                .OfType<BuildEnvironment>()];
         }
         catch (IOException error)
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
         }
         catch (UnauthorizedAccessException error)
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
         }
 
         await SaveAsync(report, output, events);
@@ -337,7 +383,7 @@ public static class WorkflowRunner
 
     private static string LogStem(WorkflowReport report, string nodeId)
     {
-        var retries = report.Reconciliations.Count(r => r.NodeId == nodeId && r.Decision == "retry");
+        int retries = report.Reconciliations.Count(r => r.NodeId == nodeId && r.Decision == "retry");
         return retries == 0 ? nodeId : $"{nodeId}.attempt-{retries + 1}";
     }
 

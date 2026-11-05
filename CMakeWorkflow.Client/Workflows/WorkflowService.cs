@@ -1,11 +1,8 @@
-using System.Diagnostics;
-using System.IO.Pipes;
-using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
-using StreamJsonRpc;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 public sealed class WorkflowService(CMakeWorkflowClient client)
 {
@@ -18,10 +15,14 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
     /// </remarks>
     public async Task<WorkflowOperation> StartAsync(StartWorkflowOptions options, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
         client.RequireCapability("workflow/start");
         if (string.IsNullOrWhiteSpace(options.ClientRequestId))
+        {
             throw new ArgumentException("ClientRequestId is required.");
-        var result = await client.Proxy.StartAsync(options, ct);
+        }
+
+        OperationSnapshot result = await client.Proxy.StartAsync(options, ct);
         return new WorkflowOperation(client, result.OperationId);
     }
 

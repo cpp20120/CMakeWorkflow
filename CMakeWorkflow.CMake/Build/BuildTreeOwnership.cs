@@ -3,7 +3,9 @@ using System.Text;
 using System.Diagnostics;
 using System.Text.Json;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public sealed class BuildTreeOwnership : IDisposable
 {
@@ -19,48 +21,58 @@ public sealed class BuildTreeOwnership : IDisposable
         controller ??= Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_CONTROLLER_BUILD_DIR");
         if (controller is not null &&
             WorkflowPlanner.PathComparer.Equals(CanonicalPath(tree), CanonicalPath(controller)))
+        {
             throw new InvalidOperationException(
                 "Unsafe nested build: worker and controller build directories are identical. Launch externally or use an independent worker tree.");
+        }
+
         if (Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_OWNED_TREES") is { } inherited)
         {
-            using var json = JsonDocument.Parse(inherited);
-            foreach (var parentTree in json.RootElement.EnumerateArray())
+            using JsonDocument json = JsonDocument.Parse(inherited);
+            foreach (JsonElement parentTree in json.RootElement.EnumerateArray())
+            {
                 if (WorkflowPlanner.PathComparer.Equals(CanonicalPath(tree), CanonicalPath(parentTree.GetString()!)))
+                {
                     throw new InvalidOperationException(
                         "Unsafe nested build: this tree is already owned by the parent CMakeWorkflow invocation.");
+                }
+            }
         }
     }
 
     public static void PropagateTo(ProcessStartInfo info)
     {
-        var inherited = new List<string>();
+        ArgumentNullException.ThrowIfNull(info);
+        List<string> inherited = [];
         if (Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_OWNED_TREES") is { } value)
         {
-            using var json = JsonDocument.Parse(value);
+            using JsonDocument json = JsonDocument.Parse(value);
             inherited.AddRange(json.RootElement.EnumerateArray().Select(p => p.GetString()!));
         }
 
         lock (owned)
+        {
             info.Environment["CMAKE_WORKFLOW_OWNED_TREES"] = JsonSerializer.Serialize(
-                inherited.Concat(owned).Distinct(WorkflowPlanner.PathComparer).ToList(),
+                [.. inherited.Concat(owned).Distinct(WorkflowPlanner.PathComparer)],
                 WorkflowJson.Default.ListString);
+        }
     }
 
     public static async Task<BuildTreeOwnership> AcquireAsync(IEnumerable<string> trees, CancellationToken ct)
     {
-        var owner = new BuildTreeOwnership();
+        BuildTreeOwnership owner = new();
         try
         {
             // The same protocol is used by workflow, target and sequence commands.
             // Store locks outside build trees so an unconfigured context is not mutated.
-            var lockRoot = Path.Combine(Path.GetTempPath(), "cmake-workflow-build-locks");
-            Directory.CreateDirectory(lockRoot);
-            foreach (var tree in trees.Select(CanonicalPath).Distinct(WorkflowPlanner.PathComparer)
+            string lockRoot = Path.Combine(Path.GetTempPath(), "cmake-workflow-build-locks");
+            _ = Directory.CreateDirectory(lockRoot);
+            foreach (string? tree in trees.Select(CanonicalPath).Distinct(WorkflowPlanner.PathComparer)
                          .Order(WorkflowPlanner.PathComparer))
             {
                 RejectController(tree, null);
-                var key = OperatingSystem.IsWindows() ? tree.ToUpperInvariant() : tree;
-                var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))) + ".lock";
+                string key = OperatingSystem.IsWindows() ? tree.ToUpperInvariant() : tree;
+                string name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))) + ".lock";
                 while (true)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -69,7 +81,11 @@ public sealed class BuildTreeOwnership : IDisposable
                         owner.leases.Add(new FileStream(Path.Combine(lockRoot, name), FileMode.OpenOrCreate,
                             FileAccess.ReadWrite, FileShare.None));
                         owner.paths.Add(tree);
-                        lock (owned) owned.Add(tree);
+                        lock (owned)
+                        {
+                            _ = owned.Add(tree);
+                        }
+
                         break;
                     }
                     // EAGAIN is 11 on Linux and 35 on macOS; Windows reports
@@ -92,10 +108,19 @@ public sealed class BuildTreeOwnership : IDisposable
 
     public void Dispose()
     {
-        foreach (var lease in leases) lease.Dispose();
+        foreach (FileStream lease in leases)
+        {
+            lease.Dispose();
+        }
+
         lock (owned)
-            foreach (var path in paths)
-                owned.Remove(path);
+        {
+            foreach (string path in paths)
+            {
+                _ = owned.Remove(path);
+            }
+        }
+
         paths.Clear();
         leases.Clear();
     }

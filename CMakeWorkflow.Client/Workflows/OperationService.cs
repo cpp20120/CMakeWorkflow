@@ -1,11 +1,6 @@
-using System.Diagnostics;
-using System.IO.Pipes;
-using System.Net.Sockets;
-using System.Text;
-using System.Text.Json;
-using StreamJsonRpc;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 public sealed class OperationService(CMakeWorkflowClient client)
 {

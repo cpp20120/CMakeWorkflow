@@ -1,11 +1,13 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 /// <summary>A byte tunnel to a persistent Host, with no ownership of that Host.</summary>
 public static class StdioBridge
 {
     public static async Task RunAsync(string endpoint, Stream input, Stream output, CancellationToken ct)
     {
-        await using var connection = await LocalTransport.ConnectAsync(endpoint, ct);
+        await using Stream connection = await LocalTransport.ConnectAsync(endpoint, ct);
         await ForwardAsync(input, output, connection, ct);
     }
 
@@ -14,10 +16,13 @@ public static class StdioBridge
     // The caller owns input/output and must supply cancellable asynchronous streams.
     public static async Task ForwardAsync(Stream input, Stream output, Stream connection, CancellationToken ct)
     {
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var upstream = CopyAsync(input, connection, stop.Token);
-        var downstream = CopyAsync(connection, output, stop.Token);
-        var first = await Task.WhenAny(upstream, downstream);
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+        using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        Task upstream = CopyAsync(input, connection, stop.Token);
+        Task downstream = CopyAsync(connection, output, stop.Token);
+        Task first = await Task.WhenAny(upstream, downstream);
         try
         {
             await first;
@@ -27,7 +32,7 @@ public static class StdioBridge
         {
             await stop.CancelAsync();
             // Closing the local endpoint never requests Host shutdown or operation cancellation.
-            connection.Dispose();
+            await connection.DisposeAsync();
             try
             {
                 await Task.WhenAll(upstream, downstream);
@@ -42,11 +47,15 @@ public static class StdioBridge
 
     private static async Task CopyAsync(Stream source, Stream destination, CancellationToken ct)
     {
-        var buffer = new byte[16 * 1024];
+        byte[] buffer = new byte[16 * 1024];
         while (true)
         {
-            var read = await source.ReadAsync(buffer, ct);
-            if (read == 0) return;
+            int read = await source.ReadAsync(buffer, ct);
+            if (read == 0)
+            {
+                return;
+            }
+
             await destination.WriteAsync(buffer.AsMemory(0, read), ct);
             await destination.FlushAsync(ct);
         }

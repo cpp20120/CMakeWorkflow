@@ -1,9 +1,13 @@
 using System.Text.Json;
 using StreamJsonRpc;
+using System.Diagnostics.CodeAnalysis;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 /// <summary>A stable Host application refusal with a machine-readable code.</summary>
+[SuppressMessage("Design", "CA1032", Justification = "Existing constructors require domain-specific error evidence; generic constructors would create invalid exception state.")]
 public sealed class CMakeWorkflowRpcRefusalException(string code, string message, Exception inner)
     : Exception(message, inner)
 {
@@ -17,7 +21,7 @@ internal static class RpcRefusals
         try { return await call(); }
         catch (RemoteInvocationException error) when (TryRead(error, out _, out _))
         {
-            TryRead(error, out var code, out var message);
+            _ = TryRead(error, out string? code, out string? message);
             throw new CMakeWorkflowRpcRefusalException(code!, message!, error);
         }
     }
@@ -26,7 +30,11 @@ internal static class RpcRefusals
     {
         code = null;
         message = null;
-        if (error.ErrorCode != 1001) return false;
+        if (error.ErrorCode != 1001)
+        {
+            return false;
+        }
+
         switch (error.DeserializedErrorData)
         {
             case RpcErrorData data:
@@ -34,10 +42,18 @@ internal static class RpcRefusals
                 message = data.Message;
                 break;
             case JsonElement element when element.ValueKind == JsonValueKind.Object:
-                if (element.TryGetProperty("code", out var c) || element.TryGetProperty("Code", out c))
+                if (element.TryGetProperty("code", out JsonElement c) || element.TryGetProperty("Code", out c))
+                {
                     code = c.GetString();
-                if (element.TryGetProperty("message", out var m) || element.TryGetProperty("Message", out m))
+                }
+
+                if (element.TryGetProperty("message", out JsonElement m) || element.TryGetProperty("Message", out m))
+                {
                     message = m.GetString();
+                }
+
+                break;
+            default:
                 break;
         }
         return !string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(message);

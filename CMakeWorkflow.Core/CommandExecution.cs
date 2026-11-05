@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
+#pragma warning restore IDE0130
 
 public static class CommandExecution
 {
@@ -10,23 +12,33 @@ public static class CommandExecution
         TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
         CancellationToken cancellationToken)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        ArgumentNullException.ThrowIfNull(arguments);
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
-        var start = new ProcessStartInfo(executable)
+        ProcessStartInfo start = new(executable)
         {
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        foreach (string argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
         if (environment is not null)
-            foreach (var (key, value) in environment)
+        {
+            foreach ((string? key, string? value) in environment)
+            {
                 start.Environment[key] = value;
-        using var process = Process.Start(start)
+            }
+        }
+
+        using Process process = Process.Start(start)
                             ?? throw new IOException($"Could not start {executable}.");
-        var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        Task<string> stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
         try
         {
             await process.WaitForExitAsync(deadline.Token);
@@ -39,22 +51,30 @@ public static class CommandExecution
                 await process.WaitForExitAsync(CancellationToken.None);
             }
 
-            if (cancellationToken.IsCancellationRequested) throw;
-            var outText = await stdout;
-            var errText = await stderr;
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            string outText = await stdout;
+            string errText = await stderr;
             return new CommandResult(process.ExitCode, outText + errText, true, process.Id,
                 outText, errText);
         }
 
-        var standardOutput = await stdout;
-        var standardError = await stderr;
+        string standardOutput = await stdout;
+        string standardError = await stderr;
         return new CommandResult(process.ExitCode, standardOutput + standardError, false,
             process.Id, standardOutput, standardError);
     }
 
     public static async Task<string> Sha256Async(string path, CancellationToken ct)
     {
-        await using var stream = File.OpenRead(path);
+        await using FileStream stream = File.OpenRead(path);
+
+#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+#pragma warning restore CA1308
+
     }
 }

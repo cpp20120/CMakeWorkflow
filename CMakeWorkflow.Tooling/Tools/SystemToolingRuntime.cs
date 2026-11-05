@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling;
+#pragma warning restore IDE0130
 
 public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToolingRuntime
 {
@@ -9,28 +11,34 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
         : OperatingSystem.IsMacOS() ? ToolPlatform.MacOS : ToolPlatform.Linux;
 
     public bool IsAdministrator => OperatingSystem.IsWindows() ||
-                                   !OperatingSystem.IsWindows() && GetEffectiveUserId() == 0;
+                                   (!OperatingSystem.IsWindows() && GetEffectiveUserId() == 0);
 
     [DllImport("libc", EntryPoint = "geteuid")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern uint GetEffectiveUserId();
 
     public string? Resolve(string command, string installDirectory)
     {
-        var suffixes = Platform == ToolPlatform.Windows
-            ? new[] { "", ".exe", ".cmd", ".bat" }
+        string[] suffixes = Platform == ToolPlatform.Windows
+            ? ["", ".exe", ".cmd", ".bat"]
             : [""];
-        var directories = new[] { installDirectory }.Concat((Environment.GetEnvironmentVariable("PATH") ?? "")
+        IEnumerable<string> directories = new[] { installDirectory }.Concat((Environment.GetEnvironmentVariable("PATH") ?? "")
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
-        foreach (var directory in directories)
-        foreach (var suffix in suffixes)
+        foreach (string? directory in directories)
         {
-            try
+            foreach (string? suffix in suffixes)
             {
-                var path = Path.Combine(directory, command + suffix);
-                if (File.Exists(path)) return Path.GetFullPath(path);
-            }
-            catch (Exception error) when (error is ArgumentException or NotSupportedException)
-            {
+                try
+                {
+                    string path = Path.Combine(directory, command + suffix);
+                    if (File.Exists(path))
+                    {
+                        return Path.GetFullPath(path);
+                    }
+                }
+                catch (Exception error) when (error is ArgumentException or NotSupportedException)
+                {
+                }
             }
         }
 
@@ -40,16 +48,23 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
     public async Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
         TimeSpan timeout, CancellationToken ct)
     {
-        var start = new ProcessStartInfo(executable)
+        ArgumentNullException.ThrowIfNull(arguments);
+        ProcessStartInfo start = new(executable)
         {
-            UseShellExecute = false, RedirectStandardOutput = true,
-            RedirectStandardError = true, WorkingDirectory = workingDirectory ?? ""
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = workingDirectory ?? ""
         };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new IOException($"Could not start {executable}.");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        foreach (string argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(start) ?? throw new IOException($"Could not start {executable}.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync(ct);
+        Task<string> error = process.StandardError.ReadToEndAsync(ct);
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
         try
         {
@@ -63,7 +78,11 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
                 await process.WaitForExitAsync(CancellationToken.None);
             }
 
-            if (ct.IsCancellationRequested) throw;
+            if (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+
             throw new TimeoutException($"Tool command timed out after {timeout}: {executable}.");
         }
 

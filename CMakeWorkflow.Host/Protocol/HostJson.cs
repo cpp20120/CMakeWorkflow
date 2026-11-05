@@ -2,8 +2,6 @@ using System.Text.Json.Serialization;
 using CMakeWorkflow.Tooling;
 using CMakeWorkflow.History;
 using CMakeWorkflow.Profiling;
-using PolyType;
-using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host;
 
@@ -82,7 +80,7 @@ namespace CMakeWorkflow.Host;
 [JsonSerializable(typeof(HistoryImportRequest))]
 [JsonSerializable(typeof(HistoryImportResult))]
 [JsonSerializable(typeof(HistoryRunsPageRequest))]
-[JsonSerializable(typeof(CMakeWorkflow.History.HistoryRunPage))]
+[JsonSerializable(typeof(HistoryRunPage))]
 [JsonSerializable(typeof(HistoryRunsRequest))]
 [JsonSerializable(typeof(HistoryShowRequest))]
 [JsonSerializable(typeof(HistoryMetricsRequest))]

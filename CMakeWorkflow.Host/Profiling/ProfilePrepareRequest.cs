@@ -1,16 +1,15 @@
-using System.Text.Json.Serialization;
-using CMakeWorkflow;
-using CMakeWorkflow.History;
-using CMakeWorkflow.Profiling;
-using StreamJsonRpc;
-
+using System.Diagnostics.CodeAnalysis;
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record ProfilePrepareRequest(
     string RequestId,
     string ResultsDirectory,
     string Target,
-    List<ProfileVariantRequest> Variants,
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<ProfileVariantRequest> Variants,
     int Repeats = 3,
     double TimeoutSeconds = 300,
     string Backend = "auto",
@@ -18,4 +17,8 @@ public sealed record ProfilePrepareRequest(
     string? Configuration = null,
     string? SourceDirectory = null,
     string? ConfigurePreset = null,
-    string[]? Arguments = null);
+
+#pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
+string[]? Arguments = null
+#pragma warning restore CA1819
+);

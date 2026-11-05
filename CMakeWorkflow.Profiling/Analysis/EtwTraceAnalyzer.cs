@@ -5,7 +5,9 @@ using System.Text.Json.Nodes;
 using System.Xml;
 using System.Xml.Linq;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling;
+#pragma warning restore IDE0130
 
 public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 {
@@ -17,14 +19,18 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct)
     {
         if (nativeProcess && !OperatingSystem.IsWindows())
+        {
             throw new PlatformNotSupportedException("ETL conversion requires Windows tracerpt.");
-        var dump = Path.Combine(outputDirectory, captureId + ".events.xml");
-        var conversion = await process.RunAsync("tracerpt",
+        }
+
+        string dump = Path.Combine(outputDirectory, captureId + ".events.xml");
+        CommandResult conversion = await process.RunAsync("tracerpt",
             [trace, "-o", dump, "-of", "XML", "-lr", "-y"], outputDirectory,
             TimeSpan.FromMinutes(15), null, ct);
         ProfileEnvironment.RequireSuccess(conversion, "tracerpt");
-        if (!File.Exists(dump)) throw new IOException("tracerpt succeeded without an XML event dump.");
-        return ParseXml(dump, outputDirectory, captureId, executable,
+        return !File.Exists(dump)
+            ? throw new IOException("tracerpt succeeded without an XML event dump.")
+            : ParseXml(dump, outputDirectory, captureId, executable,
             targetProcessId, targetStartedAt, targetFinishedAt, ct);
     }
 
@@ -34,39 +40,43 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         string captureId, string executable, int? targetProcessId,
         DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct)
     {
-        var normalizedDirectory = Path.Combine(outputDirectory, "traces", "normalized");
-        Directory.CreateDirectory(normalizedDirectory);
-        var summaryPath = Path.Combine(normalizedDirectory, captureId + ".etw.json");
-        var samplesPath = Path.Combine(normalizedDirectory, captureId + ".etw-samples.jsonl");
-        var timelinePath = Path.Combine(normalizedDirectory, captureId + ".timeline.jsonl");
-        var stackPath = Path.Combine(normalizedDirectory, captureId + ".stacks.json");
-        var stacks = new StackEvidence();
-        var timelineCount = 0;
-        var timelineDropped = 0;
-        var threadProcess = new Dictionary<int, int>();
-        var threads = new Dictionary<int, ThreadCounts>();
-        var readyAt = new Dictionary<int, DateTimeOffset>();
-        var runningAt = new Dictionary<int, DateTimeOffset>();
-        var totalEvents = 0;
-        var cpuSamples = 0;
-        var switchesIn = 0;
-        var switchesOut = 0;
-        var readyEvents = 0;
-        var rawStacks = 0;
+        string normalizedDirectory = Path.Combine(outputDirectory, "traces", "normalized");
+        _ = Directory.CreateDirectory(normalizedDirectory);
+        string summaryPath = Path.Combine(normalizedDirectory, captureId + ".etw.json");
+        string samplesPath = Path.Combine(normalizedDirectory, captureId + ".etw-samples.jsonl");
+        string timelinePath = Path.Combine(normalizedDirectory, captureId + ".timeline.jsonl");
+        string stackPath = Path.Combine(normalizedDirectory, captureId + ".stacks.json");
+        StackEvidence stacks = new();
+        int timelineCount = 0;
+        int timelineDropped = 0;
+        Dictionary<int, int> threadProcess = [];
+        Dictionary<int, ThreadCounts> threads = [];
+        Dictionary<int, DateTimeOffset> readyAt = [];
+        Dictionary<int, DateTimeOffset> runningAt = [];
+        int totalEvents = 0;
+        int cpuSamples = 0;
+        int switchesIn = 0;
+        int switchesOut = 0;
+        int readyEvents = 0;
+        int rawStacks = 0;
         string? imageName = null;
-        using (var sampleWriter = new StreamWriter(samplesPath, false, new UTF8Encoding(false)))
-        using (var timelineWriter = new StreamWriter(timelinePath, false, new UTF8Encoding(false)))
-        using (var reader = XmlReader.Create(dump, new XmlReaderSettings
-               {
-                   DtdProcessing = DtdProcessing.Prohibit,
-                   XmlResolver = null,
-                   IgnoreComments = true,
-                   IgnoreWhitespace = true
-               }))
+        using (StreamWriter sampleWriter = new(samplesPath, false, new UTF8Encoding(false)))
+        using (StreamWriter timelineWriter = new(timelinePath, false, new UTF8Encoding(false)))
+        using (XmlReader reader = XmlReader.Create(dump, new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            IgnoreComments = true,
+            IgnoreWhitespace = true
+        }))
         {
             void Timeline(DateTimeOffset? time, int tid, string state, int? processor)
             {
-                if (time is null) return;
+                if (time is null)
+                {
+                    return;
+                }
+
                 if (timelineCount >= 10000)
                 {
                     timelineDropped++;
@@ -76,8 +86,10 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 timelineCount++;
                 timelineWriter.WriteLine(new JsonObject
                 {
-                    ["timestamp"] = time.Value.ToString("O"), ["threadId"] = tid,
-                    ["state"] = state, ["cpu"] = processor
+                    ["timestamp"] = time.Value.ToString("O"),
+                    ["threadId"] = tid,
+                    ["state"] = state,
+                    ["cpu"] = processor
                 }.ToJsonString());
             }
 
@@ -85,42 +97,47 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             {
                 if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "Event")
                 {
-                    if (!reader.Read()) break;
+                    if (!reader.Read())
+                    {
+                        break;
+                    }
+
                     continue;
                 }
 
                 ct.ThrowIfCancellationRequested();
-                var record = (XElement)XNode.ReadFrom(reader);
+                XElement record = (XElement)XNode.ReadFrom(reader);
                 totalEvents++;
-                var system = Child(record, "System");
-                var execution = Child(system, "Execution");
-                var headerPid = ParseInt(Attr(execution, "ProcessID"));
-                var headerTid = ParseInt(Attr(execution, "ThreadID"));
-                var cpu = ParseInt(Attr(execution, "ProcessorID"));
-                var timestampText = Attr(Child(system, "TimeCreated"), "SystemTime");
+                XElement? system = Child(record, "System");
+                XElement? execution = Child(system, "Execution");
+                int? headerPid = ParseInt(Attr(execution, "ProcessID"));
+                int? headerTid = ParseInt(Attr(execution, "ThreadID"));
+                int? cpu = ParseInt(Attr(execution, "ProcessorID"));
+                string? timestampText = Attr(Child(system, "TimeCreated"), "SystemTime");
                 DateTimeOffset? timestamp = DateTimeOffset.TryParse(timestampText,
-                    CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+                    CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed)
                     ? parsed
                     : null;
-                var data = Child(record, "EventData")?.Elements()
+                Dictionary<string, string> data = Child(record, "EventData")?.Elements()
                                .Where(x => x.Name.LocalName == "Data")
                                .GroupBy(x => Attr(x, "Name") ?? "", StringComparer.OrdinalIgnoreCase)
                                .ToDictionary(x => x.Key, x => x.First().Value.Trim(),
                                    StringComparer.OrdinalIgnoreCase)
                            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var rendering = Child(record, "RenderingInfo");
-                var eventName = Child(rendering, "EventName")?.Value.Trim() ?? "";
-                var opcode = Child(rendering, "Opcode")?.Value.Trim()
+                XElement? rendering = Child(record, "RenderingInfo");
+                string eventName = Child(rendering, "EventName")?.Value.Trim() ?? "";
+                string opcode = Child(rendering, "Opcode")?.Value.Trim()
                              ?? Child(system, "Opcode")?.Value.Trim() ?? "";
-                var normalizedName = new string(eventName.Where(char.IsLetterOrDigit)
-                    .Select(char.ToLowerInvariant).ToArray());
-                var payloadPid = Value(data, "ProcessId", "ProcessID", "PID");
-                var payloadTid = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
-                var targetPid = targetProcessId;
+                string normalizedName = new([.. eventName.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant)]);
+                int? payloadPid = Value(data, "ProcessId", "ProcessID", "PID");
+                int? payloadTid = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
+                int? targetPid = targetProcessId;
 
                 if (normalizedName == "process" && (opcode.Equals("Start", StringComparison.OrdinalIgnoreCase)
                                                     || opcode == "1") && payloadPid == targetPid)
+                {
                     imageName = data.GetValueOrDefault("ImageFileName");
+                }
 
                 if (normalizedName == "thread")
                 {
@@ -128,34 +145,49 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     {
                         if (opcode.Equals("Start", StringComparison.OrdinalIgnoreCase)
                             || opcode.Equals("DCStart", StringComparison.OrdinalIgnoreCase)
-                            || opcode is "1" or "3") threadProcess[tid] = pid;
+                            || opcode is "1" or "3")
+                        {
+                            threadProcess[tid] = pid;
+                        }
                         else if (opcode.Equals("End", StringComparison.OrdinalIgnoreCase)
                                  || opcode.Equals("DCEnd", StringComparison.OrdinalIgnoreCase)
                                  || opcode is "2" or "4")
                         {
-                            threadProcess.Remove(tid);
-                            readyAt.Remove(tid);
-                            runningAt.Remove(tid);
+                            _ = threadProcess.Remove(tid);
+                            _ = readyAt.Remove(tid);
+                            _ = runningAt.Remove(tid);
                         }
                     }
 
                     continue;
                 }
 
-                if (targetPid is null || !WithinWindow(timestamp, targetStartedAt, targetFinishedAt)) continue;
-                var eventPid = payloadPid ?? headerPid;
-                var belongsToTarget = eventPid == targetPid
+                if (targetPid is null || !WithinWindow(timestamp, targetStartedAt, targetFinishedAt))
+                {
+                    continue;
+                }
+
+                int? eventPid = payloadPid ?? headerPid;
+                bool belongsToTarget = eventPid == targetPid
                                       || (headerTid is { } knownTid &&
                                           threadProcess.GetValueOrDefault(knownTid) == targetPid)
                                       || (payloadTid is { } payloadThread &&
                                           threadProcess.GetValueOrDefault(payloadThread) == targetPid);
                 if (normalizedName is "sampledprofile" or "sampleprofile")
                 {
-                    if (!belongsToTarget) continue;
+                    if (!belongsToTarget)
+                    {
+                        continue;
+                    }
+
                     cpuSamples++;
-                    var thread = payloadTid ?? headerTid;
-                    if (thread is { } sampleTid) Counts(threads, sampleTid).Samples++;
-                    var stack = record.Descendants().FirstOrDefault(x =>
+                    int? thread = payloadTid ?? headerTid;
+                    if (thread is { } sampleTid)
+                    {
+                        Counts(threads, sampleTid).Samples++;
+                    }
+
+                    string? stack = record.Descendants().FirstOrDefault(x =>
                                     x.Name.LocalName is "StackTrace" or "Stack")?.Value.Trim()
                                 ?? data.GetValueOrDefault("StackTrace")
                                 ?? data.GetValueOrDefault("Stack");
@@ -164,19 +196,22 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                         rawStacks++;
                         // tracerpt may expose only raw addresses: these are
                         // explicitly marked unresolved, not fabricated symbols.
-                        var frames = stack.Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries
+                        string[] frames = [.. stack.Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries
                                                               | StringSplitOptions.TrimEntries)
                             .SelectMany(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                                 ? x.Split(' ', StringSplitOptions.RemoveEmptyEntries)
                                 : [x])
                             .Select(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                                 ? "[unknown]"
-                                : x).ToArray();
+                                : x)];
                         stacks.Add(frames);
                     }
-                    else stacks.Add([]);
+                    else
+                    {
+                        stacks.Add([]);
+                    }
 
-                    var sample = new JsonObject
+                    JsonObject sample = new()
                     {
                         ["timestamp"] = timestamp?.ToString("O"),
                         ["processId"] = targetPid,
@@ -190,17 +225,20 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 }
                 else if (normalizedName is "cswitch" or "contextswitch")
                 {
-                    var next = Value(data, "NewThreadId", "NewThreadID");
-                    var previous = Value(data, "OldThreadId", "OldThreadID");
+                    int? next = Value(data, "NewThreadId", "NewThreadID");
+                    int? previous = Value(data, "OldThreadId", "OldThreadID");
                     if (next is { } nextTid && threadProcess.GetValueOrDefault(nextTid) == targetPid)
                     {
                         switchesIn++;
-                        var counts = Counts(threads, nextTid);
+                        ThreadCounts counts = Counts(threads, nextTid);
                         counts.SwitchesIn++;
                         if (timestamp is { } switchTime)
                         {
-                            if (readyAt.Remove(nextTid, out var readyTime) && switchTime >= readyTime)
+                            if (readyAt.Remove(nextTid, out DateTimeOffset readyTime) && switchTime >= readyTime)
+                            {
                                 counts.AddReadyLatency((switchTime - readyTime).TotalMilliseconds);
+                            }
+
                             runningAt[nextTid] = switchTime;
                             Timeline(timestamp, nextTid, "running", cpu);
                         }
@@ -209,34 +247,39 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     if (previous is { } previousTid && threadProcess.GetValueOrDefault(previousTid) == targetPid)
                     {
                         switchesOut++;
-                        var counts = Counts(threads, previousTid);
+                        ThreadCounts counts = Counts(threads, previousTid);
                         counts.SwitchesOut++;
                         Timeline(timestamp, previousTid, "offcpu", cpu);
                         if (timestamp is { } switchTime
-                            && runningAt.Remove(previousTid, out var runningTime)
+                            && runningAt.Remove(previousTid, out DateTimeOffset runningTime)
                             && switchTime >= runningTime)
+                        {
                             counts.RunningMilliseconds += (switchTime - runningTime).TotalMilliseconds;
+                        }
                     }
                 }
                 else if (normalizedName is "readythread" or "threadready")
                 {
-                    var ready = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
+                    int? ready = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
                     if (ready is { } readyTid && threadProcess.GetValueOrDefault(readyTid) == targetPid)
                     {
                         readyEvents++;
                         Counts(threads, readyTid).ReadyEvents++;
                         Timeline(timestamp, readyTid, "ready", cpu);
-                        if (timestamp is { } readyTime) readyAt.TryAdd(readyTid, readyTime);
+                        if (timestamp is { } readyTime)
+                        {
+                            _ = readyAt.TryAdd(readyTid, readyTime);
+                        }
                     }
                 }
             }
         }
 
-        var threadRows = new JsonArray();
-        var readyLatencyCount = 0;
-        var readyLatencyMilliseconds = 0.0;
-        var runningMilliseconds = 0.0;
-        foreach (var (tid, counts) in threads.OrderBy(x => x.Key))
+        JsonArray threadRows = [];
+        int readyLatencyCount = 0;
+        double readyLatencyMilliseconds = 0.0;
+        double runningMilliseconds = 0.0;
+        foreach ((int tid, ThreadCounts? counts) in threads.OrderBy(x => x.Key))
         {
             readyLatencyCount += counts.ReadyLatencyCount;
             readyLatencyMilliseconds += counts.ReadyLatencyMilliseconds;
@@ -258,7 +301,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             });
         }
 
-        var summary = new JsonObject
+        JsonObject summary = new()
         {
             ["schemaVersion"] = 1,
             ["backend"] = "etw",
@@ -292,7 +335,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         File.WriteAllText(stackPath, stacks.ToJson("etw", captureId).ToJsonString() + "\n");
         File.WriteAllText(summaryPath,
             summary.ToJsonString(new JsonSerializerOptions
-                { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n");
+            { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n");
         return new EtwAnalysisResult(dump, summaryPath, samplesPath,
             cpuSamples, switchesIn, readyEvents);
     }
@@ -318,7 +361,11 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 
     private static ThreadCounts Counts(Dictionary<int, ThreadCounts> counts, int tid)
     {
-        if (!counts.TryGetValue(tid, out var value)) counts[tid] = value = new ThreadCounts();
+        if (!counts.TryGetValue(tid, out ThreadCounts? value))
+        {
+            counts[tid] = value = new ThreadCounts();
+        }
+
         return value;
     }
 
@@ -328,29 +375,39 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
     private static string? Attr(XElement? parent, string name) =>
         parent?.Attributes().FirstOrDefault(x => x.Name.LocalName == name)?.Value;
 
-    private static int? Value(IReadOnlyDictionary<string, string> data, params string[] names)
+    private static int? Value(Dictionary<string, string> data, params string[] names)
     {
-        foreach (var name in names)
-            if (data.TryGetValue(name, out var value) && ParseInt(value) is { } result)
+        foreach (string name in names)
+        {
+            if (data.TryGetValue(name, out string? value) && ParseInt(value) is { } result)
+            {
                 return result;
+            }
+        }
+
         return null;
     }
 
     private static int? ParseInt(string? value)
     {
-        if (value is null) return null;
+        if (value is null)
+        {
+            return null;
+        }
+
         value = value.Trim();
-        if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+        return value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
             && int.TryParse(value[2..], NumberStyles.HexNumber,
-                CultureInfo.InvariantCulture, out var hex)) return hex;
-        return int.TryParse(value, NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out var decimalValue)
+                CultureInfo.InvariantCulture, out int hex)
+            ? hex
+            : int.TryParse(value, NumberStyles.Integer,
+            CultureInfo.InvariantCulture, out int decimalValue)
             ? decimalValue
             : null;
     }
 
     private static bool WithinWindow(DateTimeOffset? timestamp,
         DateTimeOffset? start, DateTimeOffset? end) =>
-        timestamp is null || (start is null || timestamp >= start.Value.AddMilliseconds(-50))
-        && (end is null || timestamp <= end.Value.AddMilliseconds(50));
+        timestamp is null || ((start is null || timestamp >= start.Value.AddMilliseconds(-50))
+        && (end is null || timestamp <= end.Value.AddMilliseconds(50)));
 }

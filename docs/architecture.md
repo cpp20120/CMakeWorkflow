@@ -103,12 +103,16 @@ Scheduler не сериализует отчёты, не обращается к
 Process-домен доступен через `execution/start` и `Client.Executions.StartAsync`; значение `cmake` в этом же API
 направляется в существующий CMake-путь. Совместимый `workflow/start` сохранён. Process-домен не использует
 CMake contexts, targets или CMake report: его manifest и `run.json` имеют собственную схему. Его восстановление
-через resume сейчас не поддерживается.
+через resume поддерживается только явно, после SQLite reconciliation и проверки доказательств отсутствия
+предыдущего допуска для исполняемых узлов. `running`/`outcome_unknown` блокируют продолжение;
+успешные и другие терминальные узлы не повторяются. Одноразовый claim сохраняется до изменения runner state.
+Подробнее — [process recovery](ru/process-execution.md).
 
-Общие примитивы пока находятся в разных проектах: scheduler — в Core, а
-[WorkflowProcessBackend](../CMakeWorkflow.CMake/Execution/WorkflowProcessBackend.cs) и
-[DurableByteWriter](../CMakeWorkflow.CMake/Recovery/DurableByteWriter.cs) — в CMake. Host получает доступ к внутренним
-типам через `InternalsVisibleTo`. Это текущее размещение кода, а не отдельная сборка execution engine.
+Общие примитивы находятся в Core: scheduler — в `Execution`,
+[WorkflowProcessBackend](../CMakeWorkflow.Core/Processes/WorkflowProcessBackend.cs) — в `Processes`,
+[DurableByteWriter](../CMakeWorkflow.Core/Persistence/DurableByteWriter.cs) — в `Persistence`.
+CMake и Host получают доступ к внутренним типам через `InternalsVisibleTo`.
+`CMakeProcessExecution` остаётся адаптером подготовки CMake-процесса.
 
 ## Выполнение workflow
 
@@ -173,7 +177,9 @@ Host и SDK используют закрытые DTO, source-generated `System.
 
 Host хранит admission в `<workspace>/.cmakeworkflow/operations.sqlite` через
 [DurableAcceptanceStore](../CMakeWorkflow.Host/Workflows/DurableAcceptanceStore.cs). Запись включает идентичность
-запроса, неизменяемый snapshot manifest, допуск dispatch и сведения о checkpoint. Повтор исходного запроса с тем же
+запроса, неизменяемый snapshot manifest, допуск dispatch и сведения о checkpoint.
+Для process домена сохраняются также точные байты последнего dispatch checkpoint: аудит resume связывается
+с их hash при существующем `ClaimResumeAttempt`. Отдельного recovery store нет. Повтор исходного запроса с тем же
 `ClientRequestId` возвращает ту же операцию; изменение параметров с тем же ID отклоняется.
 
 Порядок запуска: принять snapshot и проверить hash → проверить доменный plan → зарезервировать results directory →

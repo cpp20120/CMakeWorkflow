@@ -10,9 +10,12 @@ internal sealed class TransportTestHost : IAsyncDisposable
 
     public TransportTestHost()
     {
-        Directory.CreateDirectory(Root);
+        _ = Directory.CreateDirectory(Root);
         if (!OperatingSystem.IsWindows())
+        {
             File.SetUnixFileMode(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         Endpoint = OperatingSystem.IsWindows()
             ? @"\\.\pipe\cmakeworkflow-" + Guid.NewGuid().ToString("N")
             : Path.Combine(Root, "host.sock");
@@ -23,10 +26,14 @@ internal sealed class TransportTestHost : IAsyncDisposable
     {
         while (true)
         {
-            if (server.IsCompleted) await server;
+            if (server.IsCompleted)
+            {
+                await server;
+            }
+
             try
             {
-                await using var client = await CMakeWorkflowClient.ConnectAsync(new(Endpoint, Root), ct);
+                await using CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectAsync(new(Endpoint, Root), ct);
                 return;
             }
             catch (System.Net.Sockets.SocketException)

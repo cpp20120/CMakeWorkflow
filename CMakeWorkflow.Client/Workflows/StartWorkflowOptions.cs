@@ -1,11 +1,6 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using PolyType;
-using StreamJsonRpc;
-using CMakeWorkflow;
-using CMakeWorkflow.Profiling;
-
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 /// <summary>Durable admission inputs, interpreted by the connected Host.</summary>
 /// <param name="ClientRequestId">Persist this caller-chosen ID before submission; use operations/find after a lost response.</param>

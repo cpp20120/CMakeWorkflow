@@ -1,4 +1,6 @@
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
 /// <summary>Explicit, user-scoped Linux Host installation over authenticated SSH.NET.</summary>
 public sealed record SshNetProvisionOptions(
@@ -15,7 +17,15 @@ public sealed record SshNetProvisionFile(string RelativePath, string Sha256, lon
 public sealed record SshNetProvisionPlan(
     string ApprovalSha256, string RuntimeIdentifier, string RemoteArchitecture,
     string InstallRoot, string ReleaseDirectory, string Executable,
-    bool AlreadyActive, string[] ToolProbes, SshNetProvisionFile[] Files);
+    bool AlreadyActive,
+#pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
+string[] ToolProbes
+#pragma warning restore CA1819
+,
+#pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
+SshNetProvisionFile[] Files
+#pragma warning restore CA1819
+);
 
 public sealed record SshNetProvisionReceipt(
     string ApprovalSha256, string ReleaseDirectory, string Executable,

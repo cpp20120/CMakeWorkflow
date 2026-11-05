@@ -8,15 +8,15 @@ internal static class WorkflowRunnerDomainCharacterizationTests
 {
     public static async Task RunAsync(string root)
     {
-        var fixture = Path.Combine(root, "domain-runner");
-        var source = Directory.CreateDirectory(Path.Combine(fixture, "source")).FullName;
-        var build = Path.Combine(fixture, "build");
-        var observerSource = Directory.CreateDirectory(Path.Combine(fixture, "observer-source")).FullName;
-        var observerBuild = Directory.CreateDirectory(Path.Combine(fixture, "observer-build")).FullName;
-        var continueConfigure = Path.Combine(observerBuild, "continue-configure");
-        var manifest = Path.Combine(fixture, "workflow.json");
-        var output = Path.Combine(fixture, "results");
-        Directory.CreateDirectory(Path.Combine(build, ".cmake", "api", "v1", "query",
+        string fixture = Path.Combine(root, "domain-runner");
+        string source = Directory.CreateDirectory(Path.Combine(fixture, "source")).FullName;
+        string build = Path.Combine(fixture, "build");
+        string observerSource = Directory.CreateDirectory(Path.Combine(fixture, "observer-source")).FullName;
+        string observerBuild = Directory.CreateDirectory(Path.Combine(fixture, "observer-build")).FullName;
+        string continueConfigure = Path.Combine(observerBuild, "continue-configure");
+        string manifest = Path.Combine(fixture, "workflow.json");
+        string output = Path.Combine(fixture, "results");
+        _ = Directory.CreateDirectory(Path.Combine(build, ".cmake", "api", "v1", "query",
             "client-cmake-workflow"));
         await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"), """
             cmake_minimum_required(VERSION 3.26)
@@ -35,24 +35,31 @@ internal static class WorkflowRunnerDomainCharacterizationTests
               execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.05)
             endwhile()
             """);
-        var query = Path.Combine(build, ".cmake", "api", "v1", "query", "client-cmake-workflow");
-        foreach (var kind in new[] { "codemodel-v2", "cache-v2", "toolchains-v1" })
+        string query = Path.Combine(build, ".cmake", "api", "v1", "query", "client-cmake-workflow");
+        foreach (string? kind in new[] { "codemodel-v2", "cache-v2", "toolchains-v1" })
+        {
             await File.WriteAllTextAsync(Path.Combine(query, kind), "");
+        }
+
         await RunCommand("cmake", ["-S", source, "-B", build], fixture);
 
-        var workflow = new WorkflowDocument
+        WorkflowDocument workflow = new()
         {
             SchemaVersion = 2,
             Contexts = new Dictionary<string, WorkflowContext>
             {
                 ["worker"] = new()
                 {
-                    BuildDirectory = "build", SourceDirectory = "source", Mode = "adopt",
+                    BuildDirectory = "build",
+                    SourceDirectory = "source",
+                    Mode = "adopt",
                     ProvenancePolicy = "allowUnverified"
                 },
                 ["observer"] = new()
                 {
-                    BuildDirectory = "observer-build", SourceDirectory = "observer-source", Mode = "managed"
+                    BuildDirectory = "observer-build",
+                    SourceDirectory = "observer-source",
+                    Mode = "managed"
                 }
             },
             Nodes =
@@ -77,37 +84,37 @@ internal static class WorkflowRunnerDomainCharacterizationTests
         };
         await File.WriteAllBytesAsync(manifest,
             JsonSerializer.SerializeToUtf8Bytes(workflow, WorkflowJson.Default.WorkflowDocument));
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        var plan = await WorkflowPlanner.LoadAsync(manifest, [], null, deadline.Token);
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(120));
+        WorkflowPlan plan = await WorkflowPlanner.LoadAsync(manifest, [], null, deadline.Token);
         Check(plan.Nodes.Select(node => node.Definition.Id).SequenceEqual(
                 ["build", "profile", "configure-observer", "inspect-observer"]),
             "Public planner returned an unexpected stable node order.");
 
-        var profile = new BlockingProfileExecutor();
-        var gates = new List<string[]>();
-        var runTask = WorkflowRunner.RunAsync(plan, 2, output, deadline.Token, profile,
+        BlockingProfileExecutor profile = new();
+        List<string[]> gates = [];
+        Task<int> runTask = WorkflowRunner.RunAsync(plan, 2, output, deadline.Token, profile,
             beforeExternalDispatch: async (directory, token) =>
             {
-                var report = await ReadReportAsync(Path.Combine(directory, "run.json"), token);
-                gates.Add(report.Nodes.Select(node => node.Id + ":" + node.Status).ToArray());
+                WorkflowReport report = await ReadReportAsync(Path.Combine(directory, "run.json"), token);
+                gates.Add([.. report.Nodes.Select(node => node.Id + ":" + node.Status)]);
             });
 
         try
         {
             await profile.Started.Task.WaitAsync(TimeSpan.FromSeconds(60));
             await File.WriteAllTextAsync(continueConfigure, "continue");
-            var request = profile.Request ?? throw new Exception("Profile extension request was not captured.");
+            WorkflowOperationRequest request = profile.Request ?? throw new UnreachableException("Profile extension request was not captured.");
             Check(request.Kind == "profile" && request.NodeId == "profile"
                   && request.Executable is not null && File.Exists(request.Executable)
                   && request.Arguments.SequenceEqual(["alpha", "", "a;b"])
                   && request.WorkingDirectory == source
-                  && request.Environment.TryGetValue("PROFILE_VALUE", out var env) && env == "fixture"
-                  && request.Options.TryGetValue("capture", out var option) && option == "stable"
+                  && request.Environment.TryGetValue("PROFILE_VALUE", out string? env) && env == "fixture"
+                  && request.Options.TryGetValue("capture", out string? option) && option == "stable"
                   && request.OutputDirectory == output,
                 "Fake profile extension received a changed or incomplete execution request.");
 
-            var during = await WaitForProfileAndInspectAsync(Path.Combine(output, "run.json"), deadline.Token);
-            var profileNode = during.Nodes.Single(node => node.Id == "profile");
+            WorkflowReport during = await WaitForProfileAndInspectAsync(Path.Combine(output, "run.json"), deadline.Token);
+            NodeResult profileNode = during.Nodes.Single(node => node.Id == "profile");
             Check(profileNode.Status == "running" && profileNode.Executable is null
                   && profileNode.ExitCode is null && profileNode.Arguments.Count == 0
                   && profileNode.ExperimentResult == "NotRun" && profileNode.Outputs.Count == 0,
@@ -116,7 +123,7 @@ internal static class WorkflowRunnerDomainCharacterizationTests
             profile.Release();
             Check(await runTask.WaitAsync(TimeSpan.FromSeconds(30)) == 0,
                 "WorkflowRunner did not report success after fake profile completion.");
-            var final = await ReadReportAsync(Path.Combine(output, "run.json"), deadline.Token);
+            WorkflowReport final = await ReadReportAsync(Path.Combine(output, "run.json"), deadline.Token);
             AssertFinalProjection(final, request);
             Check(gates.Count == 3
                   && gates[0].SequenceEqual([
@@ -130,8 +137,12 @@ internal static class WorkflowRunnerDomainCharacterizationTests
         finally
         {
             profile.Release();
-            try { await runTask.WaitAsync(TimeSpan.FromSeconds(10)); }
+            try { _ = await runTask.WaitAsync(TimeSpan.FromSeconds(10)); }
+
+#pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
             catch (Exception) { }
+#pragma warning restore CA1031
+
         }
 
         await CharacterizeMissingToolAsync(build, fixture, deadline.Token);
@@ -144,10 +155,10 @@ internal static class WorkflowRunnerDomainCharacterizationTests
               && report.Nodes.Select(node => node.Id).SequenceEqual(
                   ["build", "profile", "configure-observer", "inspect-observer"]),
             "Workflow report status or plan-ordered node identity changed.");
-        var build = report.Nodes[0];
-        var profile = report.Nodes[1];
-        var configure = report.Nodes[2];
-        var inspect = report.Nodes[3];
+        NodeResult build = report.Nodes[0];
+        NodeResult profile = report.Nodes[1];
+        NodeResult configure = report.Nodes[2];
+        NodeResult inspect = report.Nodes[3];
         Check(build.Status == "succeeded" && build.ExitCode == 0
               && build.BuildVerification?.Verification == "BackendSucceeded"
               && build.Artifact is { Materialization: "VerifiedAfterBuild" },
@@ -156,10 +167,11 @@ internal static class WorkflowRunnerDomainCharacterizationTests
               && profile.ExperimentResult == "captured"
               && profile.Error == "fixture capture complete"
               && profile.Outputs.OrderBy(pair => pair.Key).SequenceEqual(new Dictionary<string, string>
-                  {
-                      ["backend"] = "fixture-backend", ["eventSource"] = "synthetic-source",
-                      ["sampleCount"] = "7"
-                  }.OrderBy(pair => pair.Key))
+              {
+                  ["backend"] = "fixture-backend",
+                  ["eventSource"] = "synthetic-source",
+                  ["sampleCount"] = "7"
+              }.OrderBy(pair => pair.Key))
               && profile.ExecutionConditions.GetValueOrDefault("profilerBackend") == "fixture-backend"
               && profile.ExecutionConditions.GetValueOrDefault("profilerEventSource") == "synthetic-source"
               && profile.Artifact is { Materialization: "VerifiedAgainstBuild" } artifact
@@ -171,7 +183,7 @@ internal static class WorkflowRunnerDomainCharacterizationTests
               && report.ManifestHash.Length == 64,
             "Concurrent independent inspect projection or within-run manifest binding changed.");
 
-        var actualProjection = JsonSerializer.SerializeToNode(new
+        JsonNode? actualProjection = JsonSerializer.SerializeToNode(new
         {
             status = report.Status,
             nodes = report.Nodes.Select(node => new
@@ -190,7 +202,7 @@ internal static class WorkflowRunnerDomainCharacterizationTests
                 profilerEventSource = node.ExecutionConditions.GetValueOrDefault("profilerEventSource")
             })
         });
-        var expectedProjection = JsonNode.Parse(JsonSerializer.Serialize(new
+        JsonNode? expectedProjection = JsonNode.Parse(JsonSerializer.Serialize(new
         {
             status = "succeeded",
             nodes = new object[]
@@ -239,22 +251,24 @@ internal static class WorkflowRunnerDomainCharacterizationTests
 
     private static async Task CharacterizeMissingToolAsync(string build, string fixture, CancellationToken ct)
     {
-        var index = Directory.GetFiles(Path.Combine(build, ".cmake", "api", "v1", "reply"), "index-*.json")
+        string index = Directory.GetFiles(Path.Combine(build, ".cmake", "api", "v1", "reply"), "index-*.json")
             .OrderByDescending(path => Path.GetFileName(path)[6..], StringComparer.Ordinal).First();
-        var indexJson = JsonNode.Parse(await File.ReadAllTextAsync(index, ct))!;
-        var missingCtest = Path.Combine(fixture, "missing-ctest-executable");
+        JsonNode indexJson = JsonNode.Parse(await File.ReadAllTextAsync(index, ct))!;
+        string missingCtest = Path.Combine(fixture, "missing-ctest-executable");
         indexJson["cmake"]!["paths"]!["ctest"] = missingCtest;
         await File.WriteAllTextAsync(index, indexJson.ToJsonString(), ct);
 
-        var missingManifest = Path.Combine(fixture, "missing-tool.json");
-        var missingWorkflow = new WorkflowDocument
+        string missingManifest = Path.Combine(fixture, "missing-tool.json");
+        WorkflowDocument missingWorkflow = new()
         {
             SchemaVersion = 2,
             Contexts = new Dictionary<string, WorkflowContext>
             {
                 ["worker"] = new()
                 {
-                    BuildDirectory = "build", SourceDirectory = "source", Mode = "adopt",
+                    BuildDirectory = "build",
+                    SourceDirectory = "source",
+                    Mode = "adopt",
                     ProvenancePolicy = "allowUnverified"
                 }
             },
@@ -269,12 +283,12 @@ internal static class WorkflowRunnerDomainCharacterizationTests
         };
         await File.WriteAllBytesAsync(missingManifest,
             JsonSerializer.SerializeToUtf8Bytes(missingWorkflow, WorkflowJson.Default.WorkflowDocument), ct);
-        var plan = await WorkflowPlanner.LoadAsync(missingManifest, [], null, ct);
-        var output = Path.Combine(fixture, "missing-tool-results");
+        WorkflowPlan plan = await WorkflowPlanner.LoadAsync(missingManifest, [], null, ct);
+        string output = Path.Combine(fixture, "missing-tool-results");
         Check(await WorkflowRunner.RunAsync(plan, 1, output, ct) == 3,
             "Unavailable CTest executable did not produce needs_attention.");
-        var report = await ReadReportAsync(Path.Combine(output, "run.json"), ct);
-        var node = report.Nodes.Single(result => result.Id == "ctest");
+        WorkflowReport report = await ReadReportAsync(Path.Combine(output, "run.json"), ct);
+        NodeResult node = report.Nodes.Single(result => result.Id == "ctest");
         Check(report.Status == "needs_attention" && node.Status == "needs_attention"
               && node.ExperimentResult == "NotRun"
               && node.Error?.Contains(missingCtest, StringComparison.Ordinal) == true
@@ -285,15 +299,18 @@ internal static class WorkflowRunnerDomainCharacterizationTests
 
     private static async Task<WorkflowReport> WaitForProfileAndInspectAsync(string path, CancellationToken ct)
     {
-        var until = Stopwatch.StartNew();
+        Stopwatch until = Stopwatch.StartNew();
         while (until.Elapsed < TimeSpan.FromSeconds(10))
         {
             ct.ThrowIfCancellationRequested();
-            var report = await ReadReportAsync(path, ct);
+            WorkflowReport report = await ReadReportAsync(path, ct);
             if (report.Nodes.Single(node => node.Id == "profile").Status == "running"
                 && report.Nodes.Single(node => node.Id == "configure-observer").Status == "succeeded"
                 && report.Nodes.Single(node => node.Id == "inspect-observer").Status == "succeeded")
+            {
                 return report;
+            }
+
             await Task.Delay(20, ct);
         }
         throw new TimeoutException("Independent inspect did not complete while profile extension was blocked.");
@@ -305,31 +322,42 @@ internal static class WorkflowRunnerDomainCharacterizationTests
 
     private static async Task RunCommand(string executable, IReadOnlyList<string> arguments, string workingDirectory)
     {
-        var start = new ProcessStartInfo(executable)
+        ProcessStartInfo start = new(executable)
         {
             UseShellExecute = false,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new Exception($"Could not start {executable}.");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
+        foreach (string argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(start) ?? throw new UnreachableException($"Could not start {executable}.");
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
         try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60)); }
         catch
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
             await process.WaitForExitAsync();
             throw;
         }
-        var details = await stdout + await stderr;
+        string details = await stdout + await stderr;
         Check(process.ExitCode == 0, $"{executable} failed ({process.ExitCode}): {details}");
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition)
+        {
+            throw new UnreachableException(message);
+        }
     }
 
     private sealed class BlockingProfileExecutor : IWorkflowOperationExecutor
@@ -346,11 +374,12 @@ internal static class WorkflowRunnerDomainCharacterizationTests
             CancellationToken cancellationToken)
         {
             Request = request;
-            Started.TrySetResult();
+            _ = Started.TrySetResult();
             await release.Task.WaitAsync(cancellationToken);
             return new(0, "captured", new Dictionary<string, string>
             {
-                ["backend"] = "fixture-backend", ["eventSource"] = "synthetic-source",
+                ["backend"] = "fixture-backend",
+                ["eventSource"] = "synthetic-source",
                 ["sampleCount"] = "7"
             }, "fixture capture complete");
         }

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using StreamJsonRpc;
 
 namespace CMakeWorkflow.Client;
@@ -10,25 +11,39 @@ public sealed partial class CMakeWorkflowClient
     public static async Task<CMakeWorkflowClient> ConnectSshAsync(SshHostOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var start = SshCommand.Create(options);
+        ProcessStartInfo start = SshCommand.Create(options);
         ct.ThrowIfCancellationRequested();
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(options.ConnectionTimeout);
         SshProcessConnection? ssh = null;
         try
         {
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
             ssh = new SshProcessConnection(start);
+#pragma warning restore CA2000
+
             return await InitializeAsync(ssh.Input, options.Workspace, null, null, timeout.Token, ssh.Output, ssh);
         }
         catch (Exception error)
         {
-            if (ssh is not null) await ssh.DisposeAsync();
+            if (ssh is not null)
+            {
+                await ssh.DisposeAsync();
+            }
+
             ct.ThrowIfCancellationRequested();
             if (error is OperationCanceledException && timeout.IsCancellationRequested)
+            {
                 throw new TimeoutException($"SSH Host initialization timed out. {ssh?.Diagnostics}", error);
+            }
+
             if (error is IOException or ConnectionLostException or Win32Exception)
+            {
                 throw new SshConnectionException("Cannot connect to the SSH Host. Check SSH authentication, the remote executable and endpoint.",
                     ssh?.Diagnostics ?? "", ssh?.ExitCode, error);
+            }
+
             throw;
         }
     }

@@ -1,12 +1,9 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using PolyType;
-using StreamJsonRpc;
-using CMakeWorkflow;
-using CMakeWorkflow.Profiling;
-
+using System.Diagnostics.CodeAnalysis;
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Client;
+#pragma warning restore IDE0130
 
+[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record ToolchainResolution(
     int SchemaVersion,
     string Status,
@@ -15,4 +12,5 @@ public sealed record ToolchainResolution(
     ToolchainCandidate? Compiler,
     ToolchainCandidate? Sdk,
     string? EnvironmentProfileId,
-    List<string> Diagnostics);
+    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+List<string> Diagnostics);

@@ -1,8 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using System.Diagnostics.CodeAnalysis;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 public sealed class DurableAcceptanceStore : IDisposable
 {
@@ -21,11 +24,25 @@ public sealed class DurableAcceptanceStore : IDisposable
     {
         this.checkpointCodec = checkpointCodec ?? throw new ArgumentNullException(nameof(checkpointCodec));
         if (!Path.IsPathFullyQualified(workspaceDirectory) || !Directory.Exists(workspaceDirectory))
+        {
             throw new ArgumentException("An existing absolute workspace directory is required.",
                 nameof(workspaceDirectory));
+        }
+
         workspace = new WorkspaceReadPaths(workspaceDirectory).WorkspaceDirectory;
-        var storeDirectory = Path.Combine(workspace, ".cmakeworkflow");
-        if (!readOnly) Directory.CreateDirectory(storeDirectory);
+        WorkspaceReadPaths paths = new(workspace);
+        string storeDirectory = paths.Require(Path.Combine(workspace, ".cmakeworkflow"));
+        _ = paths.Require(Path.Combine(storeDirectory, "operations.sqlite"));
+        foreach (string? suffix in new[] { "-journal", "-wal", "-shm" })
+        {
+            _ = paths.Require(Path.Combine(storeDirectory, "operations.sqlite" + suffix));
+        }
+
+        if (!readOnly)
+        {
+            _ = Directory.CreateDirectory(storeDirectory);
+        }
+
         connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = Path.Combine(storeDirectory, "operations.sqlite"),
@@ -36,11 +53,24 @@ public sealed class DurableAcceptanceStore : IDisposable
         connection.Open();
         try
         {
-            if (!readOnly) Execute("PRAGMA journal_mode=DELETE;");
-            if (!readOnly) Execute("PRAGMA synchronous=FULL;");
-            Execute("PRAGMA busy_timeout=30000;");
-            if (!readOnly) Execute("CREATE TABLE IF NOT EXISTS workspace_identity (id TEXT NOT NULL PRIMARY KEY);");
             if (!readOnly)
+            {
+                Execute("PRAGMA journal_mode=DELETE;");
+            }
+
+            if (!readOnly)
+            {
+                Execute("PRAGMA synchronous=FULL;");
+            }
+
+            Execute("PRAGMA busy_timeout=30000;");
+            if (!readOnly)
+            {
+                Execute("CREATE TABLE IF NOT EXISTS workspace_identity (id TEXT NOT NULL PRIMARY KEY);");
+            }
+
+            if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS accepted_workflows (
                           request_id TEXT NOT NULL PRIMARY KEY,
@@ -52,9 +82,11 @@ public sealed class DurableAcceptanceStore : IDisposable
                           state TEXT NOT NULL CHECK(state IN ('accepted_not_dispatched', 'dispatch_authorized'))
                         );
                         """);
+            }
             // Additive migration. Old accepted_workflows remain unmodified and
             // mean 'workflow'; new non-CMake operations carry a durable domain tag.
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_domains (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -62,7 +94,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS dispatch_checkpoints (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -71,7 +106,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_results_reservations (
                           run_directory TEXT NOT NULL PRIMARY KEY,
@@ -79,7 +117,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_finalizations (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -90,7 +131,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_cancellations (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -99,7 +143,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_reconciliations (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -110,7 +157,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_resume_admissions (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -120,7 +170,10 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+
             if (!readOnly)
+            {
                 Execute("""
                         CREATE TABLE IF NOT EXISTS operation_resume_attempts (
                           operation_id TEXT NOT NULL PRIMARY KEY,
@@ -130,20 +183,49 @@ public sealed class DurableAcceptanceStore : IDisposable
                           FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
                         );
                         """);
+            }
+            // Keep the exact bound process checkpoint as recovery evidence. Old rows
+            // remain readable; missing evidence cannot authorize process resume.
+            if (!readOnly)
+            {
+                using SqliteTransaction migration = connection.BeginTransaction();
+                using SqliteCommand columns = connection.CreateCommand();
+                columns.Transaction = migration;
+                columns.CommandText = "PRAGMA table_info(dispatch_checkpoints);";
+                bool hasBytes;
+                using (SqliteDataReader reader = columns.ExecuteReader())
+                {
+                    hasBytes = false;
+                    while (reader.Read())
+                    {
+                        hasBytes |= reader.GetString(1) == "checkpoint_bytes";
+                    }
+                }
+                if (!hasBytes)
+                {
+                    columns.CommandText = "ALTER TABLE dispatch_checkpoints ADD COLUMN checkpoint_bytes BLOB;";
+                    _ = columns.ExecuteNonQuery();
+                }
+                migration.Commit();
+            }
             // Upgrade the original acceptance-only schema in place, without dropping
             // accepted requests or immutable snapshots. Schema change is transactional.
-            if (!readOnly) MigrateAcceptanceStateConstraint();
-            using var transaction = readOnly ? null : connection.BeginTransaction();
             if (!readOnly)
-                using (var insert = connection.CreateCommand())
-                {
-                    insert.Transaction = transaction;
-                    insert.CommandText = "INSERT OR IGNORE INTO workspace_identity(id) VALUES ($id);";
-                    insert.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
-                    insert.ExecuteNonQuery();
-                }
+            {
+                MigrateAcceptanceStateConstraint();
+            }
 
-            using (var read = connection.CreateCommand())
+            using SqliteTransaction? transaction = readOnly ? null : connection.BeginTransaction();
+            if (!readOnly)
+            {
+                using SqliteCommand insert = connection.CreateCommand();
+                insert.Transaction = transaction;
+                insert.CommandText = "INSERT OR IGNORE INTO workspace_identity(id) VALUES ($id);";
+                _ = insert.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
+                _ = insert.ExecuteNonQuery();
+            }
+
+            using (SqliteCommand read = connection.CreateCommand())
             {
                 read.Transaction = transaction;
                 read.CommandText = "SELECT id FROM workspace_identity LIMIT 1;";
@@ -162,15 +244,22 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     private void MigrateAcceptanceStateConstraint()
     {
-        using var inspect = connection.CreateCommand();
+        using SqliteCommand inspect = connection.CreateCommand();
         inspect.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='accepted_workflows';";
-        var definition = (string?)inspect.ExecuteScalar() ??
+        string definition = (string?)inspect.ExecuteScalar() ??
                          throw new InvalidDataException("Missing acceptance table.");
-        if (definition.Contains("'dispatch_authorized'", StringComparison.Ordinal)) return;
+        if (definition.Contains("'dispatch_authorized'", StringComparison.Ordinal))
+        {
+            return;
+        }
+
         if (!definition.Contains("CHECK(state = 'accepted_not_dispatched')", StringComparison.Ordinal))
+        {
             throw new InvalidDataException("Unknown accepted_workflows schema; migration refused.");
-        using var tx = connection.BeginTransaction();
-        using var migrate = connection.CreateCommand();
+        }
+
+        using SqliteTransaction tx = connection.BeginTransaction();
+        using SqliteCommand migrate = connection.CreateCommand();
         migrate.Transaction = tx;
         migrate.CommandText = """
                               CREATE TABLE accepted_workflows_next (
@@ -186,7 +275,7 @@ public sealed class DurableAcceptanceStore : IDisposable
                               DROP TABLE accepted_workflows;
                               ALTER TABLE accepted_workflows_next RENAME TO accepted_workflows;
                               """;
-        migrate.ExecuteNonQuery();
+        _ = migrate.ExecuteNonQuery();
         tx.Commit();
     }
 
@@ -197,14 +286,18 @@ public sealed class DurableAcceptanceStore : IDisposable
     public AcceptedWorkflow Accept(string clientRequestId, string manifestPath, string expectedManifestSha256,
         int jobs, string resultsDirectory)
     {
+        ArgumentNullException.ThrowIfNull(expectedManifestSha256);
         if (string.IsNullOrWhiteSpace(clientRequestId) || clientRequestId.Length > 128 || jobs < 1
             || !Path.IsPathFullyQualified(manifestPath) || !Path.IsPathFullyQualified(resultsDirectory)
             || !IsSha256(expectedManifestSha256))
+        {
             throw new ArgumentException("Invalid workflow admission request.");
-        var paths = new WorkspaceReadPaths(workspace);
-        var source = paths.Require(manifestPath);
-        var result = paths.Require(resultsDirectory);
-        var digest = Hex(Encoding.UTF8.GetBytes(string.Join("\n", "workflow/start:v1", source,
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        string source = paths.Require(manifestPath);
+        string result = paths.Require(resultsDirectory);
+        string digest = Hex(Encoding.UTF8.GetBytes(string.Join("\n", "workflow/start:v1", source,
             expectedManifestSha256.ToUpperInvariant(), jobs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             result)));
         // Do not resolve paths again between digest derivation and admission.
@@ -221,46 +314,55 @@ public sealed class DurableAcceptanceStore : IDisposable
             !Path.IsPathFullyQualified(request.ResultsDirectory) ||
             !IsSha256(request.SnapshotSha256) || !IsSha256(request.RequestDigest) ||
             string.IsNullOrWhiteSpace(request.DomainKind) || request.DomainKind.Length > 64)
+        {
             throw new ArgumentException("Invalid immutable operation admission request.");
-        var paths = new WorkspaceReadPaths(workspace);
-        var source = paths.Require(request.SnapshotPath);
-        var result = paths.Require(request.ResultsDirectory);
+        }
+
+        WorkspaceReadPaths paths = new(workspace);
+        string source = paths.Require(request.SnapshotPath);
+        string result = paths.Require(request.ResultsDirectory);
         return AcceptImmutableCanonical(request with { SnapshotPath = source, ResultsDirectory = result });
     }
 
     private AcceptedWorkflow AcceptImmutableCanonical(DurableImmutableRequest request)
     {
-        var source = request.SnapshotPath;
-        var result = request.ResultsDirectory;
-        var baseDirectory = Path.GetDirectoryName(source)!;
-        var clientRequestId = request.ClientRequestId;
-        var expectedManifestSha256 = request.SnapshotSha256;
-        var digest = request.RequestDigest;
+        string source = request.SnapshotPath;
+        _ = request.ResultsDirectory;
+        string baseDirectory = Path.GetDirectoryName(source)!;
+        string clientRequestId = request.ClientRequestId;
+        string expectedManifestSha256 = request.SnapshotSha256;
+        string digest = request.RequestDigest;
         // BEGIN IMMEDIATE serialization prevents two writers accepting the same ID.
-        using var transaction = connection.BeginTransaction();
-        using (var find = connection.CreateCommand())
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        using (SqliteCommand find = connection.CreateCommand())
         {
             find.Transaction = transaction;
             find.CommandText =
                 "SELECT a.operation_id,a.request_digest,a.manifest_sha256,a.manifest_base_directory,COALESCE(f.terminal_state, CASE WHEN c.operation_id IS NOT NULL THEN 'cancel_requested' ELSE a.state END) FROM accepted_workflows a LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id WHERE a.request_id=$id;";
-            find.Parameters.AddWithValue("$id", clientRequestId);
-            using var reader = find.ExecuteReader();
+            _ = find.Parameters.AddWithValue("$id", clientRequestId);
+            using SqliteDataReader reader = find.ExecuteReader();
             if (reader.Read())
             {
                 if (!string.Equals(reader.GetString(1), digest, StringComparison.Ordinal))
+                {
                     throw new InvalidOperationException("request_id_conflict");
-                var existing = new AcceptedWorkflow(WorkspaceId, reader.GetString(0), clientRequestId,
+                }
+
+                AcceptedWorkflow existing = new(WorkspaceId, reader.GetString(0), clientRequestId,
                     reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4));
                 return existing;
             }
         }
 
         // Only a new acceptance needs to validate current manifest bytes.
-        var snapshot = File.ReadAllBytes(source);
+        byte[] snapshot = File.ReadAllBytes(source);
         if (!string.Equals(Hex(snapshot), expectedManifestSha256, StringComparison.OrdinalIgnoreCase))
+        {
             throw new InvalidOperationException("stale_manifest");
-        var operationId = Guid.NewGuid().ToString("N");
-        using (var insert = connection.CreateCommand())
+        }
+
+        string operationId = Guid.NewGuid().ToString("N");
+        using (SqliteCommand insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
@@ -268,24 +370,24 @@ public sealed class DurableAcceptanceStore : IDisposable
                                    manifest_base_directory, snapshot, state)
                                  VALUES ($request,$operation,$digest,$sha,$base,$snapshot,'accepted_not_dispatched');
                                  """;
-            insert.Parameters.AddWithValue("$request", clientRequestId);
-            insert.Parameters.AddWithValue("$operation", operationId);
-            insert.Parameters.AddWithValue("$digest", digest);
-            insert.Parameters.AddWithValue("$sha", expectedManifestSha256.ToUpperInvariant());
-            insert.Parameters.AddWithValue("$base", baseDirectory);
+            _ = insert.Parameters.AddWithValue("$request", clientRequestId);
+            _ = insert.Parameters.AddWithValue("$operation", operationId);
+            _ = insert.Parameters.AddWithValue("$digest", digest);
+            _ = insert.Parameters.AddWithValue("$sha", expectedManifestSha256.ToUpperInvariant());
+            _ = insert.Parameters.AddWithValue("$base", baseDirectory);
             insert.Parameters.Add("$snapshot", SqliteType.Blob).Value = snapshot;
-            insert.ExecuteNonQuery();
+            _ = insert.ExecuteNonQuery();
         }
 
         if (request.DomainKind != "workflow")
         {
-            using var tag = connection.CreateCommand();
+            using SqliteCommand tag = connection.CreateCommand();
             tag.Transaction = transaction;
             tag.CommandText =
                 "INSERT INTO operation_domains(operation_id,domain_kind) VALUES($id,$kind);";
-            tag.Parameters.AddWithValue("$id", operationId);
-            tag.Parameters.AddWithValue("$kind", request.DomainKind);
-            tag.ExecuteNonQuery();
+            _ = tag.Parameters.AddWithValue("$id", operationId);
+            _ = tag.Parameters.AddWithValue("$kind", request.DomainKind);
+            _ = tag.ExecuteNonQuery();
         }
 
         transaction.Commit();
@@ -297,13 +399,17 @@ public sealed class DurableAcceptanceStore : IDisposable
     // belong to the original CMake workflow domain.
     public string GetDomainKind(string operationId)
     {
-        using var table = connection.CreateCommand();
+        using SqliteCommand table = connection.CreateCommand();
         table.CommandText =
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_domains';";
-        if (table.ExecuteScalar() is null) return "workflow";
-        using var read = connection.CreateCommand();
+        if (table.ExecuteScalar() is null)
+        {
+            return "workflow";
+        }
+
+        using SqliteCommand read = connection.CreateCommand();
         read.CommandText = "SELECT domain_kind FROM operation_domains WHERE operation_id=$id;";
-        read.Parameters.AddWithValue("$id", operationId);
+        _ = read.Parameters.AddWithValue("$id", operationId);
         return (string?)read.ExecuteScalar() ?? "workflow";
     }
 
@@ -317,7 +423,9 @@ public sealed class DurableAcceptanceStore : IDisposable
             (request.Domain is not null && (request.Domain.Length is < 1 or > 64 ||
                 request.Domain.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or '-')))) ||
             (request.Cursor is not null && request.Cursor.Length is < 1 or > 512))
+        {
             throw new ArgumentException("Invalid operation list query.");
+        }
     }
 
     /// <summary>Read-only keyset traversal of admitted operations, ordered by SQLite rowid descending.</summary>
@@ -334,20 +442,23 @@ public sealed class DurableAcceptanceStore : IDisposable
         }
         else
         {
-            using var max = connection.CreateCommand();
+            using SqliteCommand max = connection.CreateCommand();
             max.CommandText = "SELECT COALESCE(MAX(rowid), 0) FROM accepted_workflows;";
             watermark = (long)max.ExecuteScalar()!;
             before = long.MaxValue;
         }
-        if (watermark == 0) return new(1, [], null);
+        if (watermark == 0)
+        {
+            return new(1, [], null);
+        }
 
         // Legacy databases may not have operation_domains; all their operations are CMake workflows.
-        using var check = connection.CreateCommand();
+        using SqliteCommand check = connection.CreateCommand();
         check.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_domains';";
-        var hasDomains = check.ExecuteScalar() is not null;
+        bool hasDomains = check.ExecuteScalar() is not null;
         const string effectiveState = "COALESCE(f.terminal_state, CASE WHEN c.operation_id IS NOT NULL THEN 'cancel_requested' ELSE a.state END)";
-        var domain = hasDomains ? "COALESCE(d.domain_kind, 'workflow')" : "'workflow'";
-        using var cmd = connection.CreateCommand();
+        string domain = hasDomains ? "COALESCE(d.domain_kind, 'workflow')" : "'workflow'";
+        using SqliteCommand cmd = connection.CreateCommand();
         cmd.CommandText = $"""
             SELECT a.rowid, a.operation_id, a.request_id, a.manifest_sha256,
                    a.manifest_base_directory, {effectiveState}, {domain}
@@ -361,15 +472,15 @@ public sealed class DurableAcceptanceStore : IDisposable
             ORDER BY a.rowid DESC
             LIMIT $limit;
             """;
-        cmd.Parameters.AddWithValue("$watermark", watermark);
-        cmd.Parameters.AddWithValue("$before", before);
-        cmd.Parameters.AddWithValue("$state", (object?)request.State ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$domain", (object?)request.Domain ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$limit", request.Limit + 1);
-        var items = new List<OperationReference>(request.Limit);
+        _ = cmd.Parameters.AddWithValue("$watermark", watermark);
+        _ = cmd.Parameters.AddWithValue("$before", before);
+        _ = cmd.Parameters.AddWithValue("$state", (object?)request.State ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$domain", (object?)request.Domain ?? DBNull.Value);
+        _ = cmd.Parameters.AddWithValue("$limit", request.Limit + 1);
+        List<OperationReference> items = new(request.Limit);
         long lastRowId = 0;
         bool hasMore = false;
-        using (var reader = cmd.ExecuteReader())
+        using (SqliteDataReader reader = cmd.ExecuteReader())
         {
             while (reader.Read())
             {
@@ -386,7 +497,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     private string EncodeOperationCursor(long watermark, long before, string? state, string? domain)
     {
-        var value = string.Join("|", "v1", WorkspaceId,
+        string value = string.Join("|", "v1", WorkspaceId,
             watermark.ToString(System.Globalization.CultureInfo.InvariantCulture),
             before.ToString(System.Globalization.CultureInfo.InvariantCulture), state ?? "", domain ?? "");
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=')
@@ -398,20 +509,23 @@ public sealed class DurableAcceptanceStore : IDisposable
         try
         {
             if (cursor.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+            {
                 throw new FormatException();
-            var encoded = cursor.Replace('-', '+').Replace('_', '/');
-            var padding = (4 - encoded.Length % 4) % 4;
-            var fields = Encoding.UTF8.GetString(Convert.FromBase64String(encoded + new string('=', padding)))
+            }
+
+            string encoded = cursor.Replace('-', '+').Replace('_', '/');
+            int padding = (4 - (encoded.Length % 4)) % 4;
+            string[] fields = Encoding.UTF8.GetString(Convert.FromBase64String(encoded + new string('=', padding)))
                 .Split('|');
-            if (fields.Length != 6 || fields[0] != "v1" || fields[1] != WorkspaceId ||
+            return fields.Length != 6 || fields[0] != "v1" || fields[1] != WorkspaceId ||
                 fields[4] != (state ?? "") || fields[5] != (domain ?? "") ||
                 !long.TryParse(fields[2], System.Globalization.NumberStyles.None,
-                    System.Globalization.CultureInfo.InvariantCulture, out var watermark) ||
+                    System.Globalization.CultureInfo.InvariantCulture, out long watermark) ||
                 !long.TryParse(fields[3], System.Globalization.NumberStyles.None,
-                    System.Globalization.CultureInfo.InvariantCulture, out var before) ||
-                watermark < 1 || before < 1 || before > watermark)
-                throw new FormatException();
-            return (watermark, before);
+                    System.Globalization.CultureInfo.InvariantCulture, out long before) ||
+                watermark < 1 || before < 1 || before > watermark
+                ? throw new FormatException()
+                : ((long Watermark, long Before))(watermark, before);
         }
         catch (Exception e) when (e is FormatException or ArgumentException or DecoderFallbackException)
         {
@@ -421,11 +535,11 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     public AcceptedWorkflow? Find(string clientRequestId)
     {
-        using var command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "SELECT a.operation_id,a.request_digest,a.manifest_sha256,a.manifest_base_directory,COALESCE(f.terminal_state, CASE WHEN c.operation_id IS NOT NULL THEN 'cancel_requested' ELSE a.state END) FROM accepted_workflows a LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id WHERE a.request_id=$id;";
-        command.Parameters.AddWithValue("$id", clientRequestId);
-        using var reader = command.ExecuteReader();
+        _ = command.Parameters.AddWithValue("$id", clientRequestId);
+        using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read()
             ? new(WorkspaceId, reader.GetString(0), clientRequestId, reader.GetString(1),
                 reader.GetString(2), reader.GetString(3), reader.GetString(4))
@@ -434,11 +548,11 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     public AcceptedWorkflow? Get(string operationId)
     {
-        using var command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "SELECT a.request_id,a.request_digest,a.manifest_sha256,a.manifest_base_directory,COALESCE(f.terminal_state, CASE WHEN c.operation_id IS NOT NULL THEN 'cancel_requested' ELSE a.state END) FROM accepted_workflows a LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id WHERE a.operation_id=$id;";
-        command.Parameters.AddWithValue("$id", operationId);
-        using var reader = command.ExecuteReader();
+        _ = command.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read()
             ? new(WorkspaceId, operationId, reader.GetString(0), reader.GetString(1),
                 reader.GetString(2), reader.GetString(3), reader.GetString(4))
@@ -447,6 +561,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // Inspection does not read mutable run.json or infer whether a process is alive.
     // A dispatch authorization is not proof of a completed external effect.
+    [SuppressMessage("Design", "CA1034", Justification = "The established nested public type name is part of the existing API.")]
     public sealed record RecoveryInspection(
         string OperationId,
         string AcceptanceState,
@@ -461,14 +576,18 @@ public sealed class DurableAcceptanceStore : IDisposable
     public RecoveryInspection InspectRecovery(string operationId)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128)
+        {
             throw new ArgumentException("Invalid operation ID.", nameof(operationId));
+        }
         // Old stores opened read-only may not have the reconciliation table yet.
-        using var schema = connection.CreateCommand();
+        using SqliteCommand schema = connection.CreateCommand();
         schema.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_reconciliations';";
-        var hasDecisions = schema.ExecuteScalar() is not null;
+        bool hasDecisions = schema.ExecuteScalar() is not null;
         schema.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_resume_admissions';";
-        var hasResume = schema.ExecuteScalar() is not null;
-        using var cmd = connection.CreateCommand();
+        bool hasResume = schema.ExecuteScalar() is not null;
+        using SqliteCommand cmd = connection.CreateCommand();
+
+#pragma warning disable CA2100 // SQL structure comes only from trusted internal statements; external values are bound as SQLite parameters.
         cmd.CommandText = hasDecisions && hasResume ? """
                                                       SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
                                                              d.checkpoint_sha256, r.decision, COALESCE(x.revision,r.revision), r.note
@@ -480,7 +599,7 @@ public sealed class DurableAcceptanceStore : IDisposable
                                                       LEFT JOIN operation_resume_admissions x ON x.operation_id=a.operation_id
                                                       WHERE a.operation_id=$id;
                                                       """ :
-            hasDecisions ? """
+                    hasDecisions ? """
                            SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
                                   d.checkpoint_sha256, r.decision, r.revision, r.note
                            FROM accepted_workflows a
@@ -498,10 +617,13 @@ public sealed class DurableAcceptanceStore : IDisposable
                                  LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
                                  WHERE a.operation_id=$id;
                                  """;
-        cmd.Parameters.AddWithValue("$id", operationId);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
-        return new(operationId, reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1),
+#pragma warning restore CA2100
+
+        _ = cmd.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        return !reader.Read()
+            ? throw new KeyNotFoundException("Unknown operation.")
+            : new(operationId, reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1),
             !reader.IsDBNull(2), reader.IsDBNull(3) ? null : reader.GetString(3),
             reader.IsDBNull(4) ? null : reader.GetString(4),
             reader.IsDBNull(5) ? null : reader.GetString(5),
@@ -516,11 +638,14 @@ public sealed class DurableAcceptanceStore : IDisposable
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0 ||
             decision is not ("needs_attention" or "outcome_unknown") ||
             string.IsNullOrWhiteSpace(note) || note.Length > 4096)
+        {
             throw new ArgumentException("Invalid reconciliation decision.");
-        using var tx = connection.BeginTransaction();
+        }
+
+        using SqliteTransaction tx = connection.BeginTransaction();
         string acceptance;
         bool terminal;
-        using (var cmd = connection.CreateCommand())
+        using (SqliteCommand cmd = connection.CreateCommand())
         {
             cmd.Transaction = tx;
             cmd.CommandText = """
@@ -528,26 +653,37 @@ public sealed class DurableAcceptanceStore : IDisposable
                               LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
                               WHERE a.operation_id=$id;
                               """;
-            cmd.Parameters.AddWithValue("$id", operationId);
-            using var reader = cmd.ExecuteReader();
-            if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
+            _ = cmd.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = cmd.ExecuteReader();
+            if (!reader.Read())
+            {
+                throw new KeyNotFoundException("Unknown operation.");
+            }
+
             acceptance = reader.GetString(0);
             terminal = !reader.IsDBNull(1);
         }
 
-        if (terminal) throw new InvalidOperationException("operation_already_terminal");
+        if (terminal)
+        {
+            throw new InvalidOperationException("operation_already_terminal");
+        }
+
         if (acceptance != "dispatch_authorized")
+        {
             throw new InvalidOperationException("operation_not_dispatch_authorized");
-        using (var existing = connection.CreateCommand())
+        }
+
+        using (SqliteCommand existing = connection.CreateCommand())
         {
             existing.Transaction = tx;
             existing.CommandText =
                 "SELECT revision,decision,note FROM operation_reconciliations WHERE operation_id=$id;";
-            existing.Parameters.AddWithValue("$id", operationId);
-            using var reader = existing.ExecuteReader();
+            _ = existing.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = existing.ExecuteReader();
             if (reader.Read())
             {
-                var revision = reader.GetInt64(0);
+                long revision = reader.GetInt64(0);
                 if (expectedRevision == revision && reader.GetString(1) == decision && reader.GetString(2) == note)
                 {
                     tx.Commit();
@@ -558,19 +694,23 @@ public sealed class DurableAcceptanceStore : IDisposable
             }
         }
 
-        if (expectedRevision != 0) throw new InvalidOperationException("operation_revision_conflict");
-        using (var cmd = connection.CreateCommand())
+        if (expectedRevision != 0)
+        {
+            throw new InvalidOperationException("operation_revision_conflict");
+        }
+
+        using (SqliteCommand cmd = connection.CreateCommand())
         {
             cmd.Transaction = tx;
             cmd.CommandText = """
                               INSERT INTO operation_reconciliations(operation_id,revision,decision,note,decided_at)
                               VALUES($id,1,$decision,$note,$at);
                               """;
-            cmd.Parameters.AddWithValue("$id", operationId);
-            cmd.Parameters.AddWithValue("$decision", decision);
-            cmd.Parameters.AddWithValue("$note", note);
-            cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.ExecuteNonQuery();
+            _ = cmd.Parameters.AddWithValue("$id", operationId);
+            _ = cmd.Parameters.AddWithValue("$decision", decision);
+            _ = cmd.Parameters.AddWithValue("$note", note);
+            _ = cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            _ = cmd.ExecuteNonQuery();
         }
 
         tx.Commit();
@@ -583,9 +723,12 @@ public sealed class DurableAcceptanceStore : IDisposable
     public RecoveryInspection AdmitResume(string operationId, long expectedRevision)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0)
+        {
             throw new ArgumentException("Invalid resume request.");
-        using var tx = connection.BeginTransaction();
-        using (var cmd = connection.CreateCommand())
+        }
+
+        using SqliteTransaction tx = connection.BeginTransaction();
+        using (SqliteCommand cmd = connection.CreateCommand())
         {
             cmd.Transaction = tx;
             cmd.CommandText = """
@@ -598,39 +741,57 @@ public sealed class DurableAcceptanceStore : IDisposable
                               LEFT JOIN operation_resume_admissions x ON x.operation_id=a.operation_id
                               WHERE a.operation_id=$id;
                               """;
-            cmd.Parameters.AddWithValue("$id", operationId);
-            using var reader = cmd.ExecuteReader();
-            if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
+            _ = cmd.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = cmd.ExecuteReader();
+            if (!reader.Read())
+            {
+                throw new KeyNotFoundException("Unknown operation.");
+            }
+
             if (!reader.IsDBNull(3) || !reader.IsDBNull(4))
+            {
                 throw new InvalidOperationException("operation_terminal_or_cancel_requested");
+            }
+
             if (reader.GetString(2) != "dispatch_authorized" || reader.IsDBNull(0))
+            {
                 throw new InvalidOperationException("operation_not_reconciled");
-            var revision = reader.GetInt64(0);
+            }
+
+            long revision = reader.GetInt64(0);
             if (!reader.IsDBNull(5))
             {
                 if (expectedRevision != reader.GetInt64(5))
+                {
                     throw new InvalidOperationException("operation_revision_conflict");
+                }
+
                 tx.Commit();
                 return InspectRecovery(operationId);
             }
 
             if (reader.GetString(1) == "outcome_unknown")
+            {
                 throw new InvalidOperationException("outcome_unknown_requires_resolution");
+            }
+
             if (expectedRevision != revision)
+            {
                 throw new InvalidOperationException("operation_revision_conflict");
+            }
         }
 
-        using (var cmd = connection.CreateCommand())
+        using (SqliteCommand cmd = connection.CreateCommand())
         {
             cmd.Transaction = tx;
             cmd.CommandText = """
                               INSERT INTO operation_resume_admissions(operation_id,reconciliation_revision,revision,admitted_at)
                               VALUES($id,$expected,2,$at);
                               """;
-            cmd.Parameters.AddWithValue("$id", operationId);
-            cmd.Parameters.AddWithValue("$expected", expectedRevision);
-            cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.ExecuteNonQuery();
+            _ = cmd.Parameters.AddWithValue("$id", operationId);
+            _ = cmd.Parameters.AddWithValue("$expected", expectedRevision);
+            _ = cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            _ = cmd.ExecuteNonQuery();
         }
 
         tx.Commit();
@@ -639,14 +800,20 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // One-way, non-retryable claim. A crash after this commit cannot implicitly
     // start another runner, even if no process was launched yet.
-    public string ClaimResumeAttempt(string operationId, string runDirectory)
+    public string ClaimResumeAttempt(string operationId, string runDirectory, string? expectedCheckpointSha256 = null)
     {
-        var directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
-        var bytes = File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
-        var evidence = checkpointCodec.ForResume(bytes);
-        var hash = Hex(bytes);
-        using var tx = connection.BeginTransaction();
-        using (var verify = connection.CreateCommand())
+        string directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
+        byte[] bytes = File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
+        string hash = Hex(bytes);
+        if (expectedCheckpointSha256 is not null &&
+            !string.Equals(hash, expectedCheckpointSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("resume_checkpoint_changed");
+        }
+
+        OperationCheckpointEvidence evidence = checkpointCodec.ForResume(bytes);
+        using SqliteTransaction tx = connection.BeginTransaction();
+        using (SqliteCommand verify = connection.CreateCommand())
         {
             verify.Transaction = tx;
             verify.CommandText = """
@@ -660,34 +827,42 @@ public sealed class DurableAcceptanceStore : IDisposable
                                  LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
                                  WHERE a.operation_id=$id;
                                  """;
-            verify.Parameters.AddWithValue("$id", operationId);
-            using var reader = verify.ExecuteReader();
-            if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
+            _ = verify.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = verify.ExecuteReader();
+            if (!reader.Read())
+            {
+                throw new KeyNotFoundException("Unknown operation.");
+            }
+
             if (reader.GetString(0) != "dispatch_authorized" ||
                 !string.Equals(reader.GetString(1), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
                 reader.IsDBNull(2) || !PathComparer.Equals(reader.GetString(2), directory) ||
                 reader.IsDBNull(3) || reader.GetString(3) != "needs_attention" ||
                 reader.IsDBNull(4) || reader.GetInt64(4) != 2 ||
-                !reader.IsDBNull(5) || !reader.IsDBNull(6) || reader.IsDBNull(7))
+                !reader.IsDBNull(5) || !reader.IsDBNull(6) || reader.IsDBNull(7) ||
+                (evidence.ResumeSourceCheckpointSha256 is { } source &&
+                !string.Equals(source, reader.GetString(7), StringComparison.OrdinalIgnoreCase)))
+            {
                 throw new InvalidOperationException("resume_not_admitted_or_bound");
+            }
         }
 
         // This insert is deliberately NOT an upsert. Existing attempt = no redispatch.
-        var id = Guid.NewGuid().ToString("N");
-        using (var insert = connection.CreateCommand())
+        string id = Guid.NewGuid().ToString("N");
+        using (SqliteCommand insert = connection.CreateCommand())
         {
             insert.Transaction = tx;
             insert.CommandText = """
                                  INSERT INTO operation_resume_attempts(operation_id,attempt_id,checkpoint_sha256,started_at)
                                  VALUES($id,$attempt,$hash,$at);
                                  """;
-            insert.Parameters.AddWithValue("$id", operationId);
-            insert.Parameters.AddWithValue("$attempt", id);
-            insert.Parameters.AddWithValue("$hash", hash);
-            insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            _ = insert.Parameters.AddWithValue("$id", operationId);
+            _ = insert.Parameters.AddWithValue("$attempt", id);
+            _ = insert.Parameters.AddWithValue("$hash", hash);
+            _ = insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
             try
             {
-                insert.ExecuteNonQuery();
+                _ = insert.ExecuteNonQuery();
             }
             catch (SqliteException e) when (e.SqliteErrorCode == 19)
             {
@@ -699,6 +874,7 @@ public sealed class DurableAcceptanceStore : IDisposable
         return id;
     }
 
+    [SuppressMessage("Design", "CA1034", Justification = "The established nested public type name is part of the existing API.")]
     public sealed record CancellationDecision(string OperationId, string State, long Revision, bool Requested);
 
     // ExpectedRevision is a CAS against the cancellation-intent revision (0 -> 1).
@@ -706,10 +882,13 @@ public sealed class DurableAcceptanceStore : IDisposable
     public CancellationDecision RequestCancellation(string operationId, long expectedRevision)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0)
+        {
             throw new ArgumentException("Invalid cancellation request.");
-        using var tx = connection.BeginTransaction();
+        }
+
+        using SqliteTransaction tx = connection.BeginTransaction();
         string state;
-        using (var read = connection.CreateCommand())
+        using (SqliteCommand read = connection.CreateCommand())
         {
             read.Transaction = tx;
             read.CommandText = """
@@ -717,16 +896,16 @@ public sealed class DurableAcceptanceStore : IDisposable
                                FROM accepted_workflows a LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
                                WHERE a.operation_id=$id;
                                """;
-            read.Parameters.AddWithValue("$id", operationId);
+            _ = read.Parameters.AddWithValue("$id", operationId);
             state = (string?)read.ExecuteScalar() ?? throw new KeyNotFoundException("Unknown operation.");
         }
 
         long revision;
-        using (var read = connection.CreateCommand())
+        using (SqliteCommand read = connection.CreateCommand())
         {
             read.Transaction = tx;
             read.CommandText = "SELECT revision FROM operation_cancellations WHERE operation_id=$id;";
-            read.Parameters.AddWithValue("$id", operationId);
+            _ = read.Parameters.AddWithValue("$id", operationId);
             revision = (long?)read.ExecuteScalar() ?? 0;
         }
 
@@ -737,16 +916,19 @@ public sealed class DurableAcceptanceStore : IDisposable
         }
 
         if (expectedRevision != revision)
+        {
             throw new InvalidOperationException("operation_revision_conflict");
+        }
+
         if (revision == 0)
         {
-            using var write = connection.CreateCommand();
+            using SqliteCommand write = connection.CreateCommand();
             write.Transaction = tx;
             write.CommandText =
                 "INSERT INTO operation_cancellations(operation_id,revision,requested_at) VALUES($id,1,$at);";
-            write.Parameters.AddWithValue("$id", operationId);
-            write.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-            write.ExecuteNonQuery();
+            _ = write.Parameters.AddWithValue("$id", operationId);
+            _ = write.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            _ = write.ExecuteNonQuery();
             revision = 1;
         }
 
@@ -760,55 +942,69 @@ public sealed class DurableAcceptanceStore : IDisposable
     public void ReserveResultsDirectory(string operationId, string resultsDirectory)
     {
         if (string.IsNullOrWhiteSpace(operationId) || !Path.IsPathFullyQualified(resultsDirectory))
+        {
             throw new ArgumentException("Invalid results reservation.");
-        var canonical = new WorkspaceReadPaths(workspace).Require(resultsDirectory);
-        if (OperatingSystem.IsWindows()) canonical = canonical.ToUpperInvariant();
-        using var transaction = connection.BeginTransaction();
-        using (var existing = connection.CreateCommand())
+        }
+
+        string canonical = new WorkspaceReadPaths(workspace).Require(resultsDirectory);
+        if (OperatingSystem.IsWindows())
+        {
+            canonical = canonical.ToUpperInvariant();
+        }
+
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        using (SqliteCommand existing = connection.CreateCommand())
         {
             existing.Transaction = transaction;
             existing.CommandText = "SELECT run_directory FROM operation_results_reservations WHERE operation_id=$id;";
-            existing.Parameters.AddWithValue("$id", operationId);
-            var previous = (string?)existing.ExecuteScalar();
+            _ = existing.Parameters.AddWithValue("$id", operationId);
+            string? previous = (string?)existing.ExecuteScalar();
             if (previous is not null)
             {
                 if (!string.Equals(previous, canonical, OperatingSystem.IsWindows()
                         ? StringComparison.OrdinalIgnoreCase
                         : StringComparison.Ordinal))
+                {
                     throw new InvalidOperationException("operation_results_directory_changed");
+                }
+
                 transaction.Commit();
                 return;
             }
         }
 
-        using (var valid = connection.CreateCommand())
+        using (SqliteCommand valid = connection.CreateCommand())
         {
             valid.Transaction = transaction;
             valid.CommandText = "SELECT COUNT(*) FROM accepted_workflows WHERE operation_id=$id;";
-            valid.Parameters.AddWithValue("$id", operationId);
+            _ = valid.Parameters.AddWithValue("$id", operationId);
             if ((long)valid.ExecuteScalar()! != 1L)
+            {
                 throw new KeyNotFoundException("Unknown operation.");
+            }
         }
 
-        using (var collision = connection.CreateCommand())
+        using (SqliteCommand collision = connection.CreateCommand())
         {
             collision.Transaction = transaction;
             collision.CommandText = "SELECT operation_id FROM operation_results_reservations WHERE run_directory=$dir;";
-            collision.Parameters.AddWithValue("$dir", canonical);
+            _ = collision.Parameters.AddWithValue("$dir", canonical);
             if (collision.ExecuteScalar() is not null)
+            {
                 throw new InvalidOperationException("results_directory_reserved");
+            }
         }
 
-        using (var insert = connection.CreateCommand())
+        using (SqliteCommand insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText =
                 "INSERT INTO operation_results_reservations(run_directory,operation_id) VALUES($dir,$id);";
-            insert.Parameters.AddWithValue("$dir", canonical);
-            insert.Parameters.AddWithValue("$id", operationId);
+            _ = insert.Parameters.AddWithValue("$dir", canonical);
+            _ = insert.Parameters.AddWithValue("$id", operationId);
             try
             {
-                insert.ExecuteNonQuery();
+                _ = insert.ExecuteNonQuery();
             }
             catch (SqliteException e) when (e.SqliteErrorCode == 19)
             {
@@ -826,19 +1022,25 @@ public sealed class DurableAcceptanceStore : IDisposable
     public AcceptedWorkflow AuthorizeDispatch(string operationId)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128)
+        {
             throw new ArgumentException("Invalid operation ID.", nameof(operationId));
+        }
         // BeginTransaction uses BEGIN IMMEDIATE by default in Microsoft.Data.Sqlite;
         // serialize authorization across independent connections/processes.
-        using var transaction = connection.BeginTransaction();
+        using SqliteTransaction transaction = connection.BeginTransaction();
         string requestId, digest, sha, baseDirectory, state;
-        using (var find = connection.CreateCommand())
+        using (SqliteCommand find = connection.CreateCommand())
         {
             find.Transaction = transaction;
             find.CommandText =
                 "SELECT request_id,request_digest,manifest_sha256,manifest_base_directory,state FROM accepted_workflows WHERE operation_id=$id;";
-            find.Parameters.AddWithValue("$id", operationId);
-            using var reader = find.ExecuteReader();
-            if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
+            _ = find.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = find.ExecuteReader();
+            if (!reader.Read())
+            {
+                throw new KeyNotFoundException("Unknown operation.");
+            }
+
             requestId = reader.GetString(0);
             digest = reader.GetString(1);
             sha = reader.GetString(2);
@@ -846,38 +1048,46 @@ public sealed class DurableAcceptanceStore : IDisposable
             state = reader.GetString(4);
         }
 
-        if (state != "accepted_not_dispatched" && state != "dispatch_authorized")
+        if (state is not "accepted_not_dispatched" and not "dispatch_authorized")
+        {
             throw new InvalidDataException("Unexpected acceptance state.");
+        }
         // Verify snapshot integrity BEFORE authorizing dispatch.
-        using (var verify = connection.CreateCommand())
+        using (SqliteCommand verify = connection.CreateCommand())
         {
             verify.Transaction = transaction;
             verify.CommandText = "SELECT snapshot FROM accepted_workflows WHERE operation_id=$id;";
-            verify.Parameters.AddWithValue("$id", operationId);
-            var snapshot = (byte[]?)verify.ExecuteScalar() ??
+            _ = verify.Parameters.AddWithValue("$id", operationId);
+            byte[] snapshot = (byte[]?)verify.ExecuteScalar() ??
                            throw new InvalidDataException("Missing manifest snapshot.");
             if (!string.Equals(Hex(snapshot), sha, StringComparison.OrdinalIgnoreCase))
+            {
                 throw new InvalidDataException("Admission snapshot integrity failure.");
+            }
         }
 
         if (state == "accepted_not_dispatched")
         {
-            using (var canceled = connection.CreateCommand())
+            using (SqliteCommand canceled = connection.CreateCommand())
             {
                 canceled.Transaction = transaction;
                 canceled.CommandText = "SELECT 1 FROM operation_cancellations WHERE operation_id=$id;";
-                canceled.Parameters.AddWithValue("$id", operationId);
+                _ = canceled.Parameters.AddWithValue("$id", operationId);
                 if (canceled.ExecuteScalar() is not null)
+                {
                     throw new InvalidOperationException("operation_cancel_requested");
+                }
             }
 
-            using var update = connection.CreateCommand();
+            using SqliteCommand update = connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText =
                 "UPDATE accepted_workflows SET state='dispatch_authorized' WHERE operation_id=$id AND state='accepted_not_dispatched';";
-            update.Parameters.AddWithValue("$id", operationId);
+            _ = update.Parameters.AddWithValue("$id", operationId);
             if (update.ExecuteNonQuery() != 1)
+            {
                 throw new InvalidOperationException("dispatch_authorization_conflict");
+            }
         }
 
         transaction.Commit();
@@ -891,52 +1101,66 @@ public sealed class DurableAcceptanceStore : IDisposable
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 ||
             !Path.IsPathFullyQualified(runDirectory))
+        {
             throw new ArgumentException("Invalid dispatch checkpoint binding.");
-        var directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
-        var reportPath = new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json"));
+        }
+
+        string directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
+        string reportPath = new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json"));
         // The runner holds its exclusive run lease. Reading this file is safe only
         // under that lease; callers MUST NOT use this as an independent dispatcher.
-        var bytes = File.ReadAllBytes(reportPath);
-        var evidence = checkpointCodec.ForDispatch(bytes);
-        var hash = Hex(bytes);
-        using var transaction = connection.BeginTransaction();
-        using (var verify = connection.CreateCommand())
+        byte[] bytes = File.ReadAllBytes(reportPath);
+        OperationCheckpointEvidence evidence = checkpointCodec.ForDispatch(bytes);
+        string hash = Hex(bytes);
+        bool processDomain = GetDomainKind(operationId) == "process";
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        using (SqliteCommand verify = connection.CreateCommand())
         {
             verify.Transaction = transaction;
             verify.CommandText =
                 "SELECT manifest_sha256,state,snapshot FROM accepted_workflows WHERE operation_id=$id;";
-            verify.Parameters.AddWithValue("$id", operationId);
-            using var reader = verify.ExecuteReader();
-            if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
+            _ = verify.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = verify.ExecuteReader();
+            if (!reader.Read())
+            {
+                throw new KeyNotFoundException("Unknown operation.");
+            }
+
             if (reader.GetString(1) != "dispatch_authorized" ||
                 !string.Equals(reader.GetString(0), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(Hex((byte[])reader.GetValue(2)), reader.GetString(0),
                     StringComparison.OrdinalIgnoreCase))
+            {
                 throw new InvalidOperationException("dispatch_checkpoint_mismatch");
+            }
         }
 
-        using (var prior = connection.CreateCommand())
+        using (SqliteCommand prior = connection.CreateCommand())
         {
             prior.Transaction = transaction;
             prior.CommandText = "SELECT run_directory FROM dispatch_checkpoints WHERE operation_id=$id;";
-            prior.Parameters.AddWithValue("$id", operationId);
-            var existing = (string?)prior.ExecuteScalar();
+            _ = prior.Parameters.AddWithValue("$id", operationId);
+            string? existing = (string?)prior.ExecuteScalar();
             if (existing is not null && !PathComparer.Equals(existing, directory))
+            {
                 throw new InvalidOperationException("dispatch_run_directory_conflict");
+            }
         }
 
-        using (var bind = connection.CreateCommand())
+        using (SqliteCommand bind = connection.CreateCommand())
         {
             bind.Transaction = transaction;
             bind.CommandText = """
-                               INSERT INTO dispatch_checkpoints(operation_id,run_directory,checkpoint_sha256)
-                               VALUES ($id,$dir,$hash)
-                               ON CONFLICT(operation_id) DO UPDATE SET checkpoint_sha256=excluded.checkpoint_sha256;
+                               INSERT INTO dispatch_checkpoints(operation_id,run_directory,checkpoint_sha256,checkpoint_bytes)
+                               VALUES ($id,$dir,$hash,$bytes)
+                               ON CONFLICT(operation_id) DO UPDATE SET checkpoint_sha256=excluded.checkpoint_sha256,
+                                   checkpoint_bytes=excluded.checkpoint_bytes;
                                """;
-            bind.Parameters.AddWithValue("$id", operationId);
-            bind.Parameters.AddWithValue("$dir", directory);
-            bind.Parameters.AddWithValue("$hash", hash);
-            bind.ExecuteNonQuery();
+            _ = bind.Parameters.AddWithValue("$id", operationId);
+            _ = bind.Parameters.AddWithValue("$dir", directory);
+            _ = bind.Parameters.AddWithValue("$hash", hash);
+            _ = bind.Parameters.AddWithValue("$bytes", processDomain ? bytes : DBNull.Value);
+            _ = bind.ExecuteNonQuery();
         }
 
         transaction.Commit();
@@ -944,15 +1168,16 @@ public sealed class DurableAcceptanceStore : IDisposable
     }
 
 
+    [SuppressMessage("Design", "CA1034", Justification = "The established nested public type name is part of the existing API.")]
     public sealed record Finalization(string RunDirectory, string ReportSha256, string State, int ExitCode);
 
     public Finalization? GetFinalization(string operationId)
     {
-        using var command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "SELECT run_directory,report_sha256,terminal_state,exit_code FROM operation_finalizations WHERE operation_id=$id;";
-        command.Parameters.AddWithValue("$id", operationId);
-        using var reader = command.ExecuteReader();
+        _ = command.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read()
             ? new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3))
             : null;
@@ -961,15 +1186,15 @@ public sealed class DurableAcceptanceStore : IDisposable
     // Only a normal runner return and a durable terminal report can finalize.
     public Finalization FinalizeExecution(string operationId, string runDirectory, int exitCode)
     {
-        var paths = new WorkspaceReadPaths(workspace);
-        var directory = paths.Require(runDirectory);
-        var bytes = File.ReadAllBytes(paths.Require(Path.Combine(directory, "run.json")));
-        var evidence = checkpointCodec.ForFinalization(bytes, exitCode);
-        var terminalState = evidence.TerminalState ??
+        WorkspaceReadPaths paths = new(workspace);
+        string directory = paths.Require(runDirectory);
+        byte[] bytes = File.ReadAllBytes(paths.Require(Path.Combine(directory, "run.json")));
+        OperationCheckpointEvidence evidence = checkpointCodec.ForFinalization(bytes, exitCode);
+        string terminalState = evidence.TerminalState ??
                             throw new InvalidDataException("Missing terminal operation evidence.");
-        var hash = Hex(bytes);
-        using var tx = connection.BeginTransaction();
-        using (var check = connection.CreateCommand())
+        string hash = Hex(bytes);
+        using SqliteTransaction tx = connection.BeginTransaction();
+        using (SqliteCommand check = connection.CreateCommand())
         {
             check.Transaction = tx;
             check.CommandText = """
@@ -979,61 +1204,68 @@ public sealed class DurableAcceptanceStore : IDisposable
                                 LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
                                 WHERE a.operation_id=$id;
                                 """;
-            check.Parameters.AddWithValue("$id", operationId);
-            using var reader = check.ExecuteReader();
+            _ = check.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = check.ExecuteReader();
             if (!reader.Read() || reader.IsDBNull(2) || reader.IsDBNull(3) ||
                 reader.GetString(0) != "dispatch_authorized" ||
                 !string.Equals(reader.GetString(1), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
                 !PathComparer.Equals(reader.GetString(2), directory) ||
                 !PathComparer.Equals(reader.GetString(3), directory))
-                throw new InvalidOperationException("operation_report_binding_mismatch");
-        }
-
-        using (var decision = connection.CreateCommand())
-        {
-            decision.Transaction = tx;
-            decision.CommandText = "SELECT 1 FROM operation_reconciliations WHERE operation_id=$id;";
-            decision.Parameters.AddWithValue("$id", operationId);
-            if (decision.ExecuteScalar() is not null)
             {
-                using var attempt = connection.CreateCommand();
-                attempt.Transaction = tx;
-                attempt.CommandText = "SELECT 1 FROM operation_resume_attempts WHERE operation_id=$id;";
-                attempt.Parameters.AddWithValue("$id", operationId);
-                if (attempt.ExecuteScalar() is null || evidence.ResumeCount < 1)
-                    throw new InvalidOperationException("operation_reconciliation_conflict");
+                throw new InvalidOperationException("operation_report_binding_mismatch");
             }
         }
 
-        using (var prior = connection.CreateCommand())
+        using (SqliteCommand decision = connection.CreateCommand())
+        {
+            decision.Transaction = tx;
+            decision.CommandText = "SELECT 1 FROM operation_reconciliations WHERE operation_id=$id;";
+            _ = decision.Parameters.AddWithValue("$id", operationId);
+            if (decision.ExecuteScalar() is not null)
+            {
+                using SqliteCommand attempt = connection.CreateCommand();
+                attempt.Transaction = tx;
+                attempt.CommandText = "SELECT 1 FROM operation_resume_attempts WHERE operation_id=$id;";
+                _ = attempt.Parameters.AddWithValue("$id", operationId);
+                if (attempt.ExecuteScalar() is null || evidence.ResumeCount < 1)
+                {
+                    throw new InvalidOperationException("operation_reconciliation_conflict");
+                }
+            }
+        }
+
+        using (SqliteCommand prior = connection.CreateCommand())
         {
             prior.Transaction = tx;
             prior.CommandText =
                 "SELECT run_directory,report_sha256,terminal_state,exit_code FROM operation_finalizations WHERE operation_id=$id;";
-            prior.Parameters.AddWithValue("$id", operationId);
-            using var reader = prior.ExecuteReader();
+            _ = prior.Parameters.AddWithValue("$id", operationId);
+            using SqliteDataReader reader = prior.ExecuteReader();
             if (reader.Read())
             {
                 if (!PathComparer.Equals(reader.GetString(0), directory) ||
                     reader.GetString(1) != hash || reader.GetString(2) != terminalState ||
                     reader.GetInt32(3) != exitCode)
+                {
                     throw new InvalidOperationException("operation_finalization_conflict");
+                }
+
                 tx.Commit();
                 return new(directory, hash, terminalState, exitCode);
             }
         }
 
-        using (var insert = connection.CreateCommand())
+        using (SqliteCommand insert = connection.CreateCommand())
         {
             insert.Transaction = tx;
             insert.CommandText =
                 "INSERT INTO operation_finalizations(operation_id,run_directory,report_sha256,terminal_state,exit_code) VALUES($id,$dir,$hash,$status,$exit);";
-            insert.Parameters.AddWithValue("$id", operationId);
-            insert.Parameters.AddWithValue("$dir", directory);
-            insert.Parameters.AddWithValue("$hash", hash);
-            insert.Parameters.AddWithValue("$status", terminalState);
-            insert.Parameters.AddWithValue("$exit", exitCode);
-            insert.ExecuteNonQuery();
+            _ = insert.Parameters.AddWithValue("$id", operationId);
+            _ = insert.Parameters.AddWithValue("$dir", directory);
+            _ = insert.Parameters.AddWithValue("$hash", hash);
+            _ = insert.Parameters.AddWithValue("$status", terminalState);
+            _ = insert.Parameters.AddWithValue("$exit", exitCode);
+            _ = insert.ExecuteNonQuery();
         }
 
         tx.Commit();
@@ -1042,32 +1274,57 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     public (string RunDirectory, string CheckpointSha256)? GetDispatchCheckpoint(string operationId)
     {
-        using var command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "SELECT run_directory,checkpoint_sha256 FROM dispatch_checkpoints WHERE operation_id=$id;";
-        command.Parameters.AddWithValue("$id", operationId);
-        using var reader = command.ExecuteReader();
+        _ = command.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? (reader.GetString(0), reader.GetString(1)) : null;
+    }
+
+    internal byte[] GetProcessDispatchCheckpointBytes(string operationId)
+    {
+        using SqliteCommand cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT checkpoint_bytes,checkpoint_sha256 FROM dispatch_checkpoints WHERE operation_id=$id;";
+        _ = cmd.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        if (!reader.Read() || reader.IsDBNull(0))
+        {
+            throw new InvalidOperationException("process_recovery_evidence_missing");
+        }
+
+        byte[] bytes = (byte[])reader.GetValue(0);
+        return !string.Equals(Hex(bytes), reader.GetString(1), StringComparison.OrdinalIgnoreCase)
+            ? throw new InvalidDataException("Process dispatch evidence changed.")
+            : bytes;
     }
 
     public byte[] GetSnapshot(string operationId)
     {
-        using var command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT snapshot,manifest_sha256 FROM accepted_workflows WHERE operation_id=$id;";
-        command.Parameters.AddWithValue("$id", operationId);
-        using var reader = command.ExecuteReader();
-        if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
-        var bytes = (byte[])reader.GetValue(0);
-        if (!string.Equals(Hex(bytes), reader.GetString(1), StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Admission snapshot integrity failure.");
-        return bytes;
+        _ = command.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new KeyNotFoundException("Unknown operation.");
+        }
+
+        byte[] bytes = (byte[])reader.GetValue(0);
+        return !string.Equals(Hex(bytes), reader.GetString(1), StringComparison.OrdinalIgnoreCase)
+            ? throw new InvalidDataException("Admission snapshot integrity failure.")
+            : bytes;
     }
 
     private void Execute(string sql)
     {
-        using var command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
+
+#pragma warning disable CA2100 // SQL structure comes only from trusted internal statements; external values are bound as SQLite parameters.
         command.CommandText = sql;
-        command.ExecuteNonQuery();
+#pragma warning restore CA2100
+
+        _ = command.ExecuteNonQuery();
     }
 
     private static StringComparer PathComparer => OperatingSystem.IsWindows()

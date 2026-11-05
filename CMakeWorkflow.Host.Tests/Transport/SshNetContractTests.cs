@@ -1,6 +1,7 @@
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Host;
 using Nerdbank.Streams;
+using StreamJsonRpc;
 
 internal static class SshNetContractTests
 {
@@ -9,9 +10,9 @@ internal static class SshNetContractTests
     // Invalid arguments must be rejected before reading private keys or opening sockets.
     internal static async Task RunAsync()
     {
-        var missingKey = Path.GetFullPath(Path.Combine(Path.GetTempPath(),
+        string missingKey = Path.GetFullPath(Path.Combine(Path.GetTempPath(),
             "cmwf-sshnet-test-" + Guid.NewGuid().ToString("N"), "id_ed25519"));
-        var options = new SshNetHostOptions("ssh.invalid", "tester", missingKey,
+        SshNetHostOptions options = new("ssh.invalid", "tester", missingKey,
             ValidPin, "/tmp/cmw.sock", "/srv/project");
         await RejectAsync<ArgumentException>(options with { HostKeySha256 = "SHA256:BAD" });
         await RejectAsync<ArgumentException>(options with { HostKeySha256 = "" });
@@ -20,7 +21,7 @@ internal static class SshNetContractTests
         await RejectAsync<ArgumentException>(options with { Username = "user name" });
         await RejectAsync<ArgumentOutOfRangeException>(options with { Port = 0 });
         await RejectAsync<ArgumentOutOfRangeException>(options with { ConnectionTimeout = TimeSpan.Zero });
-        var ephemeral = new SshNetLaunchOptions(options.Host, options.Username, missingKey,
+        SshNetLaunchOptions ephemeral = new(options.Host, options.Username, missingKey,
             ValidPin, options.Workspace);
         await RejectEphemeralAsync<ArgumentException>(ephemeral with { HostKeySha256 = "SHA256:BAD" });
         await RejectEphemeralAsync<ArgumentException>(ephemeral with { Workspace = "relative" });
@@ -33,53 +34,66 @@ internal static class SshNetContractTests
 
     private static async Task RejectAsync<T>(SshNetHostOptions options) where T : Exception
     {
-        try { await CMakeWorkflowClient.ConnectSshNetAsync(options); }
+        try { _ = await CMakeWorkflowClient.ConnectSshNetAsync(options); }
         catch (T) { return; }
-        throw new Exception("SSH.NET did not reject " + typeof(T).Name + " before connecting.");
+        throw new System.Diagnostics.UnreachableException("SSH.NET did not reject " + typeof(T).Name + " before connecting.");
     }
 
     private static async Task RejectEphemeralAsync<T>(SshNetLaunchOptions options) where T : Exception
     {
-        try { await CMakeWorkflowClient.LaunchSshNetAsync(options); }
+        try { _ = await CMakeWorkflowClient.LaunchSshNetAsync(options); }
         catch (T) { return; }
-        throw new Exception("Private SSH.NET Host did not reject " + typeof(T).Name + " before connecting.");
+        throw new System.Diagnostics.UnreachableException("Private SSH.NET Host did not reject " + typeof(T).Name + " before connecting.");
     }
 
     private static async Task VerifyPrivateHostAsync()
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var root = Path.Combine(Path.GetTempPath(), "cmw-ephemeral-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
+        string root = Path.Combine(Path.GetTempPath(), "cmw-ephemeral-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(root);
         if (!OperatingSystem.IsWindows())
+        {
             File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        var (clientStream, hostStream) = FullDuplexStream.CreatePair();
+        }
+
+        (Stream? clientStream, Stream? hostStream) = FullDuplexStream.CreatePair();
         using (clientStream)
         using (hostStream)
         {
-            var server = HostServer.RunStdioAsync(hostStream, hostStream, timeout.Token);
+
+#pragma warning disable CA2025 // Disposing the transport intentionally signals EOF; the forwarding/server task is awaited before leaving the ownership scope.
+            Task server = HostServer.RunStdioAsync(hostStream, hostStream, timeout.Token);
+#pragma warning restore CA2025
+
             try
             {
-                using (var rpc = HostConnection.Create(clientStream))
+                using (JsonRpc rpc = HostConnection.Create(clientStream))
                 {
-                    var proxy = rpc.Attach<IHostRpc>();
+                    IHostRpc proxy = rpc.Attach<IHostRpc>();
                     rpc.StartListening();
-                    var identity = await proxy.InitializeAsync(new(1, root), timeout.Token);
+                    HostInfo identity = await proxy.InitializeAsync(new(1, root), timeout.Token);
                     if (identity.WorkspaceDirectory != root || !identity.Capabilities.Contains("workflow/start"))
-                        throw new Exception("Private Host handshake returned invalid identity/capabilities.");
+                    {
+                        throw new System.Diagnostics.UnreachableException("Private Host handshake returned invalid identity/capabilities.");
+                    }
                 }
-                clientStream.Dispose();
+                await clientStream.DisposeAsync();
                 await server.WaitAsync(TimeSpan.FromSeconds(8), timeout.Token);
             }
             finally
             {
-                clientStream.Dispose();
-                if (!server.IsCompleted) await timeout.CancelAsync();
+                await clientStream.DisposeAsync();
+                if (!server.IsCompleted)
+                {
+                    await timeout.CancelAsync();
+                }
+
                 await server.WaitAsync(TimeSpan.FromSeconds(8));
             }
         }
         try
         {
-            await SshTransportTests.RejectAsync<ArgumentException>(() =>
+            _ = await SshTransportTests.RejectAsync<ArgumentException>(() =>
                 HostCommand.ExecuteAsync(["serve", "--stdio", "--endpoint", "/tmp/unused"], default));
         }
         finally
@@ -95,23 +109,31 @@ internal static class SshNetContractTests
     {
         static string Env(string name) => Environment.GetEnvironmentVariable(name)
             ?? throw new ArgumentException("Missing live SSH.NET test setting: " + name);
-        var options = new SshNetHostOptions(
+        SshNetHostOptions options = new(
             Env("CMWF_SSHNET_HOST"), Env("CMWF_SSHNET_USER"), Env("CMWF_SSHNET_KEY"),
             Env("CMWF_SSHNET_PIN"), Env("CMWF_SSHNET_ENDPOINT"), Env("CMWF_SSHNET_WORKSPACE"))
         {
-            Port = int.Parse(Environment.GetEnvironmentVariable("CMWF_SSHNET_PORT") ?? "22"),
+            Port = int.Parse(Environment.GetEnvironmentVariable("CMWF_SSHNET_PORT") ?? "22", System.Globalization.CultureInfo.CurrentCulture),
             RemoteExecutable = Environment.GetEnvironmentVariable("CMWF_SSHNET_EXE") ?? "cmakeworkflow"
         };
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using (var client = await CMakeWorkflowClient.ConnectSshNetAsync(options, timeout.Token))
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+        await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(options, timeout.Token))
         {
             if (!client.Host.Capabilities.Contains("operations/get"))
-                throw new Exception("SSH.NET bridge did not negotiate Host capabilities.");
+            {
+                throw new System.Diagnostics.UnreachableException("SSH.NET bridge did not negotiate Host capabilities.");
+            }
+
             if (!client.Host.WorkspaceDirectory.Equals(options.Workspace, StringComparison.Ordinal))
-                throw new Exception("SSH.NET bridge initialized the wrong remote workspace.");
-            var tools = await client.Toolchains.DiscoverAsync(timeout.Token);
+            {
+                throw new System.Diagnostics.UnreachableException("SSH.NET bridge initialized the wrong remote workspace.");
+            }
+
+            ToolchainInventory tools = await client.Toolchains.DiscoverAsync(timeout.Token);
             if (tools.SchemaVersion != 1)
-                throw new Exception("SSH.NET typed RPC payload corrupted.");
+            {
+                throw new System.Diagnostics.UnreachableException("SSH.NET typed RPC payload corrupted.");
+            }
         }
         Console.WriteLine("PASS SSH.NET live: pinned key, exec binary RPC, read and teardown");
     }

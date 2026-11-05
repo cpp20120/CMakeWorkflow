@@ -22,18 +22,29 @@ internal sealed class ProcessNodeReport
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Stdout { get; set; }
     public string? Stderr { get; set; }
+    public List<string>? Dependencies { get; init; }
 }
 
 internal sealed class ProcessOperationReport
 {
+    [JsonRequired]
     public int SchemaVersion { get; init; } = 1;
+    [JsonRequired]
     public string Domain { get; init; } = "process";
     public required string SnapshotSha256 { get; init; }
     public string Status { get; set; } = "running";
     public string? Error { get; set; }
+    public string? RecoveryPhase { get; set; }
+    public int ResumeCount { get; set; }
+    public ProcessRecoveryAudit? Recovery { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public required List<ProcessNodeReport> Nodes { get; init; }
 }
+
+// Exact pre-recovery bytes retain the evidence behind the operator's decision.
+// The dispatch hash is checked against SQLite when claiming the single attempt.
+internal sealed record ProcessRecoveryAudit(string Note, DateTimeOffset ConfirmedAt,
+    byte[] PreviousCheckpoint, byte[] DispatchCheckpoint);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ProcessWorkflowManifest))]

@@ -1,7 +1,9 @@
 using CMakeWorkflow.Tooling;
 using StreamJsonRpc;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 /// <summary>
 /// Private, single-client Host over a binary stdio pair. The session owns the
@@ -12,13 +14,13 @@ internal static class StdioHostServer
 {
     internal static async Task RunAsync(Stream input, Stream output, CancellationToken ct)
     {
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        using var fixes = new FixCoordinator();
-        using var executions = new DurableExecutionCoordinator(lifetime.Token);
-        using var downloads = VerifiedCMakeInstaller.CreateDownloadClient();
-        var installer = new VerifiedCMakeInstaller(downloads);
-        using var rpc = HostConnection.Create(input, output);
-        var session = new DoctorSession(
+        using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using FixCoordinator fixes = new();
+        using DurableExecutionCoordinator executions = new(lifetime.Token);
+        using HttpClient downloads = VerifiedCMakeInstaller.CreateDownloadClient();
+        VerifiedCMakeInstaller installer = new(downloads);
+        using JsonRpc rpc = HostConnection.Create(input, output);
+        DoctorSession session = new(
             workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
             value => rpc.NotifyAsync("tooling/progress", value), lifetime.Token,
             fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);

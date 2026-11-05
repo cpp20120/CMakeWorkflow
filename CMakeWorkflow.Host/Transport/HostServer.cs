@@ -4,7 +4,9 @@ using System.Net.Sockets;
 using CMakeWorkflow.Tooling;
 using StreamJsonRpc;
 
+#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host;
+#pragma warning restore IDE0130
 
 public static class HostServer
 {
@@ -14,15 +16,15 @@ public static class HostServer
 
     public static async Task RunAsync(string endpoint, CancellationToken ct)
     {
-        using var shutdownHost = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using CancellationTokenSource shutdownHost = CancellationTokenSource.CreateLinkedTokenSource(ct);
         ct = shutdownHost.Token;
         // Max 16 active clients; request lifetimes are tied to their connection.
-        var clients = new ConcurrentDictionary<long, Task>();
-        using var slots = new SemaphoreSlim(16);
-        using var fixes = new FixCoordinator();
-        using var executions = new DurableExecutionCoordinator(ct);
-        using var downloads = VerifiedCMakeInstaller.CreateDownloadClient();
-        var installer = new VerifiedCMakeInstaller(downloads);
+        ConcurrentDictionary<long, Task> clients = new();
+        using SemaphoreSlim slots = new(16);
+        using FixCoordinator fixes = new();
+        using DurableExecutionCoordinator executions = new(ct);
+        using HttpClient downloads = VerifiedCMakeInstaller.CreateDownloadClient();
+        VerifiedCMakeInstaller installer = new(downloads);
         long next = 0;
 
         async Task ServeAsync(Stream stream, long id)
@@ -30,16 +32,16 @@ public static class HostServer
             try
             {
                 using (stream)
-                using (var disconnected = CancellationTokenSource.CreateLinkedTokenSource(ct))
-                using (var rpc = HostConnection.Create(stream))
+                using (CancellationTokenSource disconnected = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                using (JsonRpc rpc = HostConnection.Create(stream))
                 {
-                    var session = new DoctorSession(
+                    DoctorSession session = new(
                         workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
                         value => rpc.NotifyAsync("tooling/progress", value), disconnected.Token,
                         fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);
                     rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<IHostRpc>(), session, null);
                     rpc.Disconnected += (_, _) => disconnected.Cancel();
-                    using var shutdown = ct.Register(rpc.Dispose);
+                    using CancellationTokenRegistration shutdown = ct.Register(rpc.Dispose);
                     rpc.StartListening();
                     try
                     {
@@ -47,37 +49,37 @@ public static class HostServer
                     }
                     catch (Exception error) when (error is not OutOfMemoryException)
                     {
-                        Console.Error.WriteLine($"[Host] Connection ended: {error}");
+                        await Console.Error.WriteLineAsync($"[Host] Connection ended: {error}");
                     }
                     finally
                     {
-                        disconnected.Cancel();
+                        await disconnected.CancelAsync();
                         await session.DrainAsync();
                     }
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
-                Console.Error.WriteLine($"[Host] Session failed: {error}");
+                await Console.Error.WriteLineAsync($"[Host] Session failed: {error}");
             }
             finally
             {
-                clients.TryRemove(id, out _);
-                slots.Release();
+                _ = clients.TryRemove(id, out _);
+                _ = slots.Release();
             }
         }
 
         void Accept(Stream stream)
         {
-            var id = Interlocked.Increment(ref next);
+            long id = Interlocked.Increment(ref next);
             // Task.Run prevents a synchronously completed connection from being
             // removed before it is registered below.
-            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource start = new(TaskCreationOptions.RunContinuationsAsynchronously);
             clients[id] = Task.Run(async () =>
             {
                 await start.Task;
                 await ServeAsync(stream, id);
-            });
+            }, ct);
             start.SetResult();
         }
 
@@ -85,24 +87,28 @@ public static class HostServer
         {
             if (OperatingSystem.IsWindows())
             {
-                var name = LocalTransport.PipeName(endpoint);
+                string name = LocalTransport.PipeName(endpoint);
                 // Exclusive process lock prevents another Host joining this pipe's server pool.
-                var lockDirectory =
+                string lockDirectory =
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                         "CMakeWorkflow", "host");
-                Directory.CreateDirectory(lockDirectory);
-                using var ownership = new FileStream(Path.Combine(lockDirectory, name + ".lock"),
+                _ = Directory.CreateDirectory(lockDirectory);
+                using FileStream ownership = new(Path.Combine(lockDirectory, name + ".lock"),
                     FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                var announced = false;
+                bool announced = false;
                 while (!ct.IsCancellationRequested)
                 {
                     await slots.WaitAsync(ct);
-                    var pipe = new NamedPipeServerStream(name, PipeDirection.InOut,
-                        NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
-                        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
+                    NamedPipeServerStream pipe = new(name, PipeDirection.InOut,
+                                            NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
+                                            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+#pragma warning restore CA2000
+
                     if (!announced)
                     {
-                        Console.Error.WriteLine($"[Host] Listening: {endpoint}");
+                        await Console.Error.WriteLineAsync($"[Host] Listening: {endpoint}");
                         announced = true;
                     }
 
@@ -113,8 +119,8 @@ public static class HostServer
                     }
                     catch
                     {
-                        pipe.Dispose();
-                        slots.Release();
+                        await pipe.DisposeAsync();
+                        _ = slots.Release();
                         throw;
                     }
                 }
@@ -122,23 +128,27 @@ public static class HostServer
             else
             {
                 LocalTransport.ValidateUnixEndpoint(endpoint);
-                using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                using Socket listener = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
                 listener.Bind(new UnixDomainSocketEndPoint(endpoint));
                 try
                 {
                     File.SetUnixFileMode(endpoint, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                     listener.Listen(16);
-                    Console.Error.WriteLine($"[Host] Listening: {endpoint}");
+                    await Console.Error.WriteLineAsync($"[Host] Listening: {endpoint}");
                     while (!ct.IsCancellationRequested)
                     {
                         await slots.WaitAsync(ct);
                         try
                         {
+
+#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
                             Accept(new NetworkStream(await listener.AcceptAsync(ct), ownsSocket: true));
+#pragma warning restore CA2000
+
                         }
                         catch
                         {
-                            slots.Release();
+                            _ = slots.Release();
                             throw;
                         }
                     }
@@ -154,7 +164,7 @@ public static class HostServer
         }
         finally
         {
-            shutdownHost.Cancel();
+            await shutdownHost.CancelAsync();
             await Task.WhenAll(clients.Values);
             await executions.DrainAsync();
         }
