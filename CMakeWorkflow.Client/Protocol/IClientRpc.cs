@@ -10,6 +10,15 @@ namespace CMakeWorkflow.Client;
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 internal partial interface IClientRpc
 {
+    [JsonRpcMethod("tooling/doctor")]
+    Task<HostToolingPlan> DoctorAsync(HostDoctorOptions request, CancellationToken ct);
+
+    [JsonRpcMethod("tooling/planFix")]
+    Task<HostFixPlan> PlanFixAsync(HostPlanFixOptions request, CancellationToken ct);
+
+    [JsonRpcMethod("tooling/applyFix")]
+    Task<HostFixResult> ApplyFixAsync(HostApplyFixOptions request, CancellationToken ct);
+
     [JsonRpcMethod("initialize")]
     Task<HostIdentity> InitializeAsync(InitRequest request, CancellationToken ct);
 
@@ -100,6 +109,9 @@ internal partial interface IClientRpc
 
     [JsonRpcMethod("workflow/start")]
     Task<OperationSnapshot> StartAsync(StartWorkflowOptions request, CancellationToken ct);
+
+    [JsonRpcMethod("workflow/preflight")]
+    Task<WorkflowPreflightResult> PreflightAsync(WorkflowPreflightOptions request, CancellationToken ct);
 
     [JsonRpcMethod("workflow/plan")]
     Task<JsonElement> PlanAsync(PlanRequest request, CancellationToken ct);

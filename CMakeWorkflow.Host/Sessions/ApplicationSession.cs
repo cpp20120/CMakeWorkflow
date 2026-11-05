@@ -10,7 +10,7 @@ public sealed partial class DoctorSession
 {
     private static readonly string[] ReadCapabilities =
     [
-        "context/inspect", "target/resolve", "workflow/plan", "runs/get",
+        "context/inspect", "target/resolve", "workflow/plan", "workflow/preflight", "runs/get",
         "profile/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/list", "operations/cancel",
         "workflow/start", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",

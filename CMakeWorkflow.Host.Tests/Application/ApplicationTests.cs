@@ -105,6 +105,8 @@ internal static class ApplicationTests
         Check(
             profilePlan.Nodes.Any(node => node.Kind == "profile") && profilePlan.Nodes.Any(node => node.Kind == "run"),
             "Profile graph must include separate timing and instrumented capture nodes");
+        await P3ApiTests.RunAsync(endpoint, root, prepared.Manifest, prepared.ManifestSha256,
+            profilePlan.Nodes.Count, ct);
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with { Target = "other" }, ct),
             "request_id_conflict");
         var otherProfileDirectory = Path.Combine(root, "other profile definitions");

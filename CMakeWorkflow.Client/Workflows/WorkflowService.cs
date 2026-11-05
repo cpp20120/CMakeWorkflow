@@ -25,6 +25,38 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
         return new WorkflowOperation(client, result.OperationId);
     }
 
+    /// <summary>Read-only validation of exact Host manifest bytes and the prospective DAG.</summary>
+    public Task<WorkflowPreflightResult> PreflightAsync(WorkflowPreflightOptions options,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        client.RequireCapability("workflow/preflight");
+        return RpcRefusals.TranslateAsync(() => client.Proxy.PreflightAsync(options, ct));
+    }
+
+    /// <summary>Preflight a typed recipe already prepared on this Host; does not execute it.</summary>
+    public Task<WorkflowPreflightResult> PreflightAsync(PreparedRecipe prepared, int jobs,
+        string resultsDirectory, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        return PreflightAsync(new(prepared.Manifest, prepared.ManifestSha256, jobs, resultsDirectory), ct);
+    }
+
+    public Task<WorkflowPreflightResult> PreflightAsync(PreparedBenchmark prepared, int jobs,
+        string resultsDirectory, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        return PreflightAsync(new(prepared.Manifest, prepared.ManifestSha256, jobs, resultsDirectory), ct);
+    }
+
+    public Task<WorkflowPreflightResult> PreflightAsync(PreparedWorkflow prepared, int jobs,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        return PreflightAsync(new(prepared.Manifest, prepared.ManifestSha256, jobs,
+            prepared.ResultsDirectory), ct);
+    }
+
     public Task<JsonElement> PlanAsync(string manifest, CancellationToken ct = default)
     {
         client.RequireCapability("workflow/plan");

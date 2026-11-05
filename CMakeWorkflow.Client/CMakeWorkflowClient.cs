@@ -38,6 +38,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         Campaigns = new(this);
         History = new(this);
         Toolchains = new(this);
+        Provisioning = new(this);
     }
 
     public HostIdentity Host { get; }
@@ -51,6 +52,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     public CampaignService Campaigns { get; }
     public HistoryService History { get; }
     public ToolchainService Toolchains { get; }
+    public HostProvisioningService Provisioning { get; }
 
     public static async Task<CMakeWorkflowClient> ConnectAsync(ClientOptions options, CancellationToken ct = default)
     {

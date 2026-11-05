@@ -8,6 +8,10 @@ namespace CMakeWorkflow.Host;
 
 public partial interface IHostRpc
 {
+    [JsonRpcMethod("workflow/preflight")]
+    Task<WorkflowPreflightResult> WorkflowPreflightAsync(WorkflowPreflightRequest request,
+        CancellationToken cancellationToken);
+
     [JsonRpcMethod("execution/report")]
     Task<System.Text.Json.JsonElement> ExecutionReportAsync(OperationGetRequest request,
         CancellationToken cancellationToken);
