@@ -34,10 +34,15 @@ internal static class SshLifecycleTests
         // The descendant keeps both output pipes open. Teardown must terminate
         // the entire owned process tree before waiting for pipe EOF.
         string childPid = Path.Combine(files.Root, "child-pid");
+        string childStat = Path.Combine(files.Root, "child-stat");
         string tree = files.Script("ssh-with-child", $"""
             printf '%s' "$$" > {SshTestPrograms.Quote(files.PidFile)}
             sleep 30 &
-            printf '%s' "$!" > {SshTestPrograms.Quote(childPid)}
+            child=$!
+            if test -r "/proc/$child/stat"; then
+                cat "/proc/$child/stat" > {SshTestPrograms.Quote(childStat)}
+            fi
+            printf '%s' "$child" > {SshTestPrograms.Quote(childPid)}
             wait
             """);
         watch.Restart();
@@ -45,8 +50,8 @@ internal static class SshLifecycleTests
             options with { SshExecutable = tree }));
         SshTransportTests.Check(watch.Elapsed < TimeSpan.FromSeconds(3), "Process-tree cleanup took " + watch.Elapsed);
         files.AssertExited();
-        files.AssertExited(childPid);
+        await SshTestPrograms.AssertStoppedAsync(childPid, childStat);
         Console.WriteLine($"SSH process-tree cleanup including timeout: {watch.Elapsed.TotalMilliseconds:F0}ms.");
-        Console.WriteLine("SSH lifecycle passed: 300ms timeout/cancellation finish within 3s and reap the process.");
+        Console.WriteLine("SSH lifecycle passed: 300ms timeout/cancellation finish within 3s, reap SSH and stop its descendant.");
     }
 }

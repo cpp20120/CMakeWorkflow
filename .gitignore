@@ -6,3 +6,4 @@ out/
 # Local IDE metadata
 .idea/
 .codex/
+*.sln.DotSettings.user

@@ -8,6 +8,10 @@ dotnet_analyzer_diagnostic.category-Style.severity = warning
 # No mandatory ConfigureAwait(false)
 dotnet_diagnostic.CA2007.severity = none
 
+# Several folder groups intentionally share one namespace (including partial types).
+# Folder-based namespace fixes split those types and break compilation.
+dotnet_diagnostic.IDE0130.severity = none
+
 # CLI / developer tooling does not require resource localization
 dotnet_diagnostic.CA1303.severity = none
 
