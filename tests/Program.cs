@@ -4,7 +4,7 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow" or "--process-boundaries"))
+        if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow" or "--process-boundaries" or "--artifacts"))
         {
             Console.Error.WriteLine(
                 "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli|--workflow|--process-boundaries]");
@@ -34,6 +34,12 @@ internal static class Program
             {
                 WorkflowTests.Run();
                 Console.WriteLine("All workflow integration checks passed.");
+                return 0;
+            }
+            if (args.Length == 2 && args[1] == "--artifacts")
+            {
+                ArtifactTests.Run();
+                Console.WriteLine("All workflow artifact checks passed.");
                 return 0;
             }
             if (args.Length == 2 && args[1] == "--remote-cli")

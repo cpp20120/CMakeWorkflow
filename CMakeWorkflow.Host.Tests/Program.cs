@@ -53,6 +53,21 @@ if (args.Length > 0 && args[0] == "--workflow-process-cleanup-tests")
     }
 }
 
+if (args.Length > 0 && args[0] == "--workflow-domain-tests")
+{
+    var domainRoot = Path.Combine(Path.GetTempPath(), "cmwf-domain-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(domainRoot);
+    try
+    {
+        await WorkflowRunnerDomainCharacterizationTests.RunAsync(domainRoot);
+        return;
+    }
+    finally
+    {
+        if (Directory.Exists(domainRoot)) Directory.Delete(domainRoot, recursive: true);
+    }
+}
+
 if (args.Length > 0 && args[0] == "--durable-persistence-tests")
 {
     var persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));
