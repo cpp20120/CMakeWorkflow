@@ -3,3 +3,6 @@ obj/
 out/
 *.log
 *.patch
+# Local IDE metadata
+.idea/
+.codex/
