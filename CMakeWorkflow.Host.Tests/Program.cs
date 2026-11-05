@@ -68,6 +68,21 @@ if (args.Length > 0 && args[0] == "--workflow-domain-tests")
     }
 }
 
+if (args.Length > 0 && args[0] == "--durable-operation-tests")
+{
+    var neutralRoot = Path.Combine(Path.GetTempPath(), "cmwf-neutral-operation-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(neutralRoot);
+    try
+    {
+        DurableOperationNeutralTests.Run(neutralRoot);
+        return;
+    }
+    finally
+    {
+        if (Directory.Exists(neutralRoot)) Directory.Delete(neutralRoot, recursive: true);
+    }
+}
+
 if (args.Length > 0 && args[0] == "--durable-persistence-tests")
 {
     var persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));

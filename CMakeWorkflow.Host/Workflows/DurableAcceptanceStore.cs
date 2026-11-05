@@ -7,15 +7,23 @@ namespace CMakeWorkflow.Host;
 public sealed class DurableAcceptanceStore : IDisposable
 {
     private readonly SqliteConnection connection;
+    private readonly IOperationCheckpointEvidenceCodec checkpointCodec;
     private readonly string workspace;
     public string WorkspaceId { get; }
 
     public DurableAcceptanceStore(string workspaceDirectory, bool readOnly = false)
+        : this(workspaceDirectory, readOnly, CMakeWorkflowCheckpointEvidenceCodec.Instance)
     {
+    }
+
+    internal DurableAcceptanceStore(string workspaceDirectory, bool readOnly,
+        IOperationCheckpointEvidenceCodec checkpointCodec)
+    {
+        this.checkpointCodec = checkpointCodec ?? throw new ArgumentNullException(nameof(checkpointCodec));
         if (!Path.IsPathFullyQualified(workspaceDirectory) || !Directory.Exists(workspaceDirectory))
             throw new ArgumentException("An existing absolute workspace directory is required.",
                 nameof(workspaceDirectory));
-        workspace = BuildTreeOwnership.CanonicalPath(workspaceDirectory);
+        workspace = new WorkspaceReadPaths(workspaceDirectory).WorkspaceDirectory;
         var storeDirectory = Path.Combine(workspace, ".cmakeworkflow");
         if (!readOnly) Directory.CreateDirectory(storeDirectory);
         connection = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -174,6 +182,8 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // Caller must have authorized the workspace. Digest is derived entirely from the
     // original typed request, never from current manifest contents on a retry.
+    // Legacy CMake admission adapter: retain the exact v1 digest and path semantics.
+    // The storage layer below accepts a caller-derived immutable request identity.
     public AcceptedWorkflow Accept(string clientRequestId, string manifestPath, string expectedManifestSha256,
         int jobs, string resultsDirectory)
     {
@@ -184,10 +194,37 @@ public sealed class DurableAcceptanceStore : IDisposable
         var paths = new WorkspaceReadPaths(workspace);
         var source = paths.Require(manifestPath);
         var result = paths.Require(resultsDirectory);
-        var baseDirectory = Path.GetDirectoryName(source)!;
         var digest = Hex(Encoding.UTF8.GetBytes(string.Join("\n", "workflow/start:v1", source,
             expectedManifestSha256.ToUpperInvariant(), jobs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             result)));
+        // Do not resolve paths again between digest derivation and admission.
+        return AcceptImmutableCanonical(new DurableImmutableRequest(clientRequestId, source,
+            expectedManifestSha256, result, digest));
+    }
+
+    // Neutral immutable admission: the trusted domain adapter owns the request digest.
+    // Idempotent retries compare the digest BEFORE reading potentially changed bytes.
+    internal AcceptedWorkflow AcceptImmutable(DurableImmutableRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ClientRequestId) || request.ClientRequestId.Length > 128 ||
+            !Path.IsPathFullyQualified(request.SnapshotPath) ||
+            !Path.IsPathFullyQualified(request.ResultsDirectory) ||
+            !IsSha256(request.SnapshotSha256) || !IsSha256(request.RequestDigest))
+            throw new ArgumentException("Invalid immutable operation admission request.");
+        var paths = new WorkspaceReadPaths(workspace);
+        var source = paths.Require(request.SnapshotPath);
+        var result = paths.Require(request.ResultsDirectory);
+        return AcceptImmutableCanonical(request with { SnapshotPath = source, ResultsDirectory = result });
+    }
+
+    private AcceptedWorkflow AcceptImmutableCanonical(DurableImmutableRequest request)
+    {
+        var source = request.SnapshotPath;
+        var result = request.ResultsDirectory;
+        var baseDirectory = Path.GetDirectoryName(source)!;
+        var clientRequestId = request.ClientRequestId;
+        var expectedManifestSha256 = request.SnapshotSha256;
+        var digest = request.RequestDigest;
         // BEGIN IMMEDIATE serialization prevents two writers accepting the same ID.
         using var transaction = connection.BeginTransaction();
         using (var find = connection.CreateCommand())
@@ -458,12 +495,7 @@ public sealed class DurableAcceptanceStore : IDisposable
     {
         var directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
         var bytes = File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
-        var report = System.Text.Json.JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
-                     ?? throw new InvalidDataException("Invalid resume checkpoint.");
-        if (report.Status != "needs_attention" || report.RecoveryPhase is "running" or "resuming" ||
-            report.Nodes.Any(n => n.Status is "running" or "outcome_unknown") ||
-            report.Nodes.Any(n => n.Status is not ("succeeded" or "needs_attention" or "pending" or "blocked")))
-            throw new InvalidOperationException("resume_checkpoint_not_safe");
+        var evidence = checkpointCodec.ForResume(bytes);
         var hash = Hex(bytes);
         using var tx = connection.BeginTransaction();
         using (var verify = connection.CreateCommand())
@@ -484,8 +516,8 @@ public sealed class DurableAcceptanceStore : IDisposable
             using var reader = verify.ExecuteReader();
             if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
             if (reader.GetString(0) != "dispatch_authorized" ||
-                !string.Equals(reader.GetString(1), report.ManifestHash, StringComparison.OrdinalIgnoreCase) ||
-                reader.IsDBNull(2) || !WorkflowPlanner.PathComparer.Equals(reader.GetString(2), directory) ||
+                !string.Equals(reader.GetString(1), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
+                reader.IsDBNull(2) || !PathComparer.Equals(reader.GetString(2), directory) ||
                 reader.IsDBNull(3) || reader.GetString(3) != "needs_attention" ||
                 reader.IsDBNull(4) || reader.GetInt64(4) != 2 ||
                 !reader.IsDBNull(5) || !reader.IsDBNull(6) || reader.IsDBNull(7))
@@ -717,10 +749,7 @@ public sealed class DurableAcceptanceStore : IDisposable
         // The runner holds its exclusive run lease. Reading this file is safe only
         // under that lease; callers MUST NOT use this as an independent dispatcher.
         var bytes = File.ReadAllBytes(reportPath);
-        var report = System.Text.Json.JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
-                     ?? throw new InvalidDataException("Invalid runner checkpoint.");
-        if (report.Status != "running" || !report.Nodes.Any(n => n.Status == "running"))
-            throw new InvalidDataException("Runner checkpoint has no admitted dispatch.");
+        var evidence = checkpointCodec.ForDispatch(bytes);
         var hash = Hex(bytes);
         using var transaction = connection.BeginTransaction();
         using (var verify = connection.CreateCommand())
@@ -732,7 +761,7 @@ public sealed class DurableAcceptanceStore : IDisposable
             using var reader = verify.ExecuteReader();
             if (!reader.Read()) throw new KeyNotFoundException("Unknown operation.");
             if (reader.GetString(1) != "dispatch_authorized" ||
-                !string.Equals(reader.GetString(0), report.ManifestHash, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(reader.GetString(0), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(Hex((byte[])reader.GetValue(2)), reader.GetString(0),
                     StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("dispatch_checkpoint_mismatch");
@@ -744,7 +773,7 @@ public sealed class DurableAcceptanceStore : IDisposable
             prior.CommandText = "SELECT run_directory FROM dispatch_checkpoints WHERE operation_id=$id;";
             prior.Parameters.AddWithValue("$id", operationId);
             var existing = (string?)prior.ExecuteScalar();
-            if (existing is not null && !WorkflowPlanner.PathComparer.Equals(existing, directory))
+            if (existing is not null && !PathComparer.Equals(existing, directory))
                 throw new InvalidOperationException("dispatch_run_directory_conflict");
         }
 
@@ -787,13 +816,9 @@ public sealed class DurableAcceptanceStore : IDisposable
         var paths = new WorkspaceReadPaths(workspace);
         var directory = paths.Require(runDirectory);
         var bytes = File.ReadAllBytes(paths.Require(Path.Combine(directory, "run.json")));
-        var report = System.Text.Json.JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
-                     ?? throw new InvalidDataException("Invalid final runner report.");
-        if (report.FinishedAt is null || report.Status is not ("succeeded" or "failed" or "canceled"))
-            throw new InvalidOperationException("runner_report_not_terminal");
-        var expectedExit = report.Status switch { "succeeded" => 0, "canceled" => 130, _ => 1 };
-        if (expectedExit != exitCode)
-            throw new InvalidOperationException("runner_exit_report_mismatch");
+        var evidence = checkpointCodec.ForFinalization(bytes, exitCode);
+        var terminalState = evidence.TerminalState ??
+                            throw new InvalidDataException("Missing terminal operation evidence.");
         var hash = Hex(bytes);
         using var tx = connection.BeginTransaction();
         using (var check = connection.CreateCommand())
@@ -810,9 +835,9 @@ public sealed class DurableAcceptanceStore : IDisposable
             using var reader = check.ExecuteReader();
             if (!reader.Read() || reader.IsDBNull(2) || reader.IsDBNull(3) ||
                 reader.GetString(0) != "dispatch_authorized" ||
-                !string.Equals(reader.GetString(1), report.ManifestHash, StringComparison.OrdinalIgnoreCase) ||
-                !WorkflowPlanner.PathComparer.Equals(reader.GetString(2), directory) ||
-                !WorkflowPlanner.PathComparer.Equals(reader.GetString(3), directory))
+                !string.Equals(reader.GetString(1), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
+                !PathComparer.Equals(reader.GetString(2), directory) ||
+                !PathComparer.Equals(reader.GetString(3), directory))
                 throw new InvalidOperationException("operation_report_binding_mismatch");
         }
 
@@ -827,7 +852,7 @@ public sealed class DurableAcceptanceStore : IDisposable
                 attempt.Transaction = tx;
                 attempt.CommandText = "SELECT 1 FROM operation_resume_attempts WHERE operation_id=$id;";
                 attempt.Parameters.AddWithValue("$id", operationId);
-                if (attempt.ExecuteScalar() is null || report.ResumeCount < 1)
+                if (attempt.ExecuteScalar() is null || evidence.ResumeCount < 1)
                     throw new InvalidOperationException("operation_reconciliation_conflict");
             }
         }
@@ -841,12 +866,12 @@ public sealed class DurableAcceptanceStore : IDisposable
             using var reader = prior.ExecuteReader();
             if (reader.Read())
             {
-                if (!WorkflowPlanner.PathComparer.Equals(reader.GetString(0), directory) ||
-                    reader.GetString(1) != hash || reader.GetString(2) != report.Status ||
+                if (!PathComparer.Equals(reader.GetString(0), directory) ||
+                    reader.GetString(1) != hash || reader.GetString(2) != terminalState ||
                     reader.GetInt32(3) != exitCode)
                     throw new InvalidOperationException("operation_finalization_conflict");
                 tx.Commit();
-                return new(directory, hash, report.Status, exitCode);
+                return new(directory, hash, terminalState, exitCode);
             }
         }
 
@@ -858,13 +883,13 @@ public sealed class DurableAcceptanceStore : IDisposable
             insert.Parameters.AddWithValue("$id", operationId);
             insert.Parameters.AddWithValue("$dir", directory);
             insert.Parameters.AddWithValue("$hash", hash);
-            insert.Parameters.AddWithValue("$status", report.Status);
+            insert.Parameters.AddWithValue("$status", terminalState);
             insert.Parameters.AddWithValue("$exit", exitCode);
             insert.ExecuteNonQuery();
         }
 
         tx.Commit();
-        return new(directory, hash, report.Status, exitCode);
+        return new(directory, hash, terminalState, exitCode);
     }
 
     public (string RunDirectory, string CheckpointSha256)? GetDispatchCheckpoint(string operationId)
@@ -896,6 +921,9 @@ public sealed class DurableAcceptanceStore : IDisposable
         command.CommandText = sql;
         command.ExecuteNonQuery();
     }
+
+    private static StringComparer PathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     private static string Hex(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
