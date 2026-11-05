@@ -6,6 +6,9 @@ using CMakeWorkflow.Client;
 using StreamJsonRpc;
 using CMakeWorkflow.Client.Campaigns;
 using CMakeWorkflow.Client.Recipes;
+using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 
 internal static class ProfileWorkflowWireTests
 {

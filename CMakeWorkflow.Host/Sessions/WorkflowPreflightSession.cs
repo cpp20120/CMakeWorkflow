@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow.Host;
 

@@ -1,10 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Core.Processes;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Execution;
 
 // Owns all CMake-specific process preparation and result projection. The backend
 // receives a complete start specification and never discovers domain context.

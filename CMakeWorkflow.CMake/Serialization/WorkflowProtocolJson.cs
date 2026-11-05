@@ -1,4 +1,7 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Recovery;
 
 namespace CMakeWorkflow;
 

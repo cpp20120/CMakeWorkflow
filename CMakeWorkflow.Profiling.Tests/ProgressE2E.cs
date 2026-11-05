@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
-using CMakeWorkflow;
+using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.Profiling;
 
 // Opt-in real-process acceptance test, separate from the fast profiling tests.

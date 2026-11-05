@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Workflows;
 
 // Public .NET SDK DTOs outside the shared recipe/model contracts.
 // TypeScript uses the same JSON field names.

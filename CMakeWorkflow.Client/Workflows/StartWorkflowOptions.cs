@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Workflows;
 
 /// <summary>Durable admission inputs, interpreted by the connected Host.</summary>
 /// <param name="ClientRequestId">Persist this caller-chosen ID before submission; use operations/find after a lost response.</param>

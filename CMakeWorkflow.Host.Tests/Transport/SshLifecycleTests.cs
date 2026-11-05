@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Transport;
 
 internal static class SshLifecycleTests
 {

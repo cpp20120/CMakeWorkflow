@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Transport;
 
 /// <summary>Connects to an independently running Linux Host via the installed OpenSSH client.</summary>
 /// <remarks>All remote paths refer to the remote filesystem. No files are synchronized.</remarks>

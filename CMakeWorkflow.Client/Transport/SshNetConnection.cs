@@ -3,9 +3,7 @@ using System.Text;
 using Renci.SshNet;
 using SshNetCommand = Renci.SshNet.SshCommand;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Transport;
 
 /// <summary>
 /// SSH exec channel, without PTY: raw binary stdin/stdout for JSON-RPC, stderr

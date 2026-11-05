@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.Core.Processes;
 using CMakeWorkflow.Engine;
 

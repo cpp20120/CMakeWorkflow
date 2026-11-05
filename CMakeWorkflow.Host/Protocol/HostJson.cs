@@ -2,6 +2,10 @@ using System.Text.Json.Serialization;
 using CMakeWorkflow.Tooling;
 using CMakeWorkflow.History;
 using CMakeWorkflow.Profiling;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow.Host;
 

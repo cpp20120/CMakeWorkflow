@@ -1,6 +1,6 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+using CMakeWorkflow.CMake.Planning;
+
+namespace CMakeWorkflow.CMake.Build;
 
 // One coordinator per canonical physical tree. The existing scheduler serializes
 // accesses and the existing workflow lease protects cooperating CLI processes.

@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Build;
 
 // This is an observation token, NOT a semantic configuration key or freshness key.
 public sealed record GenerationObservation(string? IndexFile, string? IndexHash)

@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Artifacts;
 
 // Snapshot boundary between a native CMake invoke and a durable workflow run.
 // Explicit harnessDirectory remains supported; otherwise only CMake's printed

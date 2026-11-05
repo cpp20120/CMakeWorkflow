@@ -1,3 +1,5 @@
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.Tooling;
 using System.Diagnostics.CodeAnalysis;
 

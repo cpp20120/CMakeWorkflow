@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Provisioning;
 using Renci.SshNet;
+using CMakeWorkflow.Client.Transport;
 
 /// <summary>Opt-in real sshd/SFTP Host provision and idempotent activation.</summary>
 internal static class SshNetProvisionTests

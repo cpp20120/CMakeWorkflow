@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.CMake.Planning;
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;
 #pragma warning restore IDE0130

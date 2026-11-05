@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Transport;
+using CMakeWorkflow.Client.Workflows;
 using Renci.SshNet;
 
 /// <summary>

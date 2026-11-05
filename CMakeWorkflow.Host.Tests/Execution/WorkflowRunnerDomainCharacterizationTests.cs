@@ -3,6 +3,9 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CMakeWorkflow;
+using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 
 internal static class WorkflowRunnerDomainCharacterizationTests
 {

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
 
 internal static class CancellationSmoke
 {

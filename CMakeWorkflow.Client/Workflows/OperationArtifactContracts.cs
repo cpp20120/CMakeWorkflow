@@ -1,7 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Workflows;
 
 // Same closed wire shape as the Host DTOs; the SDK does not depend on Host assemblies.
 public sealed record OperationArtifactListRequest(string OperationId);

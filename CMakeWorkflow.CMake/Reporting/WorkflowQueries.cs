@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Reporting;
 
 // Shared by CLI formatting and Host RPC. These methods do not execute processes,
 // acquire execution leases, create queries/results, or change recovery state.

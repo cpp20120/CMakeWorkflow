@@ -1,3 +1,6 @@
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.History;
 using StreamJsonRpc;
 

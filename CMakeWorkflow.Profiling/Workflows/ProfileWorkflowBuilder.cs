@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using CMakeWorkflow.CMake.Planning;
 
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling;

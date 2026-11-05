@@ -1,5 +1,7 @@
 using System.Text.Json;
 using CMakeWorkflow;
+using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.Host;
 
 internal static class BenchmarkRecipeTests

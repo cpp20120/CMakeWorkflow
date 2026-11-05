@@ -1,7 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Build;
 
 // Only valid when called by a CMake target with DEPENDS on the native target.
 // It deliberately NEVER calls cmake --build, avoiding re-entrancy into Ninja.

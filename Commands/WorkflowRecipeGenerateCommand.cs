@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.Profiling;
 
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.

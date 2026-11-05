@@ -1,6 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Recovery;
 
 // No environment-controlled execution hooks in a normal/release CLI.
 // Test builds pause at deterministic boundaries; the test process kills them.

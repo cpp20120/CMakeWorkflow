@@ -1,4 +1,4 @@
-using CMakeWorkflow;
+using CMakeWorkflow.CMake.Planning;
 
 internal static class WorkflowDagDirectTests
 {

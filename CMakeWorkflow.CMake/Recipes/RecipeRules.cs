@@ -1,8 +1,7 @@
 using System.Text.RegularExpressions;
+using CMakeWorkflow.CMake.Planning;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Recipes;
 
 internal static class RecipeRules
 {

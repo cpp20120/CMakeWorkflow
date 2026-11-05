@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.Client.Transport;
 using Renci.SshNet;
 
 namespace CMakeWorkflow.Client.Provisioning;
@@ -194,7 +195,7 @@ public static class SshNetHostProvisioner
             Port = options.Port,
             ConnectionTimeout = options.ConnectionTimeout
         });
-        SshCommand.RemotePath(options.InstallRoot, nameof(options.InstallRoot));
+        global::CMakeWorkflow.Client.Transport.SshCommand.RemotePath(options.InstallRoot, nameof(options.InstallRoot));
         if (options.InstallRoot is "/" or "/tmp" || options.InstallRoot.EndsWith('/'))
         {
             throw new ArgumentException("Use a dedicated remote install directory.", nameof(options));

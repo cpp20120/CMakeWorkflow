@@ -1,4 +1,6 @@
 using System.Text.Json;
+using CMakeWorkflow.CMake;
+using CMakeWorkflow.CMake.Planning;
 
 namespace CMakeWorkflow.Profiling;
 

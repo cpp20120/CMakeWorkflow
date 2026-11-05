@@ -6,6 +6,7 @@ using CMakeWorkflow.Profiling;
 using CMakeWorkflow.Campaigns.FuzzCorpus;
 using CMakeWorkflow.Campaigns.Mutation;
 using CMakeWorkflow.Campaigns.WeakMemory;
+using CMakeWorkflow.CMake.Recipes;
 
 namespace CMakeWorkflow.Host;
 

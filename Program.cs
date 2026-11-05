@@ -5,6 +5,11 @@ using CMakeWorkflow.History;
 using CMakeWorkflow.Tooling;
 using CMakeWorkflow.Host;
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.CMake;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow;
 

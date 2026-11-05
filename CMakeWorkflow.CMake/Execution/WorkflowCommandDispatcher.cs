@@ -1,9 +1,9 @@
 using System.Text.Json.Nodes;
 using System.Text;
+using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.CMake.Reporting;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Execution;
 
 /// <summary>
 /// Journal-backed adapter for an ordered series of external commands. This is not

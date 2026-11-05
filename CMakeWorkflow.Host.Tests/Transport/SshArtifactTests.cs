@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
 using StreamJsonRpc;
 
 // Read-only artifact transfer through the same bridge used by the durable workflow tests.

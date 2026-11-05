@@ -6,6 +6,7 @@ using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Provisioning;
 using CMakeWorkflow.Client.Recipes;
 using CMakeWorkflow.Client.Toolchains;
+using CMakeWorkflow.Client.Workflows;
 using PolyType;
 using StreamJsonRpc;
 

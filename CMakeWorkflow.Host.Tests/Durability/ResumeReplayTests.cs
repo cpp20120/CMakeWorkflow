@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow;
+using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Host;
 
 internal static class ResumeReplayTests

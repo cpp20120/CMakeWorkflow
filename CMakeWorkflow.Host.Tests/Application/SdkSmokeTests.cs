@@ -1,4 +1,5 @@
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;

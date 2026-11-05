@@ -3,6 +3,10 @@ using System.Text;
 using System.Text.Json;
 using CMakeWorkflow;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.History;
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Profiling;
@@ -456,7 +460,7 @@ internal static class ApplicationTests
         await using (CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(
                          new ClientOptions(endpoint, root), ct))
         {
-            CMakeWorkflow.Client.OperationOverview sdkOverview = await sdk.Operations.GetOverviewAsync(resumeId, ct);
+            CMakeWorkflow.Client.Workflows.OperationOverview sdkOverview = await sdk.Operations.GetOverviewAsync(resumeId, ct);
             Check(!sdkOverview.IsFinalized && sdkOverview.Nodes.Count == 0 &&
                   sdkOverview.Operation.OperationId == resumeId,
                 "SDK nonterminal overview projection");

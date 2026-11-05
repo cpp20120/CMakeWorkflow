@@ -4,6 +4,7 @@ using System.Text.Json;
 using CMakeWorkflow.Host;
 using CMakeWorkflow.Client;
 using StreamJsonRpc;
+using CMakeWorkflow.Client.Workflows;
 
 internal static class ProcessWorkflowWireTests
 {
@@ -122,7 +123,7 @@ internal static class ProcessWorkflowWireTests
             Check((await handle.GetSnapshotAsync(ct)).Kind == "process", "SDK lost domain kind.");
             Check((await sdk.Executions.GetReportAsync(operationId, ct)).GetProperty("status")
                   .GetString() == "succeeded", "SDK could not retrieve verified process report.");
-            CMakeWorkflow.Client.OperationOverview overview = await handle.GetOverviewAsync(ct);
+            CMakeWorkflow.Client.Workflows.OperationOverview overview = await handle.GetOverviewAsync(ct);
             Check(overview.IsFinalized && overview.Nodes.Single().Id == "effect" &&
                   overview.Operation.Kind == "process", "SDK operation overview projection failed.");
             using (CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))

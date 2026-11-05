@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using CMakeWorkflow;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 
 internal static class WorkflowDagTests
 {

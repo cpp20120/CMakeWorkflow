@@ -1,6 +1,7 @@
 // Prevent the storage-free Client read projections from silently diverging from
 // existing History Host DTOs. No dependency from Client to the SQLite assembly.
 using CMakeWorkflow.Client.History;
+using CMakeWorkflow.Client.Workflows;
 
 internal static class HistoryWireModelParityTests
 {
@@ -23,7 +24,7 @@ internal static class HistoryWireModelParityTests
     {
         Check(typeof(CMakeWorkflow.History.HistoryRun), typeof(HistoryRun));
         Check(typeof(CMakeWorkflow.History.HistoryRunPage), typeof(HistoryRunPage));
-        Check(typeof(CMakeWorkflow.Host.OperationNodeView), typeof(CMakeWorkflow.Client.OperationNodeView));
+        Check(typeof(CMakeWorkflow.Host.OperationNodeView), typeof(OperationNodeView));
         Check(typeof(CMakeWorkflow.History.HistoryDetail), typeof(HistoryDetail));
         Check(typeof(CMakeWorkflow.History.HistoryNode), typeof(HistoryNode));
         Check(typeof(CMakeWorkflow.History.HistoryMeasurement), typeof(HistoryMeasurement));

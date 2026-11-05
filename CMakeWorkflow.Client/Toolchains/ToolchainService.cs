@@ -1,8 +1,4 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-using CMakeWorkflow.Client.Toolchains;
-
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Toolchains;
 
 public sealed class ToolchainService(CMakeWorkflowClient client)
 {

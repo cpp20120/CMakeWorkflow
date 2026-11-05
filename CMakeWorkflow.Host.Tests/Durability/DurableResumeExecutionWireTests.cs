@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CMakeWorkflow;
+using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Host;
 using StreamJsonRpc;
 

@@ -7,6 +7,7 @@ using System.Text.Json;
 using StreamJsonRpc;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Recipes;
+using CMakeWorkflow.Client.Workflows;
 
 if (args.Length == 4 && args[0] == "--verify-package")
 {

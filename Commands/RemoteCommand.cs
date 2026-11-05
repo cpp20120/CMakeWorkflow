@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflow.Client.Transport;
 
 namespace CMakeWorkflow;
 

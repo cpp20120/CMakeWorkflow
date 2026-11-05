@@ -1,9 +1,12 @@
 using System.Text.Json;
+using CMakeWorkflow.CMake.Artifacts;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Engine;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.CMake.Execution;
 
 public static class WorkflowRunner
 {

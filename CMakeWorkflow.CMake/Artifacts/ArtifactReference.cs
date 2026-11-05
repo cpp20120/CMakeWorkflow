@@ -1,6 +1,6 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+using CMakeWorkflow.CMake.Build;
+
+namespace CMakeWorkflow.CMake.Artifacts;
 
 public sealed record ArtifactReference(
     string BuildNode,

@@ -3,6 +3,8 @@ using CMakeWorkflow.Profiling;
 using CMakeWorkflow.Host;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Serialization;
 
 internal static class TypedRecipeTests
 {

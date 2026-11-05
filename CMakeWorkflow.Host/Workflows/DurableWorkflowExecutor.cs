@@ -1,3 +1,6 @@
+using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Profiling;
 
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.

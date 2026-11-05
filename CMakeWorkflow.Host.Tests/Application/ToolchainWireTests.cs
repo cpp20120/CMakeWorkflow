@@ -4,6 +4,8 @@ using StreamJsonRpc;
 using ClientSdk = CMakeWorkflow.Client;
 using CMakeWorkflow;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
 
 internal static class ToolchainWireTests
 {
@@ -37,7 +39,7 @@ internal static class ToolchainWireTests
         _ = Directory.CreateDirectory(directory);
         string script = Path.Combine(directory, "VsDevCmd.bat");
         string argumentCapture = Path.Combine(directory, "received-arguments.txt");
-        VisualStudioInstance fakeVs = new("fake", "Fake VS", "99.0", directory, script);
+        global::CMakeWorkflow.Tooling.VisualStudioInstance fakeVs = new("fake", "Fake VS", "99.0", directory, script);
         global::CMakeWorkflow.Tooling.ToolchainInventory inventory = new(1, "windows", [fakeVs], [], []);
         global::CMakeWorkflow.Tooling.DeveloperEnvironmentRequest request = new("vs:fake", "x64", "x64", "10.0.26100.0", "14.51.36231");
         try
@@ -98,10 +100,10 @@ internal static class ToolchainWireTests
             @"C:\VS1\cl.exe", "14.40", "one", "vs:one");
         global::CMakeWorkflow.Tooling.ToolchainCandidate sdk = new("sdk-10", "sdk", "windows-sdk", "windows-sdk",
             @"C:\Kits\Include\10.0", "10.0");
-        VisualStudioInstance one = new("one", "VS One", "17.0", @"C:\VS1", @"C:\VS1\VsDevCmd.bat");
-        VisualStudioInstance two = new("two", "VS Two", "17.0", @"C:\VS2", @"C:\VS2\VsDevCmd.bat");
+        global::CMakeWorkflow.Tooling.VisualStudioInstance one = new("one", "VS One", "17.0", @"C:\VS1", @"C:\VS1\VsDevCmd.bat");
+        global::CMakeWorkflow.Tooling.VisualStudioInstance two = new("two", "VS Two", "17.0", @"C:\VS2", @"C:\VS2\VsDevCmd.bat");
         global::CMakeWorkflow.Tooling.ToolchainInventory inventory = new(1, "windows", [one, two], [cmake, ninja, compiler, sdk], []);
-        ToolchainResolution chosen = WindowsToolchains.Resolve(inventory, new(CompilerCandidateId: compiler.Id,
+        global::CMakeWorkflow.Tooling.ToolchainResolution chosen = WindowsToolchains.Resolve(inventory, new(CompilerCandidateId: compiler.Id,
             SdkCandidateId: sdk.Id));
         Check(chosen.Status == "resolved" && chosen.EnvironmentProfileId == "vs:one"
                                           && chosen.CMake?.Provider == "path" && chosen.Ninja?.Provider == "path",
@@ -113,20 +115,20 @@ internal static class ToolchainWireTests
         global::CMakeWorkflow.Tooling.ToolchainCandidate looseClang = new("loose-clang", "compiler", "clang", "path",
             @"C:\tools\llvm\clang++.exe");
         global::CMakeWorkflow.Tooling.ToolchainInventory mixed = inventory with { Candidates = [cmake, ninja, mingw, looseClang, compiler, sdk] };
-        ToolchainResolution automatic = WindowsToolchains.Resolve(mixed, new());
+        global::CMakeWorkflow.Tooling.ToolchainResolution automatic = WindowsToolchains.Resolve(mixed, new());
         Check(automatic.Status == "resolved" && automatic.Compiler?.Id == compiler.Id,
             "MinGW/PATH must never override an activated MSVC-ABI toolchain.");
-        ToolchainResolution onlyGnu = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, mingw] }, new());
+        global::CMakeWorkflow.Tooling.ToolchainResolution onlyGnu = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, mingw] }, new());
         Check(onlyGnu.Status == "incomplete" && onlyGnu.Compiler is null,
             "GNU-only Windows PATH must not satisfy automatic toolchain resolution.");
-        ToolchainResolution explicitGnu = WindowsToolchains.Resolve(mixed, new(CompilerCandidateId: mingw.Id));
+        global::CMakeWorkflow.Tooling.ToolchainResolution explicitGnu = WindowsToolchains.Resolve(mixed, new(CompilerCandidateId: mingw.Id));
         Check(explicitGnu.Status == "resolved" && explicitGnu.Compiler?.Id == mingw.Id
                                                && explicitGnu.Sdk is null && explicitGnu.EnvironmentProfileId is null,
             "Explicit GNU toolchain must remain separate from VS/Windows SDK.");
-        ToolchainResolution bareClang =
+        global::CMakeWorkflow.Tooling.ToolchainResolution bareClang =
             WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, looseClang, sdk] }, new());
         Check(bareClang.Status == "incomplete", "Unactivated Windows clang++ must not be treated as configured.");
-        ToolchainResolution missingSdk = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, compiler] },
+        global::CMakeWorkflow.Tooling.ToolchainResolution missingSdk = WindowsToolchains.Resolve(inventory with { Candidates = [cmake, ninja, compiler] },
             new(CompilerCandidateId: compiler.Id));
         Check(missingSdk.Status == "incomplete", "MSVC ABI without Windows SDK must not be ready.");
         try
@@ -169,12 +171,12 @@ internal static class ToolchainWireTests
         Check(JsonSerializer.Serialize(fromManifest, WorkflowJson.Default.WorkflowToolchainBinding)
                 .Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
             "Workflow serializer emitted nonstandard CMake candidate property casing.");
-        ToolchainSelection? fromHostSelection = JsonSerializer.Deserialize(selectionJson,
+        global::CMakeWorkflow.Tooling.ToolchainSelection? fromHostSelection = JsonSerializer.Deserialize(selectionJson,
             HostJson.Default.ToolchainSelection);
         Check(fromHostSelection?.CMakeCandidateId == cmake.Id,
             "Host resolver did not accept documented cmakeCandidateId.");
         string clientSelection = JsonSerializer.Serialize(
-            new ClientSdk.ToolchainSelection(CMakeCandidateId: cmake.Id),
+            new global::CMakeWorkflow.Client.Toolchains.ToolchainSelection(CMakeCandidateId: cmake.Id),
             CamelCaseJson);
         string clientPreparation = JsonSerializer.Serialize(
             new WorkflowToolchainBinding(CMakeCandidateId: cmake.Id),
@@ -277,7 +279,7 @@ internal static class ToolchainWireTests
         Check(discovered.Candidates.All(x => !string.IsNullOrWhiteSpace(x.Id) &&
                                              Path.IsPathFullyQualified(x.Path)),
             "Discovery returned unqualified candidates.");
-        ToolchainResolution resolution = await host.ToolchainsResolveAsync(new(new()), ct);
+        global::CMakeWorkflow.Tooling.ToolchainResolution resolution = await host.ToolchainsResolveAsync(new(new()), ct);
         Check(resolution.SchemaVersion == 1, "Invalid resolution schema.");
         if (!OperatingSystem.IsWindows())
         {
@@ -298,7 +300,7 @@ internal static class ToolchainWireTests
         await using ClientSdk.CMakeWorkflowClient sdkClient = await ClientSdk.CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct);
         ClientSdk.Toolchains.ToolchainInventory sdkInventory = await sdkClient.Toolchains.DiscoverAsync(ct);
         Check(sdkInventory.Candidates.Count == discovered.Candidates.Count, "SDK discovery differs from Host.");
-        ClientSdk.ToolchainResolution sdkResolved = await sdkClient.Toolchains.ResolveAsync(new(), ct);
+        ClientSdk.Toolchains.ToolchainResolution sdkResolved = await sdkClient.Toolchains.ResolveAsync(new(), ct);
         Check(sdkResolved.Status == resolution.Status, "SDK resolution differs from Host.");
         Console.WriteLine("Toolchain discovery/resolver/SDK wire checks passed.");
     }

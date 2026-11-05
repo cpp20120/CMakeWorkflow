@@ -1,6 +1,6 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+using CMakeWorkflow.CMake.Reporting;
+
+namespace CMakeWorkflow.CMake.Execution;
 
 // Compatibility entry point for workflow callers. CMake preparation and process
 // execution are implemented in separate internal layers.

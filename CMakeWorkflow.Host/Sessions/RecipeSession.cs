@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.Profiling;
 
 namespace CMakeWorkflow.Host;

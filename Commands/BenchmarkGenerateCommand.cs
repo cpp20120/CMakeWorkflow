@@ -1,4 +1,6 @@
 using System.Globalization;
+using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Serialization;
 
 #pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow;

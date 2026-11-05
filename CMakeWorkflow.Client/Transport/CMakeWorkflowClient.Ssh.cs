@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using CMakeWorkflow.Client.Transport;
 using StreamJsonRpc;
 
 namespace CMakeWorkflow.Client;

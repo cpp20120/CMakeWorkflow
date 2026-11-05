@@ -2,6 +2,9 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow;
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.CMake.Reporting;
 
 internal static class WorkflowProcessCharacterization
 {

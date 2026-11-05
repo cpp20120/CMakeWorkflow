@@ -1,3 +1,5 @@
+using CMakeWorkflow.Client.Workflows;
+
 namespace CMakeWorkflow.Client.Profiling;
 
 // One typed request per capability. Neither SDK nor Host wraps an arbitrary CLI argv.

@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using CMakeWorkflow.Client.Transport;
 
 namespace CMakeWorkflow.Client;
 

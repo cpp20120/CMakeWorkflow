@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
 
 // Creates files on the simulated remote machine, never in SDK submission code.
 // A release file makes disconnect/cancellation checks independent of build speed.

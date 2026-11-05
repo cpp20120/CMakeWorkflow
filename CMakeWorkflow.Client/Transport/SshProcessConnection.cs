@@ -1,8 +1,6 @@
 using System.Diagnostics;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Client;
-#pragma warning restore IDE0130
+namespace CMakeWorkflow.Client.Transport;
 
 // Owns only the local SSH transport process, never the remote persistent Host.
 internal sealed class SshProcessConnection : IRemoteSshConnection

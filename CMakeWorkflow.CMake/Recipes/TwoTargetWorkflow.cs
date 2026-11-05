@@ -1,6 +1,7 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
-#pragma warning restore IDE0130
+using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Execution;
+
+namespace CMakeWorkflow.CMake.Recipes;
 
 /// <summary>
 /// Minimal interleaved-build probe, NOT a general workflow scheduler.

@@ -1,6 +1,7 @@
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Provisioning;
+using CMakeWorkflow.Client.Workflows;
 using StreamJsonRpc;
 
 internal static class P3ApiTests
