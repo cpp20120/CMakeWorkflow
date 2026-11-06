@@ -21,6 +21,8 @@
     <Project Path="CMakeWorkflow.Pipelines.Persistence.Tests/CMakeWorkflow.Pipelines.Persistence.Tests.csproj"/>
     <Project Path="CMakeWorkflow.Pipelines.Coordinator/CMakeWorkflow.Pipelines.Coordinator.csproj"/>
     <Project Path="CMakeWorkflow.Pipelines.Coordinator.Tests/CMakeWorkflow.Pipelines.Coordinator.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.GitHub/CMakeWorkflow.Pipelines.GitHub.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.GitHub.Tests/CMakeWorkflow.Pipelines.GitHub.Tests.csproj"/>
     <Project Path="CMakeWorkflow.History/CMakeWorkflow.History.csproj"/>
     <Project Path="CMakeWorkflow.History.Tests/CMakeWorkflow.History.Tests.csproj"/>
     <Project Path="CMakeWorkflow.csproj"/>

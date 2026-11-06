@@ -162,4 +162,56 @@ Host ownership lease required for fully autonomous recovery: the caller must
 manage that before invoking concurrent dispatch/recovery. If a reserved child
 was never dispatched and read-only lookup cannot find it, the stage intentionally
 stays unresolved; operator reconciliation requires verified prior-owner
-quiescence. The P3 GitHub adapter will be implemented separately.
+quiescence. The P3 GitHub adapter is described below.
+
+## P3: read-only GitHub Actions attach/watch (experimental)
+
+`CMakeWorkflow.Pipelines.GitHub` is a separate **read-only adapter**. It does
+not submit, rerun, cancel, approve or download anything. The P1 manifest
+supports `github.actions` `mode: "attach"` with a pinned `repository`, workflow
+YAML filename, `runId`, `runAttempt` and `expectedHeadSha`. P3 turns that
+pre-existing manifest into verified provider observation, using the existing
+P2a `waiting_external` stage state; the SQLite schema remains **v2**.
+
+1. `GitHubActionsStageWatcher.AttachReadyAsync(operationId, stageId)` checks
+   prerequisites, queries the **specific attempt** from GitHub, checks the exact
+   repository / run ID / attempt / workflow path / commit SHA, and then stores
+   the immutable `github:` binding via a ledger CAS. Errors do not attach.
+2. `ObserveAsync(operationId, stageId)` reconstructs the pinned identity from
+   the **immutable admitted manifest** and compares it with the persisted
+   binding before another provider GET. Nonterminal observations leave the
+   ledger unchanged. A verified `completed` + `success` becomes `succeeded`;
+   any other recognized terminal conclusion becomes `failed`. Unknown or
+   inconsistent provider values are refused, not interpreted as success.
+3. Each terminal stage journals an evidence reference to the exact repository,
+   run, attempt and SHA-256 of the GitHub JSON response received. This SHA-256
+   is a local audit fingerprint, **not** a GitHub-signed attestation. A
+   committed terminal result is immutable even if GitHub later reruns the run.
+
+`GitHubActionsHttpReader(HttpClient, token)` uses only
+`GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}`;
+`HttpClient` and any read-only token are borrowed from the caller. For private
+repositories, supply a token with Actions **read** access. Public run reads
+can be anonymous, subject to rate limits. Responses are capped at 1 MiB;
+403/404/429, cancellation, timeouts, malformed responses and identity changes
+remain errors and **never** trigger a new external run or automatic retry.
+
+```csharp
+using CMakeWorkflow.Pipelines.GitHub;
+using CMakeWorkflow.Pipelines.Persistence;
+
+using var ledger = new PipelineLedger("out/pipelines.sqlite");
+using var http = new HttpClient();
+var watcher = new GitHubActionsStageWatcher(ledger,
+    new GitHubActionsHttpReader(http, token: null));
+// The stage must already exist in an accepted PipelineDocument.
+var attached = await watcher.AttachReadyAsync(operationId, "ci");
+var latest = await watcher.ObserveAsync(attached.OperationId, "ci");
+// Or await watcher.WatchUntilTerminalAsync(attached.OperationId, "ci")
+// to poll every 30 seconds until terminal (caller-controlled cancellation).
+```
+
+This is explicit observation, **not** an autonomous poller. The caller is
+responsible for credentials, request scheduling, ledger/Host ownership and
+reconnections. No new Host RPC, CLI command, container runtime, artifact
+federation or `workflow_dispatch` support is included in P3.

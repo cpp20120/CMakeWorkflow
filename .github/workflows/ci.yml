@@ -68,6 +68,8 @@ jobs:
         run: dotnet CMakeWorkflow.Pipelines.Persistence.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.Persistence.Tests.dll
       - name: Durable workflow child coordinator checks
         run: dotnet CMakeWorkflow.Pipelines.Coordinator.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.Coordinator.Tests.dll
+      - name: GitHub Actions pinned attempt watch checks
+        run: dotnet CMakeWorkflow.Pipelines.GitHub.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.GitHub.Tests.dll
       - name: Campaign checks
         run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
       - name: Generic CMake integration
