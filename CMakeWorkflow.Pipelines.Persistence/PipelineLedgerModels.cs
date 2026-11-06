@@ -40,3 +40,12 @@ public sealed record PipelineLedgerEvent(
     string Kind,
     string RecordedAt,
     string? Detail);
+
+/// <summary>Host-scoped, exact child admission parameters persisted atomically before dispatch.</summary>
+/// <remarks>Only Host validates filesystem authorization; this value provides lexical identity and recovery evidence.</remarks>
+public sealed record PipelineChildLaunch(
+    string WorkspaceDirectory,
+    string Manifest,
+    string ManifestSha256,
+    int Jobs,
+    string ResultsDirectory);

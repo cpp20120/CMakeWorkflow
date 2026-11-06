@@ -121,3 +121,45 @@ API calls, automatic pollers, deployment or approvals.
 Next: P2b binds this ledger to Host-owned child operations with an explicit
 reconciliation and ownership protocol. The external GitHub watch adapter
 comes after that; it must not turn unknown outcomes into automatic retries.
+
+## P2b: durable Host child coordination (experimental)
+
+`CMakeWorkflow.Pipelines.Coordinator` connects the SQLite ledger to the existing
+`CMakeWorkflow.Client` Host RPC facade (`workflow/preflight`, `workflow/start`,
+`operations/find`, `operations/overview`). It is **not** installed as a new
+Host RPC endpoint, CLI command or autonomous scheduler yet. Use a persistent,
+workspace-bound Host connection; disposing a private launched Host may interrupt
+its child operations.
+
+The ledger schema is now **v2**. Opening a v1 database additively creates the
+`pipeline_child_launches` table. Each new coordinator-authorized reservation
+atomically binds immutable Host workspace path, absolute manifest path, exact
+SHA-256, jobs, result directory and the deterministic request ID. Legacy
+three-argument `ReserveWorkflow` remains readable but **cannot be dispatched
+or automatically rebound by the P2b coordinator** because it has no pinned
+Host launch specification. Stage IDs of any legal size produce bounded
+Host request IDs.
+
+1. `StartReadyAsync` first performs read-only Host preflight, then commits the
+   pipeline-wide CAS reservation and pinned child launch, then sends **one**
+   `workflow/start` RPC. It checks the returned request ID, domain and manifest
+   hash before binding the operation ID. A failure at any point after reservation
+   leaves `dispatch_intent` and never triggers automatic retries.
+2. `RecoverAsync` on `dispatch_intent` uses only `operations/find` with the
+   original persisted request ID and validates the pinned Host identity. A
+   lookup error or not-found is **not** authority to start another operation.
+   This call needs exclusive owner/quiescence discipline when a dispatch might
+   still be in flight; it never claims or changes that ownership itself.
+3. `RecoverAsync` on `waiting_external` reads `operations/overview`, and only
+   a Host-verified terminal report SHA-256 can transition to `succeeded` or
+   `failed` (including canceled as a non-success). Unfinalized terminal-looking
+   observations do **not** prove a stage finished.
+
+No automatic polling, external GitHub API, artifact transfer, deployment,
+child cancellation, process lease acquisition or general pipeline scheduling
+is included. In particular, this patch does **not** enforce the cross-process
+Host ownership lease required for fully autonomous recovery: the caller must
+manage that before invoking concurrent dispatch/recovery. If a reserved child
+was never dispatched and read-only lookup cannot find it, the stage intentionally
+stays unresolved; operator reconciliation requires verified prior-owner
+quiescence. The P3 GitHub adapter will be implemented separately.

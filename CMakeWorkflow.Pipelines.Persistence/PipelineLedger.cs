@@ -46,7 +46,7 @@ public sealed class PipelineLedger : IDisposable
             Execute("PRAGMA synchronous=FULL;");
             using SqliteCommand version = Command("PRAGMA user_version;");
             long schema = (long)(version.ExecuteScalar() ?? -1L);
-            if (schema is not 0 and not 1)
+            if (schema is not 0 and not 1 and not 2)
             {
                 throw new InvalidDataException($"Unsupported pipeline ledger schema: {schema}.");
             }
@@ -99,10 +99,23 @@ public sealed class PipelineLedger : IDisposable
                     PRIMARY KEY (operation_id, revision),
                     FOREIGN KEY (operation_id) REFERENCES pipeline_runs(operation_id)
                 );
+                CREATE TABLE IF NOT EXISTS pipeline_child_launches (
+                    operation_id TEXT NOT NULL,
+                    stage_id TEXT NOT NULL,
+                    child_request_id TEXT NOT NULL,
+                    workspace_directory TEXT NOT NULL,
+                    manifest TEXT NOT NULL,
+                    manifest_sha256 TEXT NOT NULL,
+                    jobs INTEGER NOT NULL CHECK (jobs > 0),
+                    results_directory TEXT NOT NULL,
+                    PRIMARY KEY (operation_id, stage_id),
+                    FOREIGN KEY (operation_id, stage_id)
+                        REFERENCES pipeline_stages(operation_id, stage_id)
+                );
                 """, tx);
-            if (schema == 0)
+            if (schema < 2)
             {
-                Execute("PRAGMA user_version=1;", tx);
+                Execute("PRAGMA user_version=2;", tx);
             }
 
             tx.Commit();
@@ -205,7 +218,62 @@ public sealed class PipelineLedger : IDisposable
     /// <remarks>After a crash this intent is uncertain; lookup by ChildRequestId, never dispatch again blindly.</remarks>
     public PipelineRunSnapshot ReserveWorkflow(string operationId, string stageId, long expectedRevision) =>
         Transition(operationId, stageId, expectedRevision, "workflow", PipelineStageStates.Pending,
-            PipelineStageStates.DispatchIntent, "reserved", childRequestId: $"pipeline:{operationId}:{stageId}");
+            PipelineStageStates.DispatchIntent, "reserved", childRequestId: ChildRequestId(operationId, stageId));
+
+    /// <summary>Atomically reserve a launch specification and child request ID before invoking Host RPC.</summary>
+    /// <remarks>
+    /// The old three-argument reservation remains for P2a/manual recovery, but it is not authorized for
+    /// coordinator dispatch. This overload pins the exact Host-side admission inputs in the same SQLite transaction.
+    /// </remarks>
+    public PipelineRunSnapshot ReserveWorkflow(string operationId, string stageId, long expectedRevision,
+        PipelineChildLaunch launch)
+    {
+        ArgumentNullException.ThrowIfNull(launch);
+        ValidateLaunch(launch);
+        return Transition(operationId, stageId, expectedRevision, "workflow", PipelineStageStates.Pending,
+            PipelineStageStates.DispatchIntent, "reserved", childRequestId: ChildRequestId(operationId, stageId),
+            launch: launch with { ManifestSha256 = launch.ManifestSha256.ToUpperInvariant() });
+    }
+
+    /// <summary>Read the immutable Host-side request parameters bound to a workflow dispatch intent.</summary>
+    public PipelineChildLaunch? GetChildLaunch(string operationId, string stageId)
+    {
+        Identifier(operationId, nameof(operationId));
+        Identifier(stageId, nameof(stageId));
+        using SqliteTransaction tx = db.BeginTransaction();
+        PipelineRunSnapshot snapshot = Read(operationId, tx);
+        PipelineStageSnapshot stage = snapshot.Stages.SingleOrDefault(s => s.Id == stageId)
+            ?? throw new ArgumentException("Unknown pipeline stage.", nameof(stageId));
+        using SqliteCommand cmd = Command("""
+            SELECT child_request_id,workspace_directory,manifest,manifest_sha256,jobs,results_directory
+            FROM pipeline_child_launches WHERE operation_id=$op AND stage_id=$stage;
+            """, tx);
+        Add(cmd, "$op", operationId);
+        Add(cmd, "$stage", stageId);
+        PipelineChildLaunch? launch;
+        using (SqliteDataReader reader = cmd.ExecuteReader())
+        {
+            if (!reader.Read())
+            {
+                launch = null;
+            }
+            else
+            {
+                if (stage.ChildRequestId != reader.GetString(0))
+                {
+                    throw new InvalidDataException("Child launch request identity differs from stage intent.");
+                }
+
+                launch = new(reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                    reader.GetInt32(4), reader.GetString(5));
+                ValidateLaunch(launch);
+                ValidateLaunchAgainstManifest(snapshot.ManifestJson, stageId, launch);
+            }
+        }
+
+        tx.Commit();
+        return launch;
+    }
 
     /// <summary>Bind an already accepted child operation by ID; only a reserved workflow stage may bind.</summary>
     public PipelineRunSnapshot BindChild(string operationId, string stageId, long expectedRevision,
@@ -284,7 +352,8 @@ public sealed class PipelineLedger : IDisposable
     private PipelineRunSnapshot Transition(string operationId, string stageId, long expectedRevision,
         string? kind, string requiredState, string nextState, string eventKind,
         string? childRequestId = null, string? childOperationId = null,
-        string? externalReference = null, string? evidenceReference = null)
+        string? externalReference = null, string? evidenceReference = null,
+        PipelineChildLaunch? launch = null)
     {
         Identifier(operationId, nameof(operationId));
         Identifier(stageId, nameof(stageId));
@@ -328,6 +397,26 @@ public sealed class PipelineLedger : IDisposable
             stage.ChildOperationId is null && stage.ExternalReference is null)
         {
             throw new InvalidDataException("Cannot finish a stage without a persisted external binding.");
+        }
+
+        if (launch is not null)
+        {
+            ValidateLaunchAgainstManifest(previous.ManifestJson, stageId, launch);
+            using SqliteCommand reservation = Command("""
+                INSERT INTO pipeline_child_launches
+                    (operation_id,stage_id,child_request_id,workspace_directory,manifest,
+                     manifest_sha256,jobs,results_directory)
+                VALUES ($op,$stage,$request,$workspace,$manifest,$sha,$jobs,$results);
+                """, tx);
+            Add(reservation, "$op", operationId);
+            Add(reservation, "$stage", stageId);
+            Add(reservation, "$request", childRequestId);
+            Add(reservation, "$workspace", launch.WorkspaceDirectory);
+            Add(reservation, "$manifest", launch.Manifest);
+            Add(reservation, "$sha", launch.ManifestSha256);
+            Add(reservation, "$jobs", launch.Jobs);
+            Add(reservation, "$results", launch.ResultsDirectory);
+            _ = reservation.ExecuteNonQuery();
         }
 
         using (SqliteCommand cmd = Command("""
@@ -460,6 +549,58 @@ public sealed class PipelineLedger : IDisposable
         return new(operationId, requestId, name, digest, manifestJson, revision, status,
             ordered.AsReadOnly());
     }
+
+    private static string ChildRequestId(string operationId, string stageId)
+    {
+        Identifier(operationId, nameof(operationId));
+        Identifier(stageId, nameof(stageId));
+        // Bound the Host request ID even for a 128-character stage ID.
+        string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(stageId)));
+        return $"pipeline:{operationId}:{digest[..32]}";
+    }
+
+    private static void ValidateLaunch(PipelineChildLaunch launch)
+    {
+        if (string.IsNullOrWhiteSpace(launch.WorkspaceDirectory) || launch.WorkspaceDirectory.Length > 2048 ||
+            string.IsNullOrWhiteSpace(launch.Manifest) || launch.Manifest.Length > 2048 ||
+            string.IsNullOrWhiteSpace(launch.ResultsDirectory) || launch.ResultsDirectory.Length > 2048 ||
+            launch.Jobs <= 0 || launch.ManifestSha256 is null || launch.ManifestSha256.Length != 64 ||
+            !launch.ManifestSha256.All(char.IsAsciiHexDigit))
+        {
+            throw new ArgumentException("Invalid bounded Host workflow launch specification.", nameof(launch));
+        }
+
+        string root = Slash(launch.WorkspaceDirectory).TrimEnd('/');
+        string manifest = Slash(launch.Manifest);
+        string results = Slash(launch.ResultsDirectory);
+        if (root.Length == 0 || !Rooted(root) || !SafeSegments(root) ||
+            !manifest.StartsWith(root + "/", StringComparison.Ordinal) || !SafeSegments(manifest) ||
+            !results.StartsWith(root + "/", StringComparison.Ordinal) || !SafeSegments(results))
+        {
+            throw new ArgumentException("Host launch paths must be canonical workspace-contained paths.",
+                nameof(launch));
+        }
+    }
+
+    private static void ValidateLaunchAgainstManifest(string immutableJson, string stageId, PipelineChildLaunch launch)
+    {
+        PipelineDocument document = PipelineManifest.ParseJson(immutableJson);
+        PipelineWorkflowStage workflow = document.Stages.Single(s => s.Id == stageId).Workflow
+            ?? throw new InvalidDataException("Child launch stage is not a workflow.");
+        string expected = Slash(launch.WorkspaceDirectory).TrimEnd('/') + "/" + Slash(workflow.Manifest);
+        if (!string.Equals(Slash(launch.Manifest), expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("child_manifest_does_not_match_pipeline_snapshot");
+        }
+    }
+
+    private static string Slash(string value) => value.Replace('\\', '/');
+
+    private static bool Rooted(string path) => path.StartsWith('/') ||
+        (path.Length > 2 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '/');
+
+    private static bool SafeSegments(string path) =>
+        !path.Split('/').Skip(1).Any(static part => part is "" or "." or "..");
 
     private string? FindOperationId(string clientRequestId, SqliteTransaction tx)
     {
