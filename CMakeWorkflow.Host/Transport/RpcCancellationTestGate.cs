@@ -1,5 +1,7 @@
 #if RPC_CANCELLATION_TESTING
+
 using System.Diagnostics;
+using CMakeWorkflow.Host.Sessions;
 
 namespace CMakeWorkflow.Host;
 
