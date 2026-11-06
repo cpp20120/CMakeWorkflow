@@ -94,7 +94,8 @@ public sealed class GitHubActionsHttpReader(HttpClient client, string? token = n
             : new GitHubRunAttempt(id, (int)attempt, Text(repository, "full_name"), path,
             Text(root, "head_sha"), Text(root, "status"),
             conclusion.ValueKind == JsonValueKind.Null ? null : conclusion.GetString(),
-            Convert.ToHexString(SHA256.HashData(body)));
+            Convert.ToHexString(SHA256.HashData(body)),
+            OptionalText(root, "event"), OptionalText(root, "display_title"));
     }
 
     private static JsonElement Object(JsonElement parent, string property)
@@ -109,6 +110,13 @@ public sealed class GitHubActionsHttpReader(HttpClient client, string? token = n
         JsonElement child = parent.GetProperty(property);
         return child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString())
             ? child.GetString()! : throw new InvalidDataException($"GitHub field '{property}' must be a nonempty string.");
+    }
+
+    private static string? OptionalText(JsonElement parent, string property)
+    {
+        return !parent.TryGetProperty(property, out JsonElement value) || value.ValueKind == JsonValueKind.Null
+            ? null : value.ValueKind == JsonValueKind.String
+                ? value.GetString() : throw new InvalidDataException($"Invalid GitHub field '{property}'.");
     }
 
     private static long Number(JsonElement parent, string property)

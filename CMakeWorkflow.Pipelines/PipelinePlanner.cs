@@ -131,9 +131,9 @@ public static class PipelinePlanner
 
     private static void ValidateGitHub(PipelineGitHubActionsStage options)
     {
-        if (options.Mode != "attach")
+        if (options.Mode is not ("attach" or "dispatch"))
         {
-            throw new ArgumentException("GitHub Actions v1 supports attach only (no workflow dispatch).");
+            throw new ArgumentException("GitHub Actions supports attach and dispatch only.");
         }
 
         string[] parts = (options.Repository ?? "").Split('/');
@@ -149,9 +149,52 @@ public static class PipelinePlanner
             throw new ArgumentException("GitHub workflow must name a YAML workflow file.");
         }
 
-        if (options.RunId <= 0 || options.RunAttempt <= 0)
+        if (options.Mode == "attach")
         {
-            throw new ArgumentException("GitHub runId and runAttempt must be positive.");
+            if (options.RunId <= 0 || options.RunAttempt <= 0 || options.Ref is not null || options.Inputs is not null)
+            {
+                throw new ArgumentException("GitHub attach requires positive runId/attempt and no dispatch options.");
+            }
+        }
+        else
+        {
+            string workflowFile = options.Workflow.StartsWith(".github/workflows/", StringComparison.Ordinal)
+                ? options.Workflow[".github/workflows/".Length..] : options.Workflow;
+            if (workflowFile.Contains('/', StringComparison.Ordinal))
+            {
+                throw new ArgumentException("GitHub dispatch requires a workflow YAML filename.");
+            }
+
+            string? branchRef = options.Ref;
+            if (options.RunId != 0 || options.RunAttempt != 0 ||
+                string.IsNullOrWhiteSpace(branchRef) || branchRef.Length > 255 ||
+                !(branchRef.StartsWith("refs/heads/", StringComparison.Ordinal) ||
+                  branchRef.StartsWith("refs/tags/", StringComparison.Ordinal)) ||
+                branchRef.Any(char.IsControl) || branchRef.Any(char.IsWhiteSpace) ||
+                branchRef.Split('/').Any(static part => part is "" or "." or "..") ||
+                options.Inputs is { Count: > 24 })
+            {
+                throw new ArgumentException("GitHub dispatch requires a bounded branch/tag ref, no run ID, and <=24 inputs.");
+            }
+
+            int bytes = 0;
+            foreach (KeyValuePair<string, string> input in options.Inputs ??
+                         new Dictionary<string, string>())
+            {
+                if (input.Key == "cmwf_request_id" || input.Key.Length is < 1 or > 64 ||
+                    !input.Key.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-') ||
+                    input.Value is null || input.Value.Length > 65535)
+                {
+                    throw new ArgumentException("Invalid or reserved GitHub dispatch input.");
+                }
+
+                bytes += System.Text.Encoding.UTF8.GetByteCount(input.Key) +
+                    System.Text.Encoding.UTF8.GetByteCount(input.Value);
+                if (bytes > 64000)
+                {
+                    throw new ArgumentException("GitHub dispatch input payload too large.");
+                }
+            }
         }
 
         string sha = options.ExpectedHeadSha ?? "";

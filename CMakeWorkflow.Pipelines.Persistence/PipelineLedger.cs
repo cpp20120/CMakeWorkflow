@@ -294,9 +294,53 @@ public sealed class PipelineLedger : IDisposable
         PipelineDocument frozen = PipelineManifest.ParseJson(snapshot.ManifestJson);
         PipelineGitHubActionsStage github = frozen.Stages.Single(s => s.Id == stageId).GitHubActions
             ?? throw new InvalidOperationException("Stage is not a GitHub Actions attachment.");
+        if (github.Mode != "attach")
+        {
+            throw new InvalidOperationException("not_a_github_attach_stage");
+        }
+
         string binding = $"github:{github.Repository}:{github.Workflow}:{github.RunId}:{github.RunAttempt}:{github.ExpectedHeadSha}";
         return Transition(operationId, stageId, expectedRevision, "github.actions", PipelineStageStates.Pending,
             PipelineStageStates.WaitingExternal, "github_watch_recorded", externalReference: binding);
+    }
+
+    /// <summary>Persist GitHub dispatch intent before issuing the one permitted provider POST.</summary>
+    /// <remarks>Every subsequent exception or restart must be reconciled by GET, never by another POST.</remarks>
+    public PipelineRunSnapshot ReserveGitHubDispatch(string operationId, string stageId, long expectedRevision)
+    {
+        PipelineRunSnapshot snapshot = Get(operationId);
+        PipelineDocument frozen = PipelineManifest.ParseJson(snapshot.ManifestJson);
+        PipelineGitHubActionsStage options = frozen.Stages.Single(s => s.Id == stageId).GitHubActions
+            ?? throw new InvalidOperationException("not_a_github_dispatch_stage");
+        return options.Mode == "dispatch"
+            ? Transition(operationId, stageId, expectedRevision, "github.actions", PipelineStageStates.Pending,
+                PipelineStageStates.DispatchIntent, "github_dispatch_reserved",
+                childRequestId: ChildRequestId(operationId, stageId))
+            : throw new InvalidOperationException("not_a_github_dispatch_stage");
+    }
+
+    /// <summary>Bind a run ID returned by the provider (or independently correlated via a verified read).</summary>
+    /// <remarks>Caller must validate external identity; CAS prevents rebinding or multiple dispatch attempts.</remarks>
+    public PipelineRunSnapshot BindGitHubDispatch(string operationId, string stageId, long expectedRevision,
+        long runId, int runAttempt)
+    {
+        if (runId <= 0 || runAttempt != 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(runId), "A new dispatch must bind attempt 1.");
+        }
+
+        PipelineRunSnapshot snapshot = Get(operationId);
+        PipelineDocument frozen = PipelineManifest.ParseJson(snapshot.ManifestJson);
+        PipelineGitHubActionsStage options = frozen.Stages.Single(s => s.Id == stageId).GitHubActions
+            ?? throw new InvalidOperationException("not_a_github_dispatch_stage");
+        if (options.Mode != "dispatch")
+        {
+            throw new InvalidOperationException("not_a_github_dispatch_stage");
+        }
+
+        string binding = $"github:{options.Repository}:{options.Workflow}:{runId}:{runAttempt}:{options.ExpectedHeadSha}";
+        return Transition(operationId, stageId, expectedRevision, "github.actions", PipelineStageStates.DispatchIntent,
+            PipelineStageStates.WaitingExternal, "github_dispatch_bound", externalReference: binding);
     }
 
     /// <summary>Record a trusted adapter's verified terminal outcome, retaining a nonempty evidence reference.</summary>

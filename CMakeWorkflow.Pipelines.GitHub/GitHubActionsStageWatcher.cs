@@ -115,7 +115,7 @@ public sealed class GitHubActionsStageWatcher(PipelineLedger ledger, IGitHubActi
             ?? throw new InvalidDataException("Admitted GitHub stage has no pinned options.");
     }
 
-    private static void Verify(PipelineGitHubActionsStage expected, GitHubRunAttempt actual)
+    internal static void Verify(PipelineGitHubActionsStage expected, GitHubRunAttempt actual)
     {
         ArgumentNullException.ThrowIfNull(actual);
         if (expected.Mode != "attach" || actual.RunId != expected.RunId ||

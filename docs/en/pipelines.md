@@ -215,3 +215,72 @@ This is explicit observation, **not** an autonomous poller. The caller is
 responsible for credentials, request scheduling, ledger/Host ownership and
 reconnections. No new Host RPC, CLI command, container runtime, artifact
 federation or `workflow_dispatch` support is included in P3.
+
+## P4: durable GitHub Actions workflow_dispatch (experimental)
+
+`GitHubActionsDispatchCoordinator` supports `github.actions` stages with
+`mode: "dispatch"`, `repository`, `workflow`, `expectedHeadSha`, `ref` and
+optional `inputs`. `runId` and `runAttempt` must be omitted (or zero) for a
+dispatch; attach mode is unchanged. `ref` must be an explicit branch/tag,
+e.g. `refs/heads/main`. The expected SHA must be a full 40-character commit ID.
+No token is serialized into a pipeline manifest or SQLite database.
+
+The target GitHub workflow (present on the repository's default branch) must
+opt in to correlation by declaring `cmwf_request_id` and setting `run-name`:
+
+```yaml
+name: CI
+run-name: cmwf-${{ inputs.cmwf_request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      cmwf_request_id:
+        required: true
+        type: string
+```
+
+Example admitted stage:
+
+```json
+{
+  "id": "ci",
+  "kind": "github.actions",
+  "githubActions": {
+    "mode": "dispatch",
+    "repository": "cpp20120/CMakeWorkflow",
+    "workflow": "ci.yml",
+    "expectedHeadSha": "0123456789abcdef0123456789abcdef01234567",
+    "ref": "refs/heads/feature/pipelines-v1",
+    "inputs": {}
+  }
+}
+```
+
+1. `DispatchReadyAsync` performs the prerequisite CAS and **commits the
+   dispatch_intent** with a deterministic `cmwf_request_id` before any POST.
+   It then makes **one** GitHub `workflow_dispatch` POST with
+   `return_run_details=true` and parses its 200 response. When a run ID is
+   returned, it immediately binds attempt 1 via CAS, before another GET.
+2. **Never call dispatch again** after the intent commits. A 204, timeout,
+   4xx/5xx, cancellation, malformed or missing receipt, crash, or lost reply
+   leaves an unresolved intent. GitHub does not provide request-key
+   deduplication; we do not claim exactly-once remote execution.
+3. `ReconcileKnownRunAsync(operationId,stageId,candidateRunId)` is **read-only
+   to GitHub**: an operator supplies a candidate run ID, and the adapter
+   verifies repository, workflow, attempt 1, SHA, `workflow_dispatch` event,
+   and exact `run-name` correlation marker before the ledger binds it. An
+   absent candidate **never** authorizes another POST.
+4. `ObserveAsync` reads only the pinned attempt. A provider GET verifies
+   all fields, including correlation, before terminal outcome is committed.
+   An unknown completion state remains a failure to observe, not success.
+   `WatchUntilTerminalAsync` is an optional caller-controlled polling loop.
+
+The caller supplies a GitHub Actions **write** token to
+`GitHubActionsHttpDispatcher` and at least read permission to
+`GitHubActionsHttpReader`. Both borrow `HttpClient`, neither logs tokens.
+This P4 slice does not register new Host RPC or CLI endpoints, start a
+background daemon, select host leases, retry uncertain requests, or transfer
+artifacts. A successful `200` response pins an **unverified receipt**; it is
+not considered successful execution until the subsequent validated GET.
+If the branch moves between approval and dispatch, the returned commit SHA
+may mismatch: observation/reconciliation must refuse to misattribute the run.
