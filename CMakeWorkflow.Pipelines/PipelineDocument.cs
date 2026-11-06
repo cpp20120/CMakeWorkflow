@@ -1,0 +1,53 @@
+using System.Text.Json.Serialization;
+
+namespace CMakeWorkflow.Pipelines;
+
+/// <summary>An in-memory pipeline definition. This DTO has no execution authority.</summary>
+/// <remarks>Schema v1 supports local workflow stages and read-only GitHub Actions attachments.</remarks>
+public sealed class PipelineDocument
+{
+    [JsonRequired] public int SchemaVersion { get; init; }
+
+    [JsonRequired] public string Name { get; init; } = "";
+
+    [JsonRequired] public IReadOnlyList<PipelineStage> Stages { get; init; } = [];
+}
+
+/// <summary>One pipeline stage and its explicit prerequisites.</summary>
+public sealed class PipelineStage
+{
+    [JsonRequired] public string Id { get; init; } = "";
+
+    [JsonRequired] public string Kind { get; init; } = "";
+
+    public IReadOnlyList<string> DependsOn { get; init; } = [];
+
+    public PipelineWorkflowStage? Workflow { get; init; }
+
+    [JsonPropertyName("githubActions")]
+    public PipelineGitHubActionsStage? GitHubActions { get; init; }
+}
+
+/// <summary>A reference to an existing local CMake workflow manifest.</summary>
+/// <remarks>Lexical path validation is not filesystem authorization. The Host must validate paths again.</remarks>
+public sealed class PipelineWorkflowStage
+{
+    [JsonRequired] public string Manifest { get; init; } = "";
+}
+
+/// <summary>Attach to one existing GitHub Actions attempt, without dispatching a new run.</summary>
+/// <remarks>The eventual adapter must verify repository, workflow, attempt and head SHA against the provider.</remarks>
+public sealed class PipelineGitHubActionsStage
+{
+    [JsonRequired] public string Mode { get; init; } = "";
+
+    [JsonRequired] public string Repository { get; init; } = "";
+
+    [JsonRequired] public string Workflow { get; init; } = "";
+
+    [JsonRequired] public long RunId { get; init; }
+
+    [JsonRequired] public int RunAttempt { get; init; }
+
+    [JsonRequired] public string ExpectedHeadSha { get; init; } = "";
+}

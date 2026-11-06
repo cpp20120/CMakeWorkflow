@@ -62,6 +62,8 @@ jobs:
         run: dotnet build CMakeWorkflow.slnx -c Release
       - name: Pure workflow SDK checks
         run: dotnet CMakeWorkflow.Contracts.Tests/bin/Release/net10.0/CMakeWorkflow.Contracts.Tests.dll
+      - name: Pure pipeline v1 planner checks
+        run: dotnet CMakeWorkflow.Pipelines.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.Tests.dll
       - name: Campaign checks
         run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
       - name: Generic CMake integration
