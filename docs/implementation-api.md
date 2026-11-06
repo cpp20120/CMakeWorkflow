@@ -30,10 +30,10 @@ Release assembly metadata.
 | [CMakeWorkflow.Host](#cmakeworkflowhost) | 98 | 153 |
 | [CMakeWorkflow.Profiling](#cmakeworkflowprofiling) | 28 | 38 |
 | [CMakeWorkflow.History](#cmakeworkflowhistory) | 17 | 11 |
-| [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 47 | 62 |
+| [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 47 | 61 |
 | [CMakeWorkflow.Campaigns](#cmakeworkflowcampaigns) | 14 | 45 |
-| [CMakeWorkflow](#cmakeworkflow) | 2 | 3 |
-| **Total** | **269** | **449** |
+| [CMakeWorkflow](#cmakeworkflow) | 0 | 0 |
+| **Total** | **267** | **445** |
 
 ## CMakeWorkflow.Core
 
@@ -235,7 +235,7 @@ public sealed record CMakeTargetRef(string BuildDirectory, string Target, string
 
 #### `ConfigureProvenance`
 
-Source: [CMakeWorkflow.CMake/Build/ConfigureProvenance.cs](../CMakeWorkflow.CMake/Build/ConfigureProvenance.cs#L4)
+Source: [CMakeWorkflow.CMake/Build/ConfigureProvenance.cs](../CMakeWorkflow.CMake/Build/ConfigureProvenance.cs#L3)
 
 ```csharp
 public sealed class ConfigureProvenance
@@ -256,12 +256,12 @@ public sealed class ConfigureProvenance
 
 #### `ExternalCMakeBuildContext`
 
-Source: [CMakeWorkflow.CMake/Build/ExternalCMakeBuildContext.cs](../CMakeWorkflow.CMake/Build/ExternalCMakeBuildContext.cs#L5)
+Source: [CMakeWorkflow.CMake/Build/ExternalCMakeBuildContext.cs](../CMakeWorkflow.CMake/Build/ExternalCMakeBuildContext.cs#L4)
 
 ```csharp
 public sealed class ExternalCMakeBuildContext : CMakeWorkflow.CMake.Build.ICMakeBuildContext
 {
-    public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.BuiltArtifact> EnsureBuiltAsync(CMakeWorkflow.CMake.Build.CMakeTargetRef target, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.BuiltArtifact> EnsureBuiltAsync(CMakeWorkflow.CMake.Build.CMakeTargetRef target, System.Threading.CancellationToken cancellationToken);
 }
 ```
 
@@ -306,7 +306,7 @@ public sealed record NativeTargetObservation(string Name, string Configuration, 
 
 #### `ObservedBuildContext`
 
-Source: [CMakeWorkflow.CMake/Build/ObservedBuildContext.cs](../CMakeWorkflow.CMake/Build/ObservedBuildContext.cs#L4)
+Source: [CMakeWorkflow.CMake/Build/ObservedBuildContext.cs](../CMakeWorkflow.CMake/Build/ObservedBuildContext.cs#L3)
 
 ```csharp
 public sealed class ObservedBuildContext
@@ -334,12 +334,12 @@ public sealed class ObservedBuildContext
 
 #### `PreparedCMakeBuildContext`
 
-Source: [CMakeWorkflow.CMake/Build/PreparedCMakeBuildContext.cs](../CMakeWorkflow.CMake/Build/PreparedCMakeBuildContext.cs#L6)
+Source: [CMakeWorkflow.CMake/Build/PreparedCMakeBuildContext.cs](../CMakeWorkflow.CMake/Build/PreparedCMakeBuildContext.cs#L5)
 
 ```csharp
 public sealed class PreparedCMakeBuildContext : CMakeWorkflow.CMake.Build.ICMakeBuildContext
 {
-    public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.BuiltArtifact> EnsureBuiltAsync(CMakeWorkflow.CMake.Build.CMakeTargetRef target, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.BuiltArtifact> EnsureBuiltAsync(CMakeWorkflow.CMake.Build.CMakeTargetRef target, System.Threading.CancellationToken cancellationToken);
 }
 ```
 
@@ -451,7 +451,7 @@ public sealed record WorkflowPlan(string File, string ManifestHash, System.Colle
 
 #### `WorkflowPlanNodeView`
 
-Source: [CMakeWorkflow.CMake/Planning/WorkflowPlanNodeView.cs](../CMakeWorkflow.CMake/Planning/WorkflowPlanNodeView.cs#L6)
+Source: [CMakeWorkflow.CMake/Planning/WorkflowPlanNodeView.cs](../CMakeWorkflow.CMake/Planning/WorkflowPlanNodeView.cs#L5)
 
 ```csharp
 public sealed record WorkflowPlanNodeView(string Id, string Kind, string Target, string BuildDirectory, string? Configuration, System.Collections.Generic.List<string> Dependencies, string ObservedState, System.Collections.Generic.List<CMakeWorkflow.CMake.Planning.PlanDiagnostic> Diagnostics, System.Collections.Generic.List<string> Resources, bool Exclusive, System.Collections.Generic.List<CMakeWorkflow.Contracts.Workflows.WorkflowArtifactInput> Inputs, System.Collections.Generic.List<CMakeWorkflow.Contracts.Workflows.WorkflowArtifactOutput> Outputs, CMakeWorkflow.Contracts.Workflows.WorkflowExecutionConstraints? Constraints);
@@ -459,7 +459,7 @@ public sealed record WorkflowPlanNodeView(string Id, string Kind, string Target,
 
 #### `WorkflowPlanView`
 
-Source: [CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs](../CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs#L4)
+Source: [CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs](../CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs#L3)
 
 ```csharp
 public sealed record WorkflowPlanView(int SchemaVersion, string Workflow, string ManifestHash, bool Valid, System.Collections.Generic.List<CMakeWorkflow.CMake.Planning.WorkflowPlanNodeView> Nodes);
@@ -584,7 +584,7 @@ public static class TwoTargetWorkflow
 
 #### `WorkflowEvent`
 
-Source: [CMakeWorkflow.CMake/Recovery/WorkflowEvent.cs](../CMakeWorkflow.CMake/Recovery/WorkflowEvent.cs#L5)
+Source: [CMakeWorkflow.CMake/Recovery/WorkflowEvent.cs](../CMakeWorkflow.CMake/Recovery/WorkflowEvent.cs#L4)
 
 ```csharp
 public sealed record WorkflowEvent(int SchemaVersion, long Sequence, System.DateTimeOffset Timestamp, string Type, string RunDirectory, string? NodeId, string? NodeKind, string? Status, int? ExitCode, string? Error, System.Collections.Generic.List<CMakeWorkflow.CMake.Artifacts.WorkflowArtifactView> Artifacts);
@@ -602,7 +602,7 @@ public sealed record WorkflowReconciliation(string Id, System.DateTimeOffset Tim
 
 #### `NodeResult`
 
-Source: [CMakeWorkflow.CMake/Reporting/NodeResult.cs](../CMakeWorkflow.CMake/Reporting/NodeResult.cs#L6)
+Source: [CMakeWorkflow.CMake/Reporting/NodeResult.cs](../CMakeWorkflow.CMake/Reporting/NodeResult.cs#L5)
 
 ```csharp
 public sealed class NodeResult
@@ -667,7 +667,7 @@ public static class WorkflowQueries
 
 #### `WorkflowReport`
 
-Source: [CMakeWorkflow.CMake/Reporting/WorkflowReport.cs](../CMakeWorkflow.CMake/Reporting/WorkflowReport.cs#L7)
+Source: [CMakeWorkflow.CMake/Reporting/WorkflowReport.cs](../CMakeWorkflow.CMake/Reporting/WorkflowReport.cs#L6)
 
 ```csharp
 public sealed class WorkflowReport
@@ -986,7 +986,7 @@ public sealed record ProfilePreparation(int SchemaVersion, string Manifest, stri
 
 #### `ProfilePrepareRequest`
 
-Source: [CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs](../CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs#L7)
+Source: [CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs](../CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs#L6)
 
 ```csharp
 public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Host.Profiling.ProfileVariantRequest> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
@@ -1028,7 +1028,7 @@ public sealed record ApplicationError(string Code, string Message);
 
 #### `HostInfo`
 
-Source: [CMakeWorkflow.Host/Protocol/HostInfo.cs](../CMakeWorkflow.Host/Protocol/HostInfo.cs#L8)
+Source: [CMakeWorkflow.Host/Protocol/HostInfo.cs](../CMakeWorkflow.Host/Protocol/HostInfo.cs#L7)
 
 ```csharp
 public sealed record HostInfo(int ProtocolVersion, int ProcessId, string WorkspaceDirectory, string[] Capabilities, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolingProfileView> Profiles);
@@ -1299,7 +1299,7 @@ public sealed record TestMatrixPrepareRequest(string RequestId, string OutputPat
 
 #### `DoctorSession`
 
-Source: [CMakeWorkflow.Host/Sessions/ApplicationSession.cs](../CMakeWorkflow.Host/Sessions/ApplicationSession.cs#L21), [CMakeWorkflow.Host/Sessions/BenchmarkSession.cs](../CMakeWorkflow.Host/Sessions/BenchmarkSession.cs#L10), [CMakeWorkflow.Host/Sessions/DoctorSession.cs](../CMakeWorkflow.Host/Sessions/DoctorSession.cs#L12), [CMakeWorkflow.Host/Sessions/EnvironmentSession.cs](../CMakeWorkflow.Host/Sessions/EnvironmentSession.cs#L7), [CMakeWorkflow.Host/Sessions/ExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ExecutionSession.cs#L5), [CMakeWorkflow.Host/Sessions/FixSession.cs](../CMakeWorkflow.Host/Sessions/FixSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs#L7), [CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs](../CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProfileSession.cs](../CMakeWorkflow.Host/Sessions/ProfileSession.cs#L13), [CMakeWorkflow.Host/Sessions/RecipeSession.cs](../CMakeWorkflow.Host/Sessions/RecipeSession.cs#L13), [CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs](../CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs#L19), [CMakeWorkflow.Host/Sessions/ToolchainSession.cs](../CMakeWorkflow.Host/Sessions/ToolchainSession.cs#L7), [CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs](../CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs#L9)
+Source: [CMakeWorkflow.Host/Sessions/ApplicationSession.cs](../CMakeWorkflow.Host/Sessions/ApplicationSession.cs#L20), [CMakeWorkflow.Host/Sessions/BenchmarkSession.cs](../CMakeWorkflow.Host/Sessions/BenchmarkSession.cs#L10), [CMakeWorkflow.Host/Sessions/DoctorSession.cs](../CMakeWorkflow.Host/Sessions/DoctorSession.cs#L12), [CMakeWorkflow.Host/Sessions/EnvironmentSession.cs](../CMakeWorkflow.Host/Sessions/EnvironmentSession.cs#L7), [CMakeWorkflow.Host/Sessions/ExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ExecutionSession.cs#L5), [CMakeWorkflow.Host/Sessions/FixSession.cs](../CMakeWorkflow.Host/Sessions/FixSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs#L7), [CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs](../CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProfileSession.cs](../CMakeWorkflow.Host/Sessions/ProfileSession.cs#L13), [CMakeWorkflow.Host/Sessions/RecipeSession.cs](../CMakeWorkflow.Host/Sessions/RecipeSession.cs#L13), [CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs](../CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs#L19), [CMakeWorkflow.Host/Sessions/ToolchainSession.cs](../CMakeWorkflow.Host/Sessions/ToolchainSession.cs#L7), [CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs](../CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs#L9)
 
 ```csharp
 public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tools.ToolingService> createTooling, System.Func<CMakeWorkflow.Host.Provisioning.DoctorProgress, System.Threading.Tasks.Task> progress, System.Threading.CancellationToken disconnected, CMakeWorkflow.Host.Provisioning.FixCoordinator fixes, System.Func<CMakeWorkflow.Host.Provisioning.FixProgress, System.Threading.Tasks.Task> fixProgress, System.TimeProvider? timeProvider = null, CMakeWorkflow.Host.Workflows.DurableExecutionCoordinator? durableExecutions = null) : CMakeWorkflow.Host.Protocol.IHostRpc
@@ -1524,7 +1524,7 @@ public sealed record CancellationDecision(string OperationId, string State, long
 
 #### `DurableAcceptanceStore.Finalization`
 
-Source: [CMakeWorkflow.Host/Workflows/DurableAcceptanceStore.cs](../CMakeWorkflow.Host/Workflows/DurableAcceptanceStore.cs#L1243)
+Source: [CMakeWorkflow.Host/Workflows/DurableAcceptanceStore.cs](../CMakeWorkflow.Host/Workflows/DurableAcceptanceStore.cs#L1242)
 
 ```csharp
 public sealed record Finalization(string RunDirectory, string ReportSha256, string State, int ExitCode);
@@ -1606,7 +1606,7 @@ public sealed record ExecutionStartRequest(string Domain, string ClientRequestId
 
 #### `OperationArtifactChunk`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L19)
+Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L18)
 
 ```csharp
 public sealed record OperationArtifactChunk(string ArtifactId, long Offset, long TotalSize, long LastWriteUtcTicks, byte[] Content, bool Eof);
@@ -1614,7 +1614,7 @@ public sealed record OperationArtifactChunk(string ArtifactId, long Offset, long
 
 #### `OperationArtifactChunkRequest`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L9)
+Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L8)
 
 ```csharp
 public sealed record OperationArtifactChunkRequest(string OperationId, string ArtifactId, long Offset, int Count, long ExpectedSize, long ExpectedLastWriteUtcTicks);
@@ -1622,7 +1622,7 @@ public sealed record OperationArtifactChunkRequest(string OperationId, string Ar
 
 #### `OperationArtifactInfo`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L12)
+Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L11)
 
 ```csharp
 public sealed record OperationArtifactInfo(string ArtifactId, string Kind, string? NodeId, string RelativePath, long Size, long LastWriteUtcTicks, string Sha256);
@@ -1638,7 +1638,7 @@ public sealed record OperationArtifactList(string OperationId, string ReportSha2
 
 #### `OperationArtifactListRequest`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L8)
+Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L7)
 
 ```csharp
 public sealed record OperationArtifactListRequest(string OperationId);
@@ -1675,7 +1675,7 @@ public static class OperationEventReplay
 
 #### `OperationEventsPage`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationEventsPage.cs](../CMakeWorkflow.Host/Workflows/OperationEventsPage.cs#L8)
+Source: [CMakeWorkflow.Host/Workflows/OperationEventsPage.cs](../CMakeWorkflow.Host/Workflows/OperationEventsPage.cs#L7)
 
 ```csharp
 public sealed record OperationEventsPage(string OperationId, long AfterSequence, long NextSequence, bool HasMore, System.Collections.Generic.List<CMakeWorkflow.CMake.Recovery.WorkflowEvent> Events);
@@ -1707,7 +1707,7 @@ public sealed record OperationGetRequest(string OperationId);
 
 #### `OperationListPage`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationListPage.cs](../CMakeWorkflow.Host/Workflows/OperationListPage.cs#L7)
+Source: [CMakeWorkflow.Host/Workflows/OperationListPage.cs](../CMakeWorkflow.Host/Workflows/OperationListPage.cs#L6)
 
 ```csharp
 public sealed record OperationListPage(int SchemaVersion, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.OperationReference> Items, string? NextCursor);
@@ -1727,7 +1727,7 @@ public sealed record OperationListRequest(int Limit = 50, string? State = null, 
 
 #### `OperationNodeView`
 
-Source: [CMakeWorkflow.Host/Workflows/OperationOverview.cs](../CMakeWorkflow.Host/Workflows/OperationOverview.cs#L19)
+Source: [CMakeWorkflow.Host/Workflows/OperationOverview.cs](../CMakeWorkflow.Host/Workflows/OperationOverview.cs#L18)
 
 ```csharp
 public sealed record OperationNodeView(string Id, string Kind, string Status, System.Collections.Generic.List<string> Dependencies, System.DateTimeOffset? StartedAt, System.DateTimeOffset? FinishedAt, int? ExitCode, string? Error, string? Stdout, string? Stderr);
@@ -1820,7 +1820,7 @@ public sealed record WorkflowPlanRequest(string Manifest, string[]? Only = null,
 
 #### `WorkflowPreflightDiagnostic`
 
-Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L13)
+Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L12)
 
 ```csharp
 public sealed record WorkflowPreflightDiagnostic(string Severity, string Message);
@@ -1828,7 +1828,7 @@ public sealed record WorkflowPreflightDiagnostic(string Severity, string Message
 
 #### `WorkflowPreflightNode`
 
-Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L15)
+Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L14)
 
 ```csharp
 public sealed record WorkflowPreflightNode(string Id, string Kind, string Target, string BuildDirectory, string? Configuration, System.Collections.Generic.List<string> Dependencies, System.Collections.Generic.List<string> Resources, bool Exclusive, string ObservedState, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.WorkflowPreflightDiagnostic> Diagnostics);
@@ -1836,7 +1836,7 @@ public sealed record WorkflowPreflightNode(string Id, string Kind, string Target
 
 #### `WorkflowPreflightRequest`
 
-Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L10)
+Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L9)
 
 ```csharp
 public sealed record WorkflowPreflightRequest(string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
@@ -1844,7 +1844,7 @@ public sealed record WorkflowPreflightRequest(string Manifest, string ManifestSh
 
 #### `WorkflowPreflightResult`
 
-Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L24)
+Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L22)
 
 ```csharp
 public sealed record WorkflowPreflightResult(int SchemaVersion, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory, bool Valid, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.WorkflowPreflightNode> Nodes);
@@ -1944,37 +1944,37 @@ public sealed class StackEvidence
 
 #### `LinuxPerfBackend`
 
-Source: [CMakeWorkflow.Profiling/Backends/LinuxPerfBackend.cs](../CMakeWorkflow.Profiling/Backends/LinuxPerfBackend.cs#L7)
+Source: [CMakeWorkflow.Profiling/Backends/LinuxPerfBackend.cs](../CMakeWorkflow.Profiling/Backends/LinuxPerfBackend.cs#L6)
 
 ```csharp
 public sealed class LinuxPerfBackend(CMakeWorkflow.Profiling.Capture.IProfileProcess process) : CMakeWorkflow.Profiling.Capture.IProfilerBackend
 {
     public CMakeWorkflow.Profiling.Capture.ProfileCapabilities Capabilities { get; }
-    public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Capture.ProfileResult> CaptureAsync(CMakeWorkflow.Profiling.Capture.ProfileRequest request, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Capture.ProfileResult> CaptureAsync(CMakeWorkflow.Profiling.Capture.ProfileRequest request, System.Threading.CancellationToken cancellationToken);
 }
 ```
 
 #### `MacInstrumentsBackend`
 
-Source: [CMakeWorkflow.Profiling/Backends/MacInstrumentsBackend.cs](../CMakeWorkflow.Profiling/Backends/MacInstrumentsBackend.cs#L7)
+Source: [CMakeWorkflow.Profiling/Backends/MacInstrumentsBackend.cs](../CMakeWorkflow.Profiling/Backends/MacInstrumentsBackend.cs#L6)
 
 ```csharp
 public sealed class MacInstrumentsBackend(CMakeWorkflow.Profiling.Capture.IProfileProcess process) : CMakeWorkflow.Profiling.Capture.IProfilerBackend
 {
     public CMakeWorkflow.Profiling.Capture.ProfileCapabilities Capabilities { get; }
-    public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Capture.ProfileResult> CaptureAsync(CMakeWorkflow.Profiling.Capture.ProfileRequest request, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Capture.ProfileResult> CaptureAsync(CMakeWorkflow.Profiling.Capture.ProfileRequest request, System.Threading.CancellationToken cancellationToken);
 }
 ```
 
 #### `WindowsEtwBackend`
 
-Source: [CMakeWorkflow.Profiling/Backends/WindowsEtwBackend.cs](../CMakeWorkflow.Profiling/Backends/WindowsEtwBackend.cs#L7)
+Source: [CMakeWorkflow.Profiling/Backends/WindowsEtwBackend.cs](../CMakeWorkflow.Profiling/Backends/WindowsEtwBackend.cs#L6)
 
 ```csharp
 public sealed class WindowsEtwBackend(CMakeWorkflow.Profiling.Capture.IProfileProcess process) : CMakeWorkflow.Profiling.Capture.IProfilerBackend
 {
     public CMakeWorkflow.Profiling.Capture.ProfileCapabilities Capabilities { get; }
-    public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Capture.ProfileResult> CaptureAsync(CMakeWorkflow.Profiling.Capture.ProfileRequest request, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Capture.ProfileResult> CaptureAsync(CMakeWorkflow.Profiling.Capture.ProfileRequest request, System.Threading.CancellationToken cancellationToken);
 }
 ```
 
@@ -2195,13 +2195,13 @@ public static class ProfileWorkflowBuilder
 
 #### `ProfileWorkflowExecutor`
 
-Source: [CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs](../CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs#L10)
+Source: [CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs](../CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs#L9)
 
 ```csharp
 public sealed class ProfileWorkflowExecutor(CMakeWorkflow.Profiling.Capture.IProfileProcess? process = null) : CMakeWorkflow.Core.IWorkflowOperationExecutor
 {
     public bool Supports(string kind);
-    public System.Threading.Tasks.Task<CMakeWorkflow.Core.WorkflowOperationResult> ExecuteAsync(CMakeWorkflow.Core.WorkflowOperationRequest operation, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Core.WorkflowOperationResult> ExecuteAsync(CMakeWorkflow.Core.WorkflowOperationRequest request, System.Threading.CancellationToken cancellationToken);
 }
 ```
 
@@ -2230,7 +2230,7 @@ public sealed record HistoryDetection(string Metric, string Unit, string? Varian
 
 #### `HistoryDetectionReport`
 
-Source: [CMakeWorkflow.History/Analysis/HistoryDetectionReport.cs](../CMakeWorkflow.History/Analysis/HistoryDetectionReport.cs#L7)
+Source: [CMakeWorkflow.History/Analysis/HistoryDetectionReport.cs](../CMakeWorkflow.History/Analysis/HistoryDetectionReport.cs#L6)
 
 ```csharp
 public sealed record HistoryDetectionReport(int SchemaVersion, string BaselineRun, string CandidateRun, string Metric, string Direction, double MinimumEffectPercent, double Alpha, string Test, System.Collections.Generic.List<CMakeWorkflow.History.Analysis.HistoryDetection> Results);
@@ -2306,7 +2306,7 @@ public sealed record HistoryBuildEnvironment(string Directory, string? Configura
 
 #### `HistoryDetail`
 
-Source: [CMakeWorkflow.History/Models/HistoryDetail.cs](../CMakeWorkflow.History/Models/HistoryDetail.cs#L7)
+Source: [CMakeWorkflow.History/Models/HistoryDetail.cs](../CMakeWorkflow.History/Models/HistoryDetail.cs#L6)
 
 ```csharp
 public sealed record HistoryDetail(CMakeWorkflow.History.Models.HistoryRun Run, System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryNode> Nodes, System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryMeasurement> Measurements, System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryArtifact> Artifacts);
@@ -2346,7 +2346,7 @@ public sealed record HistoryNode(string RunId, string Id, string Kind, string St
 
 #### `HistoryRun`
 
-Source: [CMakeWorkflow.History/Models/HistoryRun.cs](../CMakeWorkflow.History/Models/HistoryRun.cs#L7)
+Source: [CMakeWorkflow.History/Models/HistoryRun.cs](../CMakeWorkflow.History/Models/HistoryRun.cs#L6)
 
 ```csharp
 public sealed record HistoryRun(string Id, string Directory, string Format, string? Workflow, string? ManifestHash, string? StartedAt, string? FinishedAt, string Status, string? Revision, string SourceHash, bool SourceAvailable = true, string? HostId = null, string? EnvironmentFingerprint = null, CMakeWorkflow.History.Models.HistoryHostEnvironment? Environment = null, System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryBuildEnvironment>? BuildEnvironments = null);
@@ -2366,7 +2366,7 @@ public sealed class HistoryStore : System.IDisposable
     public string Import(string directory, bool recursive, System.Action<CMakeWorkflow.History.Models.HistoryImportResult>? onComplete = null, System.Action<string>? pathGuard = null);
     public System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryRun> Runs(int limit, string? status, string? since, string? until, string? workflow, string? variant, System.Func<string, bool>? includeDirectory = null, System.Threading.CancellationToken ct = default);
     public CMakeWorkflow.History.HistoryRunPage RunsPage(string databaseIdentity, int limit, string? status, string? since, string? until, string? workflow, string? variant, string? cursor, System.Func<string, bool>? includeDirectory = null, System.Threading.CancellationToken ct = default);
-    public CMakeWorkflow.History.Models.HistoryDetail Show(string id, System.Action<string>? validateDirectory = null, int maxMeasurements = 2147483647, System.Threading.CancellationToken ct = default, System.Func<string, bool>? artifactAllowed = null);
+    public CMakeWorkflow.History.Models.HistoryDetail Show(string id, System.Action<string>? validateDirectory = null, int maxMeasurements = 2147483647, System.Func<string, bool>? artifactAllowed = null, System.Threading.CancellationToken ct = default);
     public System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario, System.Func<string, bool>? includeDirectory = null, int maxRows = 2147483647, System.Threading.CancellationToken ct = default);
     public void Dispose();
 }
@@ -2568,7 +2568,7 @@ public sealed record DeveloperEnvironmentRequest(string EnvironmentProfileId, st
 
 #### `DeveloperEnvironmentSnapshot`
 
-Source: [CMakeWorkflow.Tooling/Toolchains/DeveloperEnvironmentSnapshot.cs](../CMakeWorkflow.Tooling/Toolchains/DeveloperEnvironmentSnapshot.cs#L7)
+Source: [CMakeWorkflow.Tooling/Toolchains/DeveloperEnvironmentSnapshot.cs](../CMakeWorkflow.Tooling/Toolchains/DeveloperEnvironmentSnapshot.cs#L6)
 
 ```csharp
 public sealed record DeveloperEnvironmentSnapshot(int SchemaVersion, string EnvironmentProfileId, string HostArchitecture, string TargetArchitecture, string Fingerprint, System.Collections.Generic.Dictionary<string, string> VisibleVariables, System.Collections.Generic.List<string> Diagnostics);
@@ -2610,7 +2610,7 @@ public sealed record ToolchainCandidate(string Id, string Role, string Flavor, s
 
 #### `ToolchainInventory`
 
-Source: [CMakeWorkflow.Tooling/Toolchains/ToolchainInventory.cs](../CMakeWorkflow.Tooling/Toolchains/ToolchainInventory.cs#L7)
+Source: [CMakeWorkflow.Tooling/Toolchains/ToolchainInventory.cs](../CMakeWorkflow.Tooling/Toolchains/ToolchainInventory.cs#L6)
 
 ```csharp
 public sealed record ToolchainInventory(int SchemaVersion, string Platform, System.Collections.Generic.List<CMakeWorkflow.Tooling.Toolchains.VisualStudioInstance> VisualStudio, System.Collections.Generic.List<CMakeWorkflow.Tooling.Toolchains.ToolchainCandidate> Candidates, System.Collections.Generic.List<string> Diagnostics);
@@ -2618,7 +2618,7 @@ public sealed record ToolchainInventory(int SchemaVersion, string Platform, Syst
 
 #### `ToolchainResolution`
 
-Source: [CMakeWorkflow.Tooling/Toolchains/ToolchainResolution.cs](../CMakeWorkflow.Tooling/Toolchains/ToolchainResolution.cs#L7)
+Source: [CMakeWorkflow.Tooling/Toolchains/ToolchainResolution.cs](../CMakeWorkflow.Tooling/Toolchains/ToolchainResolution.cs#L6)
 
 ```csharp
 public sealed record ToolchainResolution(int SchemaVersion, string Status, CMakeWorkflow.Tooling.Toolchains.ToolchainCandidate? CMake, CMakeWorkflow.Tooling.Toolchains.ToolchainCandidate? Ninja, CMakeWorkflow.Tooling.Toolchains.ToolchainCandidate? Compiler, CMakeWorkflow.Tooling.Toolchains.ToolchainCandidate? Sdk, string? EnvironmentProfileId, System.Collections.Generic.List<string> Diagnostics);
@@ -2653,13 +2653,12 @@ public static class WindowsDevelopmentDoctor
 
 #### `WindowsToolchains`
 
-Source: [CMakeWorkflow.Tooling/Toolchains/WindowsToolchains.cs](../CMakeWorkflow.Tooling/Toolchains/WindowsToolchains.cs#L13)
+Source: [CMakeWorkflow.Tooling/Toolchains/WindowsToolchains.cs](../CMakeWorkflow.Tooling/Toolchains/WindowsToolchains.cs#L12)
 
 ```csharp
 public static class WindowsToolchains
 {
     public static string CandidateId(string role, string path);
-    public static System.Collections.Generic.List<CMakeWorkflow.Tooling.Toolchains.VisualStudioInstance> ParseVsWhere(string json);
     public static System.Threading.Tasks.Task<CMakeWorkflow.Tooling.Toolchains.ToolchainInventory> DiscoverAsync(System.Threading.CancellationToken ct);
     public static CMakeWorkflow.Tooling.Toolchains.ToolchainResolution Resolve(CMakeWorkflow.Tooling.Toolchains.ToolchainInventory inventory, CMakeWorkflow.Tooling.Toolchains.ToolchainSelection selection);
     public static System.Collections.Generic.Dictionary<string, string> ParseVisibleEnvironment(string output);
@@ -2803,7 +2802,7 @@ public class ToolingJson : System.Text.Json.Serialization.JsonSerializerContext
 
 #### `ToolingPlan`
 
-Source: [CMakeWorkflow.Tooling/Tools/ToolingPlan.cs](../CMakeWorkflow.Tooling/Tools/ToolingPlan.cs#L7)
+Source: [CMakeWorkflow.Tooling/Tools/ToolingPlan.cs](../CMakeWorkflow.Tooling/Tools/ToolingPlan.cs#L6)
 
 ```csharp
 public sealed record ToolingPlan(int SchemaVersion, CMakeWorkflow.Tooling.Tools.ToolPlatform Platform, string[] Profiles, string InstallDirectory, CMakeWorkflow.Tooling.Tools.PackageManagerKind PackageManager, bool Ready, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolStatus> Tools, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolingStep> Steps);
@@ -2811,7 +2810,7 @@ public sealed record ToolingPlan(int SchemaVersion, CMakeWorkflow.Tooling.Tools.
 
 #### `ToolingProfileList`
 
-Source: [CMakeWorkflow.Tooling/Tools/ToolingProfileList.cs](../CMakeWorkflow.Tooling/Tools/ToolingProfileList.cs#L7)
+Source: [CMakeWorkflow.Tooling/Tools/ToolingProfileList.cs](../CMakeWorkflow.Tooling/Tools/ToolingProfileList.cs#L6)
 
 ```csharp
 public sealed record ToolingProfileList(int SchemaVersion, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolingProfileView> Profiles);
@@ -2933,7 +2932,7 @@ public sealed record FuzzRunOptions(string BuildDirectory, string Layer, string?
 
 #### `FuzzRunReport`
 
-Source: [CMakeWorkflow.Campaigns/FuzzCorpus/FuzzRunReport.cs](../CMakeWorkflow.Campaigns/FuzzCorpus/FuzzRunReport.cs#L4)
+Source: [CMakeWorkflow.Campaigns/FuzzCorpus/FuzzRunReport.cs](../CMakeWorkflow.Campaigns/FuzzCorpus/FuzzRunReport.cs#L3)
 
 ```csharp
 public sealed class FuzzRunReport
@@ -3053,30 +3052,5 @@ public sealed record WeakMemoryOptions(string SourceDirectory, string Protocol, 
 
 ## CMakeWorkflow
 
-### Namespace `CMakeWorkflow.Commands`
-
-#### `WorkflowReportCommand`
-
-Source: [Commands/WorkflowReportCommand.cs](../Commands/WorkflowReportCommand.cs#L13)
-
-```csharp
-public static class WorkflowReportCommand
-{
-    public static System.Threading.Tasks.Task<int> ExecuteAsync(string runDirectory, System.Threading.CancellationToken ct, bool json = false);
-    public static void Write(CMakeWorkflow.CMake.Reporting.WorkflowReport report, string runDirectory);
-}
-```
-
-### Namespace `CMakeWorkflow`
-
-#### `Program`
-
-Source: [Program.cs](../Program.cs#L22)
-
-```csharp
-public static class Program
-{
-    public static System.Threading.Tasks.Task<int> Main(string[] args);
-}
-```
-
+This executable has no source-declared public CLR types. Integrate through its documented CLI commands or the Host
+wire protocol; the entry point and command handlers are internal implementation.

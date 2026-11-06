@@ -22,14 +22,14 @@ public sealed record HistoryBuildEnvironment(
     string? Flags,
     string Fingerprint);
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.History.HistoryDetail(Nodes, Measurements, Artifacts) participates in CMakeWorkflow.Client.History.HistoryService.ShowAsync; retain these concrete collection parameter types.")]
 public sealed record HistoryDetail(
     HistoryRun Run,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.History.HistoryDetail.Nodes (List<HistoryNode>) is exposed through CMakeWorkflow.Client.History.HistoryService.ShowAsync; retain this Client SDK property signature.")]
 List<HistoryNode> Nodes,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.History.HistoryDetail.Measurements (List<HistoryMeasurement>) is exposed through CMakeWorkflow.Client.History.HistoryService.ShowAsync; retain this Client SDK property signature.")]
 List<HistoryMeasurement> Measurements,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.History.HistoryDetail.Artifacts (List<HistoryArtifact>) is exposed through CMakeWorkflow.Client.History.HistoryService.ShowAsync; retain this Client SDK property signature.")]
 List<HistoryArtifact> Artifacts);
 
 public sealed record HistoryHostEnvironment(
@@ -71,7 +71,7 @@ public sealed record HistoryNode(
     string? Configuration,
     string? Target);
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.History.HistoryRun(BuildEnvironments) participates in CMakeWorkflow.Client.History.HistoryService.RunsAsync; retain these concrete collection parameter types.")]
 public sealed record HistoryRun(
     string Id,
     string Directory,
@@ -87,7 +87,7 @@ public sealed record HistoryRun(
     string? HostId = null,
     string? EnvironmentFingerprint = null,
     HistoryHostEnvironment? Environment = null,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.History.HistoryRun.BuildEnvironments (List<HistoryBuildEnvironment>?) is exposed through CMakeWorkflow.Client.History.HistoryService.RunsAsync; retain this Client SDK property signature.")]
 List<HistoryBuildEnvironment>? BuildEnvironments = null);
 
 public sealed record HistoryStats(
@@ -128,7 +128,7 @@ public sealed record HistoryDetection(
     int? Permutations,
     bool? Exact);
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.History.HistoryDetectionReport(Results) participates in CMakeWorkflow.Client.History.HistoryService.DetectAsync; retain these concrete collection parameter types.")]
 public sealed record HistoryDetectionReport(
     int SchemaVersion,
     string BaselineRun,
@@ -138,5 +138,5 @@ public sealed record HistoryDetectionReport(
     double MinimumEffectPercent,
     double Alpha,
     string Test,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.History.HistoryDetectionReport.Results (List<HistoryDetection>) is exposed through CMakeWorkflow.Client.History.HistoryService.DetectAsync; retain this Client SDK property signature.")]
 List<HistoryDetection> Results);

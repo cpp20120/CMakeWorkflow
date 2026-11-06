@@ -9,7 +9,7 @@ compiler. The boundaries matter both for correctness and for interpreting saved 
 
 | Component | Responsibility                                                           | Implementation                                                                         |
 |-----------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| CLI       | Command dispatch, Ctrl+C/SIGINT, history indexing                        | [Program.cs](../../Program.cs)                                                         |
+| CLI       | Process entry, Ctrl+C/SIGINT and command routing                         | [Program.cs](../../Program.cs), [CLI routing](../../Commands/CliApplication.cs)          |
 | Core      | Child-process execution, cancellation, hashing and operation contracts   | [Core](../../CMakeWorkflow.Core/)                                                      |
 | CMake     | CMake File API, contexts, provenance, leases, DAG planning and execution | [WorkflowRunner.cs](../../CMakeWorkflow.CMake/Execution/WorkflowRunner.cs)                       |
 | Profiling | Platform capture, analysis and replay                                    | [ProfileWorkflowExecutor.cs](../../CMakeWorkflow.Profiling/Workflows/ProfileWorkflowExecutor.cs) |

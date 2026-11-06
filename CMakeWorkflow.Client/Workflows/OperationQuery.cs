@@ -16,6 +16,6 @@ public sealed record OperationQuery(int Limit = 50, string? State = null,
 /// <param name="SchemaVersion">Response schema version.</param>
 /// <param name="Items">Non-null operation list.</param>
 /// <param name="NextCursor">Opaque next-page cursor, or null when enumeration is exhausted.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-public sealed record OperationPage(int SchemaVersion, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.OperationPage(Items) participates in CMakeWorkflow.Client.Workflows.OperationService.ListAsync; retain these concrete collection parameter types.")]
+public sealed record OperationPage(int SchemaVersion, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.OperationPage.Items (List<OperationSnapshot>) is exposed through CMakeWorkflow.Client.Workflows.OperationService.ListAsync; retain this Client SDK property signature.")]
 List<OperationSnapshot> Items, string? NextCursor);

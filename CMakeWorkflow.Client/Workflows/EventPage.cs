@@ -12,11 +12,11 @@ namespace CMakeWorkflow.Client.Workflows;
 /// <param name="NextSequence">Last returned sequence, or the unchanged input cursor for an empty page.</param>
 /// <param name="HasMore">Whether another event was found after this page.</param>
 /// <param name="Events">Non-null event list, in strictly increasing sequence order.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.EventPage(Events) participates in CMakeWorkflow.Client.Workflows.WorkflowOperation.ReadEventsAsync; retain these concrete collection parameter types.")]
 public sealed record EventPage(
     string OperationId,
     long AfterSequence,
     long NextSequence,
     bool HasMore,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.EventPage.Events (List<JsonElement>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowOperation.ReadEventsAsync; retain this Client SDK property signature.")]
 List<JsonElement> Events);

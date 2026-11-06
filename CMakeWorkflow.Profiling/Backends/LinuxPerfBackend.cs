@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Capture;
 
@@ -12,8 +11,7 @@ public sealed class LinuxPerfBackend(IProfileProcess process) : IProfilerBackend
         "recorded process and inherited children; event availability depends on perf permissions",
         ["perf.data", "CSV"]);
 
-    [SuppressMessage("Naming", "CA1725", Justification = "Preserve the existing public parameter name for named-argument callers.")]
-    public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken ct)
+    public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!Capabilities.Modes.Contains(request.Mode))
@@ -60,7 +58,7 @@ public sealed class LinuxPerfBackend(IProfileProcess process) : IProfilerBackend
         try
         {
             CommandResult result = await process.RunAsync("perf", args, request.WorkingDirectory,
-                request.Timeout, ProfileEnvironment.Copy(request.Environment), ct);
+                request.Timeout, ProfileEnvironment.Copy(request.Environment), cancellationToken);
             ProfileEnvironment.RequireSuccess(result, counters ? "perf stat" : "perf record");
             return !File.Exists(path)
                 ? throw new IOException("perf returned success without an output file.")

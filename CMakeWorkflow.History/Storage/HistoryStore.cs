@@ -337,7 +337,7 @@ public sealed class HistoryStore : IDisposable
                 HistoryJson.Default.ListHistoryBuildEnvironment)
             : null);
 
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Materializes SQLite rows into an owned List for History result DTOs and Host response construction; the reader is disposed before the list escapes.")]
     public List<HistoryRun> Runs(int limit, string? status, string? since, string? until,
         string? workflow, string? variant, Func<string, bool>? includeDirectory = null, CancellationToken ct = default)
     {
@@ -495,9 +495,8 @@ public sealed class HistoryStore : IDisposable
         return new(1, items, next);
     }
 
-    [SuppressMessage("Design", "CA1068", Justification = "Preserve the existing positional and named argument order for public callers.")]
     public HistoryDetail Show(string id, Action<string>? validateDirectory = null,
-        int maxMeasurements = int.MaxValue, CancellationToken ct = default, Func<string, bool>? artifactAllowed = null)
+        int maxMeasurements = int.MaxValue, Func<string, bool>? artifactAllowed = null, CancellationToken ct = default)
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText =
@@ -532,7 +531,7 @@ public sealed class HistoryStore : IDisposable
         return list;
     }
 
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Materializes SQLite rows into an owned List for History result DTOs and Host response construction; the reader is disposed before the list escapes.")]
     public List<HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario,
         Func<string, bool>? includeDirectory = null, int maxRows = int.MaxValue, CancellationToken ct = default)
     {

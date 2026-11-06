@@ -1,8 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.CMake.Artifacts;
 namespace CMakeWorkflow.CMake.Recovery;
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record WorkflowEvent(
     int SchemaVersion,
     long Sequence,
@@ -14,5 +12,5 @@ public sealed record WorkflowEvent(
     string? Status,
     int? ExitCode,
     string? Error,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
 List<WorkflowArtifactView> Artifacts);

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
@@ -10,10 +9,9 @@ using CMakeWorkflow.CMake.Serialization;
 namespace CMakeWorkflow.Commands;
 #pragma warning restore IDE0130
 
-[SuppressMessage("Maintainability", "CA1515", Justification = "Preserve the established public CLI entry points used by integrations.")]
-public static class WorkflowReportCommand
+internal static class WorkflowReportCommand
 {
-    public static async Task<int> ExecuteAsync(string runDirectory, CancellationToken ct,
+    internal static async Task<int> ExecuteAsync(string runDirectory, CancellationToken ct,
         bool json = false)
     {
         try
@@ -41,7 +39,7 @@ public static class WorkflowReportCommand
         }
     }
 
-    public static void Write(WorkflowReport report, string runDirectory)
+    internal static void Write(WorkflowReport report, string runDirectory)
     {
         ArgumentNullException.ThrowIfNull(report);
         Console.WriteLine($"Workflow: {report.Workflow}");

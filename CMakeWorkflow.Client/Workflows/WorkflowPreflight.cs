@@ -29,13 +29,13 @@ public sealed record WorkflowPreflightDiagnostic(string Severity, string Message
 /// <param name="Exclusive">Whether the node requests exclusive scheduling within this run.</param>
 /// <param name="ObservedState">Current build context observation; not a live operation status.</param>
 /// <param name="Diagnostics">Non-null planner findings for this node.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.WorkflowPreflightNode(Dependencies, Resources, Diagnostics) participates in CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain these concrete collection parameter types.")]
 public sealed record WorkflowPreflightNode(
     string Id, string Kind, string Target, string BuildDirectory, string? Configuration,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-List<string> Dependencies, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.WorkflowPreflightNode.Dependencies (List<string>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain this Client SDK property signature.")]
+List<string> Dependencies, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.WorkflowPreflightNode.Resources (List<string>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain this Client SDK property signature.")]
 List<string> Resources, bool Exclusive, string ObservedState,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.WorkflowPreflightNode.Diagnostics (List<WorkflowPreflightDiagnostic>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain this Client SDK property signature.")]
 List<WorkflowPreflightDiagnostic> Diagnostics);
 
 /// <summary>Read-only preflight evidence suitable for explicit start request construction.</summary>
@@ -50,10 +50,10 @@ List<WorkflowPreflightDiagnostic> Diagnostics);
 /// <param name="ResultsDirectory">Reviewed Host results path.</param>
 /// <param name="Valid">Whether the proposed plan has no rejecting preflight errors.</param>
 /// <param name="Nodes">Non-null prospective nodes and diagnostics.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.WorkflowPreflightResult(Nodes) participates in CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain these concrete collection parameter types.")]
 public sealed record WorkflowPreflightResult(
     int SchemaVersion, string Manifest, string ManifestSha256, int Jobs,
-    string ResultsDirectory, bool Valid, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    string ResultsDirectory, bool Valid, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.WorkflowPreflightResult.Nodes (List<WorkflowPreflightNode>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain this Client SDK property signature.")]
 List<WorkflowPreflightNode> Nodes)
 {
     /// <summary>Construct an explicit start request from reviewed Host values; does not dispatch.</summary>

@@ -57,6 +57,7 @@ try
         return 0;
     }
 
+    CliDispatchTests.Run();
     RemoteCliTests.Run();
     ReportTests.Run();
     BenchmarkRecipeTests.Run();

@@ -2,7 +2,8 @@
 
 **[English](cli.md) · [Русский](../cli.md) · [Index](README.md)**
 
-The CLI command contract is implemented in [Program.cs](../../Program.cs) and its subcommand handlers. Below,
+The CLI command contract is implemented by [routing](../../Commands/CliApplication.cs) and its subcommand handlers;
+[Program.cs](../../Program.cs) owns process cancellation and exit diagnostics. Below,
 `CMakeWorkflow` denotes a published executable or a launcher on PATH; for source development use
 `dotnet bin/Release/net10.0/CMakeWorkflow.dll` instead. Replace all uppercase placeholders with real values and quote
 paths with spaces.
@@ -114,6 +115,10 @@ A `workflow run` returns **0** for success, **1** for failure and **130** for us
 and tooling cases use **2**; it is not a universal meaning across commands. Recovery has an additional **4** for an
 interrupted outcome-unknown checkpoint. `workflow report` exit code 0 only says the report could be read.
 `history detect` can exit successfully with a **regression** verdict; inspect its JSON.
+
+Expected input, filesystem, tool, database and transport failures produce a concise diagnostic and exit status 1.
+Exceptions outside the explicit [CLI failure classification](../../Commands/CliErrors.cs) propagate with runtime
+diagnostics. Automatic History indexing reports expected import failures without replacing the workflow result.
 
 Keep stdout, stderr, spawn errors, exit status and termination signals separate. `--json` is supported by the relevant
 handlers, not every command. Workflow execution emits JSONL; profile run/analyze/replay and DagFlow campaign commands

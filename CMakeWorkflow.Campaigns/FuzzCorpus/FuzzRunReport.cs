@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 namespace CMakeWorkflow.Campaigns.FuzzCorpus;
 
 public sealed class FuzzRunReport
@@ -16,28 +15,23 @@ public sealed class FuzzRunReport
     public int InitialInputs { get; set; }
     public int FinalInputs { get; set; }
     public int ReplayedInputs { get; set; }
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+
     public List<string> FailedInputs { get; set; } = [];
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+
     public List<string> NewInputs { get; set; } = [];
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+
     public List<string> CrashArtifacts { get; set; } = [];
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+
     public Dictionary<string, string> ArtifactSha256 { get; set; } = [];
     public bool ReplayOnly { get; set; }
     public string ReplayMechanism { get; set; } = "direct-input";
     public int DurationSeconds { get; set; }
     public int InputTimeoutSeconds { get; set; }
     public int MaxLength { get; set; }
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+
     public List<string> BuildArguments { get; set; } = [];
     public string? CampaignTool { get; set; }
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+
     public List<string> CampaignArguments { get; set; } = [];
     public int? CampaignExitCode { get; set; }
     public bool CampaignTimedOut { get; set; }

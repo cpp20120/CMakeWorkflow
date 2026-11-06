@@ -9,7 +9,7 @@ using CMakeWorkflow.Tooling.Tools;
 namespace CMakeWorkflow.Host.Sessions;
 
 // One instance per connection. Never changes process-wide cwd or environment.
-[method: SuppressMessage("Design", "CA1068", Justification = "Preserve the existing positional and named argument order for public callers.")]
+[method: SuppressMessage("Design", "CA1068", Justification = "disconnected is the connection lifetime captured by the session, not a per-call cancellation token; the constructor also requires Fix coordination and notification callbacks.")]
 public sealed partial class DoctorSession(
     Func<string, ToolingService> createTooling,
     Func<DoctorProgress, Task> progress,

@@ -592,7 +592,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // Inspection does not read mutable run.json or infer whether a process is alive.
     // A dispatch authorization is not proof of a completed external effect.
-    [SuppressMessage("Design", "CA1034", Justification = "The established nested public type name is part of the existing API.")]
+    [SuppressMessage("Design", "CA1034", Justification = "Store-scoped projection joining acceptance, dispatch binding and reconciliation; RecoveryView maps it to the separate Host RPC DTO.")]
     public sealed record RecoveryInspection(
         string OperationId,
         string AcceptanceState,
@@ -923,7 +923,7 @@ public sealed class DurableAcceptanceStore : IDisposable
         return id;
     }
 
-    [SuppressMessage("Design", "CA1034", Justification = "The established nested public type name is part of the existing API.")]
+    [SuppressMessage("Design", "CA1034", Justification = "Store-scoped result of the cancellation-intent CAS; session code maps it to OperationCancelResult rather than exposing the store projection.")]
     public sealed record CancellationDecision(string OperationId, string State, long Revision, bool Requested);
 
     // ExpectedRevision is a CAS against the cancellation-intent revision (0 -> 1).
@@ -1239,8 +1239,7 @@ public sealed class DurableAcceptanceStore : IDisposable
         return hash;
     }
 
-
-    [SuppressMessage("Design", "CA1034", Justification = "The established nested public type name is part of the existing API.")]
+    [SuppressMessage("Design", "CA1034", Justification = "Store-scoped terminal ledger row containing the verified report digest; it is consumed by durable execution and read-side verification.")]
     public sealed record Finalization(string RunDirectory, string ReportSha256, string State, int ExitCode);
 
     public Finalization? GetFinalization(string operationId)

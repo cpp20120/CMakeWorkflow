@@ -18,7 +18,7 @@ public static class HistoryComparison
             Math.Sqrt(sorted.Sum(x => (x - mean) * (x - mean)) / sorted.Length));
     }
 
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Produces the owned comparison-row list consumed by HistoryCommand.Compare and the Host history/compare response; this is an implementation result, not a Client SDK signature.")]
     public static List<HistoryDifference> Compare(HistoryDetail baseline, HistoryDetail candidate)
     {
         ArgumentNullException.ThrowIfNull(baseline);

@@ -25,21 +25,21 @@ public sealed class WorkflowNode
     /// <summary>Build-node ID supplying the executable to run/profile; null for other kinds.</summary>
     public string? From { get; set; }
     /// <summary>Explicit prerequisite IDs; empty means no explicit prerequisites.</summary>
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.DependsOn exposes List<string>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.DependsOn supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<string> DependsOn { get; set; } = [];
     /// <summary>Literal process arguments for run/profile, without shell parsing or NUL characters.</summary>
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Arguments exposes List<string>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Arguments supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<string> Arguments { get; set; } = [];
     /// <summary>Optional execution directory; null uses the executor default. Relative paths use the manifest base.</summary>
     public string? WorkingDirectory { get; set; }
     /// <summary>Environment overrides for execution; keys cannot contain equals or NUL, and values cannot contain NUL.</summary>
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Environment supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public Dictionary<string, string> Environment { get; set; } = [];
 
     /// <summary>Profile-extension options; must be empty for other kinds. Values are literal strings without NUL.</summary>
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Options supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public Dictionary<string, string> Options { get; set; } = [];
 
     // Explicit output directory relative to the native build tree (invoke only).
@@ -50,8 +50,8 @@ public sealed class WorkflowNode
     /// <summary>CTest label filter, or null for no label filter; valid only for ctest.</summary>
     public string? LabelRegex { get; set; }
     /// <summary>Named scheduling conflict keys within the run; empty requests no additional named resources.</summary>
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Resources exposes List<string>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Resources supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<string> Resources { get; set; } = [];
     /// <summary>Whether this node requires exclusive admission relative to other active nodes in the run.</summary>
     public bool Exclusive { get; set; }
@@ -61,12 +61,12 @@ public sealed class WorkflowNode
 
     // Optional schema-v2 evidence. A reference adds an ordinary DAG dependency.
     /// <summary>Input evidence checked before execution; producer references also add dependencies.</summary>
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Inputs exposes List<WorkflowArtifactInput>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Inputs supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<WorkflowArtifactInput> Inputs { get; set; } = [];
     /// <summary>Named files to validate and hash after successful execution; empty declares no outputs.</summary>
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    [SuppressMessage("Usage", "CA2227", Justification = "The existing mutable DTO setter is required for source and serialization compatibility.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Outputs exposes List<WorkflowArtifactOutput>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
+    [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Outputs supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<WorkflowArtifactOutput> Outputs { get; set; } = [];
     /// <summary>Execution requirements, or null for no explicit requirements.</summary>
     public WorkflowExecutionConstraints? Constraints { get; set; }

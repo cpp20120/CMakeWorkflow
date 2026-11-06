@@ -30,9 +30,9 @@ public sealed record OperationArtifactInfo(
 /// <param name="OperationId">Owning operation.</param>
 /// <param name="ReportSha256">Report hash binding this catalog to durable finalization.</param>
 /// <param name="Artifacts">Non-null catalog entries.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.OperationArtifactList(Artifacts) participates in CMakeWorkflow.Client.Workflows.WorkflowOperation.ListArtifactsAsync; retain these concrete collection parameter types.")]
 public sealed record OperationArtifactList(
-    string OperationId, string ReportSha256, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    string OperationId, string ReportSha256, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.OperationArtifactList.Artifacts (List<OperationArtifactInfo>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowOperation.ListArtifactsAsync; retain this Client SDK property signature.")]
 List<OperationArtifactInfo> Artifacts);
 /// <summary>One byte range; callers must verify the assembled file against the catalog SHA-256.</summary>
 /// <param name="ArtifactId">Catalog artifact identity.</param>

@@ -1,15 +1,13 @@
-using System.Diagnostics.CodeAnalysis;
 
 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Profiling;
 #pragma warning restore IDE0130
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record ProfilePrepareRequest(
     string RequestId,
     string ResultsDirectory,
     string Target,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
 List<ProfileVariantRequest> Variants,
     int Repeats = 3,
     double TimeoutSeconds = 300,

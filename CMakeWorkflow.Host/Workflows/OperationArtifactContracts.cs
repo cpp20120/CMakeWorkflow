@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 
 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
@@ -12,9 +11,9 @@ public sealed record OperationArtifactChunkRequest(
 public sealed record OperationArtifactInfo(
     string ArtifactId, string Kind, string? NodeId, string RelativePath,
     long Size, long LastWriteUtcTicks, string Sha256);
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
 public sealed record OperationArtifactList(
-    string OperationId, string ReportSha256, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    string OperationId, string ReportSha256,
 List<OperationArtifactInfo> Artifacts);
 public sealed record OperationArtifactChunk(
     string ArtifactId, long Offset, long TotalSize, long LastWriteUtcTicks,

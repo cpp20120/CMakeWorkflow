@@ -2,7 +2,8 @@
 
 > **Язык / Language:** [Русский](cli.md) · [English](en/cli.md) · [Documentation index](README.md)
 
-Командный контракт определяется [Program.cs](../Program.cs) и обработчиками семейств команд. Команды ниже существуют в
+Командный контракт определяется [маршрутизацией CLI](../Commands/CliApplication.cs) и обработчиками семейств команд;
+[Program.cs](../Program.cs) отвечает за отмену процесса и диагностику выхода. Команды ниже существуют в
 текущих исходниках. Для локальной разработки заменяйте `CMakeWorkflow` на
 `dotnet bin/Release/net10.0/CMakeWorkflow.dll`.
 
@@ -124,6 +125,10 @@ Alias `setup` направляет в `tooling setup`. Подробности в
 
 `workflow report` с кодом 0 означает успешное чтение отчёта, а не успешность сохранённого workflow: проверяйте `status`
 в данных. `history detect` может успешно вернуть `regression`; такой результат читается из JSON, а не из exit code.
+
+Ожидаемые ошибки аргументов, файлов, инструментов, базы данных и транспорта выводятся кратко с exit code 1.
+Исключения вне явной [классификации ошибок CLI](../Commands/CliErrors.cs) распространяются с диагностикой runtime.
+Ожидаемые ошибки автоматического History import выводятся отдельно и не подменяют результат workflow.
 
 Разделяйте stdout, stderr, spawn error, exit code и termination signal.
 `--json` поддерживается только соответствующими обработчиками; у profile run/analyze/replay и DagFlow campaigns нет

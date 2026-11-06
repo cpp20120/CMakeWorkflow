@@ -1,10 +1,8 @@
-using System.Diagnostics.CodeAnalysis;
 
 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Toolchains;
 #pragma warning restore IDE0130
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record DeveloperEnvironmentSnapshot(
     int SchemaVersion,
     string EnvironmentProfileId,
@@ -12,5 +10,5 @@ public sealed record DeveloperEnvironmentSnapshot(
     string TargetArchitecture,
     string Fingerprint,
     Dictionary<string, string> VisibleVariables,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
 List<string> Diagnostics);

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 
 // Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
@@ -12,17 +11,15 @@ public sealed record WorkflowPreflightRequest(
 
 public sealed record WorkflowPreflightDiagnostic(string Severity, string Message);
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record WorkflowPreflightNode(
     string Id, string Kind, string Target, string BuildDirectory, string? Configuration,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-List<string> Dependencies, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
+List<string> Dependencies,
 List<string> Resources, bool Exclusive, string ObservedState,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
 List<WorkflowPreflightDiagnostic> Diagnostics);
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
 public sealed record WorkflowPreflightResult(
     int SchemaVersion, string Manifest, string ManifestSha256, int Jobs,
-    string ResultsDirectory, bool Valid, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    string ResultsDirectory, bool Valid,
 List<WorkflowPreflightNode> Nodes);

@@ -33,15 +33,15 @@ public sealed record HostToolingStep(string Tool, string Method, string? Executa
 string[] Arguments
 #pragma warning restore CA1819
 , string? Source, string? Diagnostic);
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Provisioning.HostToolingPlan(Tools, Steps) participates in CMakeWorkflow.Client.Provisioning.HostProvisioningService.DoctorAsync; retain these concrete collection parameter types.")]
 public sealed record HostToolingPlan(int SchemaVersion, HostToolPlatform Platform,
 #pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
 string[] Profiles
 #pragma warning restore CA1819
 ,
     string InstallDirectory, HostPackageManagerKind PackageManager, bool Ready,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-List<HostToolStatus> Tools, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Provisioning.HostToolingPlan.Tools (List<HostToolStatus>) is exposed through CMakeWorkflow.Client.Provisioning.HostProvisioningService.DoctorAsync; retain this Client SDK property signature.")]
+List<HostToolStatus> Tools, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Provisioning.HostToolingPlan.Steps (List<HostToolingStep>) is exposed through CMakeWorkflow.Client.Provisioning.HostProvisioningService.DoctorAsync; retain this Client SDK property signature.")]
 List<HostToolingStep> Steps);
 public sealed record HostToolingResult(int SchemaVersion, bool Success,
 

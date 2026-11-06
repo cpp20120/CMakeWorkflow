@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -24,8 +23,7 @@ public static class WindowsToolchains
 
     }
 
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-    public static List<VisualStudioInstance> ParseVsWhere(string json)
+    private static List<VisualStudioInstance> ParseVsWhere(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json);
         if (document.RootElement.ValueKind != JsonValueKind.Array)

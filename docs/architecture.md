@@ -10,7 +10,7 @@
 
 | Компонент       | Ответственность                                                                    | Основные исходники                                                                                                                                     |
 |-----------------|------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
-| CLI entry point | Маршрутизация команд, SIGINT, подключение profiling, автоматический импорт History | [Program.cs](../Program.cs)                                                                                                                            |
+| CLI entry point | Entry point, SIGINT и маршрутизация CLI-команд | [Program.cs](../Program.cs), [CliApplication.cs](../Commands/CliApplication.cs) |
 | Contracts       | Модели workflow, fluent builders и версионированные рецепты                        | [Contracts](../CMakeWorkflow.Contracts/) |
 | Core            | Общий scheduler, запуск команд, hashing, контракт дополнительных операций          | [ExecutionScheduler.cs](../CMakeWorkflow.Core/Execution/ExecutionScheduler.cs), [CommandExecution.cs](../CMakeWorkflow.Core/CommandExecution.cs) |
 | CMake           | File API, наблюдение build tree, provenance, leases, план и исполнение DAG         | [WorkflowDocument.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowDocument.cs), [WorkflowRunner.cs](../CMakeWorkflow.CMake/Execution/WorkflowRunner.cs)                             |

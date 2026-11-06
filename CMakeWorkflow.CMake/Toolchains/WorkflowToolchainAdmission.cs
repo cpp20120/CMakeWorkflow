@@ -51,7 +51,7 @@ public static class WorkflowToolchainAdmission
         return selected;
     }
 
-    [SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [SuppressMessage("Design", "CA1002", Justification = "Produces the owned List assigned to WorkflowReport.Toolchains by WorkflowRunner; this is an internal report-building result.")]
     public static List<WorkflowToolchainIdentity> Identities(
         IReadOnlyDictionary<string, WorkflowToolchainRuntime> selected) =>
         [.. selected.OrderBy(p => p.Key, WorkflowPlanner.PathComparer).Select(pair =>

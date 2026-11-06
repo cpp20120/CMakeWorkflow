@@ -96,7 +96,7 @@ public static class HistoryCommand
                     }
                 case "show" when positional.Count == 1:
                     {
-                        HistoryDetail detail = db.Show(positional[0]);
+                        HistoryDetail detail = db.Show(positional[0], ct: ct);
                         if (json)
                         {
                             Console.WriteLine(JsonSerializer.Serialize(detail, HistoryJson.Default.HistoryDetail));
@@ -172,7 +172,7 @@ public static class HistoryCommand
                     }
                 case "compare" when positional.Count == 2:
                     {
-                        List<HistoryDifference> rows = Compare(db.Show(positional[0]), db.Show(positional[1]));
+                        List<HistoryDifference> rows = Compare(db.Show(positional[0], ct: ct), db.Show(positional[1], ct: ct));
                         if (json)
                         {
                             Console.WriteLine(JsonSerializer.Serialize(rows, HistoryJson.Default.ListHistoryDifference));
@@ -209,7 +209,7 @@ public static class HistoryCommand
                             throw new ArgumentException("--alpha must be a number between zero and one.");
                         }
 
-                        HistoryDetectionReport report = HistoryDetector.Detect(db.Show(positional[0]), db.Show(positional[1]),
+                        HistoryDetectionReport report = HistoryDetector.Detect(db.Show(positional[0], ct: ct), db.Show(positional[1], ct: ct),
                         metric, options.GetValueOrDefault("--variant"),
                         options.GetValueOrDefault("--scenario"), direction, minimum, alpha, ct);
                         if (json)

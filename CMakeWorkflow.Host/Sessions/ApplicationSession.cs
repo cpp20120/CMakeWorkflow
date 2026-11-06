@@ -16,7 +16,6 @@ using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host.Sessions;
 
-
 #pragma warning disable CA1001 // The session gate uses only managed async waiters, never AvailableWaitHandle; DrainAsync preserves the existing session lifecycle.
 public sealed partial class DoctorSession
 {
@@ -375,7 +374,6 @@ public sealed partial class DoctorSession
             accepted.ManifestBaseDirectory));
     }
 
-
     public Task<OperationOverview> OperationOverviewAsync(OperationGetRequest request,
         CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, ct) => OperationOverviewReader.ReadAsync(paths, request.OperationId, ct),
@@ -546,7 +544,7 @@ public sealed partial class DoctorSession
     {
         return string.IsNullOrWhiteSpace(id)
             ? throw new ArgumentException("runId is required.")
-            : db.Show(id, path => paths.Require(path), MeasurementLimit, ct, paths.Contains);
+            : db.Show(id, path => paths.Require(path), MeasurementLimit, paths.Contains, ct);
     }
 
     private static string? Date(string? value)

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Capture;
 
@@ -12,8 +11,7 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
         "system-wide recording; select target process and its threads during analysis",
         [".etl"]);
 
-    [SuppressMessage("Naming", "CA1725", Justification = "Preserve the existing public parameter name for named-argument callers.")]
-    public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken ct)
+    public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!Capabilities.Modes.Contains(request.Mode))
@@ -32,7 +30,7 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
         DateTimeOffset began = DateTimeOffset.UtcNow;
         while (lease is null)
         {
-            ct.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 lease = new FileStream(Path.Combine(lockDirectory, "capture.lock"),
@@ -40,7 +38,7 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
             }
             catch (IOException error) when ((error.HResult & 0xffff) is 11 or 32 or 33 or 35)
             {
-                await Task.Delay(100, ct);
+                await Task.Delay(100, cancellationToken);
             }
         }
 
@@ -50,7 +48,7 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
             // A unique WPR instance name means cleanup cannot stop an unrelated
             // recording. The mutex coordinates our own capture processes.
             CommandResult status = await process.RunAsync("wpr", ["-status", "-instancename", session],
-                request.WorkingDirectory, TimeSpan.FromSeconds(15), null, ct);
+                request.WorkingDirectory, TimeSpan.FromSeconds(15), null, cancellationToken);
             if (status.Output.Contains("recording is in progress", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"WPR session name is already active: {session}");
@@ -62,12 +60,12 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
             started = true;
             CommandResult start = await process.RunAsync("wpr",
                 ["-start", profile, "-filemode", "-instancename", session],
-                request.WorkingDirectory, TimeSpan.FromSeconds(30), null, ct);
+                request.WorkingDirectory, TimeSpan.FromSeconds(30), null, cancellationToken);
             ProfileEnvironment.RequireSuccess(start, "wpr -start");
             DateTimeOffset targetStartedAt = DateTimeOffset.UtcNow;
             CommandResult target = await process.RunAsync(request.Executable, request.Arguments,
                 request.WorkingDirectory, request.Timeout,
-                ProfileEnvironment.Copy(request.Environment), ct);
+                ProfileEnvironment.Copy(request.Environment), cancellationToken);
             DateTimeOffset targetFinishedAt = DateTimeOffset.UtcNow;
             CommandResult stop = await process.RunAsync("wpr",
                 ["-stop", trace, "-instancename", session],

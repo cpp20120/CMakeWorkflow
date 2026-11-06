@@ -1,9 +1,8 @@
-using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.History.Models;
 
 namespace CMakeWorkflow.History;
 
 /// <summary>Workspace-authorized, keyset-paginated run history.</summary>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
-public sealed record HistoryRunPage(int SchemaVersion, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+
+public sealed record HistoryRunPage(int SchemaVersion,
 List<HistoryRun> Items, string? NextCursor);

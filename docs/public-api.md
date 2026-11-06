@@ -35,7 +35,7 @@ validation alone does not establish that compatibility.
 
 These eight assemblies are not part of the audited external .NET SDK package boundary. Their `public` declarations
 allow cross-assembly composition inside the repository; the modifier alone does not establish an embedding or plugin
-contract. Their 269 publicly accessible source types are listed separately in
+contract. Their 267 publicly accessible source types are listed separately in
 [Implementation assembly API inventory](implementation-api.md).
 
 CLI commands and the negotiated Host JSON-RPC wire protocol are external integration surfaces in their own right.

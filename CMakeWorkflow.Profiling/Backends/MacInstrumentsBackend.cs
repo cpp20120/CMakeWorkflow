@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Capture;
 
@@ -13,8 +12,7 @@ public sealed class MacInstrumentsBackend(IProfileProcess process) : IProfilerBa
         "recorded process; template-specific system events may include other processes",
         [".trace"]);
 
-    [SuppressMessage("Naming", "CA1725", Justification = "Preserve the existing public parameter name for named-argument callers.")]
-    public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken ct)
+    public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         string template = request.Mode switch
@@ -46,7 +44,7 @@ public sealed class MacInstrumentsBackend(IProfileProcess process) : IProfilerBa
         try
         {
             CommandResult result = await process.RunAsync("xcrun", args, request.WorkingDirectory,
-                request.Timeout + TimeSpan.FromSeconds(30), null, ct);
+                request.Timeout + TimeSpan.FromSeconds(30), null, cancellationToken);
             ProfileEnvironment.RequireSuccess(result, "xctrace record");
             return !File.Exists(path) && !Directory.Exists(path)
                 ? throw new IOException("xctrace returned success without a .trace artifact.")

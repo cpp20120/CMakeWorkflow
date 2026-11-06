@@ -81,3 +81,107 @@ dotnet_diagnostic.IDE0306.severity = warning
 dotnet_diagnostic.IDE0090.severity = warning
 dotnet_diagnostic.IDE0066.severity = warning
 dotnet_diagnostic.IDE0170.severity = warning
+
+# Reviewed implementation DTOs: concrete owned collections are intentional here.
+# These exact-file policies are not compatibility claims; Client/Contracts keep local SDK contract annotations.
+
+# FuzzRunCampaign accumulates failure/digest data and replaces NewInputs/CrashArtifacts at finalization.
+[CMakeWorkflow.Campaigns/FuzzCorpus/FuzzRunReport.cs]
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+
+# CMakeWorkflowNodeExecutor records configure attempts and argument lists; CMakeInspection persists the mutable evidence.
+[CMakeWorkflow.CMake/Build/ConfigureProvenance.cs]
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+
+# CMakeInspection replaces Configurations and accumulates Targets, Toolchains and Diagnostics while observing a tree.
+[CMakeWorkflow.CMake/Build/ObservedBuildContext.cs]
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+
+# WorkflowRunner and checkpoint recovery fill and replace node dependency, output and evidence collections.
+[CMakeWorkflow.CMake/Reporting/NodeResult.cs]
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+
+# WorkflowRunner updates report lists and environment snapshots; WorkflowReconcileCommand appends reconciliation audit.
+[CMakeWorkflow.CMake/Reporting/WorkflowReport.cs]
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+
+# WorkflowQueries assembles node projection lists from the plan for CLI/Host responses; this is an implementation DTO.
+[CMakeWorkflow.CMake/Planning/WorkflowPlanNodeView.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# WorkflowQueries materializes the selected graph into this implementation-only plan response.
+[CMakeWorkflow.CMake/Planning/WorkflowPlanView.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# WorkflowEventJournal captures the event artifact list before appending the event; this carrier is not a library API.
+[CMakeWorkflow.CMake/Recovery/WorkflowEvent.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# HistoryDetector builds the owned result list for the detection report; the external Client model is separate.
+[CMakeWorkflow.History/Analysis/HistoryDetectionReport.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# HistoryStore.RunsPage accumulates rows under the cursor watermark before returning this internal result projection.
+[CMakeWorkflow.History/HistoryRunPage.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# HistoryStore.Show materializes node, measurement and artifact rows into owned lists after reading SQLite.
+[CMakeWorkflow.History/Models/HistoryDetail.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# HistoryStore.Run reads the recorded build-environment list into this implementation projection of an indexed run.
+[CMakeWorkflow.History/Models/HistoryRun.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# ProfileSession validates and maps this server-side variant list into a profile manifest; Client uses its own options DTO.
+[CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# DoctorSession.InitializeAsync assembles the server handshake tooling-profile list; Client exposes HostIdentity separately.
+[CMakeWorkflow.Host/Protocol/HostInfo.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# OperationArtifactReader/ProcessArtifactReader assemble the owned catalog list before returning a verified artifact response.
+[CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# OperationEventReplay materializes bounded journal pages; the response retains that owned list.
+[CMakeWorkflow.Host/Workflows/OperationEventsPage.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# DurableAcceptanceStore.ListOperations materializes a bounded admission page before returning this server-side DTO.
+[CMakeWorkflow.Host/Workflows/OperationListPage.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# OperationOverviewReader materializes terminal node/dependency lists only after verifying finalized report evidence.
+[CMakeWorkflow.Host/Workflows/OperationOverview.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# DoctorSession.WorkflowPreflightAsync maps planner nodes/resources/diagnostics into server-side response lists.
+[CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# WindowsToolchains.InspectEnvironmentAsync collects environment inspection diagnostics into this implementation result.
+[CMakeWorkflow.Tooling/Toolchains/DeveloperEnvironmentSnapshot.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# WindowsToolchains.DiscoverAsync appends VisualStudio instances, candidate tools and diagnostics during probing.
+[CMakeWorkflow.Tooling/Toolchains/ToolchainInventory.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# WindowsToolchains.Resolve accumulates selection diagnostics and returns the owned list in this implementation result.
+[CMakeWorkflow.Tooling/Toolchains/ToolchainResolution.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# ToolingService builds tool statuses and installation steps in owned mutable lists before producing a plan.
+[CMakeWorkflow.Tooling/Tools/ToolingPlan.cs]
+dotnet_diagnostic.CA1002.severity = none
+
+# ToolingCommand materializes catalog profiles into this implementation response; it is not a Client SDK model.
+[CMakeWorkflow.Tooling/Tools/ToolingProfileList.cs]
+dotnet_diagnostic.CA1002.severity = none

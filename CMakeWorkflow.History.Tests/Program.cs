@@ -83,6 +83,19 @@ try
         Check(measurements.Count == 2 && measurements.Select(x => x.Value).SequenceEqual([2, 4])
                                       && measurements.Select(x => x.SampleIndex).SequenceEqual([0, 1]), "raw samples");
         Check(store.Show(row.Id).Nodes.Count == 3, "nodes and dependencies");
+        using (CancellationTokenSource canceledShow = new())
+        {
+            await canceledShow.CancelAsync();
+            try
+            {
+                _ = await HistoryCommand.ExecuteAsync(["show", row.Id, "--db", dbPath, "--json"], canceledShow.Token);
+                throw new System.Diagnostics.UnreachableException("History show ignored its request cancellation token.");
+            }
+            catch (OperationCanceledException) when (canceledShow.IsCancellationRequested)
+            {
+            }
+        }
+
         Write(success, "run.json", Workflow("succeeded", 3, 5));
         Check(store.Import(success, false).Contains("Imported 1", StringComparison.Ordinal), "changed report refresh");
         Check(store.Metrics(row.Id, null, null, null).Count == 2

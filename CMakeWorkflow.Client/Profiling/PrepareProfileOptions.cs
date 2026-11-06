@@ -1,12 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 namespace CMakeWorkflow.Client.Profiling;
 
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Profiling.PrepareProfileOptions(Variants) participates in CMakeWorkflow.Client.Profiling.ProfileService.PrepareAsync; retain these concrete collection parameter types.")]
 public sealed record PrepareProfileOptions(
     string RequestId,
     string ResultsDirectory,
     string Target,
-    [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Profiling.PrepareProfileOptions.Variants (List<ProfileVariantOptions>) is exposed through CMakeWorkflow.Client.Profiling.ProfileService.PrepareAsync; retain this Client SDK property signature.")]
 List<ProfileVariantOptions> Variants,
     int Repeats = 3,
     double TimeoutSeconds = 300,

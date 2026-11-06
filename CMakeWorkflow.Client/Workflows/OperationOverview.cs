@@ -17,12 +17,12 @@ namespace CMakeWorkflow.Client.Workflows;
 /// <param name="HostId">Recorded execution Host identity, or null if not supplied by this domain.</param>
 /// <param name="EnvironmentFingerprint">Recorded environment identity, or null if unavailable.</param>
 /// <param name="Nodes">Non-null list of verified terminal node evidence; empty before finalization.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.OperationOverview(Nodes) participates in CMakeWorkflow.Client.Workflows.OperationService.GetOverviewAsync; retain these concrete collection parameter types.")]
 public sealed record OperationOverview(
     int SchemaVersion, OperationSnapshot Operation, bool IsFinalized,
     string? RunDirectory, string? ReportSha256,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Error,
-    string? HostId, string? EnvironmentFingerprint, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    string? HostId, string? EnvironmentFingerprint, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.OperationOverview.Nodes (List<OperationNodeView>) is exposed through CMakeWorkflow.Client.Workflows.OperationService.GetOverviewAsync; retain this Client SDK property signature.")]
 List<OperationNodeView> Nodes);
 
 /// <summary>Verified terminal node evidence; fields may be unavailable for nodes that never executed.</summary>
@@ -36,9 +36,9 @@ List<OperationNodeView> Nodes);
 /// <param name="Error">Reported node error, or null if absent.</param>
 /// <param name="Stdout">Host stdout log path, or null when not recorded; not inline output text.</param>
 /// <param name="Stderr">Host stderr log path, or null when not recorded; not inline output text.</param>
-[method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+[method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.OperationNodeView(Dependencies) participates in CMakeWorkflow.Client.Workflows.OperationService.GetOverviewAsync; retain these concrete collection parameter types.")]
 public sealed record OperationNodeView(
-    string Id, string Kind, string Status, [property: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]
+    string Id, string Kind, string Status, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.OperationNodeView.Dependencies (List<string>) is exposed through CMakeWorkflow.Client.Workflows.OperationService.GetOverviewAsync; retain this Client SDK property signature.")]
 List<string> Dependencies,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt,
     int? ExitCode, string? Error, string? Stdout, string? Stderr);

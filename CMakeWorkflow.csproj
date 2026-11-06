@@ -10,6 +10,13 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="Program.cs"/>
+        <Compile Include="Commands/CliApplication.cs"/>
+        <Compile Include="Commands/CliErrors.cs"/>
+        <Compile Include="Commands/CliHistory.cs"/>
+        <Compile Include="Commands/CliUsage.cs"/>
+        <Compile Include="Commands/ProfileCliCommand.cs"/>
+        <Compile Include="Commands/TargetCommand.cs"/>
+        <Compile Include="Commands/WorkflowCliCommand.cs"/>
         <Compile Include="Commands/RemoteCommand.cs"/>
         <Compile Include="Commands/RemoteProvisionCommand.cs"/>
         <Compile Include="Commands/BenchmarkGenerateCommand.cs"/>

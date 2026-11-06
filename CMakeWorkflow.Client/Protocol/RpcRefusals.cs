@@ -5,7 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CMakeWorkflow.Client.Protocol;
 
 /// <summary>A stable Host application refusal with a machine-readable code.</summary>
-[SuppressMessage("Design", "CA1032", Justification = "Existing constructors require domain-specific error evidence; generic constructors would create invalid exception state.")]
+[SuppressMessage("Design", "CA1032", Justification = "CMakeWorkflowRpcRefusalException carries the Host refusal Code and inner RPC failure for client decisions; generic constructors cannot supply that evidence.")]
 public sealed class CMakeWorkflowRpcRefusalException(string code, string message, Exception inner)
     : Exception(message, inner)
 {
