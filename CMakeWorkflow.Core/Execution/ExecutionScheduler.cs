@@ -1,12 +1,33 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
+// Preserve the established namespace; folders only group implementation.
 
-namespace CMakeWorkflow.Engine;
+namespace CMakeWorkflow.Core.Execution;
 #pragma warning restore IDE0130
 
 // The scheduler owns ready/active admission and bounded dispatch. A domain
 // adapter owns authoritative state, durable commits and dispatch authorization.
+/// <summary>Admits ready nodes with bounded parallelism using domain-owned state and hooks.</summary>
+/// <remarks>
+/// Requires a validated finite acyclic graph and positive jobs. Dependencies must succeed before admission.
+/// The domain supplies conflict rules, durable running intents and optional dispatch authorization.
+/// The scheduler does not serialize evidence or acquire domain leases. On interruption it signals stop and
+/// awaits tracked workers; callers retain their lease/cleanup responsibilities if worker drain itself fails.
+/// </remarks>
 internal static class ExecutionScheduler
 {
+    /// <summary>Schedules validated nodes after committing every batch of running intents.</summary>
+    /// <remarks>
+    /// Invokes reservation/state callbacks serially; returned Execute tasks may overlap up to jobs. Persists the
+    /// complete batch before optional ConfirmDispatch and any Execute call. A persistence/gate exception prevents
+    /// that batch from launching, but reserved intent is not automatically rolled back.
+    /// In finally, requests stop and awaits tracked tasks in sequence, then calls DrainInFlight. Exceptions from
+    /// cancellation callbacks, tasks or drain hooks can interrupt this cleanup and propagate. Domain owners must
+    /// retain their own resource/lease obligations and must not infer quiescence merely from an exception.
+    /// </remarks>
+    /// <param name="plan">Validated finite graph; borrowed definitions must remain stable throughout scheduling.</param>
+    /// <param name="jobs">Positive maximum active/admitted workers; caller validates this precondition.</param>
+    /// <param name="stop">Caller-owned worker stop source; canceled here even on normal completion, never disposed here.</param>
+    /// <param name="hooks">Domain state, conflict, persistence and execution callbacks; no leases are acquired by the scheduler.</param>
+    /// <param name="cancellation">Admission lifetime used for pending-node cancellation and callback checks; callers link stop as needed.</param>
     internal static async Task RunAsync<TPayload, TResult, TReservation>(
         ExecutionPlan<TPayload> plan, int jobs, CancellationTokenSource stop,
         ExecutionSchedulerHooks<TPayload, TResult, TReservation> hooks, CancellationToken cancellation)

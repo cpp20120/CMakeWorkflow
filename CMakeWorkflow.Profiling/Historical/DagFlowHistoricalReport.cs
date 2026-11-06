@@ -1,10 +1,11 @@
 using System.Globalization;
-using System.Text.Json;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using CMakeWorkflow.Core;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Historical;
 #pragma warning restore IDE0130
 
 // Report semantics for DagFlow's historical stress-harness experiment.

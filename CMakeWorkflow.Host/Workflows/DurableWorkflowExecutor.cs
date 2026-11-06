@@ -1,20 +1,32 @@
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Toolchains;
+using CMakeWorkflow.Profiling.Workflows;
+using CMakeWorkflow.CMake.Serialization;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
-/// <summary>
-/// One-shot, opt-in host-side execution bridge. No RPC method exposes this until
-/// ownership, shutdown and crash-injection contracts have been verified.
-/// </summary>
+/// <summary>Host-owned CMake execution bridge across durable acceptance and runner evidence.</summary>
+/// <remarks>
+/// The operation file lease covers validation, dispatch authorization, runner lifetime and finalization.
+/// The runner also owns its run-directory lease. Cancellation is the coordinator execution token, not an RPC token.
+/// Exceptions preserve unresolved state; only verified normal runner returns can finalize an operation.
+/// </remarks>
 public static class DurableWorkflowExecutor
 {
     // Uses the original immutable snapshot and runner checkpoint recovery; a
     // committed attempt is never automatically re-claimed after an exception.
+    /// <summary>Validates admitted recovery and permanently claims its attempt before runner mutation.</summary>
+    /// <remarks>
+    /// Uses original accepted bytes and bound run evidence, checks toolchain identity, and resumes with parallelism 1.
+    /// The caller must have admitted recovery after quiescence confirmation. A committed attempt is never reclaimed on exception.
+    /// Only verified terminal returns finalize; lease disposal does not erase uncertain results.
+    /// </remarks>
     public static async Task<int> ExecuteResumedAsync(string workspace, string operationId,
         CancellationToken cancellationToken)
     {
@@ -69,6 +81,12 @@ public static class DurableWorkflowExecutor
         return code;
     }
 
+    /// <summary>Executes a still-unauthorized accepted snapshot once under an exclusive operation lease.</summary>
+    /// <remarks>
+    /// Validates immutable request identity, DAG diagnostics and toolchain identity before reserving results and authorizing dispatch.
+    /// The runner must persist running intent and bind its checkpoint before external launch. After authorization, interruption
+    /// cannot authorize implicit retry. Finalizes only runner return codes 0, 1 or 130; exceptions retain recovery evidence.
+    /// </remarks>
     public static async Task<int> ExecuteAcceptedAsync(string workspace, string operationId,
         string clientRequestId, string originalManifestPath, string expectedManifestHash,
         int jobs, string resultsDirectory, CancellationToken cancellationToken,

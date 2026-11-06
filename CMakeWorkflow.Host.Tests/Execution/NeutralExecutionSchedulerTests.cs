@@ -1,7 +1,9 @@
-using CMakeWorkflow.Engine;
+using CMakeWorkflow.Core.Execution;
 
 // An independent, in-memory consumer: there are no CMake objects, files,
 // process launches, report models or Host RPC dependencies in this fixture.
+namespace CMakeWorkflow.Host.Tests.Execution;
+
 internal static class NeutralExecutionSchedulerTests
 {
     public static async Task RunAsync()
@@ -136,12 +138,12 @@ internal static class NeutralExecutionSchedulerTests
         bool authorized = false;
         using CancellationTokenSource stop = new();
         await ExecutionScheduler.RunAsync(new ExecutionPlan<string>(nodes), jobs,
-stop,
+            stop,
             new ExecutionSchedulerHooks<string, ExecutionStatus, string>
             {
                 GetStatus = id => states[id],
                 Conflicts = (a, b) => a.Exclusive || b.Exclusive ||
-                                       (conflict?.Invoke(a.Id, b.Id) ?? false),
+                                      (conflict?.Invoke(a.Id, b.Id) ?? false),
                 MarkCanceled = node => states[node.Id] = ExecutionStatus.Canceled,
                 MarkBlocked = node => states[node.Id] = ExecutionStatus.Blocked,
                 BeforeReserve = (_, _) => Task.CompletedTask,

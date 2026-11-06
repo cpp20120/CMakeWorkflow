@@ -1,9 +1,23 @@
 using System.Text.RegularExpressions;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Recipes;
 
+/// <summary>Validates a benchmark recipe and creates a build followed by serial timing dependencies.</summary>
+/// <remarks>
+/// Pure in-memory graph construction: no filesystem access, build, target execution or profiler launch.
+/// The caller owns manifest persistence, Host path authorization, planning and durable admission.
+/// At execution time, builds/configuration can mutate native trees and run/profile/test commands can have external effects.
+/// Recovery must use verified checkpoints and must not replay uncertain running nodes blindly.
+/// </remarks>
 public static class BenchmarkWorkflowBuilder
 {
+    /// <summary>Validates recipe inputs and returns a new mutable schema-v2 workflow definition.</summary>
+    /// <remarks>
+    /// Throws for invalid inputs before returning a graph. Returning a document does not establish target existence,
+    /// profiler availability or permission to execute. The planner and runtime remain authoritative.
+    /// </remarks>
     public static WorkflowDocument Build(BenchmarkRecipeV1 recipe)
     {
         ArgumentNullException.ThrowIfNull(recipe);

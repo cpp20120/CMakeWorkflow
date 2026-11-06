@@ -1,5 +1,7 @@
 using System.Diagnostics;
 
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal sealed class SshTestPrograms : IDisposable
 {
     internal string Root { get; } = Path.Combine(Path.GetTempPath(), "cmw-ssh-" + Guid.NewGuid().ToString("N")[..10]);
@@ -25,20 +27,20 @@ internal sealed class SshTestPrograms : IDisposable
     }
 
     internal string Ssh() => Script("ssh", $"""
-        printf '%s\n' "$@" > {Quote(Arguments)}
-        printf '%s' "$$" > {Quote(PidFile)}
-        test "$1" = '-T'
-        test "$2" = '-o'
-        test "$3" = 'BatchMode=yes'
-        test "$4" = '--'
-        shift 5
-        test "$#" = '1'
-        exec /bin/sh -c "$1"
-        """);
+                                            printf '%s\n' "$@" > {Quote(Arguments)}
+                                            printf '%s' "$$" > {Quote(PidFile)}
+                                            test "$1" = '-T'
+                                            test "$2" = '-o'
+                                            test "$3" = 'BatchMode=yes'
+                                            test "$4" = '--'
+                                            shift 5
+                                            test "$#" = '1'
+                                            exec /bin/sh -c "$1"
+                                            """);
 
     internal string Peer() => Script("host ' with spaces;$HOME", $"""
-        exec dotnet {Quote(typeof(SshTestPrograms).Assembly.Location)} --ssh-peer "$@"
-        """);
+                                                                  exec dotnet {Quote(typeof(SshTestPrograms).Assembly.Location)} --ssh-peer "$@"
+                                                                  """);
 
     internal static string Quote(string value) => "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
 

@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Profiling.Capture;
 
 namespace CMakeWorkflow.Profiling.Backends;
 

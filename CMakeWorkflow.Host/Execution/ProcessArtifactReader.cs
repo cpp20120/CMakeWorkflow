@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
 // Process-domain catalog over the same descriptor-anchored, no-follow artifact

@@ -2,6 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Planning;
 
@@ -33,7 +34,7 @@ public static class WorkflowPlanner
         readGuard?.Invoke(file);
         ct.ThrowIfCancellationRequested();
         byte[] bytes = snapshot;
-        WorkflowDocument document = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowDocument)
+        WorkflowDocument document = JsonSerializer.Deserialize(bytes, Serialization.WorkflowJson.Default.WorkflowDocument)
                        ?? throw new ArgumentException("Empty workflow document.");
         if (document.SchemaVersion is not (1 or 2))
         {

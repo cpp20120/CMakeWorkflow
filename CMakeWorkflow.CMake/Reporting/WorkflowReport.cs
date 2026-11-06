@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.CMake.Toolchains;
+
 namespace CMakeWorkflow.CMake.Reporting;
 
 public sealed class WorkflowReport

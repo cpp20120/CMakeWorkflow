@@ -2,9 +2,16 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.History;
+using CMakeWorkflow.History.Analysis;
+using CMakeWorkflow.History.Models;
+using CMakeWorkflow.Host.Campaigns;
+using CMakeWorkflow.Host.History;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Host.Workflows;
 using StreamJsonRpc;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Protocol;
 
 public partial interface IHostRpc
 {

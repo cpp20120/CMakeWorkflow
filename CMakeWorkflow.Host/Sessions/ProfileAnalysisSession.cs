@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Profiling.Analysis;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

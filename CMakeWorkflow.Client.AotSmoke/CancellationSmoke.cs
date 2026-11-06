@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Workflows;
+
+namespace CMakeWorkflow.Client.AotSmoke;
 
 internal static class CancellationSmoke
 {
@@ -64,9 +65,9 @@ internal static class CancellationSmoke
 
         string manifest = Path.Combine(fixture, "cancel.json");
         byte[] bytes = Encoding.UTF8.GetBytes(/*lang=json,strict*/ """
-                                           {"schemaVersion":1,"contexts":{"probe":{"buildDirectory":"cancel build","mode":"adopt"}},
-                                            "nodes":[{"id":"effect","kind":"invoke","context":"probe","target":"effect"}]}
-                                           """);
+                                                                   {"schemaVersion":1,"contexts":{"probe":{"buildDirectory":"cancel build","mode":"adopt"}},
+                                                                    "nodes":[{"id":"effect","kind":"invoke","context":"probe","target":"effect"}]}
+                                                                   """);
         await File.WriteAllBytesAsync(manifest, bytes, ct);
         StartWorkflowOptions options = new("aot-cancel-" + Guid.NewGuid().ToString("N"), manifest,
             Convert.ToHexString(SHA256.HashData(bytes)), 1, Path.Combine(fixture, "cancel results"));

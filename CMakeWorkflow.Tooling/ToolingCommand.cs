@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CMakeWorkflow.Tooling.Tools;
 
 namespace CMakeWorkflow.Tooling;
 
@@ -182,7 +183,7 @@ public static class ToolingCommand
 
     private static bool PathContains(string directory)
     {
-        foreach (string path in (Environment.GetEnvironmentVariable("PATH") ?? "")
+        foreach (string path in (System.Environment.GetEnvironmentVariable("PATH") ?? "")
                  .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             try

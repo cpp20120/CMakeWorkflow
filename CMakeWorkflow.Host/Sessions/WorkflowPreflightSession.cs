@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Workflows;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

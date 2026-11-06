@@ -1,10 +1,14 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Transport;
 #pragma warning restore IDE0130
 
 /// <summary>A byte tunnel to a persistent Host, with no ownership of that Host.</summary>
 public static class StdioBridge
 {
+    /// <summary>Connects a binary stdio tunnel to an existing persistent Host.</summary>
+    /// <remarks>
+    /// Owns the local Host connection. Ending the tunnel closes that connection without stopping the persistent Host.
+    /// </remarks>
     public static async Task RunAsync(string endpoint, Stream input, Stream output, CancellationToken ct)
     {
         await using Stream connection = await LocalTransport.ConnectAsync(endpoint, ct);
@@ -14,6 +18,13 @@ public static class StdioBridge
     // Either EOF ends this connection. Bytes copied are not an acknowledgement
     // of an RPC request: only the Host's complete RPC response establishes that.
     // The caller owns input/output and must supply cancellable asynchronous streams.
+    /// <summary>Copies bytes in both directions until either EOF, failure or cancellation.</summary>
+    /// <remarks>
+    /// Caller supplies cancellable asynchronous streams and retains ownership of input/output.
+    /// This method closes connection, cancels the sibling copy and observes both tasks before returning.
+    /// Copied bytes are not an RPC acknowledgement; an interrupted reply leaves mutation outcome uncertain.
+    /// Closing this tunnel does not request persistent Host shutdown or durable operation cancellation.
+    /// </remarks>
     public static async Task ForwardAsync(Stream input, Stream output, Stream connection, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(connection);

@@ -1,7 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.CMake.Planning;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+using CMakeWorkflow.Contracts.Workflows;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.CMake.Toolchains;
 #pragma warning restore IDE0130
 
 public static class WorkflowToolchainAdmission

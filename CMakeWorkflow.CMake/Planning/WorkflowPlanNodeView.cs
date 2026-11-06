@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.Contracts.Workflows;
+
 namespace CMakeWorkflow.CMake.Planning;
 
 [method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]

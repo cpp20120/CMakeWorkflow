@@ -1,14 +1,24 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.Core.Persistence;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
+/// <summary>Validates process recovery evidence without inferring success from interrupted running intents.</summary>
 internal static class ProcessWorkflowRecovery
 {
     internal static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 
+    /// <summary>Matches saved process outcomes to the immutable graph and existing run logs.</summary>
+    /// <remarks>
+    /// Requires the same snapshot hash and ordered node IDs. Saved dependency lists, when present, must match
+    /// the manifest; successful nodes must have successful prerequisites. Legacy reports may omit dependency lists.
+    /// Recorded logs must be existing leaf files inside the run. This check does not claim resume or prove external quiescence.
+    /// </remarks>
     internal static void ValidatePlan(ProcessOperationReport report, ProcessWorkflowManifest manifest,
         string snapshotSha256, WorkspaceReadPaths paths, string output)
     {
@@ -49,6 +59,12 @@ internal static class ProcessWorkflowRecovery
 
     // Called only by explicit resume admission under the execution lease, after
     // SQLite reconciliation and operator-confirmed quiescence. No node is reset.
+    /// <summary>Persists an explicit recovery annotation without resetting node outcomes or executing commands.</summary>
+    /// <remarks>
+    /// Caller must hold the execution lease after reconciliation and operator-confirmed quiescence.
+    /// This method acquires the run lease, verifies original graph/logs/checkpoint binding and writes durable recovery evidence.
+    /// It does not itself admit or claim resume; those remain separate ledger transitions.
+    /// </remarks>
     internal static void Prepare(DurableAcceptanceStore store, string operationId, WorkspaceReadPaths paths)
     {
         DurableAcceptanceStore.RecoveryInspection inspection = store.InspectRecovery(operationId);

@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
 // Real Host and bridge subprocesses, with POSIX OpenSSH substituted only at the network hop.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal static class SshDownloadTests
 {
     private static void Check(bool condition, string description) => SshTransportTests.Check(condition, description);

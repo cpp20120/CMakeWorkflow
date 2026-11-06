@@ -1,4 +1,6 @@
-namespace CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Workflows;
+
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

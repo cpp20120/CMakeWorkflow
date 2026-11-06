@@ -1,8 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Artifacts;
 
+/// <summary>Collects declared file/tree evidence without claiming atomic filesystem snapshots.</summary>
+/// <remarks>
+/// Caller owns execution/run leases and post-copy hash verification. Detected symbolic links/reparse
+/// points are rejected, but ordinary pathname checks/opens here are not the handle-relative Host artifact API.
+/// </remarks>
 internal static class WorkflowArtifacts
 {
     internal static bool ValidSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
@@ -15,6 +21,12 @@ internal static class WorkflowArtifacts
             ? Path.GetFullPath(Path.Combine(run, output.Path))
             : ManifestPath(Path.GetDirectoryName(manifest)!, output.Path);
 
+    /// <summary>Hashes a file or an ordinally ordered directory file inventory.</summary>
+    /// <remarks>
+    /// Directory evidence combines normalized relative file names and file hashes; empty directories are not
+    /// included. No lock prevents external mutation during traversal. Returns lowercase SHA-256 and throws
+    /// for missing inputs or detected links; callers must decide whether/when to revalidate evidence.
+    /// </remarks>
     internal static async Task<string> HashAsync(string path, CancellationToken ct)
     {
         if (File.Exists(path))
@@ -49,6 +61,12 @@ internal static class WorkflowArtifacts
 
     }
 
+    /// <summary>Copies declared evidence into an initially absent destination without rollback on interruption.</summary>
+    /// <remarks>
+    /// Does not itself establish a verified snapshot. Caller must compare the copy hash with the observed
+    /// source hash before trusting it. Cancellation/I/O failure can leave a partial destination which subsequent
+    /// calls reject until explicitly handled; no atomic publication or durability sync is performed.
+    /// </remarks>
     internal static async Task CopySnapshotAsync(string source, string destination, CancellationToken ct)
     {
         if (File.Exists(destination) || Directory.Exists(destination))

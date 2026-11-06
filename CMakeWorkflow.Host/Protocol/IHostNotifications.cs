@@ -1,7 +1,8 @@
+using CMakeWorkflow.Host.Provisioning;
 using PolyType;
 using StreamJsonRpc;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Protocol;
 
 [GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 public partial interface IHostNotifications

@@ -33,7 +33,7 @@ public static class WorkflowQueries
     // validation as CLI reports without reopening a checked pathname.
     public static WorkflowReportSnapshot ReportFromBytes(string directory, byte[] bytes)
     {
-        WorkflowReport report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
+        WorkflowReport report = JsonSerializer.Deserialize(bytes, Serialization.WorkflowJson.Default.WorkflowReport)
                      ?? throw new InvalidDataException("run.json contains an empty report.");
         return report.SchemaVersion != 1
             ? throw new InvalidDataException($"Unsupported report schemaVersion: {report.SchemaVersion}.")

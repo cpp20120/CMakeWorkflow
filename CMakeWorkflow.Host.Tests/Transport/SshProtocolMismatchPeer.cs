@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal static class SshProtocolMismatchPeer
 {
     internal static async Task RunAsync()

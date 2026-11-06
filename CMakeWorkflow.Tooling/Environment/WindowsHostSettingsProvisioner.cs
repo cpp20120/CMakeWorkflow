@@ -1,5 +1,5 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Environment;
 #pragma warning restore IDE0130
 
 // Single strongly typed Windows host setting. A GUID identifies an existing power scheme;

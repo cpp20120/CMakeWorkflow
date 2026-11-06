@@ -2,8 +2,11 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
 using StreamJsonRpc;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class DurableWorkflowWireTests
 {
@@ -37,9 +40,9 @@ internal static class DurableWorkflowWireTests
         await ConfigureAsync(source, build, ct);
 
         JsonNode document = JsonNode.Parse("""
-                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                                      """)!;
+                                           {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                            "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                           """)!;
         document["contexts"]!["w"]!["buildDirectory"] = build;
         string manifest = Path.Combine(workspace, "workflow.json");
         byte[] bytes = Encoding.UTF8.GetBytes(document.ToJsonString());
@@ -52,7 +55,7 @@ internal static class DurableWorkflowWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, workspace), ct);
             OperationReference accepted = await client.WorkflowStartAsync(request, ct);
@@ -80,7 +83,7 @@ internal static class DurableWorkflowWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, workspace), ct);
             OperationReference retry = await client.WorkflowStartAsync(request, ct);

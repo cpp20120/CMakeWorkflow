@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Globalization;
+using CMakeWorkflow.History.Analysis;
+using CMakeWorkflow.History.Models;
+using CMakeWorkflow.History.Storage;
 
 namespace CMakeWorkflow.History;
 

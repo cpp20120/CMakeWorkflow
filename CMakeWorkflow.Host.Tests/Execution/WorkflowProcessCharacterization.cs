@@ -1,20 +1,22 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using CMakeWorkflow;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Toolchains;
+
+namespace CMakeWorkflow.Host.Tests.Execution;
 
 internal static class WorkflowProcessCharacterization
 {
     private static readonly string[] ExplicitOwnedTreeNames =
     [
-    "forged tree"
-];
+        "forged tree"
+    ];
     private static readonly string TestAssembly = typeof(WorkflowProcessCharacterization).Assembly.Location;
     private static readonly string DotNet = Environment.ProcessPath
-        ?? throw new InvalidOperationException("The .NET host path is unavailable.");
+                                            ?? throw new InvalidOperationException("The .NET host path is unavailable.");
 
     public static async Task RunAsync(string root)
     {
@@ -60,12 +62,12 @@ internal static class WorkflowProcessCharacterization
         Check(details.GetProperty("inherited").GetString() == "inherited value",
             "Inherited child environment was lost.");
         Check(details.GetProperty("arguments").EnumerateArray().Select(x => x.GetString())
-                  .SequenceEqual(["plain", "value with spaces", "", "semi;colon", "quoted\"value"]),
+                .SequenceEqual(["plain", "value with spaces", "", "semi;colon", "quoted\"value"]),
             "Child argument boundaries changed.");
         Check(await File.ReadAllTextAsync(Path.Combine(directory, "logs", "node.stdout.log"))
-                  == "stdout:plain" + Environment.NewLine, "Child stdout file changed.");
+              == "stdout:plain" + Environment.NewLine, "Child stdout file changed.");
         Check(await File.ReadAllTextAsync(Path.Combine(directory, "logs", "node.stderr.log"))
-                  == "stderr:plain" + Environment.NewLine, "Child stderr file changed.");
+              == "stderr:plain" + Environment.NewLine, "Child stderr file changed.");
         Pass("workflow child argv, working directory, stdin EOF, inherited/explicit environment and stream files");
     }
 
@@ -87,8 +89,8 @@ internal static class WorkflowProcessCharacterization
             using BuildTreeOwnership ownership = await BuildTreeOwnership.AcquireAsync([ownedTree], CancellationToken.None);
             string explicitOutput = NewDirectory(directory, "explicit");
             NodeResult overridden = Result(directory,
-                [TestAssembly, "--workflow-process-worker", "ownership",
-                    Path.Combine(directory, "explicit report.json"), ownedTree, explicitController]);
+            [TestAssembly, "--workflow-process-worker", "ownership",
+                Path.Combine(directory, "explicit report.json"), ownedTree, explicitController]);
             int exitCode = await WorkflowProcessDispatcher.RunAsync(overridden,
                 new Dictionary<string, string>
                 {
@@ -101,7 +103,7 @@ internal static class WorkflowProcessCharacterization
             {
                 JsonElement rootElement = details.RootElement;
                 Check(rootElement.GetProperty("ownedTrees").EnumerateArray().Select(x => x.GetString())
-                          .SequenceEqual([inheritedTree, ownedTree]),
+                        .SequenceEqual([inheritedTree, ownedTree]),
                     "Owned-tree propagation did not override the supplied list with inherited and active trees.");
                 Check(rootElement.GetProperty("controller").GetString() == explicitController,
                     "Explicit controller environment did not override the inherited value.");
@@ -115,8 +117,8 @@ internal static class WorkflowProcessCharacterization
             }
 
             NodeResult ambient = Result(directory,
-                [TestAssembly, "--workflow-process-worker", "ownership",
-                    Path.Combine(directory, "ambient report.json"), ownedTree, ambientController]);
+            [TestAssembly, "--workflow-process-worker", "ownership",
+                Path.Combine(directory, "ambient report.json"), ownedTree, ambientController]);
             string ambientOutput = NewDirectory(directory, "ambient");
             exitCode = await WorkflowProcessDispatcher.RunAsync(ambient,
                 new Dictionary<string, string>(), ambientOutput, CancellationToken.None);
@@ -172,7 +174,7 @@ internal static class WorkflowProcessCharacterization
         MissingWorkflowToolException error = await Throws<MissingWorkflowToolException>(() => WorkflowProcessDispatcher.RunAsync(result,
             new Dictionary<string, string>(), directory, CancellationToken.None));
         Check(error.Executable == executable && error.Message ==
-              $"Required executable '{executable}' could not be started.",
+            $"Required executable '{executable}' could not be started.",
             "Missing executable error projection changed.");
         Check(error.InnerException is System.ComponentModel.Win32Exception or IOException,
             "Missing executable did not preserve its native start error.");
@@ -263,7 +265,7 @@ internal static class WorkflowProcessCharacterization
 
                 string[] ids = File.ReadAllText(pidPath).Split('|');
                 return ids.Length == 2 && int.TryParse(ids[0], out parentPid)
-                       && int.TryParse(ids[1], out childPid);
+                                       && int.TryParse(ids[1], out childPid);
             }, TimeSpan.FromSeconds(20), "Process worker did not start its descendant.");
 
             Check(IsRunning(parentPid) && IsRunning(childPid),
@@ -510,7 +512,7 @@ internal static class WorkflowProcessTestWorker
             case "spawn":
                 {
                     ProcessStartInfo childInfo = new(Environment.ProcessPath
-                        ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+                                                     ?? throw new InvalidOperationException("The .NET host path is unavailable."))
                     { UseShellExecute = false };
                     foreach (string? argument in new[]
                              {
@@ -529,7 +531,7 @@ internal static class WorkflowProcessTestWorker
             case "spawn-flood":
                 {
                     ProcessStartInfo childInfo = new(Environment.ProcessPath
-                        ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+                                                     ?? throw new InvalidOperationException("The .NET host path is unavailable."))
                     { UseShellExecute = false };
                     foreach (string? argument in new[]
                              {

@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CMakeWorkflow.CMake" />
+    <InternalsVisibleTo Include="CMakeWorkflow.Profiling" />
     <InternalsVisibleTo Include="CMakeWorkflow.Host.Tests" />
     <InternalsVisibleTo Include="CMakeWorkflow.Host" />
   </ItemGroup>

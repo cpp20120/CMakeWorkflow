@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.History.Models;
+
 namespace CMakeWorkflow.History;
 
 /// <summary>Workspace-authorized, keyset-paginated run history.</summary>

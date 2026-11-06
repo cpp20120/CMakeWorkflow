@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-namespace CMakeWorkflow.Profiling;
+namespace CMakeWorkflow.Profiling.Analysis;
 
 // A relative timeline from per-task perf tracepoints. It is not a complete
 // system-wide scheduler trace: wakeups originating in other tasks may be absent.

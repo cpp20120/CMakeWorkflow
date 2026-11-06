@@ -1,13 +1,18 @@
 using System.Collections.Concurrent;
+using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.Sessions;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
-/// <summary>
-/// Host-owned execution. In-memory entries suppress concurrent dispatch, while
-/// SQLite acceptance is authoritative across connections and process restarts.
-/// </summary>
+/// <summary>Owns background execution tasks independently of individual RPC connections.</summary>
+/// <remarks>
+/// Accepted work is linked to the supplied Host shutdown token, never the submitting request token.
+/// The in-memory task map prevents duplicate scheduling here; executor file leases and ledger transitions guard cross-process execution.
+/// The Host owner signals shutdown and drains tasks before disposing shared resources. Background failures are observed
+/// and logged; they do not manufacture terminal success/failure evidence for an uncertain runner.
+/// </remarks>
 public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : IDisposable
 {
     private readonly CancellationToken shutdown = shutdown;
@@ -15,6 +20,10 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
     private readonly ConcurrentDictionary<string, CancellationTokenSource> cancellation = new(StringComparer.Ordinal);
     private int disposed;
 
+    /// <summary>Accepts a CMake request durably and schedules eligible work under Host ownership.</summary>
+    /// <remarks>
+    /// A returned reference acknowledges acceptance, not execution completion. Existing non-initial state is returned without implicit redispatch.
+    /// </remarks>
     public OperationReference Start(string workspace, WorkflowStartRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -90,6 +99,10 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
 
     // A non-CMake domain shares durable requestId, cancellation, leases and
     // lost-reply recovery, but executes its own immutable snapshot and report.
+    /// <summary>Accepts a process-domain request and schedules it under Host ownership.</summary>
+    /// <remarks>
+    /// Domain adapters validate immutable input; admission and lost-reply semantics match durable CMake execution.
+    /// </remarks>
     public OperationReference StartProcess(string workspace, ExecutionStartRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -164,6 +177,10 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         return reference;
     }
 
+    /// <summary>Schedules an admitted recovery attempt without borrowing the caller RPC lifetime.</summary>
+    /// <remarks>
+    /// Requires recovery revision 2, needs_attention, no cancellation and no finalization. The executor owns the permanent one-shot claim.
+    /// </remarks>
     public void Resume(string workspace, string operationId)
     {
         if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)
@@ -232,6 +249,10 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
+    /// <summary>Persists cancellation intent before signaling any registered worker token.</summary>
+    /// <remarks>
+    /// An executor may complete concurrently. A returned receipt is not proof of worker shutdown; terminal evidence is read separately.
+    /// </remarks>
     public DurableAcceptanceStore.CancellationDecision Cancel(string workspace, string operationId,
         long expectedRevision)
     {
@@ -260,6 +281,10 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
     public bool IsActive(string workspaceId, string operationId) =>
         active.ContainsKey(workspaceId + ":" + operationId);
 
+    /// <summary>Waits for registered execution tasks to leave the active map.</summary>
+    /// <remarks>
+    /// Does not initiate cancellation. The Host owner must signal its shutdown token before shutdown drain.
+    /// </remarks>
     public async Task DrainAsync()
     {
         while (!active.IsEmpty)
@@ -268,5 +293,9 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         }
     }
 
+    /// <summary>Prevents new coordinator mutations.</summary>
+    /// <remarks>
+    /// Does not cancel or drain active tasks. The Host owner supplies shutdown cancellation and awaits DrainAsync first.
+    /// </remarks>
     public void Dispose() => Interlocked.Exchange(ref disposed, 1);
 }

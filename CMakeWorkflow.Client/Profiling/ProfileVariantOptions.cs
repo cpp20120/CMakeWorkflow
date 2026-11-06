@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.Workflows;
+
 namespace CMakeWorkflow.Client.Profiling;
 
 public sealed record ProfileVariantOptions(

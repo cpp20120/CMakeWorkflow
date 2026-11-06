@@ -1,12 +1,19 @@
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
+// Preserve the established namespace; folders only group implementation.
 using CMakeWorkflow.CMake.Execution;
 
-namespace CMakeWorkflow.Profiling;
+namespace CMakeWorkflow.Profiling.Historical;
 #pragma warning restore IDE0130
 
 // A view of the durable command journal, not a second owner of operation state.
 // The percentage counts finished command steps, never elapsed wall-clock time.
+/// <summary>Locked progress view over command-dispatch notifications, not authoritative execution state.</summary>
+/// <remarks>
+/// Counts distinct succeeded/verified labels against a fixed experiment operation count; percentages are
+/// completed operations, not elapsed runtime estimates. Observe/Phase/Dispose serialize internal state and
+/// writes, but do not protect a borrowed writer from unrelated users. Writer failures can propagate.
+/// Disposal finishes a terminal line only: it neither disposes the writer nor cancels or finalizes execution.
+/// </remarks>
 internal sealed class HistoricalProgress : IDisposable
 {
     private readonly Lock gate = new();
@@ -34,6 +41,12 @@ internal sealed class HistoricalProgress : IDisposable
     internal static int TotalOperations(int timingTrials, int statTrials) =>
         checked(13 + (24 * (timingTrials + statTrials + 8)));
 
+    /// <summary>Updates display state from a dispatch notification without changing its command journal.</summary>
+    /// <remarks>
+    /// Verified replay contributes progress without implying another command launch. Duplicate successful labels
+    /// are counted once. Redirected output is throttled; heartbeat notification time and completed-operation
+    /// counts remain separate. A stopped notification clears display activity, not durable outcome uncertainty.
+    /// </remarks>
     public void Observe(WorkflowDispatchEvent item)
     {
         lock (gate)

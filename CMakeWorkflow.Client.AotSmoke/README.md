@@ -1,5 +1,9 @@
 # NativeAOT SDK consumer smoke
 
+The consumer also lists finalized artifacts, reads a byte range and downloads/verifies an artifact through the public
+operation handle. This exercises the SDK's internal artifact request DTOs and source-generated serialization without
+requiring consumers to reference those wire types.
+
 This test connects to an **already running Host** and an **existing workspace**. It checks actual source-generated RPC
 serialization with JSON reflection disabled:
 

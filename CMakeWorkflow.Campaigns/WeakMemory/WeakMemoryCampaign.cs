@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using CMakeWorkflow.Core;
 
 namespace CMakeWorkflow.Campaigns.WeakMemory;
 

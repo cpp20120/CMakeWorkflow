@@ -1,9 +1,12 @@
-using CMakeWorkflow.Client;
-using CMakeWorkflow.Client.Workflows;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class SdkSmokeTests
 {
@@ -25,7 +28,7 @@ internal static class SdkSmokeTests
             hostPid = client.Host.ProcessId;
             Check(client.Host.ProtocolVersion == 1, "protocol version");
             Check(client.Host.WorkspaceDirectory == workspace, "workspace binding");
-            Check(client.Host.Capabilities.Contains("workflow/start"), "workflow capability");
+            Check(MemoryExtensions.Contains(client.Host.Capabilities, "workflow/start"), "workflow capability");
             WorkflowOperation absent = client.Operations.GetHandle(Guid.NewGuid().ToString("N"));
             Check(absent.OperationId.Length == 32, "lightweight operation reference");
         }
@@ -118,9 +121,9 @@ internal static class SdkSmokeTests
         }
 
         JsonNode document = JsonNode.Parse("""
-                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                                      """)!;
+                                           {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                            "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                           """)!;
         document["contexts"]!["w"]!["buildDirectory"] = build;
         string manifest = Path.Combine(workspace, "workflow.json");
         byte[] bytes = Encoding.UTF8.GetBytes(document.ToJsonString());

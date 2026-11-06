@@ -6,6 +6,8 @@ using CMakeWorkflow.Client.Workflows;
 
 // Creates files on the simulated remote machine, never in SDK submission code.
 // A release file makes disconnect/cancellation checks independent of build speed.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal sealed record RemoteWorkflowFixture(string Workspace, string Marker, string Release,
     StartWorkflowOptions Request)
 {
@@ -37,27 +39,27 @@ internal sealed record RemoteWorkflowFixture(string Workspace, string Marker, st
         _ = Directory.CreateDirectory(query);
         await File.WriteAllTextAsync(Path.Combine(query, "codemodel-v2"), "", CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"), """
-            cmake_minimum_required(VERSION 3.26)
-            project(remote_workflow NONE)
-            add_custom_target(effect COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/effect.cmake")
-            """, CancellationToken.None);
+                                                                             cmake_minimum_required(VERSION 3.26)
+                                                                             project(remote_workflow NONE)
+                                                                             add_custom_target(effect COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/effect.cmake")
+                                                                             """, CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(source, "effect.cmake"), """
-            file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "started\n")
-            set(attempt 0)
-            while(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/release")
-              if(attempt GREATER_EQUAL 400)
-                message(FATAL_ERROR "Test release gate timed out")
-              endif()
-              math(EXPR attempt "${attempt} + 1")
-              execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.05)
-            endwhile()
-            file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "finished\n")
-            """, CancellationToken.None);
+                                                                           file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "started\n")
+                                                                           set(attempt 0)
+                                                                           while(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/release")
+                                                                             if(attempt GREATER_EQUAL 400)
+                                                                               message(FATAL_ERROR "Test release gate timed out")
+                                                                             endif()
+                                                                             math(EXPR attempt "${attempt} + 1")
+                                                                             execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.05)
+                                                                           endwhile()
+                                                                           file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "finished\n")
+                                                                           """, CancellationToken.None);
         await ConfigureAsync(source, build, ct);
         JsonNode manifest = JsonNode.Parse("""
-            {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-             "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-            """)!;
+                                           {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                            "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                           """)!;
         manifest["contexts"]!["w"]!["buildDirectory"] = build;
         byte[] bytes = Encoding.UTF8.GetBytes(manifest.ToJsonString());
         string path = Path.Combine(workspace, "workflow.json");

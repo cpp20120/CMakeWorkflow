@@ -1,6 +1,8 @@
 using System.Diagnostics;
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Transport;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshLifecycleTests
 {
@@ -36,15 +38,15 @@ internal static class SshLifecycleTests
         string childPid = Path.Combine(files.Root, "child-pid");
         string childStat = Path.Combine(files.Root, "child-stat");
         string tree = files.Script("ssh-with-child", $"""
-            printf '%s' "$$" > {SshTestPrograms.Quote(files.PidFile)}
-            sleep 30 &
-            child=$!
-            if test -r "/proc/$child/stat"; then
-                cat "/proc/$child/stat" > {SshTestPrograms.Quote(childStat)}
-            fi
-            printf '%s' "$child" > {SshTestPrograms.Quote(childPid)}
-            wait
-            """);
+                                                      printf '%s' "$$" > {SshTestPrograms.Quote(files.PidFile)}
+                                                      sleep 30 &
+                                                      child=$!
+                                                      if test -r "/proc/$child/stat"; then
+                                                          cat "/proc/$child/stat" > {SshTestPrograms.Quote(childStat)}
+                                                      fi
+                                                      printf '%s' "$child" > {SshTestPrograms.Quote(childPid)}
+                                                      wait
+                                                      """);
         watch.Restart();
         _ = await SshTransportTests.RejectAsync<TimeoutException>(() => CMakeWorkflowClient.ConnectSshAsync(
             options with { SshExecutable = tree }));

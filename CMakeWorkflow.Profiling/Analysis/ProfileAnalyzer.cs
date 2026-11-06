@@ -1,10 +1,12 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Globalization;
 using System.Text.RegularExpressions;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Profiling.Capture;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Analysis;
 #pragma warning restore IDE0130
 
 public static class ProfileAnalyzer

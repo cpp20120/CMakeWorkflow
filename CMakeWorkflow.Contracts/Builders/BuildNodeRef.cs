@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Contracts.Builders;
 #pragma warning restore IDE0130
 
 /// <summary>A typed reference usable as the source of a run or profile node.</summary>

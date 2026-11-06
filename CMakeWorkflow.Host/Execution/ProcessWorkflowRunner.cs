@@ -1,18 +1,47 @@
 using System.Diagnostics;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.Core.Execution;
+using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Core.Processes;
-using CMakeWorkflow.Engine;
+using CMakeWorkflow.Host.Sessions;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
 // Actual non-CMake domain consumer of ExecutionScheduler, DurableByteWriter
 // and WorkflowProcessBackend. Only this adapter knows the process manifest and
 // report; the neutral scheduler never writes domain state.
+/// <summary>Adapts the neutral scheduler to process-domain reports, logs and child execution.</summary>
+/// <remarks>
+/// Caller owns durable acceptance, results reservation and one-way dispatch authorization. This runner owns the
+/// exclusive run lease, mutable report and journal for the duration of execution. It does not finalize ledger state.
+/// Checkpoints are authoritative; the event journal is a best-effort projection. No external process starts before
+/// the complete running-intent batch is durably saved and the caller confirmation callback succeeds.
+/// </remarks>
 internal static class ProcessWorkflowRunner
 {
+    /// <summary>Runs an authorized process graph, or one explicitly admitted recovery attempt.</summary>
+    /// <remarks>
+    /// Requires a validated graph and positive jobs. Saves safety checkpoints with CancellationToken.None, even when
+    /// execution is canceled; cancellation does not undo persisted intent. A failed persistence/gate prevents its batch dispatch.
+    /// Resume rechecks exact checkpoint bytes under the run lease and permanently claims before changing report state.
+    /// Only nodes validated as never admitted are reset; successful results and their original logs are retained.
+    /// Scheduler exceptions can be projected into report.Error; remaining running nodes become outcome_unknown.
+    /// Final checkpoint failure can still throw, so a returned code and ledger finalization remain separate boundaries.
+    /// </remarks>
+    /// <param name="manifest">Validated immutable process graph.</param>
+    /// <param name="snapshotSha256">Accepted snapshot hash to embed in every checkpoint.</param>
+    /// <param name="paths">Authorized workspace policy for run and working-directory paths.</param>
+    /// <param name="output">Host run directory, exclusively leased here; must exist for resume.</param>
+    /// <param name="jobs">Positive maximum concurrently admitted nodes.</param>
+    /// <param name="confirmDispatch">Caller gate binding the newly persisted running checkpoint before any process in the batch starts.</param>
+    /// <param name="resume">Whether to recover an existing, explicitly admitted run.</param>
+    /// <param name="expectedCheckpointSha256">Required exact checkpoint hash for resume; unused for a new run.</param>
+    /// <param name="claimResume">Permanent attempt claim callback required for resume; invoked under the run lease before report mutation.</param>
+    /// <param name="cancellationToken">Host execution lifetime token; not the RPC token that submitted durable work.</param>
+    /// <returns>0 for success, 1 for failure, 130 for cancellation, or 4 for unresolved outcome; persistence failures may throw.</returns>
     internal static async Task<int> RunAsync(ProcessWorkflowManifest manifest, string snapshotSha256,
         WorkspaceReadPaths paths, string output, int jobs, Func<Task> confirmDispatch, bool resume = false, string? expectedCheckpointSha256 = null,
         Func<Task>? claimResume = null, CancellationToken cancellationToken = default)
@@ -188,6 +217,19 @@ internal static class ProcessWorkflowRunner
         state.FinishedAt = result.FinishedAt;
     }
 
+    /// <summary>Executes one admitted process with new log files and a node deadline.</summary>
+    /// <remarks>
+    /// Owns log destinations until the process backend returns or throws; the backend owns child/pump cleanup.
+    /// Opening logs can occur before the pre-start cancellation check. Cancellation is projected as canceled only
+    /// when the outer execution token is canceled; other cancellation is classified as failure. Other exceptions
+    /// become failed node diagnostics. Such projection is not independent proof that orphan descendants have stopped.
+    /// </remarks>
+    /// <param name="node">Validated immutable launch definition.</param>
+    /// <param name="state">Reserved report state supplying unique log names; not mutated by this worker.</param>
+    /// <param name="paths">Workspace authorization policy.</param>
+    /// <param name="output">Run directory for create-new log destinations.</param>
+    /// <param name="stop">Scheduler stop token, linked to the per-node timeout.</param>
+    /// <param name="requestCancellation">Outer Host execution token used to classify cancellation; despite the name, durable callers do not pass an RPC token.</param>
     private static async Task<ProcessNodeReport> ExecuteNodeAsync(ProcessWorkflowNode node,
         ProcessNodeReport state, WorkspaceReadPaths paths, string output,
         CancellationToken stop, CancellationToken requestCancellation)

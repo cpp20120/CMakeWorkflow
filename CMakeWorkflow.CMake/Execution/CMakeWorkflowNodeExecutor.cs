@@ -4,13 +4,43 @@ using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
 
 namespace CMakeWorkflow.CMake.Execution;
 
 // Executes a CMake workflow node and produces domain evidence. This component
 // does not own DAG admission, WorkflowReport, durable checkpoints or dispatch gates.
+/// <summary>Executes an already admitted CMake node and returns domain evidence for runner integration.</summary>
+/// <remarks>
+/// The runner owns DAG admission, build-tree ownership, checkpoints and dispatch authorization. This adapter
+/// re-observes provenance and validates artifacts around execution; it does not independently acquire that ownership.
+/// A process can succeed while later provenance/evidence checks fail the node and block dependents. No rollback
+/// of configure/build/invoke/run effects is implied by a failed or canceled result.
+/// </remarks>
 internal static class CMakeWorkflowNodeExecutor
 {
+    /// <summary>Executes one node with linked timeout and projects failures into a detached result.</summary>
+    /// <remarks>
+    /// Requires serialized access to the physical tree session. Run/profile requires exact target/configuration,
+    /// current generation and executable hash matching the referenced successful build evidence. Input evidence
+    /// is checked before execution and again on success; optional snapshots are verified after copying.
+    /// Missing tools become needs_attention. Outer cancellation becomes canceled; timeout becomes failed.
+    /// Other caught exceptions become failed diagnostics, including post-process evidence failures; process outcome
+    /// is retained separately where available. Later session/result finalization can still throw.
+    /// </remarks>
+    /// <param name="node">Planned node and resolved context; planning alone does not replace admission checks here.</param>
+    /// <param name="prerequisite">Referenced build result for run/profile, otherwise null as appropriate.</param>
+    /// <param name="snapshotExecutable">Whether to retain executable hash/path evidence after a successful build.</param>
+    /// <param name="session">Borrowed per-tree state; caller prevents overlapping mutations.</param>
+    /// <param name="output">Owned run directory for logs, snapshots and extension artifacts.</param>
+    /// <param name="logStem">Runner-reserved log prefix.</param>
+    /// <param name="extension">Optional profile executor; owns its child/capture cleanup through task completion.</param>
+    /// <param name="toolchain">Materialized Host toolchain, or null for ambient tools.</param>
+    /// <param name="manifest">Original manifest path used to resolve relative evidence paths.</param>
+    /// <param name="artifactSources">Borrowed producer results whose declared output evidence is already available.</param>
+    /// <param name="ct">Node execution lifetime supplied by the runner, linked here to TimeoutSeconds.</param>
     internal static async Task<NodeResult> ExecuteAsync(PlannedNode node, NodeResult? prerequisite,
         bool snapshotExecutable, BuildContextSession session, string output, string logStem, IWorkflowOperationExecutor? extension, WorkflowToolchainRuntime? toolchain,
         string manifest, IReadOnlyDictionary<string, NodeResult> artifactSources, CancellationToken ct)
@@ -392,6 +422,14 @@ internal static class CMakeWorkflowNodeExecutor
         return result;
     }
 
+    /// <summary>Records configure invocation evidence around explicit native configuration and identity verification.</summary>
+    /// <remarks>
+    /// Requires a source directory and caller-owned tree session. Writes Attempted provenance before File API
+    /// query creation and process launch. Native success records Succeeded, then observed index identity is saved
+    /// and validated; exceptions can rewrite Attempted to Interrupted or Succeeded to Rejected.
+    /// Provenance writes do not use the durable runner checkpoint protocol and are not canceled by the node token.
+    /// A provenance-write failure can propagate and replace the original exception; native/tree effects are not undone.
+    /// </remarks>
     private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session,
         string output, WorkflowToolchainRuntime? toolchain, CancellationToken ct)
     {

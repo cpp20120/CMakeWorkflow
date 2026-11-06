@@ -7,6 +7,14 @@ namespace CMakeWorkflow.Core.Processes;
 
 // A neutral process lifecycle backend. Callers prepare the process and stream
 // destinations; this type only starts, drains, waits for and cleans up the child.
+/// <summary>Owns one child process lifecycle, output pumps and supervision resources.</summary>
+/// <remarks>
+/// Caller prepares ProcessStartInfo and owns destination output streams. This backend owns the started process,
+/// its redirected streams, pump tasks and platform supervision handles; it does not dispose caller destinations.
+/// Cancellation/failure triggers termination and drain before return or propagation. Cleanup uses independent
+/// waits after caller cancellation; termination failures are reported and do not prove descendant quiescence.
+/// Primary, observer and cleanup failures are retained, aggregated when necessary.
+/// </remarks>
 internal static class WorkflowProcessBackend
 {
     private const int CopyBufferSize = 81920;
@@ -16,6 +24,16 @@ internal static class WorkflowProcessBackend
 
     internal sealed record Outcome(int? ExitCode, Exception? StartError);
 
+    /// <summary>Starts, supervises and cleans up a child before publishing its outcome.</summary>
+    /// <remarks>
+    /// Output-pump and observer failures participate in supervision. Duration callbacks are invoked after safety cleanup.
+    /// A missing executable can return StartError with null ExitCode; other failures can throw after cleanup.
+    /// A successful return is not a durable checkpoint or finalization; the domain adapter persists that evidence.
+    /// </remarks>
+    /// <param name="specification">Caller-prepared launch settings and caller-owned writable output destinations.</param>
+    /// <param name="heartbeat">Optional elapsed-time observer; null disables heartbeat callbacks.</param>
+    /// <param name="durationCompleted">Elapsed execution observer invoked after cleanup when a duration was captured.</param>
+    /// <param name="ct">Execution stop token; independent of the RPC that admitted durable work.</param>
     public static async Task<Outcome> RunAsync(Specification specification, Action<TimeSpan>? heartbeat, Action<TimeSpan> durationCompleted, CancellationToken ct)
     {
         Stopwatch processTimer = Stopwatch.StartNew();

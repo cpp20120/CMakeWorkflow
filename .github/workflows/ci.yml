@@ -109,6 +109,14 @@ jobs:
       - name: Publish NativeAOT CLI and Host
         shell: pwsh
         run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:Version=$env:SDK_VERSION -p:TreatWarningsAsErrors=true
+      - name: Publish and exercise NativeAOT historical scheduling
+        shell: pwsh
+        run: |
+          dotnet publish CMakeWorkflow.Profiling.AotSmoke/CMakeWorkflow.Profiling.AotSmoke.csproj -c Release -r ${{ matrix.rid }} -o out/profiling-aot -p:TreatWarningsAsErrors=true
+          if ($LASTEXITCODE -ne 0) { throw "Profiling NativeAOT publish failed: $LASTEXITCODE" }
+          $executable = if ($IsWindows) { 'CMakeWorkflow.Profiling.AotSmoke.exe' } else { 'CMakeWorkflow.Profiling.AotSmoke' }
+          & (Join-Path out/profiling-aot $executable)
+          if ($LASTEXITCODE -ne 0) { throw "Profiling NativeAOT smoke failed: $LASTEXITCODE" }
       - name: Pack NuGet contracts and client SDK
         shell: pwsh
         run: |

@@ -77,6 +77,11 @@ Host собирает доменные сервисы вместе и предо
 `Contracts`; для связи он использует StreamJsonRpc и SSH.NET. В SDK нет зависимости от Host, CMake runner,
 History или Tooling. Корневой executable объединяет CLI, Host и Client, в том числе для команд `remote`.
 
+Внешняя .NET-граница, для которой CI собирает пакеты и проверяет отдельного NativeAOT-потребителя, — `Client` и
+`Contracts`. Остальные сборки обеспечивают внутреннюю композицию приложения; наличие `public` само по себе не делает
+их поддерживаемым API для встраивания. CLI и Host JSON-RPC имеют отдельные внешние контракты. Подробности и отдельный
+inventory реализации приведены в [справочнике внешнего .NET API](public-api.md).
+
 ## Execution engine и доменные адаптеры
 
 Общий [ExecutionScheduler](../CMakeWorkflow.Core/Execution/ExecutionScheduler.cs) работает с

@@ -1,7 +1,11 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Recipes;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

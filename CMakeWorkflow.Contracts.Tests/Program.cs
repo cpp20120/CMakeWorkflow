@@ -1,5 +1,6 @@
 using System.Text.Json;
-using CMakeWorkflow;
+using CMakeWorkflow.Contracts.Builders;
+using CMakeWorkflow.Contracts.Workflows;
 
 static void Check(bool condition, string description)
 {

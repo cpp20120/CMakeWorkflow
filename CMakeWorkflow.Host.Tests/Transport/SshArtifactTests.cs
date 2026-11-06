@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Workflows;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
 // Read-only artifact transfer through the same bridge used by the durable workflow tests.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal static class SshArtifactTests
 {
     private static void Check(bool condition, string message) => SshTransportTests.Check(condition, message);

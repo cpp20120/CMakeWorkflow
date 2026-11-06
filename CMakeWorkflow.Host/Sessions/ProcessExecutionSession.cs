@@ -1,6 +1,8 @@
 using System.Text.Json;
+using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.Workflows;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

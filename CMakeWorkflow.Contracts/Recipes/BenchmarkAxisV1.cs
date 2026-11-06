@@ -1,9 +1,17 @@
 using System.Text.Json.Serialization;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Contracts.Recipes;
 #pragma warning restore IDE0130
 
+/// <summary>One argument axis in a Cartesian benchmark matrix.</summary>
+/// <remarks>
+/// Names and flags must be unique in the recipe. Each value contributes a literal flag/value pair.
+/// The DTO itself performs no I/O or validation; recipe builders enforce these requirements.
+/// </remarks>
+/// <param name="Name">Lowercase identifier starting with a letter, followed by lowercase letters, digits or underscores.</param>
+/// <param name="Flag">Unique literal --option without whitespace or NUL.</param>
+/// <param name="Values">1..32 distinct literal values without NUL; entries must be non-null.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BenchmarkAxisV1(
     [property: JsonRequired] string Name,

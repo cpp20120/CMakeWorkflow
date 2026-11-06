@@ -1,6 +1,11 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake;
 using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Profiling.Analysis;
+using CMakeWorkflow.Profiling.Historical;
+using CMakeWorkflow.Profiling.Workflows;
 
 namespace CMakeWorkflow.Profiling;
 
@@ -46,23 +51,15 @@ public static class ProfileCommand
                 }
 
                 if (args[i] is not ("--source-dir" or "--output" or "--trials"
-                        or "--stat-trials" or "--jobs") || i + 1 >= args.Length
+                        or "--stat-trials" or "--jobs" or "--shuffle-algorithm" or "--seeds"
+                        or "--schedule-strategy" or "--shuffle-scope") || i + 1 >= args.Length
                                                         || !values.TryAdd(args[i], args[++i]))
                 {
                     throw new ArgumentException("Invalid historical profile option.");
                 }
             }
 
-            int Count(string name, int fallback) => values.TryGetValue(name, out string? text)
-                ? int.TryParse(text, out int parsed)
-                    ? parsed
-                    : throw new ArgumentException(name + " must be an integer.")
-                : fallback;
-
-            return await DagFlowHistoricalCapture.RunAsync(new DagFlowHistoricalOptions(
-                values.GetValueOrDefault("--source-dir", Directory.GetCurrentDirectory()),
-                values.GetValueOrDefault("--output") ?? throw new ArgumentException("--output is required."),
-                Count("--trials", 5), Count("--stat-trials", 3), Count("--jobs", 4), resume), ct);
+            return await DagFlowHistoricalCapture.RunAsync(HistoricalSchedule.ParseOptions(values, resume), ct);
         }
 
         if (args[0] == "analyze")
@@ -197,7 +194,7 @@ public static class ProfileCommand
             options.GetValueOrDefault("--mode", "cpu"));
         string manifest = Path.Combine(output, "profile-workflow-" + Guid.NewGuid().ToString("N") + ".json");
         await File.WriteAllTextAsync(manifest,
-            JsonSerializer.Serialize(document, WorkflowJson.Default.WorkflowDocument) + "\n", ct);
+            JsonSerializer.Serialize(document, CMake.Serialization.WorkflowJson.Default.WorkflowDocument) + "\n", ct);
         string? runDirectory = null;
         int result = await WorkflowCommand.ExecuteAsync("run", [manifest, "--results-dir", output], ct,
             new ProfileWorkflowExecutor(), directory =>

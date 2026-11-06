@@ -3,14 +3,14 @@ using System.Text.Json.Serialization;
 using CMakeWorkflow.Client.Campaigns;
 using CMakeWorkflow.Client.History;
 using CMakeWorkflow.Client.Profiling;
-using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Provisioning;
 using CMakeWorkflow.Client.Recipes;
 using CMakeWorkflow.Client.Toolchains;
 using CMakeWorkflow.Client.Workflows;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
 
-namespace CMakeWorkflow.Client;
+namespace CMakeWorkflow.Client.Protocol;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ToolchainCandidate))]

@@ -1,8 +1,12 @@
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Toolchains;
+using CMakeWorkflow.Tooling.Environment;
+using CMakeWorkflow.Tooling.Toolchains;
+using CMakeWorkflow.Tooling.Tools;
 using PolyType;
 using StreamJsonRpc;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Protocol;
 
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 public partial interface IHostRpc

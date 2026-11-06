@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using System.Text;
 using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Core;
 
 namespace CMakeWorkflow.CMake.Execution;
 

@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
 
+namespace CMakeWorkflow.Client.AotSmoke;
+
 internal static class PackageAudit
 {
     // Audit the archive and the actual consumer restore graph, not just csproj text.

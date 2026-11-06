@@ -1,12 +1,13 @@
-using System.Text.Json;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Serialization;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Commands;
 #pragma warning restore IDE0130
 
 [SuppressMessage("Maintainability", "CA1515", Justification = "Preserve the established public CLI entry points used by integrations.")]

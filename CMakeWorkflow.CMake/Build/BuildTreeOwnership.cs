@@ -54,7 +54,7 @@ public sealed class BuildTreeOwnership : IDisposable
         {
             info.Environment["CMAKE_WORKFLOW_OWNED_TREES"] = JsonSerializer.Serialize(
                 [.. inherited.Concat(owned).Distinct(WorkflowPlanner.PathComparer)],
-                WorkflowJson.Default.ListString);
+                Serialization.WorkflowJson.Default.ListString);
         }
     }
 

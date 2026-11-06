@@ -2,6 +2,11 @@ using System.Text;
 
 namespace CMakeWorkflow.Client.Transport;
 
+/// <summary>Thread-safe tail buffer retaining at most 16 Ki UTF-16 characters of transport diagnostics.</summary>
+/// <remarks>
+/// Append and Snapshot use the same lock; returned strings are detached snapshots. Truncation discards
+/// oldest characters and can split a Unicode surrogate pair. Diagnostic text is never mixed into RPC framing.
+/// </remarks>
 internal sealed class BoundedSshDiagnostics
 {
     private const int Limit = 16 * 1024;

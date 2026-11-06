@@ -1,7 +1,9 @@
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Transport;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
 // Test-only OpenSSH replacement: real shell, bridge and persistent Host, no sshd/credentials.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal sealed class SshWorkflowConnection : IDisposable
 {
     private readonly SshTestPrograms files = new();

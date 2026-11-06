@@ -3,16 +3,33 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.CMake.Toolchains;
 #pragma warning restore IDE0130
 
+/// <summary>Captures reproducibility metadata without reserving an immutable execution environment.</summary>
+/// <remarks>
+/// Fingerprints identify the fields observed here, not continuous host stability or cross-machine equivalence.
+/// Collection is synchronous and not cancelable. Optional fields may be unavailable; filesystem failures
+/// not handled by the individual probes propagate rather than producing fabricated evidence.
+/// </remarks>
 internal static class EnvironmentProvenance
 {
+    /// <summary>Hashes ordinally sorted, length-prefixed environment override pairs.</summary>
+    /// <remarks>
+    /// Depends only on the supplied overrides, not the full inherited process environment. The caller must keep
+    /// the borrowed dictionary stable during enumeration; this is identity evidence, not an execution reservation.
+    /// </remarks>
     internal static string FingerprintOverrides(IReadOnlyDictionary<string, string> values) =>
         Hash(string.Concat(values.OrderBy(x => x.Key, StringComparer.Ordinal)
             .Select(x => x.Key.Length + ":" + x.Key + x.Value.Length + ":" + x.Value)));
 
+    /// <summary>Observes host/CPU allowance metadata and attempts to obtain a persistent local Host ID.</summary>
+    /// <remarks>
+    /// Reads platform metadata and may invoke bounded sysctl probes. Host ID acquisition can create a state
+    /// directory/file outside the run directory; handled I/O/access failures there yield null. Other host metadata
+    /// reads may still fail. The fingerprint is a point-in-time observation, not an uninterrupted measurement guarantee.
+    /// </remarks>
     internal static HostEnvironment CaptureHost()
     {
         bool linux = OperatingSystem.IsLinux();
@@ -136,6 +153,12 @@ internal static class EnvironmentProvenance
         }
     }
 
+    /// <summary>Reads cache/compiler metadata into a build-environment fingerprint without configuring the tree.</summary>
+    /// <remarks>
+    /// Missing CMakeCache.txt returns null. Optional fields remain unknown when absent. Caller must coordinate
+    /// build-tree mutation if consistent evidence is required: this method acquires no lease and does not
+    /// reconstruct effective compiler flags, preset semantics or the full native dependency graph.
+    /// </remarks>
     internal static BuildEnvironment? CaptureBuild(string directory, string? configuration)
     {
         string cache = Path.Combine(directory, "CMakeCache.txt");

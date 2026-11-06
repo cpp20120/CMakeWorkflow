@@ -1,10 +1,10 @@
-using CMakeWorkflow;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Reflection;
 using System.Text.Json.Nodes;
 using CMakeWorkflow.Campaigns.FuzzCorpus;
 using CMakeWorkflow.Campaigns.WeakMemory;
+using CMakeWorkflow.Core;
 
 string root = Path.Combine(Path.GetTempPath(), "cmake-workflow-campaign-test-" + Guid.NewGuid().ToString("N"));
 try

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using CMakeWorkflow.Core.Processes;
 
+namespace CMakeWorkflow.Host.Tests.Execution;
+
 internal static class WorkflowProcessBackendTests
 {
     public static async Task RunAsync(string root)
@@ -9,7 +11,7 @@ internal static class WorkflowProcessBackendTests
         string stdoutPath = Path.Combine(outputDirectory, "stdout.bin");
         string stderrPath = Path.Combine(outputDirectory, "stderr.bin");
         ProcessStartInfo startInfo = new(Environment.ProcessPath
-            ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+                                         ?? throw new InvalidOperationException("The .NET host path is unavailable."))
         {
             UseShellExecute = false,
             WorkingDirectory = outputDirectory,
@@ -57,7 +59,7 @@ internal static class WorkflowProcessBackendTests
         await using MemoryStream missingStderr = new();
         WorkflowProcessBackend.Outcome failed = await WorkflowProcessBackend.RunAsync(
             new WorkflowProcessBackend.Specification(missing, missingStdout, missingStderr),
-null, _ => throw new UnreachableException("Failed start reported a duration."), ct: CancellationToken.None);
+            null, _ => throw new UnreachableException("Failed start reported a duration."), ct: CancellationToken.None);
         if (failed.ExitCode is not null || failed.StartError is not System.ComponentModel.Win32Exception and not IOException)
         {
             throw new UnreachableException("Neutral backend did not return the original process-start failure.");
@@ -65,7 +67,7 @@ null, _ => throw new UnreachableException("Failed start reported a duration."), 
 
         string exitedMarker = Path.Combine(outputDirectory, "quiet-child-exited");
         ProcessStartInfo quietStart = new(Environment.ProcessPath
-            ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+                                          ?? throw new InvalidOperationException("The .NET host path is unavailable."))
         {
             UseShellExecute = false,
             WorkingDirectory = outputDirectory,
@@ -87,7 +89,7 @@ null, _ => throw new UnreachableException("Failed start reported a duration."), 
         TimeSpan? quietDuration = null;
         Task<WorkflowProcessBackend.Outcome> quietExecution = Task.Run(() => WorkflowProcessBackend.RunAsync(
             new WorkflowProcessBackend.Specification(quietStart, quietStdout, quietStderr),
-null, elapsed => quietDuration = elapsed, ct: CancellationToken.None));
+            null, elapsed => quietDuration = elapsed, ct: CancellationToken.None));
         WorkflowProcessBackend.Outcome quietOutcome = await quietExecution.WaitAsync(TimeSpan.FromSeconds(10));
         if (quietOutcome.StartError is not null || quietOutcome.ExitCode != 0 || quietDuration is null
             || quietStdout.Length != 0 || quietStderr.Length != 0)

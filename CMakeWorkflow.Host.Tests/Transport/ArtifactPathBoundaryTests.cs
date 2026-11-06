@@ -1,8 +1,11 @@
 using System.Text;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Workflows;
 
 // No Host, network, or CMake needed: exercises the actual cross-platform
 // descriptor-relative artifact opener, including held-handle path replacement.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal static class ArtifactPathBoundaryTests
 {
     private static void Check(bool condition, string why)
@@ -111,9 +114,9 @@ internal static class ArtifactPathBoundaryTests
                 movedWhileHeld = true;
             }
             catch (IOException error) when (OperatingSystem.IsWindows() &&
-                                           (error.HResult == unchecked((int)0x80070005) ||
-                                            error.HResult == unchecked((int)0x80070020) ||
-                                            error.HResult == unchecked((int)0x80070021)))
+                                            (error.HResult == unchecked((int)0x80070005) ||
+                                             error.HResult == unchecked((int)0x80070020) ||
+                                             error.HResult == unchecked((int)0x80070021)))
             {
                 // Access denied / sharing or lock violation: this is a Windows
                 // filesystem constraint, not a failure of no-follow opening.

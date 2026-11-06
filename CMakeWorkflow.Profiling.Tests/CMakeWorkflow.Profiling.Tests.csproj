@@ -7,5 +7,6 @@
     </PropertyGroup>
     <ItemGroup>
         <ProjectReference Include="../CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.History/CMakeWorkflow.History.csproj"/>
     </ItemGroup>
 </Project>

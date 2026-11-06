@@ -2,14 +2,32 @@ using System.ComponentModel;
 using System.Diagnostics;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Toolchains;
 using CMakeWorkflow.Core.Processes;
 
 namespace CMakeWorkflow.CMake.Execution;
 
 // Owns all CMake-specific process preparation and result projection. The backend
 // receives a complete start specification and never discovers domain context.
+/// <summary>Prepares CMake-domain process launch settings and maps the neutral backend outcome.</summary>
+/// <remarks>
+/// Caller has already admitted the node and supplies owned run paths. This adapter propagates inherited
+/// build-tree ownership and owns stdout/stderr destination streams; the backend owns child/pump supervision.
+/// It does not persist admission, prove provenance or finalize a durable operation.
+/// </remarks>
 internal static class CMakeProcessExecution
 {
+    /// <summary>Creates run logs, launches the prepared command and waits for backend cleanup.</summary>
+    /// <remarks>
+    /// Logs are created/truncated before the pre-start cancellation check, so cancellation can leave filesystem
+    /// effects without process launch. Optional affinity wraps the command with taskset. Missing executable
+    /// start outcomes become MissingWorkflowToolException; backend/callback/cleanup errors propagate.
+    /// </remarks>
+    /// <param name="result">Mutable node launch/result evidence; process duration is recorded in seconds after backend cleanup.</param>
+    /// <param name="environment">Overrides applied to a child environment; process-global environment is unchanged.</param>
+    /// <param name="output">Run directory for reserved log paths.</param>
+    /// <param name="heartbeat">Optional elapsed-time callback; exceptions participate in backend failure handling.</param>
+    /// <param name="ct">Execution stop/deadline token; process cleanup is handled independently of canceled request waits.</param>
     public static async Task<int> RunAsync(NodeResult result,
         IReadOnlyDictionary<string, string> environment, string output, Action<TimeSpan>? heartbeat, CancellationToken ct)
     {

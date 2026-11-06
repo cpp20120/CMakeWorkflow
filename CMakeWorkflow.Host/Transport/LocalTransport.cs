@@ -2,8 +2,8 @@ using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Text;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Transport;
 #pragma warning restore IDE0130
 
 public static class LocalTransport

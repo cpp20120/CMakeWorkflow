@@ -2,8 +2,11 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
 using StreamJsonRpc;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class DurableCancellationWireTests
 {
@@ -23,7 +26,7 @@ internal static class DurableCancellationWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, fixture.Workspace), ct);
             operationId = (await client.WorkflowStartAsync(fixture.Request, ct)).OperationId;
@@ -35,7 +38,7 @@ internal static class DurableCancellationWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, fixture.Workspace), ct);
             OperationCancelResult decision = await client.OperationCancelAsync(new(operationId, 0), ct);
@@ -59,7 +62,7 @@ internal static class DurableCancellationWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, fixture.Workspace), ct);
             await WaitForAsync(async () =>
@@ -93,7 +96,7 @@ internal static class DurableCancellationWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, race.Workspace), ct);
             OperationReference accepted = await client.WorkflowStartAsync(race.Request, ct);
@@ -126,7 +129,7 @@ internal static class DurableCancellationWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, success.Workspace), ct);
             OperationReference accepted = await client.WorkflowStartAsync(success.Request, ct);
@@ -239,9 +242,9 @@ internal static class DurableCancellationWireTests
             }
 
             JsonNode document = JsonNode.Parse("""
-                                          {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                                           "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                                          """)!;
+                                               {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                                "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                               """)!;
             document["contexts"]!["w"]!["buildDirectory"] = build;
             string manifest = Path.Combine(workspace, "workflow.json");
             byte[] bytes = Encoding.UTF8.GetBytes(document.ToJsonString());

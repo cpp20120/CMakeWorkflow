@@ -20,6 +20,7 @@ then use an existing CMake build directory.
 | [Workflow manifests](workflows.md)                    | Contexts, node types, dependencies, resources and examples             |
 | [Typed recipes](recipes.md)                           | Benchmark generation, independent recipe versions and Host preparation |
 | [CLI reference](cli.md)                               | Build/publish, commands and exit/JSON contracts                        |
+| [External .NET API](../public-api.md)                 | SDK support boundary, exported types, signatures and source links     |
 | [Results and History](results-and-history.md)         | JSONL, `run.json`, SQLite, comparisons and regression detection        |
 | [Recovery](recovery.md)                               | Unknown effects, explicit reconciliation, audit and durability         |
 | [Process execution](process-execution.md)              | Process DAGs, explicit resume, recovery evidence and one-shot claims    |

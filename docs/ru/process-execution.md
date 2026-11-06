@@ -43,6 +43,21 @@ checkpoint `run.json` и тот же SQLite-протокол admission, что �
 Сохраняются operation ID и первоначальный snapshot. Изменения исходного manifest
 не подменяют принятую операцию. Продолжение сейчас использует `jobs = 1`.
 
+SDK требует явно передать recovery revision в `ExecuteResumeAsync`. Текущее значение **2** получается из сохранённых
+переходов reconciliation/admission `0 -> 1 -> 2`; это не счётчик повторов и не значение, которое SDK должен угадывать.
+После reconciliation в `needs_attention` и проверки остановки внешних процессов используйте результат admission:
+
+```csharp
+RecoverySnapshot reconciled = await operation.InspectRecoveryAsync(ct);
+RecoverySnapshot admitted = await operation.AdmitResumeAsync(
+    reconciled.Revision, confirmedQuiescent: true, ct: ct);
+RecoverySnapshot scheduled = await operation.ExecuteResumeAsync(admitted.Revision, ct);
+```
+
+`scheduled` подтверждает постановку на выполнение, а не завершение. Устаревшая revision отклоняется до dispatch.
+Прерывание RPC может произойти после постановки попытки на выполнение под управлением Host; после переподключения
+сначала проверьте прежнюю операцию.
+
 Решение SQLite `needs_attention` **не разрешает повтор running-узла**. При наличии
 `running` или `outcome_unknown` продолжение отклоняется. Исполняются только узлы
 `pending`, `blocked` или `needs_attention` без metadata предыдущего запуска, которые

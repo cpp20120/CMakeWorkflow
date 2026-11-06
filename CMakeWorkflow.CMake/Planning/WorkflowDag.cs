@@ -1,5 +1,6 @@
 namespace CMakeWorkflow.CMake.Planning;
 
+/// <summary>Validates graph selection without performing CMake inspection or execution.</summary>
 internal static class WorkflowDag
 {
     internal static void ValidateDependencies(string nodeId, IEnumerable<string> dependencies,
@@ -14,6 +15,15 @@ internal static class WorkflowDag
         }
     }
 
+    /// <summary>Validates the entire graph before returning topological order and selected prerequisite closure.</summary>
+    /// <remarks>
+    /// Caller supplies unique IDs and known dependency references. Cycles in unselected branches still fail.
+    /// An empty only list selects every node; explicit selections include all transitive prerequisites.
+    /// Ready nodes preserve declaration order, which does not guarantee parallel execution order.
+    /// </remarks>
+    /// <param name="orderedNodeIds">Stable declaration order for the complete graph.</param>
+    /// <param name="dependencies">Complete dependency map indexed by every declared ID.</param>
+    /// <param name="only">Optional selection expressed as a non-null list; unknown selected IDs fail.</param>
     internal static (List<string> OrderedIds, HashSet<string> SelectedIds) Select(
         IReadOnlyList<string> orderedNodeIds,
         IReadOnlyDictionary<string, string[]> dependencies,

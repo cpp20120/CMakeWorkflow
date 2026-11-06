@@ -2,6 +2,8 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Core;
 
 namespace CMakeWorkflow.CMake;
 
@@ -61,7 +63,7 @@ public static class WorkflowCommand
         if (json && command == "plan")
         {
             WorkflowPlanView view = WorkflowQueries.PlanView(plan);
-            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(view, WorkflowProtocolJson.Default.WorkflowPlanView));
+            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(view, Serialization.WorkflowProtocolJson.Default.WorkflowPlanView));
         }
         else
         {

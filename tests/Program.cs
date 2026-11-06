@@ -1,4 +1,7 @@
-using CMakeWorkflow.IntegrationTests;
+using CMakeWorkflow.IntegrationTests.Execution;
+using CMakeWorkflow.IntegrationTests.Protocol;
+using CMakeWorkflow.IntegrationTests.Recipes;
+using CMakeWorkflow.IntegrationTests.Support;
 
 if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || (args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow" or "--process-boundaries" or "--artifacts")))
 {

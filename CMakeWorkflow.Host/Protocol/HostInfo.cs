@@ -1,8 +1,8 @@
-using CMakeWorkflow.Tooling;
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.Tooling.Tools;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Protocol;
 #pragma warning restore IDE0130
 
 [method: SuppressMessage("Design", "CA1002", Justification = "Keep the established public collection type and source-generated JSON contract.")]

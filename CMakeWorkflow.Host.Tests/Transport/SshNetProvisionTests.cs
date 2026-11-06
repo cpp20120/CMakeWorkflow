@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Provisioning;
-using Renci.SshNet;
 using CMakeWorkflow.Client.Transport;
+using Renci.SshNet;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 /// <summary>Opt-in real sshd/SFTP Host provision and idempotent activation.</summary>
 internal static class SshNetProvisionTests
@@ -10,7 +12,7 @@ internal static class SshNetProvisionTests
     internal static async Task RunLiveAsync()
     {
         static string Env(string name) => Environment.GetEnvironmentVariable(name)
-            ?? throw new ArgumentException("Missing F2 live setting: " + name);
+                                          ?? throw new ArgumentException("Missing F2 live setting: " + name);
         string workspace = Env("CMWF_SSHNET_WORKSPACE");
         string root = workspace.TrimEnd('/') + "/f2-provision-" + Guid.NewGuid().ToString("N")[..12];
         SshNetProvisionOptions options = new(Env("CMWF_SSHNET_HOST"), Env("CMWF_SSHNET_USER"),
@@ -61,15 +63,15 @@ internal static class SshNetProvisionTests
             Check(!installed.AlreadyActive && installed.Executable == root + "/current/CMakeWorkflow",
                 "First F2 application failed to activate versioned Host.");
             await using (CMakeWorkflowClient client = await CMakeWorkflowClient.LaunchSshNetAsync(
-                new SshNetLaunchOptions(options.Host, options.Username, options.PrivateKeyPath,
-                    options.HostKeySha256, workspace)
-                {
-                    RemoteExecutable = installed.Executable,
-                    Port = options.Port,
-                    ConnectionTimeout = options.ConnectionTimeout
-                }, ct))
+                             new SshNetLaunchOptions(options.Host, options.Username, options.PrivateKeyPath,
+                                 options.HostKeySha256, workspace)
+                             {
+                                 RemoteExecutable = installed.Executable,
+                                 Port = options.Port,
+                                 ConnectionTimeout = options.ConnectionTimeout
+                             }, ct))
             {
-                Check(client.Host.Capabilities.Contains("workflow/start"), "Provisioned Host has no workflow service.");
+                Check(MemoryExtensions.Contains(client.Host.Capabilities, "workflow/start"), "Provisioned Host has no workflow service.");
                 Check((await client.Toolchains.DiscoverAsync(ct)).SchemaVersion == 1,
                     "Provisioned Host cannot perform typed RPC.");
             }

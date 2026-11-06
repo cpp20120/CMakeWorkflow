@@ -79,7 +79,7 @@ public static class WorkflowReconcileCommand
             throw new InvalidDataException("Checkpoint changed; inspect the current report before deciding again.");
         }
 
-        WorkflowReport report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
+        WorkflowReport report = JsonSerializer.Deserialize(bytes, Serialization.WorkflowJson.Default.WorkflowReport)
                      ?? throw new InvalidDataException("Invalid run report.");
         if (report.SchemaVersion != 1 || report.Status != "outcome_unknown" ||
             report.Nodes.Any(n => n.Status == "running"))
@@ -127,8 +127,8 @@ public static class WorkflowReconcileCommand
             report.Status, report.RecoveryPhase, node is null
                 ? null
                 : JsonSerializer.Deserialize(
-                    JsonSerializer.SerializeToUtf8Bytes(node, WorkflowJson.Default.NodeResult),
-                    WorkflowJson.Default.NodeResult), true);
+                    JsonSerializer.SerializeToUtf8Bytes(node, Serialization.WorkflowJson.Default.NodeResult),
+                    Serialization.WorkflowJson.Default.NodeResult), true);
 
         if (node is not null && decision == "succeeded")
         {
@@ -202,7 +202,7 @@ public static class WorkflowReconcileCommand
         await WorkflowCheckpoint.SaveAsync(report, directory, ct);
         if (json)
         {
-            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(report, WorkflowJson.Default.WorkflowReport));
+            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(report, Serialization.WorkflowJson.Default.WorkflowReport));
         }
         else
         {

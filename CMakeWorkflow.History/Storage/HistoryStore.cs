@@ -1,12 +1,13 @@
-using Microsoft.Data.Sqlite;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.History.Models;
+using Microsoft.Data.Sqlite;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.History;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.History.Storage;
 #pragma warning restore IDE0130
 
 public sealed class HistoryStore : IDisposable
@@ -175,7 +176,7 @@ public sealed class HistoryStore : IDisposable
         if (File.Exists(directory))
         {
             string file = Path.GetFileName(directory);
-            if (file is not ("run.json" or "report.json" or "campaign-completion.json")
+            if (file is not ("run.json" or "report.json" or "campaign-completion.json" or "historical-completion.json")
                 && !file.EndsWith(".results.json", StringComparison.Ordinal))
             {
                 throw new InvalidDataException($"Unsupported history input file: {directory}");
@@ -270,6 +271,12 @@ public sealed class HistoryStore : IDisposable
         return $"Imported {imported}; unchanged {unchanged}; skipped {skipped}.";
     }
 
+    /// <summary>Enumerates result roots while pruning beneath recognized reports and bulky artifact directories.</summary>
+    /// <remarks>
+    /// Traversal order is deterministic for child names. Once a directory has a supported report/capture, its
+    /// children are not separate import candidates. This enumeration does not authorize paths, prevent link
+    /// cycles or freeze files; the import caller supplies any path guard and handles parse failures before commit.
+    /// </remarks>
     private static IEnumerable<string> CandidateDirectories(string root)
     {
         Stack<string> pending = new();
@@ -281,6 +288,7 @@ public sealed class HistoryStore : IDisposable
             if (File.Exists(Path.Combine(path, "run.json"))
                 || File.Exists(Path.Combine(path, "campaign-completion.json"))
                 || File.Exists(Path.Combine(path, "report.json"))
+                || File.Exists(Path.Combine(path, "historical-completion.json"))
                 || Directory.GetFiles(path, "*.results.json", SearchOption.TopDirectoryOnly).Length > 0)
             {
                 continue;
@@ -295,6 +303,12 @@ public sealed class HistoryStore : IDisposable
         }
     }
 
+    /// <summary>Tests the supplemental artifact-count invalidation condition for an otherwise matching import.</summary>
+    /// <remarks>
+    /// Compares persisted artifact count with distinct parsed entries. It does not compare every artifact
+    /// value and must be combined with SourceHash and indexer-version checks in Import. Uses the store-owned
+    /// SQLite connection; callers serialize access to that connection.
+    /// </remarks>
     private bool ProfileMetadataChanged(ParsedRun run)
     {
         using SqliteCommand cmd = db.CreateCommand();

@@ -1,5 +1,7 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+using CMakeWorkflow.Contracts.Workflows;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Contracts.Builders;
 #pragma warning restore IDE0130
 
 /// <summary>
@@ -11,8 +13,16 @@ public sealed class WorkflowBuilder
     private readonly WorkflowDocument document = new() { SchemaVersion = 2 };
     private readonly Dictionary<string, WorkflowNode> nodes = new(StringComparer.Ordinal);
 
+    /// <summary>Creates an empty in-memory schema-v2 builder.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public static WorkflowBuilder Create() => new();
 
+    /// <summary>Adds a named context after applying the callback; requires a build directory and a unique valid name.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowBuilder Context(string name, Action<WorkflowContextBuilder> configure)
     {
         Identifier(name, "context");
@@ -33,12 +43,24 @@ public sealed class WorkflowBuilder
         return this;
     }
 
+    /// <summary>Adds a read-only inspection node for a previously declared context.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowNodeRef Inspect(string id, string context, Action<WorkflowNodeBuilder>? configure = null) =>
         Add(id, "inspect", context, null, null, configure);
 
+    /// <summary>Adds an explicit configuration node; planning requires a compatible managed context.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowNodeRef Configure(string id, string context, Action<WorkflowNodeBuilder>? configure = null) =>
         Add(id, "configure", context, null, null, configure);
 
+    /// <summary>Adds a native build node and returns a source reference for later run/profile nodes.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public BuildNodeRef BuildTarget(string id, string context, string target,
         Action<WorkflowNodeBuilder>? configure = null)
     {
@@ -47,6 +69,10 @@ public sealed class WorkflowBuilder
         return new BuildNodeRef(id);
     }
 
+    /// <summary>Adds a native target invocation without claiming an executable result.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowNodeRef Invoke(string id, string context, string target,
         Action<WorkflowNodeBuilder>? configure = null)
     {
@@ -54,14 +80,26 @@ public sealed class WorkflowBuilder
         return Add(id, "invoke", context, target, null, configure);
     }
 
+    /// <summary>Adds execution of a previously declared build node; the source contributes a DAG dependency.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowNodeRef Run(string id, BuildNodeRef from,
         Action<WorkflowNodeBuilder>? configure = null) =>
         Add(id, "run", null, null, RequireBuild(from), configure);
 
+    /// <summary>Adds profiler execution from a previously declared build node; the source contributes a dependency.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowNodeRef Profile(string id, BuildNodeRef from,
         Action<WorkflowNodeBuilder>? configure = null) =>
         Add(id, "profile", null, null, RequireBuild(from), configure);
 
+    /// <summary>Adds a CTest node with an explicit dependency on a previously declared build node.</summary>
+    /// <remarks>
+    /// Only mutates this builder. The planner validates paths, targets, kind-specific fields and execution requirements later.
+    /// </remarks>
     public WorkflowNodeRef CTest(string id, string context, BuildNodeRef afterBuild,
         Action<WorkflowNodeBuilder>? configure = null)
     {

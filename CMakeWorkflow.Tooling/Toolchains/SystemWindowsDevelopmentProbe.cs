@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using Microsoft.Win32;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Toolchains;
 #pragma warning restore IDE0130
 
 public sealed class SystemWindowsDevelopmentProbe : IWindowsDevelopmentProbe
@@ -16,8 +16,8 @@ public sealed class SystemWindowsDevelopmentProbe : IWindowsDevelopmentProbe
 
         string[] roots =
         [
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFilesX86),
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles)
         ];
         foreach (string? root in roots.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -136,19 +136,19 @@ public sealed class SystemWindowsDevelopmentProbe : IWindowsDevelopmentProbe
         }
 
         List<string> candidates = [];
-        string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string system = System.Environment.GetFolderPath(System.Environment.SpecialFolder.System);
         if (!string.IsNullOrEmpty(system))
         {
             candidates.Add(Path.Combine(system, "wpr.exe"));
         }
 
-        string kits = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        string kits = System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFilesX86);
         if (!string.IsNullOrEmpty(kits))
         {
             candidates.Add(Path.Combine(kits, "Windows Kits", "10", "Windows Performance Toolkit", "wpr.exe"));
         }
 
-        foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator,
+        foreach (string directory in (System.Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator,
                      StringSplitOptions.RemoveEmptyEntries))
         {
             candidates.Add(Path.Combine(directory, "wpr.exe"));

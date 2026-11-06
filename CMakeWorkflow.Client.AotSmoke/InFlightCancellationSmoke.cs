@@ -1,5 +1,6 @@
 using System.Text.Json;
-using CMakeWorkflow.Client;
+
+namespace CMakeWorkflow.Client.AotSmoke;
 
 internal static class InFlightCancellationSmoke
 {
@@ -41,7 +42,7 @@ internal static class InFlightCancellationSmoke
             // The client-side exception alone proves nothing about server receipt.
             // Keep this connection open until its handler confirms cancellation.
             await Console.Error.WriteLineAsync("[RPC inflight] pendingCanceled=" + pending.IsCanceled +
-                                    "; waiting for server cancellation marker");
+                                               "; waiting for server cancellation marker");
             await WaitForMarkerAsync(canceledFile + ".canceled", "request-canceled", timeout);
             await WaitForMarkerAsync(canceledFile + ".exited", "exited", timeout);
             if (File.Exists(canceledFile + ".completed"))
@@ -100,9 +101,9 @@ internal static class InFlightCancellationSmoke
         _ = Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, "inflight-plan.json");
         await File.WriteAllTextAsync(path, /*lang=json,strict*/ """
-                                           {"schemaVersion":2,"contexts":{"probe":{"buildDirectory":"unconfigured","mode":"observe"}},
-                                            "nodes":[{"id":"inspect","kind":"inspect","context":"probe"}]}
-                                           """, ct);
+                                                                {"schemaVersion":2,"contexts":{"probe":{"buildDirectory":"unconfigured","mode":"observe"}},
+                                                                 "nodes":[{"id":"inspect","kind":"inspect","context":"probe"}]}
+                                                                """, ct);
         return path;
     }
 

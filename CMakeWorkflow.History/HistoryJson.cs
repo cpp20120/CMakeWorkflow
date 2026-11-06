@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.History.Analysis;
+using CMakeWorkflow.History.Models;
 
 namespace CMakeWorkflow.History;
 

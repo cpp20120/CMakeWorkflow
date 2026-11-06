@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
 // Binary payloads are base64-encoded by the existing JSON-RPC serializer.

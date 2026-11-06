@@ -1,4 +1,6 @@
 using System.Text.Json;
+using CMakeWorkflow.Tooling.Environment;
+using CMakeWorkflow.Tooling.Tools;
 
 namespace CMakeWorkflow.Tooling;
 

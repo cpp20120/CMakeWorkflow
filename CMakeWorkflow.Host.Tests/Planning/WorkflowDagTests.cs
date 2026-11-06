@@ -3,6 +3,8 @@ using System.Text;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 
+namespace CMakeWorkflow.Host.Tests.Planning;
+
 internal static class WorkflowDagTests
 {
     private static int _caseCount;
@@ -85,9 +87,9 @@ internal static class WorkflowDagTests
         string[] fromNodes =
         [
             /*lang=json,strict*/
-                                 "{\"id\":\"run\",\"kind\":\"run\",\"from\":\"build\",\"arguments\":[]}",
+            "{\"id\":\"run\",\"kind\":\"run\",\"from\":\"build\",\"arguments\":[]}",
             /*lang=json,strict*/
-                                 "{\"id\":\"build\",\"kind\":\"build\",\"context\":\"ctx\",\"target\":\"app\"}",
+            "{\"id\":\"build\",\"kind\":\"build\",\"context\":\"ctx\",\"target\":\"app\"}",
             Inspect("independent")
         ];
         WorkflowPlan plan = await Load(Document(fromNodes), ["run"]);
@@ -100,9 +102,9 @@ internal static class WorkflowDagTests
         string[] artifactNodes =
         [
             /*lang=json,strict*/
-                                 "{\"id\":\"consumer\",\"kind\":\"inspect\",\"context\":\"ctx\",\"inputs\":[{\"from\":\"producer\",\"artifact\":\"result\"}]}",
+            "{\"id\":\"consumer\",\"kind\":\"inspect\",\"context\":\"ctx\",\"inputs\":[{\"from\":\"producer\",\"artifact\":\"result\"}]}",
             /*lang=json,strict*/
-                                 "{\"id\":\"producer\",\"kind\":\"configure\",\"context\":\"ctx\",\"outputs\":[{\"name\":\"result\",\"path\":\"result.txt\",\"root\":\"manifest\"}]}",
+            "{\"id\":\"producer\",\"kind\":\"configure\",\"context\":\"ctx\",\"outputs\":[{\"name\":\"result\",\"path\":\"result.txt\",\"root\":\"manifest\"}]}",
             Inspect("independent")
         ];
         WorkflowPlan artifactPlan = await Load(Document(artifactNodes), ["consumer"]);
@@ -148,10 +150,10 @@ internal static class WorkflowDagTests
               && view.Valid, "public plan view identity/validity");
         Equal(expectedIds, view.Nodes.Select(node => node.Id), "public plan view order");
         Check(view.Nodes.All(node => node.Kind == "inspect" && string.IsNullOrEmpty(node.Target) && node.Configuration is null
-                                      && node.BuildDirectory.EndsWith("missing-build", StringComparison.Ordinal)
-                                      && node.ObservedState == "Unknown" && node.Resources.Count == 0
-                                      && !node.Exclusive && node.Inputs.Count == 0 && node.Outputs.Count == 0
-                                      && node.Constraints is null), "public plan view node projection");
+                                     && node.BuildDirectory.EndsWith("missing-build", StringComparison.Ordinal)
+                                     && node.ObservedState == "Unknown" && node.Resources.Count == 0
+                                     && !node.Exclusive && node.Inputs.Count == 0 && node.Outputs.Count == 0
+                                     && node.Constraints is null), "public plan view node projection");
         WorkflowPlanNodeView first = view.Nodes[0];
         Check(first.Diagnostics.Select(d => d.Severity).SequenceEqual(["Observed", "Unverified", "Unverified"])
               && first.Diagnostics[0].Message == "Session mode=observe; policy=strict; generation=Unknown; provenance=Unknown."

@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using CMakeWorkflow.Core.Processes;
 
+namespace CMakeWorkflow.Host.Tests.Execution;
+
 internal static class WorkflowProcessCleanupTests
 {
     private static readonly string AssemblyPath = typeof(WorkflowProcessCleanupTests).Assembly.Location;
     private static readonly string DotNet = Environment.ProcessPath
-        ?? throw new InvalidOperationException("The .NET host path is unavailable.");
+                                            ?? throw new InvalidOperationException("The .NET host path is unavailable.");
 
     public static async Task RunAsync(string root, string scenario)
     {
@@ -360,7 +362,7 @@ internal static class WorkflowProcessCleanupTests
     }
 
     private static async Task<WorkflowProcessBackend.Outcome> Run(Fixture fixture,
-Action<TimeSpan>? heartbeat, Action<TimeSpan> duration,
+        Action<TimeSpan>? heartbeat, Action<TimeSpan> duration,
         Stream? stdoutSink = null, CancellationToken cancellation = default)
     {
         ProcessStartInfo start = new(DotNet)
@@ -401,8 +403,8 @@ Action<TimeSpan>? heartbeat, Action<TimeSpan> duration,
 
             string[] parts = File.ReadAllText(fixture.Pids).Split('|');
             return parts.Length == 2 && int.TryParse(parts[0], out int parent)
-                   && int.TryParse(parts[1], out int child)
-                   && IsRunning(parent) && IsRunning(child);
+                                     && int.TryParse(parts[1], out int child)
+                                     && IsRunning(parent) && IsRunning(child);
         }, TimeSpan.FromSeconds(20), "Process fixture failed to start its parent and descendant.");
     }
 
@@ -469,7 +471,7 @@ Action<TimeSpan>? heartbeat, Action<TimeSpan> duration,
     {
         string[] parts = File.ReadAllText(fixture.Pids).Split('|');
         return parts.Length != 2 || !int.TryParse(parts[0], out int parent)
-                               || !int.TryParse(parts[1], out int child)
+                                 || !int.TryParse(parts[1], out int child)
             ? throw new UnreachableException("Invalid process fixture PID file.")
             : ((int Parent, int Child))(parent, child);
     }
@@ -586,8 +588,8 @@ Action<TimeSpan>? heartbeat, Action<TimeSpan> duration,
         private int waited;
 
         public override bool CanWrite => Interlocked.Exchange(ref waited, 1) == 0
-                    && !allowCopyStart.Wait(TimeSpan.FromSeconds(10))
-                    ? throw new TimeoutException("Test did not release the copy setup barrier.")
-                    : base.CanWrite;
+                                         && !allowCopyStart.Wait(TimeSpan.FromSeconds(10))
+            ? throw new TimeoutException("Test did not release the copy setup barrier.")
+            : base.CanWrite;
     }
 }

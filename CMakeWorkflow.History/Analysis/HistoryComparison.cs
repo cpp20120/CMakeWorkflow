@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.History;
+using CMakeWorkflow.History.Models;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.History.Analysis;
 #pragma warning restore IDE0130
 
 public static class HistoryComparison

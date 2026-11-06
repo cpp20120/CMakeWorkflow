@@ -1,6 +1,8 @@
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Toolchains;
+using CMakeWorkflow.Tooling.Toolchains;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

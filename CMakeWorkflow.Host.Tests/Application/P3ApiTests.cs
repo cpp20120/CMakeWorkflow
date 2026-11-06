@@ -1,8 +1,10 @@
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Provisioning;
 using CMakeWorkflow.Client.Workflows;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class P3ApiTests
 {
@@ -18,10 +20,10 @@ internal static class P3ApiTests
         string digest, int nodeCount, CancellationToken ct)
     {
         await using CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct);
-        Check(sdk.Host.Capabilities.Contains("workflow/preflight") &&
-              sdk.Host.Capabilities.Contains("tooling/doctor") &&
-              sdk.Host.Capabilities.Contains("tooling/planFix") &&
-              sdk.Host.Capabilities.Contains("tooling/applyFix"), "advertised capabilities");
+        Check(MemoryExtensions.Contains(sdk.Host.Capabilities, "workflow/preflight") &&
+              MemoryExtensions.Contains(sdk.Host.Capabilities, "tooling/doctor") &&
+              MemoryExtensions.Contains(sdk.Host.Capabilities, "tooling/planFix") &&
+              MemoryExtensions.Contains(sdk.Host.Capabilities, "tooling/applyFix"), "advertised capabilities");
 
         string nonexistentOutput = Path.Combine(workspace, "p3-preflight-output");
         WorkflowPreflightResult result = await sdk.Workflows.PreflightAsync(
@@ -31,8 +33,8 @@ internal static class P3ApiTests
             "manifest snapshot and typed plan");
         Check(!Directory.Exists(nonexistentOutput), "preflight created output directory");
         Check(result.Nodes.All(n => !string.IsNullOrWhiteSpace(n.Id) &&
-              n.Dependencies is not null && n.Resources is not null &&
-              !string.IsNullOrWhiteSpace(n.BuildDirectory)),
+                                    n.Dependencies is not null && n.Resources is not null &&
+                                    !string.IsNullOrWhiteSpace(n.BuildDirectory)),
             "preflight node DTOs");
         if (result.Valid)
         {

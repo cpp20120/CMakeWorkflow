@@ -1,11 +1,15 @@
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Runtime.InteropServices;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Tooling.Environment;
+using CMakeWorkflow.Tooling.Tests;
+using CMakeWorkflow.Tooling.Toolchains;
+using CMakeWorkflow.Tooling.Tools;
+using WindowsPowerSettingsBackend = CMakeWorkflow.Tooling.Environment.WindowsPowerSettingsBackend;
 
 static void Check(bool condition, string name)
 {
@@ -139,8 +143,8 @@ try
     // Fake Windows-only capability assessment is valid on Linux too.
     string winToolReqFile = Path.Combine(root, "windows-dev-requirements.json");
     await File.WriteAllTextAsync(winToolReqFile,
-                             /*lang=json,strict*/
-                             """{"schemaVersion":1,"toolProfiles":["native"],"requireWindowsMsvc":true,"requireWindowsSdk":true,"requireWindowsWpr":true}""", CancellationToken.None);
+        /*lang=json,strict*/
+        """{"schemaVersion":1,"toolProfiles":["native"],"requireWindowsMsvc":true,"requireWindowsSdk":true,"requireWindowsWpr":true}""", CancellationToken.None);
     FakeRuntime winToolRuntime = new();
     winToolRuntime.Add("cmake", "cmake version 4.4.4");
     winToolRuntime.Add("ctest", "ctest version 4.4.4");
@@ -170,8 +174,8 @@ try
           windowsSettings[0].After == highPerformance && windowsBackend.Writes == 0, "Windows plan must be read only");
     string windowsRequirementsFile = Path.Combine(root, "windows-power-acceptance.json");
     await File.WriteAllTextAsync(windowsRequirementsFile,
-                             /*lang=json,strict*/
-                             """{"schemaVersion":1,"toolProfiles":["native"],"windowsPowerScheme":"8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"}""", CancellationToken.None);
+        /*lang=json,strict*/
+        """{"schemaVersion":1,"toolProfiles":["native"],"windowsPowerScheme":"8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"}""", CancellationToken.None);
     FakeRuntime windowsRuntime = new();
     windowsRuntime.Add("cmake", "cmake version 4.4.4");
     windowsRuntime.Add("ctest", "ctest version 4.4.4");
@@ -234,8 +238,8 @@ try
     // End-to-end environment acceptance through the injectable sysfs backend.
     string acceptancePath = Path.Combine(root, "environment-acceptance.json");
     await File.WriteAllTextAsync(acceptancePath,
-                             /*lang=json,strict*/
-                             """{"schemaVersion":1,"toolProfiles":["native"],"maxPerfEventParanoid":1,"cpuGovernor":"performance"}""", CancellationToken.None);
+        /*lang=json,strict*/
+        """{"schemaVersion":1,"toolProfiles":["native"],"maxPerfEventParanoid":1,"cpuGovernor":"performance"}""", CancellationToken.None);
     FakeRuntime acceptanceRuntime = new();
     acceptanceRuntime.Add("cmake", "cmake version 4.4.4");
     acceptanceRuntime.Add("ctest", "ctest version 4.4.4");
@@ -477,98 +481,101 @@ static byte[] Archive(string architecture)
     return bytes.ToArray();
 }
 
-internal sealed class FakeRuntime : IToolingRuntime
+namespace CMakeWorkflow.Tooling.Tests
 {
-    private readonly Dictionary<string, string> versions = new(StringComparer.Ordinal);
-    public ToolPlatform Platform { get; set; } = ToolPlatform.Linux;
-    public bool IsAdministrator => true;
-    public bool PackageWorks { get; set; }
-    public List<(string Executable, string[] Args)> Calls { get; } = [];
-    public void Add(string name, string version) => versions[name] = version;
-
-    public string? Resolve(string command, string installDirectory) =>
-        versions.ContainsKey(command) ? command : null;
-
-    public Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
-        TimeSpan timeout, CancellationToken ct)
+    internal sealed class FakeRuntime : IToolingRuntime
     {
-        Calls.Add((executable, arguments.ToArray()));
-        if (executable == "apt-get")
+        private readonly Dictionary<string, string> versions = new(StringComparer.Ordinal);
+        public ToolPlatform Platform { get; set; } = ToolPlatform.Linux;
+        public bool IsAdministrator => true;
+        public bool PackageWorks { get; set; }
+        public List<(string Executable, string[] Args)> Calls { get; } = [];
+        public void Add(string name, string version) => versions[name] = version;
+
+        public string? Resolve(string command, string installDirectory) =>
+            versions.ContainsKey(command) ? command : null;
+
+        public Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
+            TimeSpan timeout, CancellationToken ct)
         {
-            if (arguments.Contains("install") && PackageWorks)
+            Calls.Add((executable, arguments.ToArray()));
+            if (executable == "apt-get")
             {
-                Add("cmake", "cmake version 3.31.0");
-                Add("ctest", "ctest version 3.31.0");
+                if (arguments.Contains("install") && PackageWorks)
+                {
+                    Add("cmake", "cmake version 3.31.0");
+                    Add("ctest", "ctest version 3.31.0");
+                }
+
+                return Task.FromResult(new ToolCommandResult(PackageWorks ? 0 : 1, "", "package unavailable"));
             }
 
-            return Task.FromResult(new ToolCommandResult(PackageWorks ? 0 : 1, "", "package unavailable"));
+            return Task.FromResult(new ToolCommandResult(0, versions.GetValueOrDefault(executable, ""), ""));
         }
-
-        return Task.FromResult(new ToolCommandResult(0, versions.GetValueOrDefault(executable, ""), ""));
     }
-}
 
-internal sealed class FakeInstaller(FakeRuntime runtime) : ICMakeInstaller
-{
-    public int Calls { get; private set; }
-
-    public Task InstallAsync(string installDirectory, CancellationToken ct)
+    internal sealed class FakeInstaller(FakeRuntime runtime) : ICMakeInstaller
     {
-        Calls++;
-        runtime.Add("cmake", "cmake version 3.31.0");
-        runtime.Add("ctest", "ctest version 3.31.0");
-        return Task.CompletedTask;
-    }
-}
+        public int Calls { get; private set; }
 
-internal sealed class ReleaseHandler(byte[] archive, string digest, string architecture) : HttpMessageHandler
-{
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-        CancellationToken cancellationToken)
-    {
-        HttpResponseMessage response = new(HttpStatusCode.OK);
-        if (request.RequestUri!.Host == "api.github.com")
+        public Task InstallAsync(string installDirectory, CancellationToken ct)
         {
-            string json = JsonSerializer.Serialize(new
+            Calls++;
+            runtime.Add("cmake", "cmake version 3.31.0");
+            runtime.Add("ctest", "ctest version 3.31.0");
+            return Task.CompletedTask;
+        }
+    }
+
+    internal sealed class ReleaseHandler(byte[] archive, string digest, string architecture) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = new(HttpStatusCode.OK);
+            if (request.RequestUri!.Host == "api.github.com")
             {
-                tag_name = "v3.31.0",
-                assets = new[]
+                string json = JsonSerializer.Serialize(new
                 {
-                    new
+                    tag_name = "v3.31.0",
+                    assets = new[]
                     {
-                        name = $"cmake-3.31.0-linux-{architecture}.tar.gz",
-                        browser_download_url =
-                            $"https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-linux-{architecture}.tar.gz",
-                        digest = "sha256:" + digest
+                        new
+                        {
+                            name = $"cmake-3.31.0-linux-{architecture}.tar.gz",
+                            browser_download_url =
+                                $"https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-linux-{architecture}.tar.gz",
+                            digest = "sha256:" + digest
+                        }
                     }
-                }
-            });
-            response.Content = new StringContent(json);
-        }
-        else
-        {
-            response.Content = new ByteArrayContent(archive);
-        }
+                });
+                response.Content = new StringContent(json);
+            }
+            else
+            {
+                response.Content = new ByteArrayContent(archive);
+            }
 
-        return Task.FromResult(response);
+            return Task.FromResult(response);
+        }
     }
-}
 
-internal sealed class FakeHostSettings : IHostSettingsBackend
-{
-    public Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal);
-    public int Writes { get; private set; }
-    public string? Read(string path) => Values.GetValueOrDefault(path);
-    public string? FailOnWrite;
-
-    public void Write(string path, string value)
+    internal sealed class FakeHostSettings : IHostSettingsBackend
     {
-        if (path == FailOnWrite)
-        {
-            throw new IOException("Simulated sysfs write failure");
-        }
+        public Dictionary<string, string> Values { get; } = new(StringComparer.Ordinal);
+        public int Writes { get; private set; }
+        public string? Read(string path) => Values.GetValueOrDefault(path);
+        public string? FailOnWrite;
 
-        Writes++;
-        Values[path] = value;
+        public void Write(string path, string value)
+        {
+            if (path == FailOnWrite)
+            {
+                throw new IOException("Simulated sysfs write failure");
+            }
+
+            Writes++;
+            Values[path] = value;
+        }
     }
 }

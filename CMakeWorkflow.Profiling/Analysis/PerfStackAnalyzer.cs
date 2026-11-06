@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace CMakeWorkflow.Profiling;
+namespace CMakeWorkflow.Profiling.Analysis;
 
 public static partial class PerfStackAnalyzer
 {

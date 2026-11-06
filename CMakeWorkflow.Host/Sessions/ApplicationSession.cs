@@ -4,10 +4,17 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.History;
+using CMakeWorkflow.History.Analysis;
+using CMakeWorkflow.History.Models;
+using CMakeWorkflow.History.Storage;
+using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.History;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Workflows;
 using Microsoft.Data.Sqlite;
 using StreamJsonRpc;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 
 #pragma warning disable CA1001 // The session gate uses only managed async waiters, never AvailableWaitHandle; DrainAsync preserves the existing session lifecycle.
@@ -40,6 +47,11 @@ public sealed partial class DoctorSession
     private const int MeasurementLimit = 50000;
 
     // Operation lifetime belongs to Host, not to the RPC request or connection.
+    /// <summary>Authorizes workspace paths before committing durable workflow acceptance.</summary>
+    /// <remarks>
+    /// Checks initial RPC cancellation, then hands work to the Host coordinator without linking its token to this request.
+    /// Cancellation/lost reply can race with acceptance and dispatch. The caller must find the saved request ID to recover the result.
+    /// </remarks>
     public Task<OperationReference> WorkflowStartAsync(WorkflowStartRequest request,
         CancellationToken cancellationToken)
     {
@@ -65,6 +77,10 @@ public sealed partial class DoctorSession
             request with { Manifest = manifest, ResultsDirectory = output }));
     }
 
+    /// <summary>Commits durable stop intent and signals Host-owned execution separately from this RPC.</summary>
+    /// <remarks>
+    /// Cancellation of this RPC cannot revoke a committed intent. Receipt Requested=true does not prove workers stopped.
+    /// </remarks>
     public Task<OperationCancelResult> OperationCancelAsync(OperationCancelRequest request,
         CancellationToken cancellationToken)
     {
@@ -106,6 +122,11 @@ public sealed partial class DoctorSession
             return Task.FromResult(RecoveryView(store.InspectRecovery(request.OperationId)));
         }, cancellationToken);
 
+    /// <summary>Records a recovery decision under the cross-process execution lease.</summary>
+    /// <remarks>
+    /// Requires explicit operator-confirmed quiescence and no active coordinator task. A lease cannot prove orphaned descendants stopped.
+    /// Only commits the decision: does not dispatch, reset nodes or release results ownership.
+    /// </remarks>
     public Task<RecoveryInspectionView> RecoveryReconcileAsync(RecoveryReconcileRequest request,
         CancellationToken cancellationToken)
     {
@@ -150,6 +171,11 @@ public sealed partial class DoctorSession
             request.ExpectedRevision, request.Decision, request.Note)));
     }
 
+    /// <summary>Admits resume under explicit quiescence confirmation without launching workers.</summary>
+    /// <remarks>
+    /// Requires an inactive operation and matching recovery revision. Process recovery preparation validates and durably
+    /// annotates checkpoint evidence without resetting node outcomes. Cancellation/lost reply may follow committed admission.
+    /// </remarks>
     public Task<RecoveryInspectionView> WorkflowResumeAsync(WorkflowResumeRequest request,
         CancellationToken cancellationToken)
     {
@@ -210,6 +236,11 @@ public sealed partial class DoctorSession
     // Execute an already admitted resume. Unlike workflow/resume, this is a mutation
     // that can launch external processes. The one-shot SQLite attempt claim is the
     // crash boundary; RPC cancellation must never cancel a committed dispatch.
+    /// <summary>Schedules an admitted recovery attempt under the Host coordinator lifetime.</summary>
+    /// <remarks>
+    /// Requires revision 2 and prior quiescence confirmation. The request token only guards admission, not committed dispatch.
+    /// The executor permanently claims a single attempt before external launch; lost replies never authorize blind redispatch.
+    /// </remarks>
     public async Task<RecoveryInspectionView> WorkflowResumeExecuteAsync(WorkflowResumeRequest request,
         CancellationToken cancellationToken)
     {
@@ -532,6 +563,16 @@ public sealed partial class DoctorSession
         CancellationToken ct) =>
         ApplicationCallAsync(request, query, ct);
 
+    /// <summary>Runs a gated application request with linked request/connection cancellation and bounded error translation.</summary>
+    /// <remarks>
+    /// Serializes calls using this helper through the per-session gate; it is not a Host-wide or cross-process lock,
+    /// and durable admission endpoints have their own paths. Synchronous filesystem/SQLite work is moved off the RPC
+    /// dispatch loop with Task.Run. Cancellation is cooperative: synchronous work can commit before noticing it.
+    /// Known domain/I/O/storage errors become code-1001 ApplicationError refusals; cancellation and unexpected errors propagate.
+    /// </remarks>
+    /// <param name="request">Non-null request; initialization is required before the callback can run.</param>
+    /// <param name="query">Callback receiving workspace policy and the linked lifetime; may read or mutate according to its endpoint.</param>
+    /// <param name="ct">RPC request token linked with disconnect only for this application call.</param>
     private async Task<T> ApplicationCallAsync<T>(object request,
         Func<WorkspaceReadPaths, CancellationToken, Task<T>> query, CancellationToken ct)
     {

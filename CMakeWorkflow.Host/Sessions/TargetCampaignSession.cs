@@ -2,13 +2,19 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.Campaigns;
-using CMakeWorkflow.Profiling;
 using CMakeWorkflow.Campaigns.FuzzCorpus;
 using CMakeWorkflow.Campaigns.Mutation;
 using CMakeWorkflow.Campaigns.WeakMemory;
 using CMakeWorkflow.CMake.Recipes;
+using CMakeWorkflow.CMake.Serialization;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Host.Campaigns;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.Profiling.Replay;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

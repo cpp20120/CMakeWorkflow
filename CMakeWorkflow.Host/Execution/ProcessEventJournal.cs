@@ -1,12 +1,20 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.CMake.Serialization;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
 // Non-authoritative event projection. A failed journal append cannot change a
 // durable checkpoint or license a retry of any external effect.
+/// <summary>Best-effort audit projection owned by one process runner under its run lease.</summary>
+/// <remarks>
+/// Not thread-safe; Publish calls belong to the serial checkpoint path. Constructor/append I/O failures can
+/// disable the writer without changing execution authority. AutoFlush is not the durable checkpoint protocol.
+/// On resume, sequence numbers continue above parsed historical events and an interrupted final line is separated;
+/// node events can be projected again by the new journal instance and must not be interpreted as new dispatches.
+/// </remarks>
 internal sealed class ProcessEventJournal : IDisposable
 {
     private StreamWriter? writer;
@@ -57,6 +65,11 @@ internal sealed class ProcessEventJournal : IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
+    /// <summary>Appends observed state transitions without changing the report or licensing retry.</summary>
+    /// <remarks>
+    /// Caller invokes after durable checkpoint persistence. A journal failure cannot reverse that checkpoint;
+    /// use report/ledger evidence, not event completeness, to decide finalization or safe recovery.
+    /// </remarks>
     internal void Publish(ProcessOperationReport report)
     {
         if (!started)

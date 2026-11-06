@@ -2,11 +2,13 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Workflows;
 
 // Exercises the production bridge and a real CMake child process. Deliberately
 // does not inject a crash: the existing CLI recovery suite covers OS process
 // death, while host-owned crash windows still need a separate subprocess suite.
+namespace CMakeWorkflow.Host.Tests.Durability;
+
 internal static class DurableExecutionProcessTests
 {
     public static async Task RunAsync(string parent)
@@ -34,9 +36,9 @@ internal static class DurableExecutionProcessTests
         string manifest = Path.Combine(workspace, "workflow.json");
         // Absolute build directory avoids platform-specific JSON escaping.
         JsonNode document = JsonNode.Parse("""
-                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                                       "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                                      """)!;
+                                           {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                            "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                           """)!;
         document["contexts"]!["w"]!["buildDirectory"] = build;
         string json = document.ToJsonString();
         byte[] original = Encoding.UTF8.GetBytes(json);

@@ -3,11 +3,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using CMakeWorkflow.CMake.Execution;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Profiling.Historical;
 
 // Opt-in real-process acceptance test, separate from the fast profiling tests.
 // Uses the same shared dispatcher, command journal and historical progress view
 // as the DagFlow historical experiment. No perf privileges or DagFlow checkout needed.
+namespace CMakeWorkflow.Profiling.Tests;
+
 internal static class ProgressE2E
 {
     public static async Task RunAsync()

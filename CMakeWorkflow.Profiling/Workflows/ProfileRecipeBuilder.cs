@@ -1,11 +1,25 @@
 using System.Text.RegularExpressions;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Workflows;
 #pragma warning restore IDE0130
 
+/// <summary>Validates a versioned profile recipe and derives platform-specific capture dependencies.</summary>
+/// <remarks>
+/// Pure in-memory graph construction: no filesystem access, build, target execution or profiler launch.
+/// The caller owns manifest persistence, Host path authorization, planning and durable admission.
+/// At execution time, builds/configuration can mutate native trees and run/profile/test commands can have external effects.
+/// Recovery must use verified checkpoints and must not replay uncertain running nodes blindly.
+/// </remarks>
 public static class ProfileRecipeBuilder
 {
+    /// <summary>Validates recipe inputs and returns a new mutable schema-v2 workflow definition.</summary>
+    /// <remarks>
+    /// Throws for invalid inputs before returning a graph. Returning a document does not establish target existence,
+    /// profiler availability or permission to execute. The planner and runtime remain authoritative.
+    /// </remarks>
     public static WorkflowDocument Build(ProfileRecipeV1 recipe)
     {
         ArgumentNullException.ThrowIfNull(recipe);

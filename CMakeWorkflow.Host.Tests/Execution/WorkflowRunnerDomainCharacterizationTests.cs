@@ -2,10 +2,14 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using CMakeWorkflow;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.CMake.Serialization;
+
+namespace CMakeWorkflow.Host.Tests.Execution;
 
 internal static class WorkflowRunnerDomainCharacterizationTests
 {
@@ -22,10 +26,10 @@ internal static class WorkflowRunnerDomainCharacterizationTests
         _ = Directory.CreateDirectory(Path.Combine(build, ".cmake", "api", "v1", "query",
             "client-cmake-workflow"));
         await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"), """
-            cmake_minimum_required(VERSION 3.26)
-            project(WorkflowDomainFixture LANGUAGES CXX)
-            add_executable(worker main.cpp)
-            """);
+                                                                             cmake_minimum_required(VERSION 3.26)
+                                                                             project(WorkflowDomainFixture LANGUAGES CXX)
+                                                                             add_executable(worker main.cpp)
+                                                                             """);
         await File.WriteAllTextAsync(Path.Combine(source, "main.cpp"), "int main() { return 0; }\n");
         await File.WriteAllTextAsync(Path.Combine(observerSource, "CMakeLists.txt"), """
             cmake_minimum_required(VERSION 3.26)
@@ -108,19 +112,19 @@ internal static class WorkflowRunnerDomainCharacterizationTests
             await File.WriteAllTextAsync(continueConfigure, "continue");
             WorkflowOperationRequest request = profile.Request ?? throw new UnreachableException("Profile extension request was not captured.");
             Check(request.Kind == "profile" && request.NodeId == "profile"
-                  && request.Executable is not null && File.Exists(request.Executable)
-                  && request.Arguments.SequenceEqual(["alpha", "", "a;b"])
-                  && request.WorkingDirectory == source
-                  && request.Environment.TryGetValue("PROFILE_VALUE", out string? env) && env == "fixture"
-                  && request.Options.TryGetValue("capture", out string? option) && option == "stable"
-                  && request.OutputDirectory == output,
+                                            && request.Executable is not null && File.Exists(request.Executable)
+                                            && request.Arguments.SequenceEqual(["alpha", "", "a;b"])
+                                            && request.WorkingDirectory == source
+                                            && request.Environment.TryGetValue("PROFILE_VALUE", out string? env) && env == "fixture"
+                                            && request.Options.TryGetValue("capture", out string? option) && option == "stable"
+                                            && request.OutputDirectory == output,
                 "Fake profile extension received a changed or incomplete execution request.");
 
             WorkflowReport during = await WaitForProfileAndInspectAsync(Path.Combine(output, "run.json"), deadline.Token);
             NodeResult profileNode = during.Nodes.Single(node => node.Id == "profile");
             Check(profileNode.Status == "running" && profileNode.Executable is null
-                  && profileNode.ExitCode is null && profileNode.Arguments.Count == 0
-                  && profileNode.ExperimentResult == "NotRun" && profileNode.Outputs.Count == 0,
+                                                  && profileNode.ExitCode is null && profileNode.Arguments.Count == 0
+                                                  && profileNode.ExperimentResult == "NotRun" && profileNode.Outputs.Count == 0,
                 "A blocked worker mutated the scheduler-owned persisted NodeResult.");
 
             profile.Release();
@@ -163,27 +167,27 @@ internal static class WorkflowRunnerDomainCharacterizationTests
         NodeResult configure = report.Nodes[2];
         NodeResult inspect = report.Nodes[3];
         Check(build.Status == "succeeded" && build.ExitCode == 0
-              && build.BuildVerification?.Verification == "BackendSucceeded"
-              && build.Artifact is { Materialization: "VerifiedAfterBuild" },
+                                          && build.BuildVerification?.Verification == "BackendSucceeded"
+                                          && build.Artifact is { Materialization: "VerifiedAfterBuild" },
             "Build result or verified artifact projection changed.");
         Check(profile.Status == "succeeded" && profile.ExitCode == 0
-              && profile.ExperimentResult == "captured"
-              && profile.Error == "fixture capture complete"
-              && profile.Outputs.OrderBy(pair => pair.Key).SequenceEqual(new Dictionary<string, string>
-              {
-                  ["backend"] = "fixture-backend",
-                  ["eventSource"] = "synthetic-source",
-                  ["sampleCount"] = "7"
-              }.OrderBy(pair => pair.Key))
-              && profile.ExecutionConditions.GetValueOrDefault("profilerBackend") == "fixture-backend"
-              && profile.ExecutionConditions.GetValueOrDefault("profilerEventSource") == "synthetic-source"
-              && profile.Artifact is { Materialization: "VerifiedAgainstBuild" } artifact
-              && artifact.Executable == request.Executable
-              && artifact.Sha256 == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(request.Executable))),
+                                            && profile.ExperimentResult == "captured"
+                                            && profile.Error == "fixture capture complete"
+                                            && profile.Outputs.OrderBy(pair => pair.Key).SequenceEqual(new Dictionary<string, string>
+                                            {
+                                                ["backend"] = "fixture-backend",
+                                                ["eventSource"] = "synthetic-source",
+                                                ["sampleCount"] = "7"
+                                            }.OrderBy(pair => pair.Key))
+                                            && profile.ExecutionConditions.GetValueOrDefault("profilerBackend") == "fixture-backend"
+                                            && profile.ExecutionConditions.GetValueOrDefault("profilerEventSource") == "synthetic-source"
+                                            && profile.Artifact is { Materialization: "VerifiedAgainstBuild" } artifact
+                                            && artifact.Executable == request.Executable
+                                            && artifact.Sha256 == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(request.Executable))),
             "Profile operation result/evidence projection changed.");
         Check(configure.Status == "succeeded" && configure.Configure?.State == "Succeeded"
-              && inspect.Status == "succeeded" && inspect.ObservedContext is not null
-              && report.ManifestHash.Length == 64,
+                                              && inspect.Status == "succeeded" && inspect.ObservedContext is not null
+                                              && report.ManifestHash.Length == 64,
             "Concurrent independent inspect projection or within-run manifest binding changed.");
 
         JsonNode? actualProjection = JsonSerializer.SerializeToNode(new
@@ -293,10 +297,10 @@ internal static class WorkflowRunnerDomainCharacterizationTests
         WorkflowReport report = await ReadReportAsync(Path.Combine(output, "run.json"), ct);
         NodeResult node = report.Nodes.Single(result => result.Id == "ctest");
         Check(report.Status == "needs_attention" && node.Status == "needs_attention"
-              && node.ExperimentResult == "NotRun"
-              && node.Error?.Contains(missingCtest, StringComparison.Ordinal) == true
-              && report.Findings.Any(finding => finding.Code == "TOOL_EXECUTABLE_MISSING"
-                                                 && finding.NodeId == "ctest"),
+                                                 && node.ExperimentResult == "NotRun"
+                                                 && node.Error?.Contains(missingCtest, StringComparison.Ordinal) == true
+                                                 && report.Findings.Any(finding => finding.Code == "TOOL_EXECUTABLE_MISSING"
+                                                     && finding.NodeId == "ctest"),
             "Missing-tool status, error, or finding projection changed.");
     }
 

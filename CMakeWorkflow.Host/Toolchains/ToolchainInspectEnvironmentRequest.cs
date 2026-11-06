@@ -1,7 +1,7 @@
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Tooling.Toolchains;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Toolchains;
 #pragma warning restore IDE0130
 
 public sealed record ToolchainInspectEnvironmentRequest(DeveloperEnvironmentRequest Environment);

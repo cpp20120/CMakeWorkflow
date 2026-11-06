@@ -15,9 +15,11 @@ tree.
 | [Манифесты workflow](../workflows.md)                         | `contexts`, `nodes`, зависимости, ресурсы и `schemaVersion` |
 | [Типизированные рецепты](recipes.md)                          | Генерация Benchmark, версии рецептов и Host preparation     |
 | [CLI](../cli.md)                                              | Команды, ключи, коды возврата                               |
+| [Внешний .NET API](../public-api.md)                           | Граница SDK, экспортируемые типы, сигнатуры и исходники     |
 | [Результаты и History](../results-and-history.md)             | JSONL, `run.json`, SQLite, сравнения, статистика            |
 | [Recovery](../recovery.md)                                    | `outcome_unknown`, `reconcile`, аудит и durability          |
 | [Запуск процессов](process-execution.md)                      | Process DAG, явный resume, доказательства и одноразовый claim |
+| [Расписания исторических бенчмарков](historical-scheduling.md) | PRNG, seed, блоки, парность, provenance и resume |
 | [Профилирование и DagFlow](../profiling-and-campaigns.md)     | Capture, analyze, replay и кампании                         |
 | [Интеграции](../integrations.md)                              | Provisioning, target bridge, VS Code, ограничения проверок  |
 | [Local Host IPC](host-ipc.md)                                 | JSON-RPC, Doctor, Fix, NativeAOT                            |

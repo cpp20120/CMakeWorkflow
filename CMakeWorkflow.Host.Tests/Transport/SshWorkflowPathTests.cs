@@ -1,6 +1,8 @@
-using CMakeWorkflow.Client;
 using StreamJsonRpc;
-using static SshTransportTests;
+using static CMakeWorkflow.Host.Tests.Transport.SshTransportTests;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshWorkflowPathTests
 {

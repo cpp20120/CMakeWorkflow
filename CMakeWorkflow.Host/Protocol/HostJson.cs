@@ -1,13 +1,25 @@
 using System.Text.Json.Serialization;
-using CMakeWorkflow.Tooling;
-using CMakeWorkflow.History;
-using CMakeWorkflow.Profiling;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.History;
+using CMakeWorkflow.History.Analysis;
+using CMakeWorkflow.History.Models;
+using CMakeWorkflow.Host.Campaigns;
+using CMakeWorkflow.Host.History;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Host.Toolchains;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.Tooling.Environment;
+using CMakeWorkflow.Tooling.Toolchains;
+using CMakeWorkflow.Tooling.Tools;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Protocol;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     Converters =

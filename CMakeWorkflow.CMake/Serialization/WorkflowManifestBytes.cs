@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Serialization;
 

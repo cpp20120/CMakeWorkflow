@@ -1,8 +1,11 @@
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Transport;
 #pragma warning restore IDE0130
 
 /// <summary>
@@ -12,6 +15,16 @@ namespace CMakeWorkflow.Host;
 /// </summary>
 internal static class StdioHostServer
 {
+    /// <summary>Serves one private RPC channel and drains its owned coordinator on channel loss.</summary>
+    /// <remarks>
+    /// Owns the connection handler, tooling resources and private durable coordinator for this invocation.
+    /// Disconnect or caller cancellation revokes the shared private lifetime, then session/coordinator drain runs
+    /// before normal return. No persistent Host coordinator is shared, so accepted work cannot keep executing here
+    /// after normal shutdown. Drain exceptions can propagate; shutdown does not erase ledger/recovery evidence.
+    /// </remarks>
+    /// <param name="input">Binary RPC input; handler disposal closes its stream.</param>
+    /// <param name="output">Binary RPC output; diagnostic text must use a separate channel.</param>
+    /// <param name="ct">Private Host lifetime, linked to transport disconnect.</param>
     internal static async Task RunAsync(Stream input, Stream output, CancellationToken ct)
     {
         using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -24,7 +37,7 @@ internal static class StdioHostServer
             workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
             value => rpc.NotifyAsync("tooling/progress", value), lifetime.Token,
             fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);
-        rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<IHostRpc>(), session, null);
+        rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<Protocol.IHostRpc>(), session, null);
         // On channel loss, revoke the lifetime token owned by this *private*
         // coordinator; persistent Host sessions deliberately do NOT do this.
         rpc.Disconnected += (_, _) => lifetime.Cancel();

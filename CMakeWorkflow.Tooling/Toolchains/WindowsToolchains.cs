@@ -1,12 +1,13 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.Tooling.Tools;
 using Microsoft.Win32;
-using System.Diagnostics.CodeAnalysis;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Toolchains;
 #pragma warning restore IDE0130
 
 public static class WindowsToolchains
@@ -101,7 +102,7 @@ public static class WindowsToolchains
             ("compiler", "msvc", "cl.exe"),
             ("msbuild", "msbuild", "MSBuild.exe")
         ];
-        string[] pathEntries = (Environment.GetEnvironmentVariable("PATH") ?? "")
+        string[] pathEntries = (System.Environment.GetEnvironmentVariable("PATH") ?? "")
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (string? folder in pathEntries.Distinct(Paths))
         {
@@ -120,8 +121,8 @@ public static class WindowsToolchains
 
         string[] roots = [.. new[]
             {
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles),
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFilesX86)
             }
             .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(Paths)];
         foreach (string? root in roots)
@@ -463,7 +464,7 @@ public static class WindowsToolchains
             throw new FileNotFoundException("Developer prompt script disappeared.", devcmd);
         }
 
-        string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string system = System.Environment.GetFolderPath(System.Environment.SpecialFolder.System);
         if (string.IsNullOrWhiteSpace(system))
         {
             throw new InvalidOperationException("Windows system directory is unavailable.");

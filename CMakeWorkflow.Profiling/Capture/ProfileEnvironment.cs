@@ -1,5 +1,7 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+using CMakeWorkflow.Core;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Capture;
 #pragma warning restore IDE0130
 
 internal static class ProfileEnvironment

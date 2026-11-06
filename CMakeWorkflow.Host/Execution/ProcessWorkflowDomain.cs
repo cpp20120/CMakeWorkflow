@@ -1,14 +1,27 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
 // Domain-owned input validation, request identity and report interpretation.
+/// <summary>Validates process-domain input and derives immutable admission identity.</summary>
+/// <remarks>
+/// Admission identity, manifest validation and checkpoint interpretation are separate from ledger acceptance.
+/// This adapter does not own task lifetime, reserve results or authorize external dispatch.
+/// </remarks>
 internal static class ProcessWorkflowDomain
 {
+    /// <summary>Derives the process request digest without reading the manifest.</summary>
+    /// <remarks>
+    /// Caller must authorize/canonicalize Host paths first. Jobs must be 1..128 and participates in identity along
+    /// with manifest path, expected hash and results path. This only constructs input for immutable ledger acceptance.
+    /// </remarks>
+    /// <param name="request">Domain-qualified request whose paths have already passed workspace authorization.</param>
     internal static DurableImmutableRequest Admission(ExecutionStartRequest request)
     {
         if (request.Jobs is < 1 or > 128)
@@ -23,6 +36,14 @@ internal static class ProcessWorkflowDomain
             request.ResultsDirectory, digest, "process");
     }
 
+    /// <summary>Parses and validates a bounded process graph without executing its commands.</summary>
+    /// <remarks>
+    /// Accepts process/schema 1, at most 2 MiB and 1..128 uniquely named nodes. Rejects missing dependencies
+    /// and cycles. Explicit working directories must exist inside the workspace; null uses the workspace at execution.
+    /// Executable availability and OS process-start requirements are deferred to execution, so a valid plan can still fail to launch.
+    /// </remarks>
+    /// <param name="snapshot">Original accepted manifest bytes; this method does not verify their hash against the ledger.</param>
+    /// <param name="paths">Workspace policy used to authorize explicit working directories.</param>
     internal static ProcessWorkflowManifest ReadPlan(byte[] snapshot, WorkspaceReadPaths paths)
     {
         if (snapshot.Length > 2 * 1024 * 1024)
@@ -104,10 +125,21 @@ internal static class ProcessWorkflowDomain
     }
 }
 
+/// <summary>Interprets process report bytes for dispatch, recovery and finalization.</summary>
+/// <remarks>
+/// Stateless shared instance. Parsing verifies structure and state evidence; ledger callers separately bind hashes,
+/// operation identity and revisions. Operator reconciliation never grants permission to retry an uncertain running node.
+/// </remarks>
 internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvidenceCodec
 {
     internal static ProcessCheckpointEvidenceCodec Instance { get; } = new();
 
+    /// <summary>Rejects inconsistent process checkpoint identity, node states and dependency references.</summary>
+    /// <remarks>
+    /// Validates schema/domain, SHA-256 syntax, 0..1 resume count and bounded unique node IDs.
+    /// A succeeded node requires exit code 0, timestamps and log names; running requires start time and log names.
+    /// This is structural validation, not proof that referenced logs exist or that the checkpoint belongs to an operation.
+    /// </remarks>
     internal static ProcessOperationReport Parse(byte[] bytes)
     {
         ProcessOperationReport report = JsonSerializer.Deserialize(bytes, ProcessWorkflowJson.Default.ProcessOperationReport)
@@ -151,6 +183,10 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
         return report;
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Requires a running report with at least one running node. This establishes intent, not proof of process start.
+    /// </remarks>
     public OperationCheckpointEvidence ForDispatch(byte[] checkpointBytes)
     {
         ProcessOperationReport report = Parse(checkpointBytes);
@@ -160,6 +196,11 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
             : new(report.SnapshotSha256);
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Requires reconciled needs_attention evidence, no prior resume and bounded embedded prior/dispatch checkpoints.
+    /// ValidateRecovery must show unchanged node results and no prior admission evidence for nodes eligible to run.
+    /// </remarks>
     public OperationCheckpointEvidence ForResume(byte[] checkpointBytes)
     {
         ProcessOperationReport report = Parse(checkpointBytes);
@@ -179,6 +220,11 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
             Convert.ToHexString(SHA256.HashData(audit.DispatchCheckpoint)));
     }
 
+    /// <summary>Identifies state categories that may be reset after complete recovery validation.</summary>
+    /// <remarks>
+    /// Pending, blocked and needs_attention alone do not prove safe redispatch. NeverAdmitted and the bound
+    /// dispatch checkpoint must also show that the node has no execution evidence.
+    /// </remarks>
     internal static bool Eligible(ProcessNodeReport node) =>
         node.Status is "pending" or "blocked" or "needs_attention";
 
@@ -186,6 +232,15 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
         node.StartedAt is null && node.FinishedAt is null && node.ExitCode is null &&
         node.Stdout is null && node.Stderr is null;
 
+    /// <summary>Checks that recovery preserves results and only admits nodes with no previous dispatch evidence.</summary>
+    /// <remarks>
+    /// All three reports must share snapshot identity and ordered node IDs. Current node bytes must equal prior node bytes.
+    /// Running/outcome_unknown nodes are refused. Eligible nodes must lack timestamps, exit code and log names
+    /// in both current and bound reports; previously terminal bound results must remain unchanged.
+    /// </remarks>
+    /// <param name="report">Proposed recovery report; this method does not mutate it.</param>
+    /// <param name="prior">Exact pre-recovery report embedded in the recovery audit.</param>
+    /// <param name="bound">Exact dispatch checkpoint retained by the ledger.</param>
     internal static void ValidateRecovery(ProcessOperationReport report, ProcessOperationReport prior,
         ProcessOperationReport bound)
     {
@@ -219,6 +274,11 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
         }
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Requires a finish timestamp, terminal status and a matching 0/1/130 exit code. Pending, running and
+    /// outcome_unknown node states prevent finalization; succeeded reports require every node to have succeeded.
+    /// </remarks>
     public OperationCheckpointEvidence ForFinalization(byte[] checkpointBytes, int exitCode)
     {
         ProcessOperationReport report = Parse(checkpointBytes);

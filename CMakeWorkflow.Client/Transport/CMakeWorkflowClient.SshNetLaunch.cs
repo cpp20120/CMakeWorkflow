@@ -5,13 +5,15 @@ namespace CMakeWorkflow.Client;
 
 public sealed partial class CMakeWorkflowClient
 {
-    /// <summary>
-    /// Launch a private Host on one SSH.NET exec channel. The handshake is the
-    /// readiness check; no socket or daemon is required on the remote machine.
-    /// Disposing this client closes the channel and stops the private Host,
-    /// including any unfinished workflow. Use ConnectSshNetAsync for work that
-    /// must outlive the client. Uncertain starts are never retried automatically.
-    /// </summary>
+    /// <summary>Launches a private Host on a pinned-key SSH.NET exec channel.</summary>
+    /// <remarks>
+    /// The initialization handshake establishes readiness; no daemon socket is required.
+    /// The channel owns the private Host lifetime: disposal/disconnect cancels active execution and drains Host cleanup.
+    /// Durable records may require recovery afterward. No uncertain workflow request is automatically retried.
+    /// </remarks>
+    /// <param name="options">Remote Host credentials, workspace, executable/channel settings and connection deadline.</param>
+    /// <param name="ct">Cancels connection/initialization only; not a durable operation stop token after the client is returned.</param>
+    /// <returns>Initialized client; the caller owns asynchronous disposal of its transport resources.</returns>
     public static async Task<CMakeWorkflowClient> LaunchSshNetAsync(
         SshNetLaunchOptions options, CancellationToken ct = default)
     {

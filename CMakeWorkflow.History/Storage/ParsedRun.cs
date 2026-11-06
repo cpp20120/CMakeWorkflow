@@ -1,7 +1,15 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.History;
+using CMakeWorkflow.History.Models;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.History.Storage;
 #pragma warning restore IDE0130
 
+/// <summary>Detached mutable import batch for one results directory before SQLite persistence.</summary>
+/// <remarks>
+/// The parser/enrichment path owns its lists and ProfileInputs map; it is not a live view of the source
+/// files or a concurrent collection. Run identity derives from the directory, while SourceHash captures
+/// the selected report/metadata evidence. No database writes occur by constructing this object.
+/// </remarks>
 internal sealed class ParsedRun
 {
     public required HistoryRun Run { get; set; }

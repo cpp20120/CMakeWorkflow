@@ -1,5 +1,8 @@
-using CMakeWorkflow.Host;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Tooling.Tools;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class FixTests
 {

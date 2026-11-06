@@ -1,9 +1,11 @@
 using System.Text;
 using System.Text.Json;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Transport;
 
 // A deterministic fault between durable acceptance and delivery of its response.
 // Only this test peer reads frames; production continues to use the byte bridge.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal static class SshLostReplyPeer
 {
     internal static async Task RunAsync(string endpoint, string marker)

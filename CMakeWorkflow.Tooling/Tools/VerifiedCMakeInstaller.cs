@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Tools;
 #pragma warning restore IDE0130
 
 public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeInstaller
@@ -78,10 +78,10 @@ public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeIn
             throw new InvalidDataException("CMake release does not publish a SHA-256 asset digest.");
         }
 
-        string? store = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_TOOL_STORE");
+        string? store = System.Environment.GetEnvironmentVariable("CMAKEWORKFLOW_TOOL_STORE");
         string baseDirectory = store is { Length: > 0 }
             ? Path.GetFullPath(store)
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            : Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
                 ".local", "share", "CMakeWorkflow", "tooling", "cmake");
         _ = Directory.CreateDirectory(baseDirectory);
         string archive = Path.Combine(baseDirectory, $".{Guid.NewGuid():N}.tar.gz");

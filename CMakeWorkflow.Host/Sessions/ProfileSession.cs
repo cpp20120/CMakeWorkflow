@@ -1,9 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.CMake.Serialization;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Profiling.Workflows;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {

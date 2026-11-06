@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CMakeWorkflow.Core;
 
 namespace CMakeWorkflow.Campaigns.Mutation;
 

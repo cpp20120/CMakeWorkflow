@@ -1,8 +1,11 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using CMakeWorkflow;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.History;
+using CMakeWorkflow.History.Storage;
+using CMakeWorkflow.CMake.Serialization;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class HistoryRunsPageTests
 {

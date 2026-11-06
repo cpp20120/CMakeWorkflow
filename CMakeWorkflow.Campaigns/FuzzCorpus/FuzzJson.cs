@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
-using CMakeWorkflow.Campaigns.FuzzCorpus;
 
-namespace CMakeWorkflow.Campaigns;
+namespace CMakeWorkflow.Campaigns.FuzzCorpus;
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(FuzzRunReport))]

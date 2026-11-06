@@ -4,12 +4,37 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Reporting;
-using CMakeWorkflow.Engine;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Core.Execution;
 
 namespace CMakeWorkflow.CMake.Execution;
 
+/// <summary>Owns a CMake run lease, DAG scheduling and durable run checkpoints.</summary>
+/// <remarks>
+/// The Host/CLI caller owns outer operation admission and finalization; this runner owns run-file persistence
+/// and domain execution resources. Events are audit/progress evidence, not recovery authority.
+/// Interrupted running intents are quarantined as outcome_unknown rather than automatically re-executed.
+/// </remarks>
 public static class WorkflowRunner
 {
+    /// <summary>Executes a planned DAG with write-ahead persistence before external dispatch.</summary>
+    /// <remarks>
+    /// Holds the results run lease across validation, recovery, execution and final persistence.
+    /// Each batch records running intents durably before invoking the optional Host gate and any worker.
+    /// On cancellation/failure, worker cleanup precedes normal lease release; exceptions do not imply a verified terminal report.
+    /// Resume validates saved graph, manifest and build/toolchain evidence; uncertain running checkpoints cannot authorize replay.
+    /// </remarks>
+    /// <param name="plan">Validated plan and observed context; no unresolved admission errors should remain.</param>
+    /// <param name="jobs">Positive maximum concurrently admitted workflow nodes.</param>
+    /// <param name="output">Run results directory; created if needed and protected by an exclusive run lease.</param>
+    /// <param name="ct">Execution lifetime token; durable callers pass a coordinator token, never the start RPC token.</param>
+    /// <param name="extension">Optional executor for extension node kinds such as profile; null supplies no extension.</param>
+    /// <param name="eventsToStdout">Whether to also publish journal events to standard output.</param>
+    /// <param name="resume">Whether to validate and recover an existing checkpoint instead of initializing a new run.</param>
+    /// <param name="beforeExternalDispatch">Optional post-checkpoint authorization callback, awaited before workers start; null omits the outer gate.</param>
+    /// <param name="toolchains">Materialized Host toolchain runtimes; null uses an empty binding map.</param>
+    /// <returns>Runner status code: 0 succeeded, 1 failed, 130 canceled; recovery refusal/uncertainty uses other nonterminal codes.</returns>
     public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
         IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false,
         Func<string, CancellationToken, Task>? beforeExternalDispatch = null,
@@ -59,7 +84,7 @@ public static class WorkflowRunner
             }
 
             WorkflowReport saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct),
-                            WorkflowJson.Default.WorkflowReport)
+                            Serialization.WorkflowJson.Default.WorkflowReport)
                         ?? throw new InvalidDataException("Invalid resume report.");
             if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") ||
                 saved.ManifestHash != plan.ManifestHash ||

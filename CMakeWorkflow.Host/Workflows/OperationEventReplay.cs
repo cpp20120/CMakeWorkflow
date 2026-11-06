@@ -1,10 +1,13 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake.Recovery;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.CMake.Serialization;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
+/// <summary>Reads operation audit/progress journals; events never authorize recovery dispatch.</summary>
 public static class OperationEventReplay
 {
     // Events are an audit/progress feed, never a recovery checkpoint.
@@ -39,6 +42,11 @@ public static class OperationEventReplay
             : await ReadJournalAsync(journalPath, request.OperationId, request.AfterSequence, request.Limit, ct);
     }
 
+    /// <summary>Reads increasing sequences after an exclusive cursor without mutating the journal.</summary>
+    /// <remarks>
+    /// Ignores an interrupted malformed final append; rejects malformed interior entries and non-monotonic sequences.
+    /// Limit is 1..500 and the cursor is nonnegative. An empty page does not establish completion.
+    /// </remarks>
     public static async Task<OperationEventsPage> ReadJournalAsync(string journalPath, string operationId,
         long afterSequence, int limit, CancellationToken ct)
     {

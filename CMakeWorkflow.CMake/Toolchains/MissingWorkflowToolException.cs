@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.CMake.Toolchains;
 #pragma warning restore IDE0130
 
 // A missing executable is a recoverable pre-execution admission failure, not

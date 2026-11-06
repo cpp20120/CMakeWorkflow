@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.Workflows;
+
 namespace CMakeWorkflow.Client.Workflows;
 
 public sealed record PrepareTargetOptions(

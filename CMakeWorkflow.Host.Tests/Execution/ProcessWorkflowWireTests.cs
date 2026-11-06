@@ -1,10 +1,17 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using CMakeWorkflow.Host;
-using CMakeWorkflow.Client;
-using StreamJsonRpc;
 using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
+using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+using OperationArtifactChunk = CMakeWorkflow.Host.Workflows.OperationArtifactChunk;
+using OperationArtifactInfo = CMakeWorkflow.Host.Workflows.OperationArtifactInfo;
+using OperationArtifactList = CMakeWorkflow.Host.Workflows.OperationArtifactList;
+using OperationOverview = CMakeWorkflow.Host.Workflows.OperationOverview;
+
+namespace CMakeWorkflow.Host.Tests.Execution;
 
 internal static class ProcessWorkflowWireTests
 {
@@ -49,7 +56,7 @@ internal static class ProcessWorkflowWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, workspace), ct);
             OperationReference operation = await client.ExecutionStartAsync(request, ct);
@@ -67,7 +74,7 @@ internal static class ProcessWorkflowWireTests
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, workspace), ct);
             OperationReference retried = await client.ExecutionStartAsync(request, ct);
@@ -93,7 +100,7 @@ internal static class ProcessWorkflowWireTests
             OperationReference terminal = await client.ExecutionStartAsync(request, ct);
             Check(found.OperationId == operationId && terminal.OperationId == operationId &&
                   terminal.State == "succeeded", "Lost-reply recovery/terminal retry failed.");
-            CMakeWorkflow.Host.OperationOverview overview = await client.OperationOverviewAsync(new(operationId), ct);
+            OperationOverview overview = await client.OperationOverviewAsync(new(operationId), ct);
             Check(overview.IsFinalized && overview.ReportSha256 is { Length: 64 } &&
                   overview.Operation.Kind == "process" && overview.Operation.State == "succeeded" &&
                   overview.Nodes.Count == 1 && overview.Nodes[0].Id == "effect" &&
@@ -105,9 +112,9 @@ internal static class ProcessWorkflowWireTests
                 "Process report did not contain verified domain result.");
             OperationEventsPage page = await client.OperationEventsAsync(new(operationId, 0, 100), ct);
             Check(page.Events.Count > 0, "Process event replay was empty.");
-            CMakeWorkflow.Host.OperationArtifactList artifacts = await client.OperationArtifactListAsync(new(operationId), ct);
-            CMakeWorkflow.Host.OperationArtifactInfo outputLog = artifacts.Artifacts.Single(a => a.ArtifactId == "stdout:effect");
-            CMakeWorkflow.Host.OperationArtifactChunk chunk = await client.OperationArtifactReadAsync(new(operationId,
+            OperationArtifactList artifacts = await client.OperationArtifactListAsync(new(operationId), ct);
+            OperationArtifactInfo outputLog = artifacts.Artifacts.Single(a => a.ArtifactId == "stdout:effect");
+            OperationArtifactChunk chunk = await client.OperationArtifactReadAsync(new(operationId,
                 outputLog.ArtifactId, 0, 1024, outputLog.Size, outputLog.LastWriteUtcTicks), ct);
             Check(chunk.TotalSize == outputLog.Size && chunk.ArtifactId == outputLog.ArtifactId,
                 "Verified process artifact chunk unavailable.");
@@ -122,8 +129,8 @@ internal static class ProcessWorkflowWireTests
             Check(handle.OperationId == operationId, "SDK retry returned a new operation identity.");
             Check((await handle.GetSnapshotAsync(ct)).Kind == "process", "SDK lost domain kind.");
             Check((await sdk.Executions.GetReportAsync(operationId, ct)).GetProperty("status")
-                  .GetString() == "succeeded", "SDK could not retrieve verified process report.");
-            CMakeWorkflow.Client.Workflows.OperationOverview overview = await handle.GetOverviewAsync(ct);
+                .GetString() == "succeeded", "SDK could not retrieve verified process report.");
+            Client.Workflows.OperationOverview overview = await handle.GetOverviewAsync(ct);
             Check(overview.IsFinalized && overview.Nodes.Single().Id == "effect" &&
                   overview.Operation.Kind == "process", "SDK operation overview projection failed.");
             using (CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))

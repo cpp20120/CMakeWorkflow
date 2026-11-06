@@ -1,6 +1,8 @@
-using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text.Json;
 using CMakeWorkflow.History;
+using CMakeWorkflow.History.Models;
+using CMakeWorkflow.History.Storage;
 using Microsoft.Data.Sqlite;
 
 string root = Path.Combine(Path.GetTempPath(), "cmake-workflow-history-" + Guid.NewGuid().ToString("N"));
@@ -930,15 +932,16 @@ finally
 {
     Directory.Delete(root, recursive: true);
 }
+
 internal sealed partial class Program
 {
     private static readonly string[] HarnessRunRows =
-[
-    /*lang=json,strict*/
-    """{"case":"chain-w2","warmup":true,"result":"0","output":{"run_p50_us":999}}""",
-    /*lang=json,strict*/
-    """{"case":"chain-w2","warmup":false,"result":"0","manifest_sha256":"hash","output":{"run_p50_us":1}}""",
-    /*lang=json,strict*/
-    """{"case":"chain-w2","warmup":false,"result":"0","manifest_sha256":"hash","output":{"run_p50_us":2}}"""
-];
+    [
+        /*lang=json,strict*/
+        """{"case":"chain-w2","warmup":true,"result":"0","output":{"run_p50_us":999}}""",
+        /*lang=json,strict*/
+        """{"case":"chain-w2","warmup":false,"result":"0","manifest_sha256":"hash","output":{"run_p50_us":1}}""",
+        /*lang=json,strict*/
+        """{"case":"chain-w2","warmup":false,"result":"0","manifest_sha256":"hash","output":{"run_p50_us":2}}"""
+    ];
 }

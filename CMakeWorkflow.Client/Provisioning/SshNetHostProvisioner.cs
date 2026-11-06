@@ -195,7 +195,7 @@ public static class SshNetHostProvisioner
             Port = options.Port,
             ConnectionTimeout = options.ConnectionTimeout
         });
-        global::CMakeWorkflow.Client.Transport.SshCommand.RemotePath(options.InstallRoot, nameof(options.InstallRoot));
+        Transport.SshCommand.RemotePath(options.InstallRoot, nameof(options.InstallRoot));
         if (options.InstallRoot is "/" or "/tmp" || options.InstallRoot.EndsWith('/'))
         {
             throw new ArgumentException("Use a dedicated remote install directory.", nameof(options));

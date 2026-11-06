@@ -1,5 +1,8 @@
+using CMakeWorkflow.Contracts.Workflows;
+
 namespace CMakeWorkflow.CMake.Execution;
 
+/// <summary>Checks runtime execution constraints before a node can launch external work.</summary>
 internal static class WorkflowExecutionAdmission
 {
     internal static bool ValidCpuSet(string text)
@@ -33,6 +36,12 @@ internal static class WorkflowExecutionAdmission
         return true;
     }
 
+    /// <summary>Validates required CPU affinity and returns observed launch evidence.</summary>
+    /// <remarks>
+    /// No explicit CpuSet returns an empty map. CPU affinity requires Linux, a requested subset of the current
+    /// /proc/self/status allowance, and an existing taskset on PATH. It does not launch the process, verify
+    /// continuous allowance/load, or attest profiler capabilities; the extension owns profiler admission.
+    /// </remarks>
     internal static Dictionary<string, string> Require(WorkflowExecutionConstraints? constraints)
     {
         Dictionary<string, string> result = new(StringComparer.Ordinal);

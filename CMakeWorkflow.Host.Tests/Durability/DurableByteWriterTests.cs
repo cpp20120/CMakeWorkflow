@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
-using CMakeWorkflow;
+using CMakeWorkflow.Core.Persistence;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class DurableByteWriterTests
 {

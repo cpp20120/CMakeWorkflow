@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Tools;
 #pragma warning restore IDE0130
 
 public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToolingRuntime
@@ -22,7 +22,7 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
         string[] suffixes = Platform == ToolPlatform.Windows
             ? ["", ".exe", ".cmd", ".bat"]
             : [""];
-        IEnumerable<string> directories = new[] { installDirectory }.Concat((Environment.GetEnvironmentVariable("PATH") ?? "")
+        IEnumerable<string> directories = new[] { installDirectory }.Concat((System.Environment.GetEnvironmentVariable("PATH") ?? "")
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
         foreach (string? directory in directories)
         {

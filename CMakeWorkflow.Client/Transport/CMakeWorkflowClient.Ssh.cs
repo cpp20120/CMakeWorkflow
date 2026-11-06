@@ -7,8 +7,14 @@ namespace CMakeWorkflow.Client;
 
 public sealed partial class CMakeWorkflowClient
 {
-    /// <summary>Connects through SSH to a persistent Linux Host. Disposal closes SSH, not accepted operations.</summary>
-    /// <remarks>Does not retry connection or execution requests. Remote paths are never resolved locally.</remarks>
+    /// <summary>Connects through OpenSSH to a persistent Host on the remote machine.</summary>
+    /// <remarks>
+    /// Owns the SSH process/channel, not the persistent Host or accepted operations. Disposal closes SSH only.
+    /// No automatic reconnect or request retry occurs. Remote paths are sent unchanged; initialization must match the workspace.
+    /// </remarks>
+    /// <param name="options">Remote Host credentials, workspace, executable/channel settings and connection deadline.</param>
+    /// <param name="ct">Cancels connection/initialization only; not a durable operation stop token after the client is returned.</param>
+    /// <returns>Initialized client; the caller owns asynchronous disposal of its transport resources.</returns>
     public static async Task<CMakeWorkflowClient> ConnectSshAsync(SshHostOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);

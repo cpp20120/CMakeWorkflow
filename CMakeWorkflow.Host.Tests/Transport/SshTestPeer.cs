@@ -1,9 +1,14 @@
-using CMakeWorkflow.Host;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
 // Test process using the real generated Host protocol over redirected stdio.
 // It tests SSH client plumbing without requiring sockets, sshd or credentials.
+namespace CMakeWorkflow.Host.Tests.Transport;
+
 internal static class SshTestPeer
 {
     internal static async Task RunAsync(string[] args)
@@ -28,8 +33,8 @@ internal static class SshTestPeer
         DoctorSession session = new(
             workspace => new ToolingService(new SystemToolingRuntime(workspace), new VerifiedCMakeInstaller(downloads)),
             _ => Task.CompletedTask, stop.Token, fixes, _ => Task.CompletedTask, durableExecutions: executions);
-        rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<IHostRpc>(), session, null);
-        using CancellationTokenRegistration canceled = stop.Token.Register(rpc.Dispose);
+        rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<Protocol.IHostRpc>(), session, null);
+        await using CancellationTokenRegistration canceled = stop.Token.Register(rpc.Dispose);
         rpc.StartListening();
         try { await rpc.Completion; }
         finally

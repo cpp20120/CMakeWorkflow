@@ -21,6 +21,7 @@
     <Project Path="CMakeWorkflow.Host/CMakeWorkflow.Host.csproj"/>
     <Project Path="CMakeWorkflow.Host.Tests/CMakeWorkflow.Host.Tests.csproj"/>
     <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Profiling.AotSmoke/CMakeWorkflow.Profiling.AotSmoke.csproj"/>
     <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj"/>
     <Project Path="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj"/>
     <Project Path="CMakeWorkflow.Tooling.Tests/CMakeWorkflow.Tooling.Tests.csproj"/>

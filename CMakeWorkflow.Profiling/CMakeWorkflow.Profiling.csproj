@@ -16,7 +16,10 @@
         <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
             <_Parameter1>CMakeWorkflow.Profiling.Tests</_Parameter1>
         </AssemblyAttribute>
+        <InternalsVisibleTo Include="CMakeWorkflow.Profiling.AotSmoke"/>
         <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
+        <PackageReference Include="NRandom" Version="[2.0.2]"/>
+        <PackageReference Include="Redzen" Version="[16.0.0]"/>
     </ItemGroup>
 </Project>

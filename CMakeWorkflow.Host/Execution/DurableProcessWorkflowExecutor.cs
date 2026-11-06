@@ -1,13 +1,26 @@
 using System.Security.Cryptography;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
 // The Host holds the same permanent authorization and execution lease as the
 // CMake runner. Resume is explicit and guarded by the existing one-shot claim.
+/// <summary>Host-owned process-domain execution across immutable acceptance and checkpoint evidence.</summary>
+/// <remarks>
+/// Holds a cross-process operation lease across validation, runner execution and finalization.
+/// The runner separately owns its run lease and child cleanup. Only verified exit codes 0, 1 or 130 finalize.
+/// Exceptions preserve uncertainty; lease disposal neither rolls back external effects nor releases durable results ownership.
+/// </remarks>
 internal static class DurableProcessWorkflowExecutor
 {
+    /// <summary>Runs an explicitly admitted process recovery after a permanent one-shot claim.</summary>
+    /// <remarks>
+    /// Validates checkpoint hash, original graph, recovery note and source binding before runner mutation.
+    /// The runner rechecks exact bytes and claims under the run lease; interrupted attempts cannot be automatically reclaimed.
+    /// </remarks>
     internal static async Task<int> ExecuteResumedAsync(string workspace, string operationId,
         CancellationToken cancellationToken)
     {
@@ -71,6 +84,11 @@ internal static class DurableProcessWorkflowExecutor
         return code;
     }
 
+    /// <summary>Validates accepted process input, reserves results and authorizes one initial dispatch.</summary>
+    /// <remarks>
+    /// Uses the original immutable snapshot. The runner binds its durable running checkpoint before launching workers.
+    /// The supplied token belongs to Host execution, not the RPC; authorization prevents implicit replay after a crash.
+    /// </remarks>
     internal static async Task<int> ExecuteAcceptedAsync(string workspace, string operationId,
         DurableImmutableRequest request, int jobs, CancellationToken cancellationToken)
     {

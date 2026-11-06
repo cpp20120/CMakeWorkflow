@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Workflows;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class OperationListTests
 {

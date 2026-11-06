@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Recipes;
 

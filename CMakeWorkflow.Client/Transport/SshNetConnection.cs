@@ -5,11 +5,13 @@ using SshNetCommand = Renci.SshNet.SshCommand;
 
 namespace CMakeWorkflow.Client.Transport;
 
-/// <summary>
-/// SSH exec channel, without PTY: raw binary stdin/stdout for JSON-RPC, stderr
-/// exclusively for bounded diagnostics. With ephemeral mode the channel also
-/// bounds the private remote Host lifetime.
-/// </summary>
+/// <summary>Owns an SSH.NET client, key and binary exec channel for one RPC connection.</summary>
+/// <remarks>
+/// No PTY or stdout text buffering is used; stderr is drained separately into bounded diagnostics.
+/// Callers borrow Input/Output until disposal and serialize disposal; the disposed flag is not a concurrency lock.
+/// Exec starts independently of the connect token. Channel lifetime belongs to this object; persistent bridge
+/// shutdown leaves Host operations alive, while private stdio Host shutdown revokes its coordinator lifetime.
+/// </remarks>
 internal sealed class SshNetConnection : IRemoteSshConnection
 {
     private readonly SshClient client;
@@ -40,6 +42,13 @@ internal sealed class SshNetConnection : IRemoteSshConnection
     public string Diagnostics => diagnostics.Snapshot();
     public int? ExitCode => execution.IsCompleted ? command.ExitStatus : null;
 
+    /// <summary>Validates SSH settings and decodes a canonical SHA-256 host-key pin without opening resources.</summary>
+    /// <remarks>
+    /// Rejects invalid pin/path/port/deadline settings before reading a private key or opening a socket.
+    /// Remote Linux paths are validated as remote strings and never resolved on the client filesystem.
+    /// </remarks>
+    /// <param name="options">Persistent bridge settings.</param>
+    /// <returns>New 32-byte expected host-key digest.</returns>
     internal static byte[] Validate(SshNetHostOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -49,6 +58,13 @@ internal sealed class SshNetConnection : IRemoteSshConnection
             options.Port, options.ConnectionTimeout);
     }
 
+    /// <summary>Validates SSH settings and decodes a canonical SHA-256 host-key pin without opening resources.</summary>
+    /// <remarks>
+    /// Rejects invalid pin/path/port/deadline settings before reading a private key or opening a socket.
+    /// Remote Linux paths are validated as remote strings and never resolved on the client filesystem.
+    /// </remarks>
+    /// <param name="options">Private stdio Host settings.</param>
+    /// <returns>New 32-byte expected host-key digest.</returns>
     internal static byte[] Validate(SshNetLaunchOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -111,6 +127,11 @@ internal sealed class SshNetConnection : IRemoteSshConnection
             : expected;
     }
 
+    /// <summary>Opens one pinned-key channel running a bridge to an existing persistent Host.</summary>
+    /// <remarks>
+    /// Does not launch the daemon or initialize RPC. Returned transport owns SSH resources; it does not own
+    /// remote accepted work. The failure path cleans up pre-transfer allocations; cleanup errors can propagate. No retry occurs.
+    /// </remarks>
     internal static Task<SshNetConnection> ConnectAsync(SshNetHostOptions options, CancellationToken ct)
     {
         byte[] expected = Validate(options);
@@ -119,6 +140,11 @@ internal sealed class SshNetConnection : IRemoteSshConnection
             SshCommand.BridgeCommand(options.RemoteExecutable, options.Endpoint), ct);
     }
 
+    /// <summary>Opens one pinned-key channel running a private stdio Host.</summary>
+    /// <remarks>
+    /// Channel close ends the private Host lifetime. This only creates transport; the caller performs RPC
+    /// initialization/readiness and owns teardown on handshake failure. No automatic reconnect or operation replay occurs.
+    /// </remarks>
     internal static Task<SshNetConnection> LaunchAsync(SshNetLaunchOptions options, CancellationToken ct)
     {
         byte[] expected = Validate(options);
@@ -127,6 +153,12 @@ internal sealed class SshNetConnection : IRemoteSshConnection
             SshCommand.StdioHostCommand(options.RemoteExecutable), ct);
     }
 
+    /// <summary>Authenticates against the supplied key pin and transfers an unbuffered exec channel to its owner.</summary>
+    /// <remarks>
+    /// Uses only the supplied private key and pin, not ssh-agent, ssh config or known_hosts. The connect token
+    /// is checked during connection and before exec; execution itself uses CancellationToken.None and must be
+    /// closed by transport disposal. Construction failure disposes stdin, command, client and key in sequence; a cleanup exception can interrupt later disposal.
+    /// </remarks>
     private static async Task<SshNetConnection> ConnectCommandAsync(string host, int port, string username,
         string privateKeyPath, TimeSpan connectionTimeout, byte[] expected, string remoteCommand,
         CancellationToken ct)
@@ -203,6 +235,13 @@ internal sealed class SshNetConnection : IRemoteSshConnection
         }
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Sequentially repeatable; concurrent calls are not synchronized. Closes stdin/client/command/key rather
+    /// than sending durable cancellation or awaiting workflow completion. Waits at most two seconds for stderr
+    /// after synchronous teardown; this is not a deadline covering every disposal call or remote Host cleanup.
+    /// An early exec failure is observed by its continuation; disposal does not guarantee a clean remote exit.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (disposed)

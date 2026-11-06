@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
 // A read-only observation of the exact manifest bytes supplied to planning.

@@ -1,10 +1,14 @@
-using CMakeWorkflow;
-using CMakeWorkflow.Profiling;
-using CMakeWorkflow.Host;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Serialization;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Profiling.Workflows;
+using CMakeWorkflow.Host.Protocol;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class TypedRecipeTests
 {

@@ -1,13 +1,22 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Sessions;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
 /// <summary>Read-only domain projection. Never interprets an unfinalized run.json as evidence.</summary>
 internal static class OperationOverviewReader
 {
+    /// <summary>Projects operation state without presenting unfinalized node reports as verified results.</summary>
+    /// <remarks>
+    /// Before finalization, returns no report-derived node/environment/timing evidence even if run.json exists.
+    /// After finalization, delegates exact-byte verification to the domain reader; process dependencies come from
+    /// the immutable accepted graph, including legacy reports without saved edges. No live execution lock is acquired.
+    /// </remarks>
     internal static async Task<OperationOverview> ReadAsync(
         WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {

@@ -1,9 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Tooling.Toolchains;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Toolchains;
 #pragma warning restore IDE0130
 
 // Opt-in runtime resolver. Discovery is authoritative for candidate IDs; the

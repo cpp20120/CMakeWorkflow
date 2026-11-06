@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace CMakeWorkflow.Tooling;
+namespace CMakeWorkflow.Tooling.Environment;
 
 public sealed partial class WindowsPowerSettingsBackend : IHostSettingsBackend
 {

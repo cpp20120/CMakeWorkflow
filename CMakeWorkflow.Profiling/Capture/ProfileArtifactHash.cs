@@ -1,8 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.Core;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Capture;
 #pragma warning restore IDE0130
 
 public static class ProfileArtifactHash

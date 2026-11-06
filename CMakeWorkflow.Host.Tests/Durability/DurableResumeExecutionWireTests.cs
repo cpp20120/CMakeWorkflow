@@ -3,12 +3,17 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using CMakeWorkflow;
+using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
 using StreamJsonRpc;
+using CMakeWorkflow.CMake.Serialization;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class DurableResumeExecutionWireTests
 {
@@ -18,6 +23,20 @@ internal static class DurableResumeExecutionWireTests
         {
             throw new UnreachableException(message);
         }
+    }
+
+    private static async Task RejectResumeRevisionAsync(WorkflowOperation operation, long revision, CancellationToken ct)
+    {
+        try
+        {
+            _ = await operation.ExecuteResumeAsync(revision, ct);
+        }
+        catch (RemoteInvocationException)
+        {
+            return;
+        }
+
+        throw new UnreachableException("SDK resume accepted a stale recovery revision.");
     }
 
     public static async Task RunAsync(string endpoint, string parent, CancellationToken ct)
@@ -61,10 +80,10 @@ internal static class DurableResumeExecutionWireTests
         }
 
         JsonNode doc = JsonNode.Parse("""
-                                 {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                                  "nodes":[{"id":"a","kind":"invoke","context":"w","target":"a"},
-                                           {"id":"b","kind":"invoke","context":"w","target":"b","dependsOn":["a"]}]}
-                                 """)!;
+                                      {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                       "nodes":[{"id":"a","kind":"invoke","context":"w","target":"a"},
+                                                {"id":"b","kind":"invoke","context":"w","target":"b","dependsOn":["a"]}]}
+                                      """)!;
         doc["contexts"]!["w"]!["buildDirectory"] = build;
         string manifest = Path.Combine(root, "workflow.json");
         byte[] content = Encoding.UTF8.GetBytes(doc.ToJsonString());
@@ -123,23 +142,31 @@ internal static class DurableResumeExecutionWireTests
                 "Reconcile failed");
         }
 
-        using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
-        using (JsonRpc rpc = HostConnection.Create(wire))
+        await using (CMakeWorkflow.Client.CMakeWorkflowClient sdk =
+                     await CMakeWorkflow.Client.CMakeWorkflowClient.ConnectAsync(new ClientOptions(endpoint, root), ct))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
-            rpc.StartListening();
-            _ = await client.InitializeAsync(new(1, root), ct);
-            Check((await client.WorkflowResumeAsync(new(operationId, 1, true), ct)).Revision == 2,
-                "Resume CAS admission failed");
-            Check((await client.WorkflowResumeExecuteAsync(new(operationId, 2, true), ct)).Revision == 2,
-                "Resume execution RPC rejected admitted operation");
-            // Retry over the same connection while running must not re-dispatch.
+            WorkflowOperation operation = sdk.Operations.GetHandle(operationId);
+            RecoverySnapshot reconciled = await operation.InspectRecoveryAsync(ct);
+            Check(reconciled.Revision == 1, "SDK did not observe reconciliation revision");
+            await RejectResumeRevisionAsync(operation, reconciled.Revision, ct);
+            Check((await operation.InspectRecoveryAsync(ct)).Revision == reconciled.Revision &&
+                  (await File.ReadAllLinesAsync(marker, ct)).SequenceEqual(["a"]),
+                "Rejected SDK resume mutated admission or dispatched B");
+
+            RecoverySnapshot admitted = await operation.AdmitResumeAsync(reconciled.Revision, true, ct);
+            Check(admitted.Revision == 2, "SDK resume CAS admission failed");
+            await RejectResumeRevisionAsync(operation, reconciled.Revision, ct);
+            Check((await operation.InspectRecoveryAsync(ct)).Revision == admitted.Revision &&
+                  (await File.ReadAllLinesAsync(marker, ct)).SequenceEqual(["a"]),
+                "SDK substituted an admitted revision for the stale explicit revision");
+            Check((await operation.ExecuteResumeAsync(admitted.Revision, ct)).Revision == admitted.Revision,
+                "SDK resume execution rejected the returned admission revision");
         }
 
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
         {
-            IHostRpc client = rpc.Attach<IHostRpc>();
+            Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, root), ct);
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -174,6 +201,6 @@ internal static class DurableResumeExecutionWireTests
         }
 
         Console.WriteLine(
-            "Workflow/resumeExecute E2E passed: partial DAG, reconnect, single attempt, completed-node skip and terminal finalization.");
+            "Workflow/resumeExecute SDK E2E passed: explicit revision, stale refusal without dispatch, reconnect, single attempt and completed-node skip.");
     }
 }

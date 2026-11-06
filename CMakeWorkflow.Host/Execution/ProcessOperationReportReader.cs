@@ -1,11 +1,15 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Execution;
 #pragma warning restore IDE0130
 
 // A typed non-CMake report view. Legacy operations/report stays CMake-specific.
+/// <summary>Reads process-domain terminal evidence only after ledger finalization.</summary>
 internal static class ProcessOperationReportReader
 {
     internal static async Task<JsonElement> ReadAsync(WorkspaceReadPaths paths, string operationId,
@@ -16,6 +20,12 @@ internal static class ProcessOperationReportReader
             ProcessWorkflowJson.Default.ProcessOperationReport);
     }
 
+    /// <summary>Verifies exact process report bytes, exit/state consistency and accepted snapshot identity.</summary>
+    /// <remarks>
+    /// Requires a finalized process operation. Uses a secure artifact handle and a 16 MiB report limit, then
+    /// verifies SHA-256 before interpreting terminal evidence. Does not read mutable checkpoints as results.
+    /// Cancellation interrupts reading only; all ledger connections and file handles are owned within this call.
+    /// </remarks>
     internal static async Task<(ProcessOperationReport Report, string Directory, string Revision)>
         ReadVerifiedAsync(WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {

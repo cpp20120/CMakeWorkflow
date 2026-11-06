@@ -1,11 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using CMakeWorkflow.Client;
-using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Client.Transport;
+using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
-namespace CMakeWorkflow;
+namespace CMakeWorkflow.Commands;
 
 /// <summary>
 /// A thin, one-connection CLI over the durable SDK. In particular, a lost

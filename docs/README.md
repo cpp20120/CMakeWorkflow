@@ -7,6 +7,7 @@ Choose a language / Выберите язык:
 | **[English documentation →](en/README.md)**       | **[Русская документация →](ru/README.md)**        |
 | [Get started in 5 minutes](en/getting-started.md) | [Начало работы за 5 минут](ru/getting-started.md) |
 | [CLI reference](en/cli.md)                        | [Справочник CLI](cli.md)                          |
+| [External .NET API](public-api.md)               | [Внешний .NET API](public-api.md)                 |
 | [Workflows and manifests](en/workflows.md)        | [Workflow и манифесты](workflows.md)              |
 | [Typed recipes](en/recipes.md)                    | [Типизированные рецепты](ru/recipes.md)           |
 | [Recovery and safe resumption](en/recovery.md)    | [Восстановление и продолжение](recovery.md)       |

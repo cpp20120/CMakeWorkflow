@@ -3,6 +3,11 @@ using System.Diagnostics;
 namespace CMakeWorkflow.Client.Transport;
 
 // Owns only the local SSH transport process, never the remote persistent Host.
+/// <summary>Owns the local OpenSSH process and redirected byte streams for a persistent Host bridge.</summary>
+/// <remarks>
+/// The remote persistent Host and its operations are not owned here. A background stderr reader feeds a
+/// locked bounded diagnostic buffer. Callers borrow streams until disposal and must serialize disposal calls.
+/// </remarks>
 internal sealed class SshProcessConnection : IRemoteSshConnection
 {
     private readonly Process process;
@@ -11,6 +16,11 @@ internal sealed class SshProcessConnection : IRemoteSshConnection
     private readonly Task stderr;
     private bool disposed;
 
+    /// <summary>Starts the supplied redirected OpenSSH command and begins diagnostic draining.</summary>
+    /// <remarks>
+    /// Does not perform an RPC readiness handshake. Caller must dispose even when initialization fails;
+    /// the start specification must provide redirected stdin/stdout/stderr as prepared by SshCommand.Create.
+    /// </remarks>
     internal SshProcessConnection(ProcessStartInfo start)
     {
         process = Process.Start(start) ?? throw new IOException("Could not start OpenSSH.");
@@ -44,6 +54,13 @@ internal sealed class SshProcessConnection : IRemoteSshConnection
         }
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Kills the owned process tree before closing raw pipes, then shares one two-second budget between
+    /// process reaping and diagnostic drain. Deadline expiry throws IOException; termination/disposal errors
+    /// can also propagate. The finally path attempts pipe/process cleanup independently of a request token.
+    /// This sends no operation cancellation RPC and makes no terminal-state guarantee about the remote Host.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (disposed)

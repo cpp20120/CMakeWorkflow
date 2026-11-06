@@ -4,15 +4,24 @@ using CMakeWorkflow.Client.Recipes;
 
 namespace CMakeWorkflow.Client.Workflows;
 
+/// <summary>Workflow planning and admission facade borrowing the client connection.</summary>
+/// <remarks>
+/// Paths are Host filesystem paths and are sent unchanged, including over SSH.
+/// Calls do not automatically reconnect or retry. Preflight is advisory; start rechecks admission requirements.
+/// </remarks>
 public sealed class WorkflowService(CMakeWorkflowClient client)
 {
-    /// <summary>Submits once through durable Host admission. Paths are sent unchanged, including over SSH.</summary>
+    /// <summary>Submits a workflow through durable Host admission.</summary>
     /// <remarks>
-    /// The Host owns accepted work independently of this connection. Cancellation of this RPC or a lost
-    /// response is not proof of rejection or operation cancellation. Reconnect to the same workspace and
-    /// use Operations.FindAsync with the saved ClientRequestId; never automatically resubmit an uncertain request.
-    /// Stop accepted work explicitly through WorkflowOperation.RequestCancellationAsync.
+    /// Save ClientRequestId before calling. Identical request identities reuse acceptance; changed parameters under the same ID conflict.
+    /// An RPC cancellation or lost reply can race with durable acceptance and dispatch: neither proves rejection or stops accepted work.
+    /// Find by the saved ID in the same workspace after reconnecting; never generate a new ID to retry an uncertain start.
+    /// Use WorkflowOperation.RequestCancellationAsync to request stopping the operation.
+    /// Acceptance does not guarantee successful planning, dispatch or completion.
     /// </remarks>
+    /// <param name="options">Immutable admission identity, expected manifest hash, parallelism and results path.</param>
+    /// <param name="ct">Cancels this RPC; independent of the accepted operation lifetime.</param>
+    /// <returns>A non-owning handle to the accepted operation, bound to this client.</returns>
     public async Task<WorkflowOperation> StartAsync(StartWorkflowOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -26,7 +35,11 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
         return new WorkflowOperation(client, result.OperationId);
     }
 
-    /// <summary>Read-only validation of exact Host manifest bytes and the prospective DAG.</summary>
+    /// <summary>Validates exact Host manifest bytes and the prospective DAG without dispatch.</summary>
+    /// <remarks>
+    /// The result describes current Host observations; it reserves no build trees or future execution capacity.
+    /// Cancellation stops the request, with no durable operation cancellation. RPC failures propagate without automatic retry.
+    /// </remarks>
     public Task<WorkflowPreflightResult> PreflightAsync(WorkflowPreflightOptions options,
         CancellationToken ct = default)
     {
@@ -35,7 +48,11 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
         return RpcRefusals.TranslateAsync(() => client.Proxy.PreflightAsync(options, ct));
     }
 
-    /// <summary>Preflight a typed recipe already prepared on this Host; does not execute it.</summary>
+    /// <summary>Preflights a prepared typed recipe without dispatch.</summary>
+    /// <remarks>
+    /// The result describes current Host observations; it reserves no build trees or future execution capacity.
+    /// Cancellation stops the request, with no durable operation cancellation. RPC failures propagate without automatic retry.
+    /// </remarks>
     public Task<WorkflowPreflightResult> PreflightAsync(PreparedRecipe prepared, int jobs,
         string resultsDirectory, CancellationToken ct = default)
     {
@@ -43,6 +60,11 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
         return PreflightAsync(new(prepared.Manifest, prepared.ManifestSha256, jobs, resultsDirectory), ct);
     }
 
+    /// <summary>Preflights a prepared benchmark without dispatch.</summary>
+    /// <remarks>
+    /// The result describes current Host observations; it reserves no build trees or future execution capacity.
+    /// Cancellation stops the request, with no durable operation cancellation. RPC failures propagate without automatic retry.
+    /// </remarks>
     public Task<WorkflowPreflightResult> PreflightAsync(PreparedBenchmark prepared, int jobs,
         string resultsDirectory, CancellationToken ct = default)
     {
@@ -50,6 +72,11 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
         return PreflightAsync(new(prepared.Manifest, prepared.ManifestSha256, jobs, resultsDirectory), ct);
     }
 
+    /// <summary>Preflights a prepared workflow without dispatch.</summary>
+    /// <remarks>
+    /// The result describes current Host observations; it reserves no build trees or future execution capacity.
+    /// Cancellation stops the request, with no durable operation cancellation. RPC failures propagate without automatic retry.
+    /// </remarks>
     public Task<WorkflowPreflightResult> PreflightAsync(PreparedWorkflow prepared, int jobs,
         CancellationToken ct = default)
     {
@@ -58,6 +85,11 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
             prepared.ResultsDirectory), ct);
     }
 
+    /// <summary>Reads the Host manifest and returns its plan without starting workflow nodes.</summary>
+    /// <remarks>
+    /// The result describes current Host observations; it reserves no build trees or future execution capacity.
+    /// Cancellation stops the request, with no durable operation cancellation. RPC failures propagate without automatic retry.
+    /// </remarks>
     public Task<JsonElement> PlanAsync(string manifest, CancellationToken ct = default)
     {
         client.RequireCapability("workflow/plan");

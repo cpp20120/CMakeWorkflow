@@ -2,10 +2,11 @@ using System.Text.Json;
 
 namespace CMakeWorkflow.Client.Workflows;
 
-/// <summary>
-/// An operation-bound terminal report. Report is the existing CMakeWorkflow
-/// report JSON; Revision is the SHA-256 digest committed by the remote Host.
-/// </summary>
+/// <summary>Verified operation-bound terminal CMake report.</summary>
+/// <param name="SchemaVersion">Response schema version.</param>
+/// <param name="RunDirectory">Absolute Host run directory.</param>
+/// <param name="Revision">SHA-256 of report bytes committed at durable finalization; not a numeric CAS revision.</param>
+/// <param name="Report">Detached report JSON, including failed or canceled terminal results.</param>
 public sealed record OperationReportSnapshot(
     int SchemaVersion,
     string RunDirectory,

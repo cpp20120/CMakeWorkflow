@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Environment;
 #pragma warning restore IDE0130
 
 /// <summary>Explicit, short-lived ETW session admission probe; never stops sessions it does not own.</summary>

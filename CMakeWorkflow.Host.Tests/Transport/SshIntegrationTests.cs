@@ -1,6 +1,8 @@
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Transport;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshIntegrationTests
 {
@@ -19,11 +21,11 @@ internal static class SshIntegrationTests
         // OpenSSH stand-in executes its remote command through a real POSIX
         // shell. The remote executable is the actual bridge to a persistent Host.
         string remote = files.Script("remote-host", $"""
-            test "$1" = 'host'
-            test "$2" = 'bridge'
-            shift 2
-            exec dotnet {SshTestPrograms.Quote(typeof(SshIntegrationTests).Assembly.Location)} --bridge-worker "$@"
-            """);
+                                                     test "$1" = 'host'
+                                                     test "$2" = 'bridge'
+                                                     shift 2
+                                                     exec dotnet {SshTestPrograms.Quote(typeof(SshIntegrationTests).Assembly.Location)} --bridge-worker "$@"
+                                                     """);
         SshHostOptions options = new("localhost-fixture", host.Endpoint, host.Root)
         {
             RemoteExecutable = remote,

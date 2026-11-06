@@ -1,9 +1,12 @@
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Toolchains;
 using CMakeWorkflow.Client.Transport;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Transport;
 using Nerdbank.Streams;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshNetContractTests
 {
@@ -110,7 +113,7 @@ internal static class SshNetContractTests
     internal static async Task RunLiveAsync()
     {
         static string Env(string name) => Environment.GetEnvironmentVariable(name)
-            ?? throw new ArgumentException("Missing live SSH.NET test setting: " + name);
+                                          ?? throw new ArgumentException("Missing live SSH.NET test setting: " + name);
         SshNetHostOptions options = new(
             Env("CMWF_SSHNET_HOST"), Env("CMWF_SSHNET_USER"), Env("CMWF_SSHNET_KEY"),
             Env("CMWF_SSHNET_PIN"), Env("CMWF_SSHNET_ENDPOINT"), Env("CMWF_SSHNET_WORKSPACE"))
@@ -121,7 +124,7 @@ internal static class SshNetContractTests
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
         await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(options, timeout.Token))
         {
-            if (!client.Host.Capabilities.Contains("operations/get"))
+            if (!MemoryExtensions.Contains(client.Host.Capabilities, "operations/get"))
             {
                 throw new System.Diagnostics.UnreachableException("SSH.NET bridge did not negotiate Host capabilities.");
             }

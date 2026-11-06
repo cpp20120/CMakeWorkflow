@@ -1,8 +1,11 @@
 using System.Diagnostics;
-using CMakeWorkflow.Client;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Transport;
 using Nerdbank.Streams;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class BridgeTests
 {

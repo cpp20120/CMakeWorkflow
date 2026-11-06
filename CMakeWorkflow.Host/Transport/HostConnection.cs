@@ -1,14 +1,26 @@
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.Host.Protocol;
 using StreamJsonRpc;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Transport;
 #pragma warning restore IDE0130
 
+/// <summary>Creates header-delimited JSON-RPC connections using closed source-generated Host DTOs.</summary>
+/// <remarks>
+/// No local targets are registered and listening has not started. The caller configures the session and owns disposal.
+/// Application failures use code 1001 with ApplicationError data; no CLR exception graph crosses the wire.
+/// </remarks>
 public static class HostConnection
 {
+    /// <summary>Creates a connection using one duplex stream; the caller owns the returned RPC lifetime.</summary>
     public static JsonRpc Create(Stream stream) => Create(stream, stream);
 
+    /// <summary>Creates a connection with separate binary input/output streams.</summary>
+    /// <remarks>
+    /// The returned RPC owns its message handler and its underlying streams. The caller must register a session,
+    /// start listening, and dispose/drain connection-owned work; creating an RPC does not own durable operation lifetime.
+    /// </remarks>
     public static JsonRpc Create(Stream input, Stream output)
     {
 

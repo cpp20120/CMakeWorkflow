@@ -3,8 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using CMakeWorkflow.Core;
 
-namespace CMakeWorkflow.Profiling;
+namespace CMakeWorkflow.Profiling.Historical;
 
 // Domain-specific conversion of perf's period-weighted samples. This is not
 // the general profiler's unweighted stack analysis.

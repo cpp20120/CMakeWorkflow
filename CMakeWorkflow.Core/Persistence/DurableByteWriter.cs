@@ -1,14 +1,28 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Core.Persistence;
 #pragma warning restore IDE0130
 
 // Atomically writes already-encoded bytes and durably commits the destination.
 // Callers own directory creation, leases, serialization and recovery policy.
+/// <summary>Atomically replaces encoded checkpoint bytes and confirms storage durability.</summary>
+/// <remarks>
+/// Caller owns serialization, directory creation, exclusive writer leases and recovery policy.
+/// Uses a fixed .tmp sibling, so concurrent writers to one destination are invalid.
+/// Success follows file flush, replacement and platform-specific durability sync. Failure after replacement
+/// may leave new bytes visible without confirmed durability; callers must not dispatch based on mere file existence.
+/// Interrupted temporary files are left for caller recovery/cleanup; the writer does not infer execution outcomes.
+/// </remarks>
 internal static class DurableByteWriter
 {
+    /// <summary>Persists bytes before returning dispatch-safe durability confirmation.</summary>
+    /// <remarks>
+    /// Cancellation is checked during write and before replacement. Once replacement begins, sync may complete
+    /// without observing subsequent cancellation; a canceled outer operation does not prove the file remained unchanged.
+    /// Optional callbacks are fault-injection barriers, not durability acknowledgements.
+    /// </remarks>
     internal static async Task WriteAsync(string path, ReadOnlyMemory<byte> bytes,
         CancellationToken ct, Func<Task>? afterFlushed = null, Func<Task>? afterReplaced = null,
         Func<Task>? beforeDirectorySync = null)

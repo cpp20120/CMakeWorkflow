@@ -1,13 +1,22 @@
 using System.Security.Cryptography;
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Sessions;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
 // Read-only views over an operation's durably finalized results tree. This is
 // intentionally NOT a workspace filesystem API or an artifact upload service.
+/// <summary>Exposes report-bound finalized files rather than arbitrary workspace paths.</summary>
+/// <remarks>
+/// Final report bytes must match durable finalization and accepted snapshot identity. Artifact IDs select
+/// known candidates, never caller-supplied paths. Handle-relative opens protect reads against path redirection;
+/// size/time checks detect observed changes but are not a filesystem snapshot or a complete content-lock guarantee.
+/// </remarks>
 internal static class OperationArtifactReader
 {
     internal const int MaximumChunkBytes = 64 * 1024;
@@ -15,6 +24,12 @@ internal static class OperationArtifactReader
 
     private sealed record Candidate(string Id, string Kind, string? NodeId, string Path);
 
+    /// <summary>Reads and verifies a finalized CMake report against ledger identity and terminal state.</summary>
+    /// <remarks>
+    /// Refuses unfinalized/wrong-domain operations and reports over 16 MiB. The opened file bytes must match
+    /// the committed report SHA-256; live or uncertain run.json files are not exposed as terminal evidence.
+    /// Cancellation affects this read only and does not alter execution or finalization.
+    /// </remarks>
     internal static async Task<WorkflowReportSnapshot> ReportAsync(
         WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {
@@ -53,6 +68,12 @@ internal static class OperationArtifactReader
             : report;
     }
 
+    /// <summary>Builds a bounded catalog with complete file hashes from verified finalization evidence.</summary>
+    /// <remarks>
+    /// Delegates process-domain catalogs to their adapter. Missing non-report files are skipped because nodes
+    /// may never have started. Checks size and last-write time around hashing; at most 512 catalog entries.
+    /// Returns evidence observed now, not a promise that external writers cannot later change those files.
+    /// </remarks>
     internal static async Task<OperationArtifactList> ListAsync(
         WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {
@@ -101,6 +122,12 @@ internal static class OperationArtifactReader
         return new(operationId, report.Revision, result);
     }
 
+    /// <summary>Reads at most 64 KiB from an opaque report-bound artifact ID.</summary>
+    /// <remarks>
+    /// Revalidates terminal report binding, expected file size and last-write ticks, then checks the same metadata
+    /// after the range read. These checks cannot detect every same-size/timestamp-preserving content change;
+    /// consumers must verify the assembled file against the catalog SHA-256. Cancellation has no operation side effects.
+    /// </remarks>
     internal static async Task<OperationArtifactChunk> ReadChunkAsync(
         WorkspaceReadPaths paths, OperationArtifactChunkRequest request, CancellationToken ct)
     {

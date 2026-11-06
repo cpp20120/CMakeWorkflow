@@ -1,19 +1,31 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.Host.Sessions;
 using Microsoft.Data.Sqlite;
-using System.Diagnostics.CodeAnalysis;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
+/// <summary>Transactional workspace ledger for immutable acceptance, dispatch evidence and recovery.</summary>
+/// <remarks>
+/// The caller must authorize the workspace and own/dispose this store connection; do not share it concurrently.
+/// Acceptance commits exact snapshot bytes and request identity. Dispatch authorization is a separate one-way boundary.
+/// Only a verified runner checkpoint binds possible external effects; authorization alone does not prove launch.
+/// Results reservations and uncertain attempts survive failure. This store does not launch processes, prove quiescence or clean run files.
+/// </remarks>
 public sealed class DurableAcceptanceStore : IDisposable
 {
     private readonly SqliteConnection connection;
     private readonly IOperationCheckpointEvidenceCodec checkpointCodec;
     private readonly string workspace;
+    /// <summary>Persistent ledger workspace identity used to scope operation ownership.</summary>
     public string WorkspaceId { get; }
 
+    /// <summary>Opens the workspace ledger, creating/migrating it only when writable.</summary>
+    /// <param name="workspaceDirectory">Existing absolute authorized workspace directory.</param>
+    /// <param name="readOnly">Open an existing ledger without schema mutation; a missing ledger fails.</param>
     public DurableAcceptanceStore(string workspaceDirectory, bool readOnly = false)
         : this(workspaceDirectory, readOnly, CMakeWorkflowCheckpointEvidenceCodec.Instance)
     {
@@ -283,6 +295,18 @@ public sealed class DurableAcceptanceStore : IDisposable
     // original typed request, never from current manifest contents on a retry.
     // Legacy CMake admission adapter: retain the exact v1 digest and path semantics.
     // The storage layer below accepts a caller-derived immutable request identity.
+    /// <summary>Commits a request identity and immutable manifest snapshot, or returns matching prior acceptance.</summary>
+    /// <remarks>
+    /// The caller must authorize the workspace before admission. Paths are canonicalized inside that workspace.
+    /// Existing request identity is compared before rereading manifest bytes: a matching retry retains the original snapshot.
+    /// Changed identity under the same ID fails with request_id_conflict; new acceptance verifies the supplied SHA-256.
+    /// A returned acceptance does not authorize dispatch and cancellation of an outer RPC cannot undo this commit.
+    /// </remarks>
+    /// <param name="clientRequestId">Nonempty request identity, at most 128 characters.</param>
+    /// <param name="manifestPath">Absolute Host manifest path.</param>
+    /// <param name="expectedManifestSha256">Expected exact-byte SHA-256, as 64 hexadecimal characters.</param>
+    /// <param name="jobs">Positive maximum workflow node parallelism; part of request identity.</param>
+    /// <param name="resultsDirectory">Absolute Host results path; part of request identity, reserved separately.</param>
     public AcceptedWorkflow Accept(string clientRequestId, string manifestPath, string expectedManifestSha256,
         int jobs, string resultsDirectory)
     {
@@ -307,6 +331,11 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // Neutral immutable admission: the trusted domain adapter owns the request digest.
     // Idempotent retries compare the digest BEFORE reading potentially changed bytes.
+    /// <summary>Admits domain-neutral immutable bytes under a trusted adapter-derived digest.</summary>
+    /// <remarks>
+    /// The domain adapter owns canonical request identity and domain validation. Matching retries compare the digest
+    /// before rereading snapshot bytes; conflicting ID reuse fails. Workspace path authorization still occurs here.
+    /// </remarks>
     internal AcceptedWorkflow AcceptImmutable(DurableImmutableRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.ClientRequestId) || request.ClientRequestId.Length > 128 ||
@@ -533,6 +562,7 @@ public sealed class DurableAcceptanceStore : IDisposable
         }
     }
 
+    /// <summary>Finds acceptance by caller request ID; null means no row is present at this read.</summary>
     public AcceptedWorkflow? Find(string clientRequestId)
     {
         using SqliteCommand command = connection.CreateCommand();
@@ -546,6 +576,7 @@ public sealed class DurableAcceptanceStore : IDisposable
             : null;
     }
 
+    /// <summary>Reads durable state by operation ID; null means no row is present at this read.</summary>
     public AcceptedWorkflow? Get(string operationId)
     {
         using SqliteCommand command = connection.CreateCommand();
@@ -633,6 +664,13 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // Deliberately does NOT authorize dispatch, alter acceptance, or release results ownership.
     // Requires an operator-supplied nonempty rationale; a decision is immutable in this stage.
+    /// <summary>Commits an immutable operator decision without authorizing execution.</summary>
+    /// <remarks>
+    /// The caller must establish inactivity and external quiescence and hold the execution lease.
+    /// Requires dispatch authorization and no finalization. Revision 0 becomes 1; identical retries use current revision 1.
+    /// Only needs_attention or outcome_unknown and a nonempty note up to 4096 characters are accepted.
+    /// This does not release results ownership or resolve uncertain external side effects.
+    /// </remarks>
     public RecoveryInspection Reconcile(string operationId, long expectedRevision, string decision, string note)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0 ||
@@ -720,6 +758,12 @@ public sealed class DurableAcceptanceStore : IDisposable
     // Resume admission is deliberately NOT external dispatch. The runner must later
     // validate each pending node against its durable checkpoint before execution.
     // Once admitted, a repeated RPC is idempotent; the reconciliation decision stays immutable.
+    /// <summary>Commits resume admission without launching external work.</summary>
+    /// <remarks>
+    /// The caller must ensure inactivity and quiescence. Requires a needs_attention reconciliation, no cancellation and no finalization.
+    /// Recovery revision 1 becomes 2; an admitted retry must supply current revision 2.
+    /// A runner must still validate checkpoint evidence and claim its single attempt before mutation.
+    /// </remarks>
     public RecoveryInspection AdmitResume(string operationId, long expectedRevision)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0)
@@ -800,6 +844,11 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // One-way, non-retryable claim. A crash after this commit cannot implicitly
     // start another runner, even if no process was launched yet.
+    /// <summary>Permanently claims the one allowed resume attempt against verified checkpoint bytes.</summary>
+    /// <remarks>
+    /// The caller must hold the execution lease. Commit occurs before runner mutation or dispatch.
+    /// A crash or exception after commit does not make this claim retryable; inspect and reconcile the remaining uncertainty.
+    /// </remarks>
     public string ClaimResumeAttempt(string operationId, string runDirectory, string? expectedCheckpointSha256 = null)
     {
         string directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
@@ -879,6 +928,12 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     // ExpectedRevision is a CAS against the cancellation-intent revision (0 -> 1).
     // This is a request to stop, never proof that an external process has stopped.
+    /// <summary>Commits stop intent with a cancellation-specific compare-and-swap revision.</summary>
+    /// <remarks>
+    /// Revision 0 becomes 1; a repeated nonterminal request must supply revision 1. Terminal operations return Requested=false.
+    /// This commit does not stop processes itself. The coordinator signals the Host-owned token after persistence.
+    /// The receipt is not proof of quiescence; cancellation revision is independent of recovery revision.
+    /// </remarks>
     public CancellationDecision RequestCancellation(string operationId, long expectedRevision)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0)
@@ -939,6 +994,11 @@ public sealed class DurableAcceptanceStore : IDisposable
     // An operation owns its results directory durably, across processes and restarts.
     // The reservation is deliberately NOT released on a failed or interrupted run:
     // reconciliation must decide whether the external effect occurred first.
+    /// <summary>Durably assigns exclusive results-tree ownership to an operation.</summary>
+    /// <remarks>
+    /// The caller reserves before dispatch authorization. Reservations survive crashes, failure and interruption.
+    /// Cleanup must not release ownership or reuse the tree while external outcome remains unresolved.
+    /// </remarks>
     public void ReserveResultsDirectory(string operationId, string resultsDirectory)
     {
         if (string.IsNullOrWhiteSpace(operationId) || !Path.IsPathFullyQualified(resultsDirectory))
@@ -1019,6 +1079,11 @@ public sealed class DurableAcceptanceStore : IDisposable
     // It must never be confused with the runner's write-ahead dispatch checkpoint.
     // For an existing SQLite store built before this transition, the CHECK constraint
     // must be migrated explicitly rather than silently bypassed.
+    /// <summary>Commits one-way permission to enter the runner, before its write-ahead checkpoint.</summary>
+    /// <remarks>
+    /// Requires accepted_not_dispatched. The caller must hold the operation execution lease and reserve results first.
+    /// After commit, a crash must not cause implicit second execution. This state is not evidence a process started.
+    /// </remarks>
     public AcceptedWorkflow AuthorizeDispatch(string operationId)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128)
@@ -1097,6 +1162,13 @@ public sealed class DurableAcceptanceStore : IDisposable
     // Called by the host-owned runner's beforeExternalDispatch gate, AFTER its
     // durable write-ahead checkpoint but BEFORE starting external processes.
     // This method never authorizes an operation or starts a runner by itself.
+    /// <summary>Binds verified write-ahead checkpoint bytes to an authorized operation.</summary>
+    /// <remarks>
+    /// Called after durable runner persistence and before external dispatch. The caller holds the runner/execution leases.
+    /// The binding confirms possible dispatch intent, not successful launch or completion; a crash still requires recovery.
+    /// This method does not acquire leases, schedule work or replace immutable accepted bytes.
+    /// </remarks>
+    /// <returns>SHA-256 of the bound checkpoint bytes.</returns>
     public string ConfirmRunnerCheckpoint(string operationId, string runDirectory)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 ||
@@ -1184,6 +1256,12 @@ public sealed class DurableAcceptanceStore : IDisposable
     }
 
     // Only a normal runner return and a durable terminal report can finalize.
+    /// <summary>Commits terminal state only from verified runner report bytes bound to this operation.</summary>
+    /// <remarks>
+    /// The caller must hold execution ownership and provide the final run report after worker cleanup.
+    /// Only exit codes 0, 1 and 130 finalize succeeded, failed or canceled evidence.
+    /// Do not call from a generic catch/finally to guess an interrupted outcome; leave uncertain work recoverable.
+    /// </remarks>
     public Finalization FinalizeExecution(string operationId, string runDirectory, int exitCode)
     {
         WorkspaceReadPaths paths = new(workspace);
@@ -1282,6 +1360,11 @@ public sealed class DurableAcceptanceStore : IDisposable
         return reader.Read() ? (reader.GetString(0), reader.GetString(1)) : null;
     }
 
+    /// <summary>Returns exact retained dispatch bytes only after verifying their stored SHA-256.</summary>
+    /// <remarks>
+    /// Used to distinguish never-admitted process nodes from uncertain effects during recovery. Missing bytes
+    /// in legacy rows cannot authorize resume. The returned array is detached from SQLite storage.
+    /// </remarks>
     internal byte[] GetProcessDispatchCheckpointBytes(string operationId)
     {
         using SqliteCommand cmd = connection.CreateCommand();
@@ -1299,6 +1382,7 @@ public sealed class DurableAcceptanceStore : IDisposable
             : bytes;
     }
 
+    /// <summary>Returns the immutable accepted snapshot bytes, independent of the current manifest file.</summary>
     public byte[] GetSnapshot(string operationId)
     {
         using SqliteCommand command = connection.CreateCommand();
@@ -1332,5 +1416,6 @@ public sealed class DurableAcceptanceStore : IDisposable
 
     private static string Hex(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
+    /// <summary>Closes this ledger connection; does not delete durable records or cancel execution.</summary>
     public void Dispose() => connection.Dispose();
 }

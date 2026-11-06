@@ -1,5 +1,7 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Tooling;
+using CMakeWorkflow.Tooling.Toolchains;
+
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Tooling.Tools;
 #pragma warning restore IDE0130
 
 public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller installer)
@@ -20,7 +22,7 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
 #pragma warning restore CA1308
 
         string directory = Path.GetFullPath(installDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin"));
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), ".local", "bin"));
         PackageManagerKind manager = DetectManager(requestedManager, directory);
         IReadOnlyList<ToolDefinition> definitions = ToolCatalog.ResolveProfiles(profiles, runtime.Platform);
         List<ToolStatus> statuses = new(definitions.Count);

@@ -1,10 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Transport;
 using CMakeWorkflow.Client.Workflows;
 using Renci.SshNet;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 /// <summary>
 /// Opt-in tests against an actual Linux sshd. These intentionally never run in
@@ -60,7 +62,7 @@ internal static class SshNetLiveLifecycleTests
     private static async Task PersistentAsync(Probe probe, SshNetLaunchOptions options, CancellationToken ct)
     {
         string endpoint = Environment.GetEnvironmentVariable("CMWF_SSHNET_ENDPOINT")
-            ?? throw new ArgumentException("persistent scenario requires CMWF_SSHNET_ENDPOINT.");
+                          ?? throw new ArgumentException("persistent scenario requires CMWF_SSHNET_ENDPOINT.");
         SshNetHostOptions persistent = new(options.Host, options.Username, options.PrivateKeyPath,
             options.HostKeySha256, endpoint, options.Workspace)
         {
@@ -96,7 +98,7 @@ internal static class SshNetLiveLifecycleTests
             pid = client.Host.ProcessId;
             Check(pid > 0 && client.Host.WorkspaceDirectory == options.Workspace,
                 "SSH.NET private Host handshake returned an unexpected process/workspace.");
-            Check(client.Host.Capabilities.Contains("workflow/start"), "Private Host lacks execution capability.");
+            Check(MemoryExtensions.Contains(client.Host.Capabilities, "workflow/start"), "Private Host lacks execution capability.");
             Check((await client.Toolchains.DiscoverAsync(ct)).SchemaVersion == 1,
                 "Live SSH.NET RPC corrupts a typed response.");
             Check(probe.Alive(pid), "Private Host process was not alive during the RPC session.");
@@ -174,24 +176,24 @@ internal static class SshNetLiveLifecycleTests
         try
         {
             probe.UploadText(source + "/CMakeLists.txt", """
-                cmake_minimum_required(VERSION 3.26)
-                project(cmwf_f3 NONE)
-                add_custom_target(effect COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/effect.cmake")
-                """);
+                                                         cmake_minimum_required(VERSION 3.26)
+                                                         project(cmwf_f3 NONE)
+                                                         add_custom_target(effect COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/effect.cmake")
+                                                         """);
             probe.UploadText(source + "/effect.cmake", """
-                file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "started\n")
-                set(attempt 0)
-                while(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/release")
-                  if(attempt GREATER_EQUAL 1200)
-                    message(FATAL_ERROR "F3 release gate timed out")
-                  endif()
-                  math(EXPR attempt "${attempt} + 1")
-                  execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.1)
-                endwhile()
-                file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "finished\n")
-                """);
+                                                       file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "started\n")
+                                                       set(attempt 0)
+                                                       while(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/release")
+                                                         if(attempt GREATER_EQUAL 1200)
+                                                           message(FATAL_ERROR "F3 release gate timed out")
+                                                         endif()
+                                                         math(EXPR attempt "${attempt} + 1")
+                                                         execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 0.1)
+                                                       endwhile()
+                                                       file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects.txt" "finished\n")
+                                                       """);
             _ = probe.Run("mkdir -p -- " + Quote(build + "/.cmake/api/v1/query") +
-                " && : > " + Quote(build + "/.cmake/api/v1/query/codemodel-v2"));
+                          " && : > " + Quote(build + "/.cmake/api/v1/query/codemodel-v2"));
             _ = probe.Run("cmake -S " + Quote(source) + " -B " + Quote(build) + " -G Ninja");
 
             var document = new
@@ -312,7 +314,7 @@ internal static class SshNetLiveLifecycleTests
             string output = command.Execute();
             return command.ExitStatus != 0
                 ? throw new IOException("Remote test command failed (exit " + command.ExitStatus + "): " +
-                                      shell + "\n" + command.Error)
+                                        shell + "\n" + command.Error)
                 : output;
         }
 
@@ -358,7 +360,7 @@ internal static class SshNetLiveLifecycleTests
             while (true)
             {
                 using SshCommand command = client.CreateCommand("test -f " + Quote(marker) +
-                                                         " && grep -qx 'started' " + Quote(marker));
+                                                                " && grep -qx 'started' " + Quote(marker));
                 command.CommandTimeout = TimeSpan.FromSeconds(5);
                 using CancellationTokenSource commandTimeout = CancellationTokenSource.CreateLinkedTokenSource(wait.Token);
                 commandTimeout.CancelAfter(command.CommandTimeout);

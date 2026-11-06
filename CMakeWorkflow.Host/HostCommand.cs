@@ -1,5 +1,8 @@
 using System.Text.Json;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host;

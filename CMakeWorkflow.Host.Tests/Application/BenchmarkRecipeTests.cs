@@ -1,8 +1,11 @@
 using System.Text.Json;
-using CMakeWorkflow;
 using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Serialization;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Host.Protocol;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class BenchmarkRecipeTests
 {
@@ -73,14 +76,14 @@ internal static class BenchmarkRecipeTests
         Reject(recipe with { Arguments = ["bad\0argument"] });
         foreach (string? json in new[]
                  {
-            /*lang=json,strict*/
-                                          """{"kind":"benchmark","schemaVersion":2,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[]}""",
-            /*lang=json,strict*/
-                                          """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":"ten","timeoutSeconds":1,"arguments":[]}""",
-            /*lang=json,strict*/
-                                          """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[],"unknown":true}""",
-            /*lang=json,strict*/
-                                          """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","repeats":1,"timeoutSeconds":1,"arguments":[]}"""
+                     /*lang=json,strict*/
+                     """{"kind":"benchmark","schemaVersion":2,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[]}""",
+                     /*lang=json,strict*/
+                     """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":"ten","timeoutSeconds":1,"arguments":[]}""",
+                     /*lang=json,strict*/
+                     """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","target":"x","repeats":1,"timeoutSeconds":1,"arguments":[],"unknown":true}""",
+                     /*lang=json,strict*/
+                     """{"kind":"benchmark","schemaVersion":1,"buildDirectory":"/a","repeats":1,"timeoutSeconds":1,"arguments":[]}"""
                  })
         {
             try

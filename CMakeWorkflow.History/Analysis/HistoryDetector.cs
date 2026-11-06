@@ -1,9 +1,10 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.History.Models;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.History;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.History.Analysis;
 #pragma warning restore IDE0130
 
 // This is a one-sided test for a user-declared regression direction. It does

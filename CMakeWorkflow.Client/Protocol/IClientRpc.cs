@@ -2,7 +2,6 @@ using System.Text.Json;
 using CMakeWorkflow.Client.Campaigns;
 using CMakeWorkflow.Client.History;
 using CMakeWorkflow.Client.Profiling;
-using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Provisioning;
 using CMakeWorkflow.Client.Recipes;
 using CMakeWorkflow.Client.Toolchains;
@@ -10,8 +9,14 @@ using CMakeWorkflow.Client.Workflows;
 using PolyType;
 using StreamJsonRpc;
 
-namespace CMakeWorkflow.Client;
+namespace CMakeWorkflow.Client.Protocol;
 
+/// <summary>Closed source-generated RPC shape shared by connection service facades.</summary>
+/// <remarks>
+/// CancellationToken arguments are RPC cancellation metadata, never serialized DTO members.
+/// Durable start/cancel/resume mutations can commit before an RPC is canceled; operation tokens belong to the Host coordinator.
+/// Request-scoped campaign/replay methods have connection/request lifetime instead.
+/// </remarks>
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 internal partial interface IClientRpc
 {

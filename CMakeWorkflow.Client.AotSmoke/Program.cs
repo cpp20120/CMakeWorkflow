@@ -1,13 +1,13 @@
-using CMakeWorkflow.Client;
-using CMakeWorkflow;
-using CMakeWorkflow.Profiling;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.Client.AotSmoke;
 using StreamJsonRpc;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Recipes;
 using CMakeWorkflow.Client.Workflows;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
 if (args.Length == 4 && args[0] == "--verify-package")
 {
@@ -56,6 +56,7 @@ try
                      "workflow/plan", "workflow/start", "benchmark/prepare",
                      "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare",
                      "operations/get", "operations/find", "operations/cancel", "operations/events",
+                     "operations/artifacts/list", "operations/artifacts/readChunk",
                      "workflow/recoveryInspect"
                  })
         {
@@ -158,6 +159,21 @@ try
         }
 
         Console.WriteLine($"PASS NativeAOT typed start/get/find: operation={found.OperationId}; state={found.State}");
+        OperationArtifactList artifacts = await operation.ListArtifactsAsync(ct);
+        OperationArtifactInfo artifact = artifacts.Artifacts.First(a => a.Size > 0);
+        OperationArtifactChunk chunk = await operation.ReadArtifactChunkAsync(artifact, 0, 256, ct);
+        string downloaded = await operation.DownloadArtifactAsync(artifact, Path.Combine(fixture, "downloaded-artifact"), ct: ct);
+        byte[] downloadedBytes = await File.ReadAllBytesAsync(downloaded, ct);
+        if (artifacts.OperationId != operation.OperationId || chunk.ArtifactId != artifact.ArtifactId ||
+            chunk.Offset != 0 || chunk.TotalSize != artifact.Size || downloadedBytes.LongLength != artifact.Size ||
+            chunk.Content.Length != Math.Min(256, artifact.Size) ||
+            !chunk.Content.SequenceEqual(downloadedBytes.Take(chunk.Content.Length)) ||
+            Convert.ToHexString(SHA256.HashData(downloadedBytes)) != artifact.Sha256)
+        {
+            throw new InvalidOperationException("NativeAOT artifact catalog/chunk/download did not round-trip.");
+        }
+
+        Console.WriteLine("PASS NativeAOT artifact list/chunk/download through internal SDK wire requests.");
         EventPage page = await operation.ReadEventsAsync(0, 100, ct);
         if (page.OperationId != found.OperationId || page.Events.Count == 0 || page.NextSequence <= 0)
         {

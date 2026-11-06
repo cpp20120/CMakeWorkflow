@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Client.Provisioning;
 
-namespace CMakeWorkflow;
+namespace CMakeWorkflow.Commands;
 
 /// <summary>Read-only plan and explicitly approved remote Host installation.</summary>
 internal static class RemoteProvisionCommand

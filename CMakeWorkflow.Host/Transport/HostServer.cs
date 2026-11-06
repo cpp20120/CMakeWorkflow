@@ -1,19 +1,35 @@
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Net.Sockets;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Transport;
 #pragma warning restore IDE0130
 
+/// <summary>Hosts initialized RPC sessions and shared durable execution coordinators.</summary>
 public static class HostServer
 {
-    /// <summary>Serve one private Host directly on a binary stdin/stdout pair.</summary>
+    /// <summary>Serves one private Host over binary standard input/output.</summary>
+    /// <remarks>
+    /// The private coordinator belongs to the channel: EOF/disconnect cancels execution and drains cleanup before exit.
+    /// Durable records can survive, but active execution does not outlive this private Host.
+    /// </remarks>
     public static Task RunStdioAsync(Stream input, Stream output, CancellationToken ct) =>
         StdioHostServer.RunAsync(input, output, ct);
 
+    /// <summary>Serves a persistent local Host with at most 16 simultaneous clients.</summary>
+    /// <remarks>
+    /// Each connection owns and drains its request/session work on disconnect. Durable execution belongs to the shared Host
+    /// coordinator and survives an individual client disconnect. Host shutdown cancels that coordinator and drains its tasks.
+    /// The server owns listener/client streams and endpoint cleanup; ledger records and results remain for recovery.
+    /// </remarks>
+    /// <param name="endpoint">Validated current-user named pipe or absolute Unix socket endpoint.</param>
+    /// <param name="ct">Host lifetime token, distinct from request and connection cancellation.</param>
     public static async Task RunAsync(string endpoint, CancellationToken ct)
     {
         using CancellationTokenSource shutdownHost = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -39,7 +55,7 @@ public static class HostServer
                         workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
                         value => rpc.NotifyAsync("tooling/progress", value), disconnected.Token,
                         fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);
-                    rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<IHostRpc>(), session, null);
+                    rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<Protocol.IHostRpc>(), session, null);
                     rpc.Disconnected += (_, _) => disconnected.Cancel();
                     using CancellationTokenRegistration shutdown = ct.Register(rpc.Dispose);
                     rpc.StartListening();

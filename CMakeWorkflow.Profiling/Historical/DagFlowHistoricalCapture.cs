@@ -3,20 +3,17 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Core.Persistence;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Historical;
 #pragma warning restore IDE0130
 
 // The old one-off stress-harness protocol lives in this DagFlow extension,
 // not in the workflow planner or the general profiler backend.
 public static class DagFlowHistoricalCapture
 {
-    private static readonly int[] HistoricalWorkerCounts =
-    [
-    1,
-    4
-];
     private static readonly string[] Scenarios =
     [
         "external-contention", "hot-shard-skew", "local-overflow",
@@ -31,17 +28,34 @@ public static class DagFlowHistoricalCapture
 
     private static readonly string[] Variants = ["o3", "o3-lto"];
 
-    public static async Task<int> RunAsync(DagFlowHistoricalOptions options, CancellationToken ct)
+    /// <summary>Executes historical capture through the existing journal-backed command dispatcher.</summary>
+    /// <remarks>Cancellation stops this request-owned capture; it does not roll back commands or permit replay of unknown effects.</remarks>
+    public static Task<int> RunAsync(DagFlowHistoricalOptions options, CancellationToken ct) =>
+        RunCoreAsync(options, null, ct);
+
+    /// <summary>Owns a single run lease, frozen input snapshot and persisted measurement order.</summary>
+    /// <remarks>
+    /// The existing perf permission probe precedes the run lease. Source/set validation and durable schedule
+    /// persistence precede measurement dispatch. Configure/build and capture diagnostics retain their existing
+    /// prerequisites. Exceptions leave evidence for fail-closed journal recovery, not an assumed terminal success.
+    /// </remarks>
+    /// <param name="options">Capture inputs; the seed list is copied before asynchronous work.</param>
+    /// <param name="expectedSourceIdentity">Batch snapshot hash to require, or null for the first/single experiment.</param>
+    /// <param name="ct">Capture execution lifetime; journal safety commits remain owned by the dispatcher.</param>
+    internal static async Task<int> RunCoreAsync(DagFlowHistoricalOptions options, string? expectedSourceIdentity,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(options);
+        options = options with { Seeds = HistoricalSchedule.Seeds(options) };
         if (!OperatingSystem.IsLinux())
         {
             throw new PlatformNotSupportedException("Historical perf protocol requires Linux.");
         }
 
-        if (options.TimingTrials < 1 || options.StatTrials < 1 || options.Jobs < 1)
+        HistoricalSchedule.Validate(options);
+        if (HistoricalSchedule.Seeds(options).Length > 1)
         {
-            throw new ArgumentException("Trial and job counts must be positive.");
+            return await HistoricalExperiments.RunAsync(options, ct);
         }
 
         string root = Path.GetFullPath(options.SourceDirectory);
@@ -198,7 +212,10 @@ public static class DagFlowHistoricalCapture
                 ["frequency_locked"] = false,
                 ["build"] = "static DagFlow, dynamic mimalloc; O3 -g -DNDEBUG; lld for both",
                 ["source_sha256"] = sourceHashes.DeepClone(),
-                ["ordering"] = "Python random.Random(20260930) shuffle schedule"
+                ["ordering"] = options.ShuffleAlgorithm == "python-legacy" &&
+                    HistoricalSchedule.Seeds(options).Single() == 20260930 &&
+                    options.ScheduleStrategy == "random-interleaved" && options.ShuffleScope == "block"
+                    ? "Python random.Random(20260930) shuffle schedule" : "Saved historical schedule/v1"
             };
         if (options.Resume)
         {
@@ -222,8 +239,36 @@ public static class DagFlowHistoricalCapture
             }
         }
 
-        // On resume verify all three saved host-observation commands too.
-        // They were already committed before the manifest first appeared.
+        string sourceIdentity = HistoricalSchedule.Hash(sourceHashes.ToJsonString());
+        if (expectedSourceIdentity is not null && expectedSourceIdentity != sourceIdentity)
+        {
+            throw new InvalidDataException("Seed experiments require an identical frozen source/workload set.");
+        }
+        JsonObject schedule;
+        if (options.Resume)
+        {
+            schedule = await HistoricalSchedule.LoadAsync(options, sourceIdentity, manifest, commands, ct);
+        }
+        else
+        {
+            schedule = HistoricalSchedule.Create(options, sourceIdentity);
+            await HistoricalSchedule.SaveAsync(Path.Combine(output, "schedule.json"), schedule, ct);
+            manifest["schedule_sha256"] = HistoricalSchedule.Hash(schedule.ToJsonString() + "\n");
+        }
+        manifest["schedule_file"] = "schedule.json";
+        manifest["scheduling"] = new JsonObject
+        {
+            ["identity"] = schedule["identity"]!.DeepClone(),
+            ["prngVersion"] = schedule["prngVersion"]!.DeepClone(),
+            ["measurementSetSha256"] = schedule["measurementSetSha256"]!.DeepClone(),
+            ["statisticalInterpretation"] = "Seeds/block order are experimental factors, not independent samples."
+        };
+        async Task SaveManifest() => await DurableByteWriter.WriteAsync(manifestPath,
+            Encoding.UTF8.GetBytes(manifest.ToJsonString() + "\n"), ct);
+
+        // Persist identity and the complete future order before command dispatch. On resume the same
+        // journal verifies observations/builds; it refuses unknown effects rather than rerunning them.
+        await SaveManifest();
         string cpuEvidence = await Run("cpu", "lscpu", []);
         string compilerEvidence = await Run("compiler", "clang++", ["--version"]);
         string perfEvidence = await Run("perf-version", "perf", ["version", "--build-options"]);
@@ -233,10 +278,6 @@ public static class DagFlowHistoricalCapture
             manifest["compiler"] = compilerEvidence;
             manifest["perf"] = perfEvidence;
         }
-
-        async Task SaveManifest() =>
-            await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString() + "\n", ct);
-
         await SaveManifest();
         Dictionary<string, string> binaries = new(StringComparer.Ordinal);
         foreach (string profile in Variants)
@@ -278,71 +319,61 @@ public static class DagFlowHistoricalCapture
         }
 
         await SaveManifest();
-        List<(int Workers, string Scenario)> points = [.. from workers in HistoricalWorkerCounts
-                      from scenario in Scenarios
-                      select (Workers: workers, Scenario: scenario)];
-        PythonShuffleRandom rng = new(20260930);
         List<JsonObject> timings = [];
         List<JsonObject> counters = [];
-
         string[] Invocation(string profile, int workers, string scenario) =>
         [
             "-c", cpus, binaries[profile], "--workers", workers.ToString(CultureInfo.InvariantCulture),
             "--scenario", scenario
         ];
 
-        for (int trial = 0; trial < options.TimingTrials; trial++)
+        foreach (JsonNode? item in schedule["entries"]!.AsArray())
         {
-            rng.Shuffle(points);
-            foreach ((int workers, string? scenario) in points)
+            ct.ThrowIfCancellationRequested();
+            JsonObject entry = item!.AsObject();
+            string kind = entry["kind"]!.GetValue<string>();
+            string profile = entry["profile"]!.GetValue<string>();
+            int workers = entry["workers"]!.GetValue<int>();
+            string scenario = entry["scenario"]!.GetValue<string>();
+            string label = entry["label"]!.GetValue<string>();
+            JsonObject row;
+            if (kind == "time")
             {
-                List<string> order = [.. Variants];
-                rng.Shuffle(order);
-                foreach (string? profile in order)
-                {
-                    string label = $"time-{trial}-{profile}-{workers}-{scenario}";
-                    string stdout = await Run(label, "taskset", Invocation(profile, workers, scenario));
-                    JsonObject metrics = ParseTiming(stdout, scenario);
-                    metrics["profile"] = profile;
-                    metrics["workers"] = workers;
-                    metrics["scenario"] = scenario;
-                    metrics["trial"] = trial;
-                    timings.Add(metrics);
-                    await WriteLines(Path.Combine(output, "timings.jsonl"), timings, ct);
-                }
+                string stdout = await Run(label, "taskset", Invocation(profile, workers, scenario));
+                row = ParseTiming(stdout, scenario);
             }
-        }
-
-        for (int trial = 0; trial < options.StatTrials; trial++)
-        {
-            rng.Shuffle(points);
-            foreach ((int workers, string? scenario) in points)
+            else
             {
-                List<string> order = [.. Variants];
-                rng.Shuffle(order);
-                foreach (string? profile in order)
+                string csv = Path.Combine(output, label + ".csv");
+                _ = await Run(label, "perf", new[]
                 {
-                    string label = $"stat-{trial}-{profile}-{workers}-{scenario}";
-                    string csv = Path.Combine(output, label + ".csv");
-                    _ = await Run(label, "perf", new[]
-                        {
-                            "stat", "-x", ";", "-o", csv,
-                            "-e", string.Join(",", Events), "--", "taskset"
-                        }
-                        .Concat(Invocation(profile, workers, scenario)));
-                    (JsonObject? counts, JsonObject? running) = ParseStat(await File.ReadAllTextAsync(csv, ct));
-                    JsonObject row = new()
-                    {
-                        ["profile"] = profile,
-                        ["workers"] = workers,
-                        ["scenario"] = scenario,
-                        ["trial"] = trial,
-                        ["counts"] = counts,
-                        ["running_pct"] = running
-                    };
-                    counters.Add(row);
-                    await WriteLines(Path.Combine(output, "counters.jsonl"), counters, ct);
-                }
+                    "stat", "-x", ";", "-o", csv, "-e", string.Join(",", Events), "--", "taskset"
+                }.Concat(Invocation(profile, workers, scenario)));
+                (JsonObject counts, JsonObject running) = ParseStat(await File.ReadAllTextAsync(csv, ct));
+                row = new JsonObject { ["counts"] = counts, ["running_pct"] = running };
+            }
+            row["profile"] = profile;
+            row["workers"] = workers;
+            row["scenario"] = scenario;
+            row["trial"] = entry["trial"]!.DeepClone();
+            row["schedule_order"] = entry["order"]!.DeepClone();
+            row["block_id"] = entry["block"]!.DeepClone();
+            row["pair_id"] = entry["pair"]!.DeepClone();
+            row["seed"] = schedule["identity"]!["seed"]!.DeepClone();
+            row["prng"] = schedule["identity"]!["algorithm"]!.DeepClone();
+            row["prng_version"] = schedule["prngVersion"]!.DeepClone();
+            row["schedule_strategy"] = schedule["identity"]!["strategy"]!.DeepClone();
+            row["shuffle_scope"] = schedule["identity"]!["scope"]!.DeepClone();
+            row["measurement_set_sha256"] = schedule["measurementSetSha256"]!.DeepClone();
+            if (kind == "time")
+            {
+                timings.Add(row);
+                await WriteLines(Path.Combine(output, "timings.jsonl"), timings, ct);
+            }
+            else
+            {
+                counters.Add(row);
+                await WriteLines(Path.Combine(output, "counters.jsonl"), counters, ct);
             }
         }
 
@@ -395,6 +426,18 @@ public static class DagFlowHistoricalCapture
         await CaptureFramePointers(output, source, cpus, summary, manifest, Run, SaveManifest, ct);
         progress.Phase("Rendering historical SVG/HTML report");
         int result = await DagFlowHistoricalReport.RenderAsync(output, ct);
+        if (result == 0)
+        {
+            manifest["finished_utc"] ??= DateTimeOffset.UtcNow.ToString("O");
+            await SaveManifest();
+            JsonObject hashes = [];
+            foreach (string name in new[] { "manifest.json", "schedule.json", "timings.jsonl", "counters.jsonl", "summary.json" })
+            {
+                hashes[name] = await CommandExecution.Sha256Async(Path.Combine(output, name), ct);
+            }
+            await HistoricalSchedule.SaveAsync(Path.Combine(output, "historical-completion.json"),
+                new JsonObject { ["schemaVersion"] = 1, ["status"] = "succeeded", ["sha256"] = hashes }, ct);
+        }
         progress.Phase("Historical capture complete");
         return result;
     }
@@ -431,6 +474,12 @@ public static class DagFlowHistoricalCapture
             : (sorted[(sorted.Length / 2) - 1] + sorted[sorted.Length / 2]) / 2;
     }
 
+    /// <summary>Converts a scenario timing line into the archived experiment units.</summary>
+    /// <remarks>
+    /// idle-burst reports p50/p99/max directly in microseconds. Other scenarios convert median/min/max from
+    /// milliseconds to microseconds and preserve throughput as million tasks per second. Missing scenario
+    /// lines, required fields or malformed numbers fail rather than substituting timing samples.
+    /// </remarks>
     internal static JsonObject ParseTiming(string stdout, string scenario)
     {
         string line = stdout.Split('\n').FirstOrDefault(x => x.StartsWith(scenario + " ", StringComparison.Ordinal))
@@ -454,6 +503,12 @@ public static class DagFlowHistoricalCapture
             };
     }
 
+    /// <summary>Parses the required perf-stat event counts and optional running percentages.</summary>
+    /// <remarks>
+    /// Normalizes page-faults:u to page-faults. Unavailable/nonnumeric required counters and incomplete event
+    /// sets fail. Running values remain percentages as reported; they are not fractions, elapsed time or
+    /// proof that counters were continuously scheduled. No process is launched by this parser.
+    /// </remarks>
     internal static (JsonObject Counts, JsonObject Running) ParseStat(string text)
     {
         JsonObject counts = [];

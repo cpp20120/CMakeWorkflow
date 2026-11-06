@@ -1,6 +1,6 @@
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
+// Preserve the established namespace; folders only group implementation.
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Transport;
 #pragma warning restore IDE0130
 
 internal static class HostBridgeCommand

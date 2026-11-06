@@ -1,17 +1,28 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using CMakeWorkflow;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
-using CMakeWorkflow.History;
-using CMakeWorkflow.Host;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.CMake.Serialization;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.History.Analysis;
+using CMakeWorkflow.History.Models;
+using CMakeWorkflow.History.Storage;
+using CMakeWorkflow.Host.Campaigns;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
 using Microsoft.Data.Sqlite;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+using OperationOverview = CMakeWorkflow.Host.Workflows.OperationOverview;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class ApplicationTests
 {
@@ -54,12 +65,12 @@ internal static class ApplicationTests
             $$"""{"schemaVersion":1,"target":"worker","configuration":"Debug","executable":{{JsonSerializer.Serialize(executable)}}} """, CancellationToken.None);
         string manifest = Path.Combine(root, "workflow.json");
         await File.WriteAllTextAsync(manifest, /*lang=json,strict*/ """
-                                    {"schemaVersion":2,"contexts":{"x":{"buildDirectory":"build space","mode":"adopt"}},
-                                     "nodes":[{"id":"build","kind":"build","context":"x","target":"worker",
-                                               "inputs":[{"path":"build space/CMakeCache.txt","snapshot":true}]},
-                                              {"id":"run","kind":"run","from":"build",
-                                               "outputs":[{"name":"example","root":"run","path":"example.json"}]}]}
-                                    """, CancellationToken.None);
+                                                                    {"schemaVersion":2,"contexts":{"x":{"buildDirectory":"build space","mode":"adopt"}},
+                                                                     "nodes":[{"id":"build","kind":"build","context":"x","target":"worker",
+                                                                               "inputs":[{"path":"build space/CMakeCache.txt","snapshot":true}]},
+                                                                              {"id":"run","kind":"run","from":"build",
+                                                                               "outputs":[{"name":"example","root":"run","path":"example.json"}]}]}
+                                                                    """, CancellationToken.None);
         string run = Directory.CreateDirectory(Path.Combine(root, "run directory")).FullName;
         WorkflowReport report = new()
         {
@@ -78,7 +89,7 @@ internal static class ApplicationTests
         {
             _ = db.Import(run, false);
             _ = db.Import(otherRun, false);
-            List<CMakeWorkflow.History.HistoryRun> runs = db.Runs(10, null, null, null, null, null, ct: ct);
+            List<HistoryRun> runs = db.Runs(10, null, null, null, null, null, ct: ct);
             ownId = runs.Single(r => r.Directory == run).Id;
             otherId = runs.Single(r => r.Directory == otherRun).Id;
         }
@@ -145,7 +156,7 @@ internal static class ApplicationTests
         byte[] benchmarkBytes = await File.ReadAllBytesAsync(benchmarkPrepared.Manifest, ct);
         Check(benchmarkPrepared.SchemaVersion == 1 && File.Exists(benchmarkRequest.OutputPath)
                                                    && (await File.ReadAllBytesAsync(benchmarkRequest.OutputPath, ct))
-                                                       .SequenceEqual(benchmarkBytes)
+                                                   .SequenceEqual(benchmarkBytes)
                                                    && benchmarkPrepared.ManifestSha256 == Convert.ToHexString(
                                                        SHA256.HashData(
                                                            benchmarkBytes)), "Benchmark preparation hash or path");
@@ -282,8 +293,8 @@ internal static class ApplicationTests
         string fixture = Directory.CreateDirectory(Path.Combine(root, "profile analysis fixture")).FullName;
         await File.WriteAllTextAsync(Path.Combine(fixture, "raw.txt"), "raw fixture", CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(fixture, "capture.results.json"),
-                                 /*lang=json,strict*/
-                                 """{"captureId":"capture","backend":"fixture","mode":"cpu","eventSource":"test","rawTrace":"raw.txt"}""", CancellationToken.None);
+            /*lang=json,strict*/
+            """{"captureId":"capture","backend":"fixture","mode":"cpu","eventSource":"test","rawTrace":"raw.txt"}""", CancellationToken.None);
         ProfileAnalysis analyzed = await client.ProfileAnalyzeAsync(new(fixture), ct);
         Check(analyzed.SchemaVersion == 1 && analyzed.AnalysisFile == Path.Combine(fixture, "analysis.json")
                                           && File.Exists(analyzed.AnalysisFile),
@@ -309,7 +320,7 @@ internal static class ApplicationTests
         Check(admitted.Revision == 2 && admitted.Decision == "needs_attention", "resume wire CAS admission");
         Check((await client.WorkflowResumeAsync(new(resumeId, 2, true), ct)).Revision == 2,
             "resume wire idempotence");
-        CMakeWorkflow.Host.OperationOverview overview = await client.OperationOverviewAsync(new(resumeId), ct);
+        OperationOverview overview = await client.OperationOverviewAsync(new(resumeId), ct);
         Check(!overview.IsFinalized && overview.Nodes.Count == 0 &&
               overview.ReportSha256 is null && overview.Operation.OperationId == resumeId,
             "Preterminal overview must not project an unverified checkpoint as node evidence");
@@ -345,17 +356,17 @@ internal static class ApplicationTests
         Check(saved.Revision == Convert.ToHexString(SHA256.HashData(raw)) && saved.Report.Status == "outcome_unknown",
             "Report revision/status differs from authoritative bytes");
         Check((await File.ReadAllBytesAsync(Path.Combine(run, "run.json"), ct)).SequenceEqual(raw), "Report query performed recovery");
-        List<CMakeWorkflow.History.HistoryRun> history = await client.HistoryRunsAsync(new(database, 1), ct);
+        List<HistoryRun> history = await client.HistoryRunsAsync(new(database, 1), ct);
         Check(history.Count == 1 && history[0].Id == ownId, "Workspace filtering must precede limit");
-        CMakeWorkflow.History.HistoryDetail detail = await client.HistoryShowAsync(new(database, ownId), ct);
+        HistoryDetail detail = await client.HistoryShowAsync(new(database, ownId), ct);
         Check(detail.Run.Id == ownId, "History detail wire result");
         await Refused(() => client.HistoryShowAsync(new(database, otherId), ct), "path_not_allowed");
         Check((await client.HistoryMetricsAsync(new(database, ownId), ct)).Count == 0, "Unexpected metrics");
         Check((await client.HistoryQueryAsync(new(database, Metric: "duration"), ct)).Count == 0,
             "Unexpected query result");
-        List<CMakeWorkflow.History.HistoryDifference> comparison = await client.HistoryCompareAsync(new(database, ownId, ownId), ct);
+        List<HistoryDifference> comparison = await client.HistoryCompareAsync(new(database, ownId, ownId), ct);
         Check(comparison.Single().Status == "missing", "History comparison invented measurements");
-        CMakeWorkflow.History.HistoryDetectionReport detection = await client.HistoryDetectAsync(new(database, ownId, ownId, "duration", "higher-worse", 5), ct);
+        HistoryDetectionReport detection = await client.HistoryDetectAsync(new(database, ownId, ownId, "duration", "higher-worse", 5), ct);
         Check(detection.SchemaVersion == 1, "History detect wire result");
         await Refused(() => client.HistoryRunsAsync(new(database, 1001), ct), "invalid_argument");
         await Refused(() => client.HistoryRunsAsync(new(database, Since: "invalid"), ct), "invalid_argument");
@@ -394,23 +405,23 @@ internal static class ApplicationTests
         await using (CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(
                          new ClientOptions(endpoint, root), ct))
         {
-            CMakeWorkflow.Client.History.HistoryRunPage historyPage = await sdk.History.RunsPageAsync(new(database, Limit: 1), ct);
+            Client.History.HistoryRunPage historyPage = await sdk.History.RunsPageAsync(new(database, Limit: 1), ct);
             Check(historyPage.SchemaVersion == 1 && historyPage.Items.Count == 1 &&
                   historyPage.Items[0].Id == ownId && historyPage.NextCursor is null,
                 "SDK history keyset page projection");
-            List<CMakeWorkflow.Client.History.HistoryRun> historyRows = await sdk.History.RunsAsync(new(database, Limit: 1), ct);
+            List<Client.History.HistoryRun> historyRows = await sdk.History.RunsAsync(new(database, Limit: 1), ct);
             Check(historyRows.Count == 1 && historyRows[0].Id == ownId,
                 "SDK history runs projection or filtering");
-            CMakeWorkflow.Client.History.HistoryDetail historyDetail = await sdk.History.ShowAsync(new(database, ownId), ct);
+            Client.History.HistoryDetail historyDetail = await sdk.History.ShowAsync(new(database, ownId), ct);
             Check(historyDetail.Run.Id == ownId, "SDK history detail projection");
             Check((await sdk.History.MetricsAsync(new(database, RunId: ownId), ct)).Count == 0,
                 "SDK history metrics projection");
             Check((await sdk.History.QueryAsync(new(database, Metric: "duration"), ct)).Count == 0,
                 "SDK history query projection");
-            List<CMakeWorkflow.Client.History.HistoryDifference> historyComparison = await sdk.History.CompareAsync(new(database, ownId, ownId), ct);
+            List<Client.History.HistoryDifference> historyComparison = await sdk.History.CompareAsync(new(database, ownId, ownId), ct);
             Check(historyComparison.Count == 1 && historyComparison[0].Status == "missing",
                 "SDK history compare projection");
-            CMakeWorkflow.Client.History.HistoryDetectionReport detected = await sdk.History.DetectAsync(
+            Client.History.HistoryDetectionReport detected = await sdk.History.DetectAsync(
                 new(database, ownId, ownId, "duration", "higher-worse", 5), ct);
             Check(detected.SchemaVersion == 1, "SDK history detection projection");
         }
@@ -460,7 +471,7 @@ internal static class ApplicationTests
         await using (CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(
                          new ClientOptions(endpoint, root), ct))
         {
-            CMakeWorkflow.Client.Workflows.OperationOverview sdkOverview = await sdk.Operations.GetOverviewAsync(resumeId, ct);
+            Client.Workflows.OperationOverview sdkOverview = await sdk.Operations.GetOverviewAsync(resumeId, ct);
             Check(!sdkOverview.IsFinalized && sdkOverview.Nodes.Count == 0 &&
                   sdkOverview.Operation.OperationId == resumeId,
                 "SDK nonterminal overview projection");

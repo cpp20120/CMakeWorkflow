@@ -2,8 +2,18 @@ using System.Diagnostics;
 
 namespace CMakeWorkflow.Client.Transport;
 
+/// <summary>Builds binary SSH bridge commands with separate local argv and remote shell quoting.</summary>
+/// <remarks>
+/// No process is started here. Local arguments use ProcessStartInfo.ArgumentList; remote executable and
+/// endpoint tokens are POSIX single-quoted. Remote paths remain remote strings; validation is not existence checking.
+/// </remarks>
 internal static class SshCommand
 {
+    /// <summary>Creates a noninteractive OpenSSH launch specification for a persistent Host bridge.</summary>
+    /// <remarks>
+    /// Disables PTY and credential prompts, redirects protocol streams, and leaves host authentication to
+    /// OpenSSH policy. Destination cannot be an option string. The SDK applies the overall connection deadline separately.
+    /// </remarks>
     internal static ProcessStartInfo Create(SshHostOptions options)
     {
         Text(options.Destination, nameof(options.Destination));
@@ -40,6 +50,7 @@ internal static class SshCommand
         return start;
     }
 
+    /// <summary>Quotes an exec command that attaches to an existing remote Host without owning it.</summary>
     internal static string BridgeCommand(string executable, string endpoint)
     {
         Text(executable, nameof(executable));
@@ -47,6 +58,7 @@ internal static class SshCommand
         return $"exec {Quote(executable)} host bridge --stdio --endpoint {Quote(endpoint)}";
     }
 
+    /// <summary>Quotes an exec command whose channel owns a private Host lifetime.</summary>
     internal static string StdioHostCommand(string executable)
     {
         Text(executable, nameof(executable));
@@ -64,6 +76,11 @@ internal static class SshCommand
         }
     }
 
+    /// <summary>Rejects nonabsolute Linux paths, double-slash roots and dot segments without local resolution.</summary>
+    /// <remarks>
+    /// Does not check remote existence, canonicalize symlinks or authorize workspace containment; the Host
+    /// performs those checks after initialization. This validation is shared by OpenSSH and SSH.NET transports.
+    /// </remarks>
     internal static void RemotePath(string path, string name)
     {
         Text(path, name);

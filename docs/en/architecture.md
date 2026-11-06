@@ -27,7 +27,9 @@ Sources are grouped by responsibility within the existing projects, with one lev
 - `History`: `Models`, `Storage`, `Analysis`; `Tooling`: `Tools`, `Toolchains`, `Environment`.
 
 Command entry points stay at project roots; root CLI handlers live in `Commands`.
-Small projects remain flat. Folder names do not change namespaces or the public API.
+Small projects remain flat. Source declarations define CLR namespaces; folder layout and public visibility alone do
+not establish an external compatibility contract. The external .NET SDK package boundary consists of Client and
+Contracts; see [External .NET API](../public-api.md) for its scope and the separate implementation inventory.
 
 ```mermaid
 flowchart TD
@@ -78,8 +80,9 @@ build. A File API generation change may downgrade provenance even when observed 
 comparisons cannot guarantee equal CPU temperature, frequencies or background load merely because saved fingerprints
 match.
 
-`IWorkflowOperationExecutor` is an internal operation interface used for profiling. It is **not** a third-party plugin
-loader: manifest node kinds must also be registered in the planner. The neutral `ExecutionScheduler` in Core manages ready/active admission through domain hooks.
+`IWorkflowOperationExecutor` is a public CLR type used as an internal cross-assembly operation contract for profiling.
+It is **not** a third-party plugin loader: manifest node kinds must also be registered in the planner. The neutral
+`ExecutionScheduler` in Core manages ready/active admission through domain hooks.
 `WorkflowRunner` is the CMake adapter; `ProcessWorkflowRunner` is a second actual consumer in Host.
 The shared process backend and durable byte writer also live in Core. Domain adapters own report schemas,
 leases, resource identity and dispatch evidence; the scheduler does not interpret or persist their reports.

@@ -1,9 +1,10 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using CMakeWorkflow.Host.Protocol;
 using Microsoft.Win32.SafeHandles;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Workflows;
 #pragma warning restore IDE0130
 
 /// <summary>
@@ -13,6 +14,15 @@ namespace CMakeWorkflow.Host;
 /// </summary>
 internal static class OperationArtifactFile
 {
+    /// <summary>Opens a seekable workspace descendant without following descendant symlinks or reparse points.</summary>
+    /// <remarks>
+    /// Walks held directory handles on supported platforms, so replacing an already-resolved pathname cannot
+    /// redirect the returned handle. Caller owns and must dispose the stream. This protects path resolution,
+    /// not file-content immutability or report-hash validity; those checks belong to the reader.
+    /// </remarks>
+    /// <param name="workspace">Workspace directory used as the open root.</param>
+    /// <param name="path">Full artifact path lexically beneath that root.</param>
+    /// <returns>Read-only stream owning the final native file handle.</returns>
     internal static FileStream OpenRead(string workspace, string path)
     {
         string root = Path.GetFullPath(workspace);

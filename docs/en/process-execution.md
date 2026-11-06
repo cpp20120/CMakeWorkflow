@@ -59,6 +59,20 @@ corresponding operation-handle SDK methods):
    results through `execution/report`. Cancellation remains `operations/cancel`,
    with the existing, separate cancellation-intent revision.
 
+The SDK requires an explicit recovery revision for `ExecuteResumeAsync`. The current value **2** comes from the
+persisted `0 -> 1 -> 2` reconciliation/admission transitions; it is not a retry counter or a default the SDK can infer.
+After reconciliation to `needs_attention` and verification that external work has stopped, pass the admission result:
+
+```csharp
+RecoverySnapshot reconciled = await operation.InspectRecoveryAsync(ct);
+RecoverySnapshot admitted = await operation.AdmitResumeAsync(
+    reconciled.Revision, confirmedQuiescent: true, ct: ct);
+RecoverySnapshot scheduled = await operation.ExecuteResumeAsync(admitted.Revision, ct);
+```
+
+`scheduled` acknowledges scheduling, not completion. A stale revision is refused without dispatch; an interrupted
+RPC may still have scheduled the Host-owned attempt. Reconnect and inspect before deciding how to proceed.
+
 An operation-level `needs_attention` decision **does not resolve a running node**.
 Resume rejects every `running` or `outcome_unknown` node. It executes only
 `pending`, `blocked` or `needs_attention` nodes that have no prior execution

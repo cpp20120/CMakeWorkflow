@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.Tooling.Tools;
 
-namespace CMakeWorkflow.Tooling;
+namespace CMakeWorkflow.Tooling.Environment;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,

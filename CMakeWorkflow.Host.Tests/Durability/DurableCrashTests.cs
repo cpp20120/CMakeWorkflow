@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Workflows;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class DurableCrashTests
 {
@@ -67,9 +69,9 @@ internal static class DurableCrashTests
             await ProcessOk("cmake", ["-S", source, "-B", build, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Debug"]);
             string manifest = Path.Combine(workspace, "workflow.json");
             JsonNode doc = JsonNode.Parse("""
-                                     {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
-                                      "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
-                                     """)!;
+                                          {"schemaVersion":1,"contexts":{"w":{"buildDirectory":"placeholder","mode":"adopt"}},
+                                           "nodes":[{"id":"effect","kind":"invoke","context":"w","target":"effect"}]}
+                                          """)!;
             doc["contexts"]!["w"]!["buildDirectory"] = build;
             byte[] bytes = Encoding.UTF8.GetBytes(doc.ToJsonString());
             await File.WriteAllBytesAsync(manifest, bytes);

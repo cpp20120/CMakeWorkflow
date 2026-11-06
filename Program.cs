@@ -10,6 +10,12 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Commands;
+using CMakeWorkflow.History.Storage;
+using CMakeWorkflow.Host.Toolchains;
+using CMakeWorkflow.Profiling.Analysis;
+using CMakeWorkflow.Profiling.Replay;
+using CMakeWorkflow.Profiling.Workflows;
 
 namespace CMakeWorkflow;
 
@@ -81,7 +87,7 @@ public static class Program
                 && (args.Length == 3 || args[3] == "--json"))
             {
                 ObservedBuildContext observed = await CMakeInspection.InspectAsync(BuildTreeOwnership.CanonicalPath(args[2]), cts.Token);
-                Console.WriteLine(JsonSerializer.Serialize(observed, WorkflowJson.Default.ObservedBuildContext));
+                Console.WriteLine(JsonSerializer.Serialize(observed, CMake.Serialization.WorkflowJson.Default.ObservedBuildContext));
                 return 0;
             }
 
@@ -113,7 +119,7 @@ public static class Program
                     string directory = Path.GetFullPath(args[2]);
                     WorkflowReport saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(
                                         Path.Combine(directory, "run.json"), cts.Token),
-                                    WorkflowJson.Default.WorkflowReport)
+                                    CMake.Serialization.WorkflowJson.Default.WorkflowReport)
                                 ?? throw new InvalidDataException("Invalid run report.");
                     return await WorkflowCommand.ExecuteAsync("run",
                         [saved.Workflow, "--resume-dir", directory], cts.Token, new ProfileWorkflowExecutor(),
@@ -238,7 +244,7 @@ public static class Program
             {
                 await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new TargetResolutionView(1,
                         target.BuildDirectory, target.Target, target.Configuration, artifact.ExecutablePath),
-                    WorkflowProtocolJson.Default.TargetResolutionView));
+                    CMake.Serialization.WorkflowProtocolJson.Default.TargetResolutionView));
             }
 
             if (command == "run")
@@ -379,6 +385,7 @@ public static class Program
         "       CMakeWorkflow dagflow profile flamegraph PERF_DATA OUTPUT_JSON\n" +
         "       CMakeWorkflow dagflow profile render-historical DIRECTORY\n" +
         "       CMakeWorkflow dagflow profile run-historical --source-dir DIR --output DIR [--trials N] [--stat-trials N] [--jobs N] [--resume]\n" +
+        "                  [--shuffle-algorithm ID] [--seeds 42,1337,2026] [--schedule-strategy ID] [--shuffle-scope block|global]\n" +
         "       CMakeWorkflow profile replay BASELINE_DIR CANDIDATE_DIR --node ID [--case NAME] [--harness INDEX] [--backend auto|perf|etw] [--results-dir DIR]\n" +
         "Usage: CMakeWorkflow context inspect BUILD_DIR [--json]\n" +
         "       CMakeWorkflow target <build|invoke|run|resolve> --build-dir DIR --target NAME [--config CONFIG] [--prepared] [--json for resolve] [-- executable-args...]\n" +

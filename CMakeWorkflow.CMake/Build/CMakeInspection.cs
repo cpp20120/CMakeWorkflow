@@ -241,7 +241,7 @@ public static class CMakeInspection
         if (File.Exists(provenance))
         {
             byte[] json = await File.ReadAllBytesAsync(provenance, ct);
-            result.ManagedConfigure = JsonSerializer.Deserialize(json, WorkflowJson.Default.ConfigureProvenance);
+            result.ManagedConfigure = JsonSerializer.Deserialize(json, Serialization.WorkflowJson.Default.ConfigureProvenance);
             if (result.ManagedConfigure is { } managed)
             {
                 if (managed.State != "Succeeded")
@@ -373,13 +373,19 @@ public static class CMakeInspection
 
     internal static string ProvenancePath(string tree) => Path.Combine(tree, "cmake-workflow", "configure.json");
 
+    /// <summary>Replaces configure.json invocation evidence through a fixed temporary sibling.</summary>
+    /// <remarks>
+    /// Caller serializes writes under build-tree ownership. Creates the metadata directory, writes serialized
+    /// bytes and overwrites the destination by move. There is no cancellation token, fsync/directory-sync durability
+    /// confirmation or temporary-file cleanup on failure; this is not the durable runner dispatch checkpoint.
+    /// </remarks>
     internal static async Task WriteProvenanceAsync(string tree, ConfigureProvenance provenance)
     {
         string path = ProvenancePath(tree);
         _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         string temporary = path + ".tmp";
         await File.WriteAllBytesAsync(temporary,
-            JsonSerializer.SerializeToUtf8Bytes(provenance, WorkflowJson.Default.ConfigureProvenance));
+            JsonSerializer.SerializeToUtf8Bytes(provenance, Serialization.WorkflowJson.Default.ConfigureProvenance));
         File.Move(temporary, path, true);
     }
 

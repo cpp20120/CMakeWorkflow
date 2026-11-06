@@ -1,7 +1,9 @@
-using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Toolchains;
 using CMakeWorkflow.Client.Transport;
 using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshTransportTests
 {
@@ -25,7 +27,7 @@ internal static class SshTransportTests
         await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshAsync(options, ct))
         {
             Check(client.Host.WorkspaceDirectory == files.Root, "Remote workspace changed.");
-            Check(client.Host.Capabilities.Contains("workflow/start"), "Capabilities were lost.");
+            Check(MemoryExtensions.Contains(client.Host.Capabilities, "workflow/start"), "Capabilities were lost.");
             for (int i = 0; i < 3; i++)
             {
                 ToolchainInventory inventory = await client.Toolchains.DiscoverAsync(ct);

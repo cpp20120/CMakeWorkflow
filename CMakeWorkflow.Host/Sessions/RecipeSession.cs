@@ -2,9 +2,13 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Serialization;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Profiling.Workflows;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {
@@ -16,6 +20,12 @@ public sealed partial class DoctorSession
         }
     }
 
+    /// <summary>Commits a preparation binding before its immutable manifest.</summary>
+    /// <remarks>
+    /// Caller has validated recipe and workspace paths. Commit-once writes accept identical bytes and refuse conflicts.
+    /// Cancellation can leave only the binding committed; an explicit identical retry finishes the manifest write.
+    /// No durable workflow admission, build or dispatch occurs here; committed files remain caller-owned recovery evidence.
+    /// </remarks>
     private static async Task CommitRecipeAsync(WorkspaceReadPaths paths, string kind,
         string requestId, string manifest, WorkflowDocument document,
         byte[] bindingBytes, CancellationToken ct)

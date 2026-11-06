@@ -1,10 +1,12 @@
-using CMakeWorkflow;
 using System.Security.Cryptography;
 using System.Text;
-using CMakeWorkflow.Host;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.CMake.Serialization;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class DurableAcceptanceTests
 {

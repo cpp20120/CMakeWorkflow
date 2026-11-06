@@ -4,6 +4,13 @@ using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow.CMake.Recovery;
 
+/// <summary>Best-effort event projection owned by one CMake runner under its run lease.</summary>
+/// <remarks>
+/// Not thread-safe; Publish is called on the serial report persistence path. Resume recovers the maximum
+/// parseable sequence and suppresses already successful node events; malformed JSON lines are ignored during
+/// that scan. It does not validate recovery authority or prove event completeness. AutoFlush is not durable sync.
+/// Handled journal/stdout I/O failures disable those outputs; unexpected errors may still propagate.
+/// </remarks>
 internal sealed class WorkflowEventJournal : IDisposable
 {
     private StreamWriter? journal;
@@ -68,6 +75,11 @@ internal sealed class WorkflowEventJournal : IDisposable
         }
     }
 
+    /// <summary>Projects report state changes after checkpoint persistence without owning authoritative state.</summary>
+    /// <remarks>
+    /// Does not mutate the report or retry execution. A workflow_finished event can describe a suspended
+    /// needs_attention outcome and must not be used as proof of ledger terminal finalization.
+    /// </remarks>
     public void Publish(WorkflowReport report)
     {
         if (started && report.RecoveryPhase == "resuming" && !resumedEventEmitted)
@@ -168,7 +180,7 @@ internal sealed class WorkflowEventJournal : IDisposable
     {
         WorkflowEvent item = new(1, ++sequence, DateTimeOffset.UtcNow, type, directory,
             node?.Id, node?.Kind, status, exitCode, error, artifacts);
-        string line = JsonSerializer.Serialize(item, WorkflowProtocolJson.Default.WorkflowEvent);
+        string line = JsonSerializer.Serialize(item, Serialization.WorkflowProtocolJson.Default.WorkflowEvent);
         if (journal is null)
         {
             return;

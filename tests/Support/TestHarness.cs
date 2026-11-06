@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.IntegrationTests;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.IntegrationTests.Support;
 #pragma warning restore IDE0130
 
 internal static class TestHarness

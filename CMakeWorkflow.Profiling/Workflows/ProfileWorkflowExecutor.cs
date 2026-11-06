@@ -1,8 +1,10 @@
-using CMakeWorkflow.Profiling.Backends;
 using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Profiling.Backends;
+using CMakeWorkflow.Profiling.Capture;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Profiling;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Profiling.Workflows;
 #pragma warning restore IDE0130
 
 public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : IWorkflowOperationExecutor

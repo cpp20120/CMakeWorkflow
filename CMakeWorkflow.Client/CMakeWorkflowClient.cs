@@ -16,7 +16,14 @@ using StreamJsonRpc;
 
 namespace CMakeWorkflow.Client;
 
-/// <summary>Client owns the RPC connection, never the server-side workflow operation.</summary>
+/// <summary>Owns one initialized RPC connection and its service facades.</summary>
+/// <remarks>
+/// Service facades and operation handles borrow this client and become unusable after disposal.
+/// Request cancellation is cooperative RPC cancellation, not a durable request to stop accepted execution.
+/// An interrupted mutation may already have committed; the SDK does not reconnect or retry it automatically.
+/// For uncertain starts, reconnect to the same Host workspace and find the saved ClientRequestId before deciding what to do.
+/// Connected persistent Hosts outlive this client. Launched private Hosts are owned by the client and stop with its lifetime.
+/// </remarks>
 public sealed partial class CMakeWorkflowClient : IAsyncDisposable
 {
     private readonly Stream transport;
@@ -49,19 +56,39 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         Provisioning = new(this);
     }
 
+    /// <summary>Identity and advertised capabilities returned by initialization.</summary>
     public HostIdentity Host { get; }
+    /// <summary>Manifest planning, preflight and durable workflow admission on this connection.</summary>
     public WorkflowService Workflows { get; }
+    /// <summary>Domain-qualified durable execution admission on this connection.</summary>
     public ExecutionService Executions { get; }
+    /// <summary>Workspace operation lookup and handles bound to this client lifetime.</summary>
     public OperationService Operations { get; }
+    /// <summary>Profile preparation, replay and analysis on the Host.</summary>
     public ProfileService Profiles { get; }
+    /// <summary>Benchmark recipe preparation on the Host.</summary>
     public BenchmarkService Benchmarks { get; }
+    /// <summary>Typed recipe preparation on the Host.</summary>
     public RecipeService Recipes { get; }
+    /// <summary>Target resolution and preparation on the Host.</summary>
     public TargetService Targets { get; }
+    /// <summary>Host campaign operations.</summary>
     public CampaignService Campaigns { get; }
+    /// <summary>Host history queries and imports.</summary>
     public HistoryService History { get; }
+    /// <summary>Host-local toolchain discovery and resolution.</summary>
     public ToolchainService Toolchains { get; }
+    /// <summary>Host provisioning services associated with this connection.</summary>
     public HostProvisioningService Provisioning { get; }
 
+    /// <summary>Connects once to an existing local Host and initializes its workspace.</summary>
+    /// <remarks>
+    /// The returned client owns the connection, not the Host. Failed initialization releases the transport.
+    /// Workspace is resolved locally; endpoint validation follows the current platform transport.
+    /// </remarks>
+    /// <param name="options">Local endpoint and workspace to initialize.</param>
+    /// <param name="ct">Cancels connection/initialization; no workflow operation is submitted.</param>
+    /// <returns>An initialized client; the caller must asynchronously dispose it.</returns>
     public static async Task<CMakeWorkflowClient> ConnectAsync(ClientOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -78,7 +105,15 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         }
     }
 
-    /// <summary>Starts a private Host. Disposing the client stops only this owned Host, including its active work.</summary>
+    /// <summary>Starts and owns a private local Host, then initializes a connection.</summary>
+    /// <remarks>
+    /// Startup probes retry for up to 15 seconds; these retries do not submit workflow operations.
+    /// Startup failure kills the owned process tree and removes the temporary socket directory.
+    /// Disposal kills this Host and its active process tree; durable records may require recovery afterward.
+    /// </remarks>
+    /// <param name="options">Executable, local workspace and optional endpoint.</param>
+    /// <param name="ct">Cancels startup and triggers cleanup of the process started here.</param>
+    /// <returns>An initialized client owning the launched Host; the caller must asynchronously dispose it.</returns>
     public static async Task<CMakeWorkflowClient> LaunchAsync(LaunchOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -322,6 +357,13 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Closes owned transport resources and, when launched here, the private Host.</summary>
+    /// <remarks>
+    /// Repeated calls after disposal return immediately. Service facades and operation handles borrow this lifetime.
+    /// For a connected persistent Host, closing the connection does not request durable operation cancellation.
+    /// For a private local Host the process tree is killed; a private SSH Host stops when its channel closes.
+    /// This method does not wait for persistent operations to finish or guarantee terminal finalization.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (disposed)

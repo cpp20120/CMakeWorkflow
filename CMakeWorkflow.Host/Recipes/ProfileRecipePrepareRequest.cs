@@ -1,7 +1,7 @@
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Contracts.Recipes;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.Host;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Host.Recipes;
 #pragma warning restore IDE0130
 
 public sealed record ProfileRecipePrepareRequest(string RequestId, string OutputPath, ProfileRecipeV1 Recipe);

@@ -1,9 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
-using CMakeWorkflow.Tooling;
-using System.Diagnostics.CodeAnalysis;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Workflows;
+using CMakeWorkflow.Tooling.Tools;
 
-namespace CMakeWorkflow.Host;
+namespace CMakeWorkflow.Host.Sessions;
 
 // One instance per connection. Never changes process-wide cwd or environment.
 [method: SuppressMessage("Design", "CA1068", Justification = "Preserve the existing positional and named argument order for public callers.")]

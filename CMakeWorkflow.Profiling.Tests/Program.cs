@@ -1,15 +1,27 @@
-using CMakeWorkflow;
-using CMakeWorkflow.CMake.Execution;
-using CMakeWorkflow.Profiling;
-using CMakeWorkflow.Profiling.Backends;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Profiling.Analysis;
+using CMakeWorkflow.Profiling.Backends;
+using CMakeWorkflow.Profiling.Capture;
+using CMakeWorkflow.Profiling.Historical;
+using CMakeWorkflow.Profiling.Replay;
+using CMakeWorkflow.Profiling.Tests;
+using CMakeWorkflow.Profiling.Workflows;
 
 if (args.Length == 1 && args[0] == "--progress-e2e")
 {
     await ProgressE2E.RunAsync();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--schedule-tests")
+{
+    await HistoricalScheduleTests.RunAsync();
     return;
 }
 
@@ -22,6 +34,7 @@ string root = Path.Combine(Path.GetTempPath(), "cmake-workflow-profile-test-" + 
 Directory.CreateDirectory(root);
 try
 {
+    await HistoricalScheduleTests.RunAsync();
     Check(HistoricalProgress.TotalOperations(5, 3) == 397,
         "Historical progress step count changed.");
     // A real process executed through the shared workflow process owner must
@@ -83,7 +96,7 @@ try
     await File.WriteAllTextAsync(executable, "fixture");
     ProfileRequest request = new(executable, ["--workers", "1"], root,
         new Dictionary<string, string>(), root, "capture", "cpu", TimeSpan.FromSeconds(5));
-    PythonShuffleRandom historicalOrder = new(20260930);
+    LegacyMt19937Shuffle historicalOrder = new(20260930);
     List<int> points = [.. Enumerable.Range(0, 12)];
     historicalOrder.Shuffle(points);
     Check(points.SequenceEqual([8, 9, 1, 2, 5, 0, 11, 10, 4, 3, 6, 7]),
@@ -94,14 +107,14 @@ try
           && timing["p99_us"]!.GetValue<double>() == 99,
         "Historical timing units changed.");
     (JsonObject? Counts, JsonObject? Running) = DagFlowHistoricalCapture.ParseStat("""
-                                                                100;;cycles:u;;100.00
-                                                                200;;instructions:u;;100.00
-                                                                300;;branches:u;;100.00
-                                                                4;;branch-misses:u;;100.00
-                                                                500;;cache-references:u;;100.00
-                                                                6;;cache-misses:u;;100.00
-                                                                7;;page-faults:u;;100.00
-                                                                """);
+        100;;cycles:u;;100.00
+        200;;instructions:u;;100.00
+        300;;branches:u;;100.00
+        4;;branch-misses:u;;100.00
+        500;;cache-references:u;;100.00
+        6;;cache-misses:u;;100.00
+        7;;page-faults:u;;100.00
+        """);
     Check(Counts["cycles:u"]!.GetValue<double>() == 100
           && Running["page-faults"]!.GetValue<double>() == 100,
         "Historical perf counters or running percentages changed.");
@@ -127,10 +140,10 @@ try
                 }
 
                 if (value is JsonValue && actual is JsonValue
-                                                              && double.TryParse(value.ToString(), NumberStyles.Float,
-                                                                  CultureInfo.InvariantCulture, out double numeric)
-                                                              && double.TryParse(actual.ToString(), NumberStyles.Float,
-                                                                  CultureInfo.InvariantCulture, out double computed))
+                                       && double.TryParse(value.ToString(), NumberStyles.Float,
+                                           CultureInfo.InvariantCulture, out double numeric)
+                                       && double.TryParse(actual.ToString(), NumberStyles.Float,
+                                           CultureInfo.InvariantCulture, out double computed))
                 {
                     Check(Math.Abs(numeric - computed) < 1e-7 * Math.Max(1, Math.Abs(numeric)),
                         "Historical metric changed: " + i + "/" + key);
@@ -145,13 +158,13 @@ try
     }
 
     using (StringReader weighted = new("""
-                                           worker 100/101 [001] 123.456: 17 cycles:u:
-                                                        7ff0 Work::execute (dagflow-runtime-bench)
-                                                        7ff1 Pool::worker (dagflow-runtime-bench)
-                                           worker 100/101 [001] 123.457: 23 cycles:u:
-                                                        7ff0 Work::execute (dagflow-runtime-bench)
-                                                        7ff1 Pool::worker (dagflow-runtime-bench)
-                                           """))
+                                       worker 100/101 [001] 123.456: 17 cycles:u:
+                                                    7ff0 Work::execute (dagflow-runtime-bench)
+                                                    7ff1 Pool::worker (dagflow-runtime-bench)
+                                       worker 100/101 [001] 123.457: 23 cycles:u:
+                                                    7ff0 Work::execute (dagflow-runtime-bench)
+                                                    7ff1 Pool::worker (dagflow-runtime-bench)
+                                       """))
     {
         JsonObject tree = DagFlowHistoricalFlamegraph.Parse(weighted, CancellationToken.None);
         Check(tree["metadata"]!["samples"]!.GetValue<long>() == 2
@@ -213,13 +226,13 @@ try
             foreach (int workers in new[] { 1, 4 })
             {
                 foreach (string? scenario in new[]
-                 {
-                     "external-contention", "hot-shard-skew",
-                     "local-overflow", "nested-helping", "mixed-chaos", "idle-burst"
-                 })
+                         {
+                             "external-contention", "hot-shard-skew",
+                             "local-overflow", "nested-helping", "mixed-chaos", "idle-burst"
+                         })
                 {
                     string fixtureProfile = Path.Combine(historical, "profiles",
-                $"{profileName}-{workers}-{scenario}");
+                        $"{profileName}-{workers}-{scenario}");
                     _ = Directory.CreateDirectory(fixtureProfile);
                     await File.WriteAllTextAsync(Path.Combine(fixtureProfile, "flamegraph.json"),
                         tree.ToJsonString());
@@ -288,13 +301,13 @@ try
     }
 
     using (StringReader script = new("""
-                                         test 100 [001] 123.456: 1 cycles:u:
-                                                      7ff0 Work::execute (dagflow-runtime-bench)
-                                                      7ff1 Pool::worker (dagflow-runtime-bench)
-                                         test 100 [001] 123.457: 1 cycles:u:
-                                                      7ff0 Work::execute (dagflow-runtime-bench)
-                                                      7ff1 Pool::worker (dagflow-runtime-bench)
-                                         """))
+                                     test 100 [001] 123.456: 1 cycles:u:
+                                                  7ff0 Work::execute (dagflow-runtime-bench)
+                                                  7ff1 Pool::worker (dagflow-runtime-bench)
+                                     test 100 [001] 123.457: 1 cycles:u:
+                                                  7ff0 Work::execute (dagflow-runtime-bench)
+                                                  7ff1 Pool::worker (dagflow-runtime-bench)
+                                     """))
     {
         JsonObject stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
         Check(stacks["samples"]!.GetValue<int>() == 2
@@ -304,19 +317,19 @@ try
     }
 
     using (StringReader script = new("""
-                                         dagflow-public- 1804384/1804384 835331.745025: 1 cycles:u:
-                                                     7f10 dagflow::TaskGraph::seal() (/tmp/dagflow_public_api_bench)
-                                                     7f11 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+                                     dagflow-public- 1804384/1804384 835331.745025: 1 cycles:u:
+                                                 7f10 dagflow::TaskGraph::seal() (/tmp/dagflow_public_api_bench)
+                                                 7f11 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
 
-                                         worker 101/102 835332.000001: 1 cpu-clock:u:
-                                                     0000000000400010 [unknown] (/tmp/dagflow_public_api_bench)
-                                                     7f11 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+                                     worker 101/102 835332.000001: 1 cpu-clock:u:
+                                                 0000000000400010 [unknown] (/tmp/dagflow_public_api_bench)
+                                                 7f11 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
 
-                                         worker 101 [003] 835333.000001: 1 cycles:
-                                                     7f20 dagflow::TaskGraph::add_edge() (/tmp/dagflow_public_api_bench)
+                                     worker 101 [003] 835333.000001: 1 cycles:
+                                                 7f20 dagflow::TaskGraph::add_edge() (/tmp/dagflow_public_api_bench)
 
-                                         nonsense unsupported header
-                                         """))
+                                     nonsense unsupported header
+                                     """))
     {
         StackEvidence parsed = PerfStackAnalyzer.Parse(script, CancellationToken.None);
         JsonObject stacks = parsed.ToJson("perf", "capture");
@@ -337,12 +350,12 @@ try
     // event header itself, followed by caller frames. The sampled leaf must
     // remain in the stack and in the self-sample accounting.
     using (StringReader script = new("""
-                                         dagflow 123/124 [001] 456.123456: 42 cycles:u: 7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
-                                                     7f456 std::thread::_M_run() (/usr/lib/libstdc++.so)
+                                     dagflow 123/124 [001] 456.123456: 42 cycles:u: 7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+                                                 7f456 std::thread::_M_run() (/usr/lib/libstdc++.so)
 
-                                         dagflow 123/124 [001] 456.123457: 42 cycles:u: 7f999 dagflow::TaskGraph::seal() (/tmp/libdagflow.so)
+                                     dagflow 123/124 [001] 456.123457: 42 cycles:u: 7f999 dagflow::TaskGraph::seal() (/tmp/libdagflow.so)
 
-                                         """))
+                                     """))
     {
         JsonObject stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
         Check(stacks["samples"]!.GetValue<int>() == 2
@@ -361,11 +374,11 @@ try
     }
 
     using (StringReader script = new("""
-                                         dagflow 123/124 456.123456: 42 cycles:u:
+                                     dagflow 123/124 456.123456: 42 cycles:u:
 
-                                         dagflow 123/124 456.123457: 42 cycles:u:
-                                                     7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
-                                         """))
+                                     dagflow 123/124 456.123457: 42 cycles:u:
+                                                 7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
+                                     """))
     {
         JsonObject stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
         Check(stacks["analysisStatus"]!.GetValue<string>() == "partial"
@@ -387,9 +400,9 @@ try
     }
 
     using (StringReader script = new("""
-                                         cmd 123 [003] 123.001234: sched:sched_wakeup: comm=worker pid=42 prio=120 target_cpu=003
-                                         cmd 123 [003] 123.002345: sched:sched_switch: prev_comm=worker prev_pid=42 prev_prio=120 prev_state=S ==> next_comm=other next_pid=43 next_prio=120
-                                         """))
+                                     cmd 123 [003] 123.001234: sched:sched_wakeup: comm=worker pid=42 prio=120 target_cpu=003
+                                     cmd 123 [003] 123.002345: sched:sched_switch: prev_comm=worker prev_pid=42 prev_prio=120 prev_state=S ==> next_comm=other next_pid=43 next_prio=120
+                                     """))
     using (StringWriter output = new())
     {
         Check(PerfSchedulerAnalyzer.Parse(script, output, CancellationToken.None) == 3
@@ -641,7 +654,7 @@ try
     string timeline = await File.ReadAllTextAsync(Path.Combine(root, "traces", "normalized", "etw.timeline.jsonl"));
     string stacksJson = await File.ReadAllTextAsync(Path.Combine(root, "traces", "normalized", "etw.stacks.json"));
     Check(timeline.Contains("\"ready\"", StringComparison.Ordinal) && timeline.Contains("\"running\"", StringComparison.Ordinal)
-                                         && timeline.Contains("\"offcpu\"", StringComparison.Ordinal) && stacksJson.Contains("\"samples\":1", StringComparison.Ordinal),
+                                                                   && timeline.Contains("\"offcpu\"", StringComparison.Ordinal) && stacksJson.Contains("\"samples\":1", StringComparison.Ordinal),
         "ETW scheduler timeline/CPU stack evidence missing.");
     Check((await File.ReadAllLinesAsync(etw.Samples)).Length == 1
           && (await File.ReadAllTextAsync(etw.Samples)).Contains("0x1234", StringComparison.Ordinal)
@@ -685,21 +698,21 @@ try
     await File.WriteAllTextAsync(Path.Combine(analysis, "traces", "raw", "lto.csv"),
         "200,,cycles\n300,,instructions\n6,,cache-misses\n3,,branch-misses\n");
     await File.WriteAllTextAsync(Path.Combine(analysis, "counters_o3.results.json"),
-                             /*lang=json,strict*/
-                             """{"captureId":"counters_o3","backend":"perf","mode":"counters","rawTrace":"traces/raw/counters.csv","eventSource":"Linux PMU counters"}""");
+        /*lang=json,strict*/
+        """{"captureId":"counters_o3","backend":"perf","mode":"counters","rawTrace":"traces/raw/counters.csv","eventSource":"Linux PMU counters"}""");
     await File.WriteAllTextAsync(Path.Combine(analysis, "counters_lto.results.json"),
-                             /*lang=json,strict*/
-                             """{"captureId":"counters_lto","backend":"perf","mode":"counters","rawTrace":"traces/raw/lto.csv","eventSource":"Linux PMU counters"}""");
+        /*lang=json,strict*/
+        """{"captureId":"counters_lto","backend":"perf","mode":"counters","rawTrace":"traces/raw/lto.csv","eventSource":"Linux PMU counters"}""");
     await File.WriteAllTextAsync(Path.Combine(analysis, "run.json"), /*lang=json,strict*/ """
-                                                                     {"nodes":[
-                                                                       {"id":"build_o3","kind":"build","status":"succeeded"},
-                                                                       {"id":"build_lto","kind":"build","status":"succeeded"},
-                                                                       {"id":"timing_o3_1","kind":"run","status":"succeeded","processDurationSeconds":2.0},
-                                                                       {"id":"timing_o3_2","kind":"run","status":"succeeded","processDurationSeconds":4.0},
-                                                                       {"id":"timing_lto_1","kind":"run","status":"succeeded","processDurationSeconds":1.5},
-                                                                       {"id":"timing_lto_2","kind":"run","status":"succeeded","processDurationSeconds":1.5}
-                                                                     ]}
-                                                                     """);
+        {"nodes":[
+          {"id":"build_o3","kind":"build","status":"succeeded"},
+          {"id":"build_lto","kind":"build","status":"succeeded"},
+          {"id":"timing_o3_1","kind":"run","status":"succeeded","processDurationSeconds":2.0},
+          {"id":"timing_o3_2","kind":"run","status":"succeeded","processDurationSeconds":4.0},
+          {"id":"timing_lto_1","kind":"run","status":"succeeded","processDurationSeconds":1.5},
+          {"id":"timing_lto_2","kind":"run","status":"succeeded","processDurationSeconds":1.5}
+        ]}
+        """);
     _ = await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None);
     Check(File.Exists(Path.Combine(analysis, "counter-comparison.json")),
         "perf stat counters were not analyzed separately.");
@@ -765,8 +778,8 @@ try
 
     string failedCapture = Path.Combine(analysis, "capture_failed.results.json");
     await File.WriteAllTextAsync(failedCapture,
-                             /*lang=json,strict*/
-                             """{"captureId":"capture_failed","backend":"perf","mode":"cpu","status":"failed"}""");
+        /*lang=json,strict*/
+        """{"captureId":"capture_failed","backend":"perf","mode":"cpu","status":"failed"}""");
     Check(await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None) == 1,
         "Failed capture was reported as successful analysis.");
     using (JsonDocument analyzed = JsonDocument.Parse(
@@ -782,8 +795,8 @@ try
     // A failed ProfileSession persists its manifest and journal entry, but
     // deliberately does not commit a *.results.json capture record.
     await File.WriteAllTextAsync(Path.Combine(analysis, "capture_interrupted.manifest.json"),
-                             /*lang=json,strict*/
-                             """{"captureId":"capture_interrupted","backend":"perf","mode":"cpu"}""");
+        /*lang=json,strict*/
+        """{"captureId":"capture_interrupted","backend":"perf","mode":"cpu"}""");
     await File.WriteAllTextAsync(Path.Combine(analysis, "runs.jsonl"),
         /*lang=json,strict*/
         "{\"captureId\":\"capture_interrupted\",\"status\":\"failed\",\"error\":\"perf record denied\"}\n");
@@ -802,8 +815,8 @@ try
     File.Delete(Path.Combine(analysis, "capture_interrupted.manifest.json"));
     File.Delete(Path.Combine(analysis, "runs.jsonl"));
     await File.WriteAllTextAsync(Path.Combine(analysis, "counters_o3.results.json"),
-                             /*lang=json,strict*/
-                             """{"captureId":"counters_o3","backend":"perf","mode":"counters","rawTrace":"traces/raw/counters.csv","rawTraceSha256":"wrong","eventSource":"Linux PMU counters"}""");
+        /*lang=json,strict*/
+        """{"captureId":"counters_o3","backend":"perf","mode":"counters","rawTrace":"traces/raw/counters.csv","rawTraceSha256":"wrong","eventSource":"Linux PMU counters"}""");
     try
     {
         _ = await ProfileAnalyzer.AnalyzeAsync(analysis, CancellationToken.None);
@@ -834,185 +847,193 @@ static void Check(bool condition, string message)
     }
 }
 
-internal static class HistoricalFixture
+namespace CMakeWorkflow.Profiling.Tests
 {
-    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
-    internal static async Task RunAsync(string root)
+    internal static class HistoricalFixture
     {
-        string source = Path.Combine(root, "historical-fixture-source");
-        foreach (string? dir in new[] { "include", "src", "cmake", "bench" })
+        [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+        internal static async Task RunAsync(string root)
         {
-            _ = Directory.CreateDirectory(Path.Combine(source, dir));
-        }
+            string source = Path.Combine(root, "historical-fixture-source");
+            foreach (string? dir in new[] { "include", "src", "cmake", "bench" })
+            {
+                _ = Directory.CreateDirectory(Path.Combine(source, dir));
+            }
 
-        await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"), "fixture");
-        await File.WriteAllTextAsync(Path.Combine(source, "bench", "stress_harness.cpp"), "fixture");
-        string tools = Path.Combine(root, "fake-tools");
-        _ = Directory.CreateDirectory(tools);
+            await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"), "fixture");
+            await File.WriteAllTextAsync(Path.Combine(source, "bench", "stress_harness.cpp"), "fixture");
+            string tools = Path.Combine(root, "fake-tools");
+            _ = Directory.CreateDirectory(tools);
 
-        void Script(string name, string script)
-        {
-            string file = Path.Combine(tools, name);
-            File.WriteAllText(file, script);
-            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite
-                                                             | UnixFileMode.UserExecute | UnixFileMode.GroupRead |
-                                                             UnixFileMode.GroupExecute);
-        }
+            void Script(string name, string script)
+            {
+                string file = Path.Combine(tools, name);
+                File.WriteAllText(file, script);
+                File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite
+                                                                 | UnixFileMode.UserExecute | UnixFileMode.GroupRead |
+                                                                 UnixFileMode.GroupExecute);
+            }
 
-        Script("benchmark", """
+            Script("benchmark", """
+                                #!/bin/sh
+                                if [ -n "$CMW_FAKE_BLOCK" ]; then
+                                  printf x >> "$CMW_FAKE_BLOCK"
+                                  sleep 30
+                                fi
+                                scenario=""
+                                while [ "$#" -gt 0 ]; do
+                                  if [ "$1" = "--scenario" ]; then scenario="$2"; shift 2; else shift; fi
+                                done
+                                if [ "$scenario" = "idle-burst" ]; then
+                                  echo "$scenario p50= 40 p99= 90 max= 100"
+                                else
+                                  echo "$scenario median= 1 min= 0.8 max= 1.2 throughput= 3"
+                                fi
+                                """);
+            Script("cmake", """
                             #!/bin/sh
-                            scenario=""
-                            while [ "$#" -gt 0 ]; do
-                              if [ "$1" = "--scenario" ]; then scenario="$2"; shift 2; else shift; fi
-                            done
-                            if [ "$scenario" = "idle-burst" ]; then
-                              echo "$scenario p50= 40 p99= 90 max= 100"
-                            else
-                              echo "$scenario median= 1 min= 0.8 max= 1.2 throughput= 3"
+                            if [ "$1" = "--build" ]; then
+                              mkdir -p "$2"
+                              cp "$CMW_FAKE_BENCH" "$2/dagflow-stress-bench"
+                              chmod +x "$2/dagflow-stress-bench"
+                              exit 0
                             fi
+                            while [ "$#" -gt 0 ]; do
+                              if [ "$1" = "-B" ]; then mkdir -p "$2"; exit 0; fi
+                              shift
+                            done
+                            exit 2
                             """);
-        Script("cmake", """
-                        #!/bin/sh
-                        if [ "$1" = "--build" ]; then
-                          mkdir -p "$2"
-                          cp "$CMW_FAKE_BENCH" "$2/dagflow-stress-bench"
-                          chmod +x "$2/dagflow-stress-bench"
-                          exit 0
-                        fi
-                        while [ "$#" -gt 0 ]; do
-                          if [ "$1" = "-B" ]; then mkdir -p "$2"; exit 0; fi
-                          shift
-                        done
-                        exit 2
-                        """);
-        Script("perf", """
-                       #!/bin/sh
-                       mode="$1"
-                       out=""
-                       while [ "$#" -gt 0 ]; do
-                         if [ "$1" = "-o" ]; then out="$2"; break; fi
-                         shift
-                       done
-                       case "$mode" in
-                         version) echo "fake perf";;
-                         record) printf 'fake perf data\n' > "$out";;
-                         stat)
-                           cat > "$out" <<'EOF'
-                       100;;cycles:u;;100.00
-                       200;;instructions:u;;100.00
-                       300;;branches:u;;100.00
-                       4;;branch-misses:u;;100.00
-                       500;;cache-references:u;;100.00
-                       6;;cache-misses:u;;100.00
-                       7;;page-faults:u;;100.00
-                       EOF
-                           ;;
-                         report) echo "fake report";;
-                         script) echo "bench 100/100 1.0: 10 cycles:u: 7f Work::execute (bench)";;
-                         *) exit 2;;
-                       esac
-                       """);
-        Script("taskset", """
-                          #!/bin/sh
-                          [ "$1" = "-c" ] || exit 2
-                          shift 2
-                          exec "$@"
-                          """);
-        Script("lscpu", "#!/bin/sh\necho fake-cpu\n");
-        Script("clang++", "#!/bin/sh\necho fake-clang\n");
-        Script("ldd", "#!/bin/sh\necho fake-ldd\n");
-        string? previousPath = Environment.GetEnvironmentVariable("PATH");
-        string? previousBench = Environment.GetEnvironmentVariable("CMW_FAKE_BENCH");
-        string output = Path.Combine(root, "historical-full-run");
-        try
-        {
-            Environment.SetEnvironmentVariable("PATH", tools + Path.PathSeparator + previousPath);
-            Environment.SetEnvironmentVariable("CMW_FAKE_BENCH", Path.Combine(tools, "benchmark"));
-            DagFlowHistoricalOptions options = new(source, output, 1, 1, 1);
-            if (await DagFlowHistoricalCapture.RunAsync(options, CancellationToken.None) != 0)
+            Script("perf", """
+                           #!/bin/sh
+                           mode="$1"
+                           out=""
+                           while [ "$#" -gt 0 ]; do
+                             if [ "$1" = "-o" ]; then out="$2"; break; fi
+                             shift
+                           done
+                           case "$mode" in
+                             version) echo "fake perf";;
+                             record) printf 'fake perf data\n' > "$out";;
+                             stat)
+                               cat > "$out" <<'EOF'
+                           100;;cycles:u;;100.00
+                           200;;instructions:u;;100.00
+                           300;;branches:u;;100.00
+                           4;;branch-misses:u;;100.00
+                           500;;cache-references:u;;100.00
+                           6;;cache-misses:u;;100.00
+                           7;;page-faults:u;;100.00
+                           EOF
+                               ;;
+                             report) echo "fake report";;
+                             script) echo "bench 100/100 1.0: 10 cycles:u: 7f Work::execute (bench)";;
+                             *) exit 2;;
+                           esac
+                           """);
+            Script("taskset", """
+                              #!/bin/sh
+                              [ "$1" = "-c" ] || exit 2
+                              shift 2
+                              exec "$@"
+                              """);
+            Script("lscpu", "#!/bin/sh\necho fake-cpu\n");
+            Script("clang++", "#!/bin/sh\necho fake-clang\n");
+            Script("ldd", "#!/bin/sh\necho fake-ldd\n");
+            string? previousPath = Environment.GetEnvironmentVariable("PATH");
+            string? previousBench = Environment.GetEnvironmentVariable("CMW_FAKE_BENCH");
+            string output = Path.Combine(root, "historical-full-run");
+            try
             {
-                throw new System.Diagnostics.UnreachableException("Historical capture fixture failed.");
-            }
+                Environment.SetEnvironmentVariable("PATH", tools + Path.PathSeparator + previousPath);
+                Environment.SetEnvironmentVariable("CMW_FAKE_BENCH", Path.Combine(tools, "benchmark"));
+                DagFlowHistoricalOptions options = new(source, output, 1, 1, 1);
+                if (await DagFlowHistoricalCapture.RunAsync(options, CancellationToken.None) != 0)
+                {
+                    throw new System.Diagnostics.UnreachableException("Historical capture fixture failed.");
+                }
 
-            JsonArray summary = JsonNode.Parse(
-                await File.ReadAllTextAsync(Path.Combine(output, "summary.json"), CancellationToken.None))!.AsArray();
-            if (summary.Count != 24
-                || !File.Exists(Path.Combine(output, "profiles", "o3-1-idle-burst", "flamegraph.svg"))
-                || !File.Exists(Path.Combine(output, "profiles-fp", "o3-1-idle-burst", "flamegraph.svg")))
-            {
-                throw new System.Diagnostics.UnreachableException("Historical capture omitted measurements or profiles.");
-            }
+                JsonArray summary = JsonNode.Parse(
+                    await File.ReadAllTextAsync(Path.Combine(output, "summary.json"), CancellationToken.None))!.AsArray();
+                if (summary.Count != 24
+                    || !File.Exists(Path.Combine(output, "profiles", "o3-1-idle-burst", "flamegraph.svg"))
+                    || !File.Exists(Path.Combine(output, "profiles-fp", "o3-1-idle-burst", "flamegraph.svg")))
+                {
+                    throw new System.Diagnostics.UnreachableException("Historical capture omitted measurements or profiles.");
+                }
 
-            int before = JsonNode.Parse(
-                await File.ReadAllTextAsync(Path.Combine(output, "commands.json"), CancellationToken.None))!.AsArray().Count;
-            _ = await DagFlowHistoricalCapture.RunAsync(options with { Resume = true }, CancellationToken.None);
-            int after = JsonNode.Parse(
-                await File.ReadAllTextAsync(Path.Combine(output, "commands.json"), CancellationToken.None))!.AsArray().Count;
-            if (before != after)
-            {
-                throw new System.Diagnostics.UnreachableException("Historical resume repeated successful effects.");
+                int before = JsonNode.Parse(
+                    await File.ReadAllTextAsync(Path.Combine(output, "commands.json"), CancellationToken.None))!.AsArray().Count;
+                _ = await DagFlowHistoricalCapture.RunAsync(options with { Resume = true }, CancellationToken.None);
+                int after = JsonNode.Parse(
+                    await File.ReadAllTextAsync(Path.Combine(output, "commands.json"), CancellationToken.None))!.AsArray().Count;
+                if (before != after)
+                {
+                    throw new System.Diagnostics.UnreachableException("Historical resume repeated successful effects.");
+                }
+                await HistoricalCaptureScheduleTests.RunAsync(source, root, output);
             }
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("PATH", previousPath);
-            Environment.SetEnvironmentVariable("CMW_FAKE_BENCH", previousBench);
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", previousPath);
+                Environment.SetEnvironmentVariable("CMW_FAKE_BENCH", previousBench);
+            }
         }
     }
-}
 
-internal sealed class FakeProcess : IProfileProcess
-{
-    public List<(string Executable, string[] Args)> Calls { get; } = [];
-    public bool FailTarget { get; init; }
-
-    public async Task<CommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
-        string workingDirectory, TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
-        CancellationToken cancellationToken)
+    internal sealed class FakeProcess : IProfileProcess
     {
-        string[] args = [.. arguments];
-        Calls.Add((executable, args));
-        if (FailTarget && executable != "wpr")
-        {
-            throw new InvalidOperationException("target failed");
-        }
+        public List<(string Executable, string[] Args)> Calls { get; } = [];
+        public bool FailTarget { get; init; }
 
-        if (executable == "perf")
+        public async Task<CommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
+            string workingDirectory, TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
+            CancellationToken cancellationToken)
         {
-            string path = args[Array.IndexOf(args, "-o") + 1];
-            await File.WriteAllTextAsync(path, "perf fixture", cancellationToken);
-        }
+            string[] args = [.. arguments];
+            Calls.Add((executable, args));
+            if (FailTarget && executable != "wpr")
+            {
+                throw new InvalidOperationException("target failed");
+            }
 
-        if (executable == "xcrun")
-        {
-            string path = args[Array.IndexOf(args, "--output") + 1];
-            _ = Directory.CreateDirectory(path);
-        }
+            if (executable == "perf")
+            {
+                string path = args[Array.IndexOf(args, "-o") + 1];
+                await File.WriteAllTextAsync(path, "perf fixture", cancellationToken);
+            }
 
-        if (executable == "wpr" && args[0] == "-stop")
-        {
-            await File.WriteAllTextAsync(args[1], "ETL fixture", cancellationToken);
-        }
+            if (executable == "xcrun")
+            {
+                string path = args[Array.IndexOf(args, "--output") + 1];
+                _ = Directory.CreateDirectory(path);
+            }
 
-        return new CommandResult(0, "", false, executable == "wpr" ? null : 42);
+            if (executable == "wpr" && args[0] == "-stop")
+            {
+                await File.WriteAllTextAsync(args[1], "ETL fixture", cancellationToken);
+            }
+
+            return new CommandResult(0, "", false, executable == "wpr" ? null : 42);
+        }
     }
-}
 
-internal sealed class FakeTracerptProcess(string fixture) : IProfileProcess
-{
-    public string[]? Arguments { get; private set; }
-
-    public Task<CommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
-        string workingDirectory, TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
-        CancellationToken cancellationToken)
+    internal sealed class FakeTracerptProcess(string fixture) : IProfileProcess
     {
-        if (executable != "tracerpt")
-        {
-            throw new System.Diagnostics.UnreachableException("Unexpected ETL converter.");
-        }
+        public string[]? Arguments { get; private set; }
 
-        Arguments = [.. arguments];
-        File.Copy(fixture, arguments[Array.IndexOf(Arguments, "-o") + 1], overwrite: true);
-        return Task.FromResult(new CommandResult(0, "", false));
+        public Task<CommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
+            string workingDirectory, TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
+            CancellationToken cancellationToken)
+        {
+            if (executable != "tracerpt")
+            {
+                throw new System.Diagnostics.UnreachableException("Unexpected ETL converter.");
+            }
+
+            Arguments = [.. arguments];
+            File.Copy(fixture, arguments[Array.IndexOf(Arguments, "-o") + 1], overwrite: true);
+            return Task.FromResult(new CommandResult(0, "", false));
+        }
     }
 }

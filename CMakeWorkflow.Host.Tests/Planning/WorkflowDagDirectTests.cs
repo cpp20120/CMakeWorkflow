@@ -1,5 +1,7 @@
 using CMakeWorkflow.CMake.Planning;
 
+namespace CMakeWorkflow.Host.Tests.Planning;
+
 internal static class WorkflowDagDirectTests
 {
     public static void Run()
@@ -109,7 +111,7 @@ internal static class WorkflowDagDirectTests
         string[] left = [.. expected];
         string[] right = [.. actual];
         Check(left.SequenceEqual(right), name + ": expected [" + string.Join(", ", left) + "] got [" +
-              string.Join(", ", right) + "]");
+                                         string.Join(", ", right) + "]");
     }
 
     private static void SetEqual(IEnumerable<string> expected, IReadOnlySet<string> actual, string name)

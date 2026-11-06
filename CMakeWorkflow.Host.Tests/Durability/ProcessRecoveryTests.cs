@@ -1,9 +1,14 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
 using Microsoft.Data.Sqlite;
 using StreamJsonRpc;
+
+namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static class ProcessRecoveryTests
 {
@@ -41,8 +46,8 @@ internal static class ProcessRecoveryTests
         _ = Directory.CreateDirectory(root);
         string effects = Path.Combine(root, "effects.txt");
         ProcessWorkflowNode Node(string id, List<string>? deps = null) => new(id, "dotnet",
-            [typeof(ProcessRecoveryTests).Assembly.Location, "--process-recovery-child", effects, id,
-                slow && id == "b" ? "slow" : "fast"], deps);
+        [typeof(ProcessRecoveryTests).Assembly.Location, "--process-recovery-child", effects, id,
+            slow && id == "b" ? "slow" : "fast"], deps);
         ProcessWorkflowManifest manifest = new(1, "process", [Node("a"), Node("b", ["a"])]);
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, ProcessWorkflowJson.Default.ProcessWorkflowManifest);
         string path = Path.Combine(root, "process.json");
@@ -325,7 +330,7 @@ internal static class ProcessRecoveryTests
                 report.Recovery = report.Recovery with
                 {
                     PreviousCheckpoint = JsonSerializer.SerializeToUtf8Bytes(prior,
-                    ProcessWorkflowJson.Default.ProcessOperationReport)
+                        ProcessWorkflowJson.Default.ProcessOperationReport)
                 };
                 f.Write(report);
             }

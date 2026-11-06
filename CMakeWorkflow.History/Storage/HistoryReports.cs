@@ -1,12 +1,20 @@
-using System.Security.Cryptography;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.History.Models;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow.History;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.History.Storage;
 #pragma warning restore IDE0130
 
+/// <summary>Reads completed result formats into detached history import evidence without database mutation.</summary>
+/// <remarks>
+/// Workflow reports, campaign completion markers, fuzz reports and standalone captures have different
+/// completion rules. Reading historical results is not durable Host recovery authorization. Paths stored
+/// in reports are resolved as artifact metadata, not inherently workspace-authorized file handles; callers
+/// apply their own path policy. Parse errors propagate so the store can reject a batch before writing it.
+/// </remarks>
 internal static class HistoryReports
 {
     private static string? Str(JsonElement e, string name)
@@ -96,6 +104,14 @@ internal static class HistoryReports
         }
     }
 
+    /// <summary>Selects one results format and enriches its completed evidence from files in the directory.</summary>
+    /// <remarks>
+    /// Precedence is run.json, campaign-completion.json, report.json, then top-level capture results.
+    /// An incomplete selected format returns null where its parser permits; it does not fall through to another
+    /// format. Unsupported/corrupt evidence can throw. No filesystem lease or stable multi-file snapshot is acquired.
+    /// </remarks>
+    /// <param name="directory">Directory normalized by full path and trailing-separator trimming; not symlink canonicalization.</param>
+    /// <returns>Detached import evidence, or null when there is no importable completed result.</returns>
     public static ParsedRun? Parse(string directory)
     {
         directory = Canonical(directory);
@@ -117,10 +133,21 @@ internal static class HistoryReports
             return ParseFuzz(directory, fuzz);
         }
 
+        if (File.Exists(Path.Combine(directory, "historical-completion.json")))
+        {
+            return HistoricalHistoryReports.Parse(directory);
+        }
+
         string[] captures = Directory.GetFiles(directory, "*.results.json", SearchOption.TopDirectoryOnly);
         return captures.Length > 0 ? ParseCaptures(directory, captures) : null;
     }
 
+    /// <summary>Imports terminal CMake workflow evidence and preserves measurement comparability metadata.</summary>
+    /// <remarks>
+    /// Running/missing-status or unfinished reports are skipped; unsupported statuses fail. Source bytes are
+    /// hashed. If start/end Host identity or fingerprint disagrees, the comparison fingerprint is left null
+    /// rather than asserting that measurements shared one environment. This does not verify a durable ledger row.
+    /// </remarks>
     private static ParsedRun? ParseWorkflow(string directory, string path)
     {
         byte[] bytes = File.ReadAllBytes(path);
@@ -521,6 +548,12 @@ internal static class HistoryReports
         return run;
     }
 
+    /// <summary>Imports a terminal campaign only after matching its referenced report hash.</summary>
+    /// <remarks>
+    /// The marker must reference a leaf report name in the same directory. Missing/changed reports fail;
+    /// a missing finish timestamp or nonterminal marker is skipped. Source identity combines marker and report
+    /// hashes so changed completion evidence refreshes history rather than licensing campaign replay.
+    /// </remarks>
     private static ParsedRun? ParseCampaign(string directory, string marker)
     {
         byte[] bytes = File.ReadAllBytes(marker);
@@ -564,6 +597,12 @@ internal static class HistoryReports
         return run;
     }
 
+    /// <summary>Combines top-level capture records into one history run without asserting cross-backend equivalence.</summary>
+    /// <remarks>
+    /// Each selected record must have capture ID, finish time and status. Incomplete records skip the run;
+    /// unsupported statuses fail. Any failed/canceled capture makes the aggregate run failed. Raw trace hashes
+    /// are recorded from capture metadata here, not independently verified as durable operation completion.
+    /// </remarks>
     private static ParsedRun? ParseCaptures(string directory, string[] paths)
     {
         ParsedRun run = new()
@@ -622,6 +661,12 @@ internal static class HistoryReports
         return run;
     }
 
+    /// <summary>Extends source identity with deterministically ordered small-artifact hash metadata.</summary>
+    /// <remarks>
+    /// Excludes trace and executable artifacts from this additional identity component. Does not open or
+    /// rehash those large artifacts, establish a filesystem snapshot or guarantee that every source change
+    /// will be detected independently of the parser's selected evidence.
+    /// </remarks>
     private static void FinalizeHash(ParsedRun run)
     {
         IEnumerable<string> small = run.Artifacts.Where(a => a.Sha256 is not null
@@ -635,6 +680,12 @@ internal static class HistoryReports
         };
     }
 
+    /// <summary>Enriches detached run evidence with capture, analysis and counter metadata from the results directory.</summary>
+    /// <remarks>
+    /// Preserves backend/method/unit fields instead of equating counters across sources. Version checks and
+    /// metadata reads may fail; database mutation is deferred until the caller has parsed the entire batch.
+    /// Raw trace references/hashes are metadata; merely importing them does not attest current trace contents.
+    /// </remarks>
     private static void ImportProfile(string directory, ParsedRun run)
     {
         foreach (string? path in Directory.GetFiles(directory, "*.results.json").Order(StringComparer.Ordinal))

@@ -1,8 +1,20 @@
-using CMakeWorkflow;
+using CMakeWorkflow.Contracts.Recipes;
 using CMakeWorkflow.Host;
-using CMakeWorkflow.Profiling;
-using CMakeWorkflow.Tooling;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Provisioning;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Tests;
+using CMakeWorkflow.Host.Tests.Application;
+using CMakeWorkflow.Host.Tests.Durability;
+using CMakeWorkflow.Host.Tests.Execution;
+using CMakeWorkflow.Host.Tests.Planning;
+using CMakeWorkflow.Host.Tests.Transport;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Tooling.Environment;
+using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
+using IHostRpc = CMakeWorkflow.Host.Protocol.IHostRpc;
 
 if (args.Length > 0 && args[0] == "--process-recovery-child")
 {
@@ -675,39 +687,42 @@ finally
     Directory.Delete(root, recursive: true);
 }
 
-internal sealed class NoInstaller : ICMakeInstaller
+namespace CMakeWorkflow.Host.Tests
 {
-    public Task InstallAsync(string directory, CancellationToken ct) =>
-        throw new System.Diagnostics.UnreachableException("Doctor must never install");
-}
-
-internal sealed class FakeRuntime : IToolingRuntime
-{
-    public ToolPlatform Platform => ToolPlatform.Linux;
-    public bool IsAdministrator => false;
-    public bool Missing, Delay;
-    public int Calls;
-    public TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    public string? Resolve(string command, string directory) => command is "cmake" or "ctest" or "c++" && !Missing
-        ? Path.Combine(directory, command)
-        : null;
-
-    public async Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> args, TimeSpan timeout,
-        CancellationToken ct)
+    internal sealed class NoInstaller : ICMakeInstaller
     {
-        if (!args.SequenceEqual(["--version"]))
-        {
-            throw new System.Diagnostics.UnreachableException("Doctor performed mutation");
-        }
+        public Task InstallAsync(string directory, CancellationToken ct) =>
+            throw new System.Diagnostics.UnreachableException("Doctor must never install");
+    }
 
-        Calls++;
-        _ = Started.TrySetResult();
-        if (Delay)
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
-        }
+    internal sealed class FakeRuntime : IToolingRuntime
+    {
+        public ToolPlatform Platform => ToolPlatform.Linux;
+        public bool IsAdministrator => false;
+        public bool Missing, Delay;
+        public int Calls;
+        public TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        return new(0, "version 15.0.0", "");
+        public string? Resolve(string command, string directory) => command is "cmake" or "ctest" or "c++" && !Missing
+            ? Path.Combine(directory, command)
+            : null;
+
+        public async Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> args, TimeSpan timeout,
+            CancellationToken ct)
+        {
+            if (!args.SequenceEqual(["--version"]))
+            {
+                throw new System.Diagnostics.UnreachableException("Doctor performed mutation");
+            }
+
+            Calls++;
+            _ = Started.TrySetResult();
+            if (Delay)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            }
+
+            return new(0, "version 15.0.0", "");
+        }
     }
 }

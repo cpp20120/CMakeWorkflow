@@ -168,10 +168,10 @@ reported after those commands. When stderr is redirected, the progress reporter 
 long-running operations. `workflow run` uses the same process dispatcher and emits an elapsed heartbeat for long child
 processes.
 
-The historical adapter owns the fixed research schedule and its single
-`commands.json` journal. External process execution and cleanup are delegated to the same `WorkflowProcessDispatcher` as
+The historical adapter owns its domain-specific research schedule and one
+`commands.json` journal per experiment. External process execution and cleanup are delegated to the same `WorkflowProcessDispatcher` as
 ordinary workflow nodes, and journal updates use the same durable checkpoint writer as `run.json`. Progress is an
-observer, not another source of truth. This is **not** a claim that the fixed historical schedule has become a general
+observer, not another source of truth. The measurement permutation does not turn this protocol into a general
 WorkflowDocument DAG or that its
 `commands.json` is interchangeable with a regular `run.json`.
 
@@ -180,6 +180,91 @@ hashes, and declared `perf.data`/counter output hashes are checked. A prior comm
 is not automatically repeated. Derived flamegraphs may be regenerated from verified saved `perf script` output without
 resampling. Keep the complete output folder and use a new one if recovery refuses; never force success by editing
 `commands.json`.
+
+### Reproducible measurement schedules
+
+Existing calls retain `python-legacy`, seed `20260930`, strategy `random-interleaved`
+and scope `block`, including the exact archived order. Trial counts remain separate
+from the PRNG and strategy. Configure/build dependencies and profiler diagnostic
+steps are never shuffled; measurements still execute one at a time through the
+existing journal-backed process dispatcher.
+
+```sh
+CMakeWorkflow dagflow profile run-historical --source-dir /path/to/DagFlow \
+  --output /path/to/new-experiment --trials 5 --stat-trials 3 --jobs 4 \
+  --shuffle-algorithm pcg64 --seeds 42,1337,2026 \
+  --schedule-strategy balanced-blocks --shuffle-scope block
+```
+
+- `--shuffle-algorithm`: `none`, `dotnet`, `mt19937`, `pcg32`, `pcg64`,
+  `xoshiro256ss`, `xoroshiro128pp`, `splitmix64`, `sfc64`, `philox`, `threefry`,
+  or `python-legacy`. Exact variants, seeding, versions and licenses are listed in
+  [PRNG implementation notes](../prng-notices.md).
+- `--seeds`: 1..64 distinct comma-separated UInt32 values (0..4294967295).
+  `dotnet` accepts 0..2147483647. Default: `20260930`.
+- `--schedule-strategy`: see the table below. Default: `random-interleaved`.
+- `--shuffle-scope block|global`: default `block`; selecting `shuffle-global`
+  defaults the scope to `global`, and explicitly combining that strategy with
+  `block` is rejected.
+- `--trials` and `--stat-trials`: 1..1000 repetitions **per seed**, independently
+  of how many seeds are supplied. `--jobs` only controls native builds.
+
+| Strategy | Measurement order |
+| --- | --- |
+| `sequential` | Timing trials then counter trials; declared worker/scenario/configuration order, without random draws |
+| `shuffle-global` | Shuffle all independent timing/counter observations after all builds; logical block/pair IDs are retained even when scattered |
+| `random-interleaved` | Shuffle workload points and the configuration order within each pair; global scope shuffles complete pair groups across trials/phases |
+| `randomized-blocks` | Each trial/phase is a complete block containing both configurations for every workload; shuffle observations inside each block |
+| `balanced-blocks` | Shuffle workload points and an initial configuration order, then rotate configuration positions between trials; a complete two-trial cycle gives AB/BA balance for every workload |
+
+For randomized/balanced blocks, global scope additionally shuffles **whole blocks**,
+preserving their completeness. `none` disables random permutations; a selected
+balanced strategy still applies its deterministic position rotation. Timing and
+counter phases remain distinct measurement kinds even when global ordering
+interleaves them. Diagnostic captures follow all timing/counter prerequisites.
+
+A single seed keeps the existing output layout. Multiple seeds produce
+`experiments.json` and separate directories such as `seed-000-42`, `seed-001-1337`
+and `seed-002-2026`, each with its own snapshot, manifest, command journal, schedule,
+raw rows and summary. Subsequent seeds copy the first experiment's frozen source
+snapshot and must match its identity. The parent index does not pool summaries.
+**Different seeds are ordering factors, not automatically independent performance
+samples.** Each raw row retains its seed, PRNG version, strategy, scope, block ID,
+pair ID, measurement-set hash and actual schedule position.
+
+New captures durably save `schedule.json` before measurement dispatch and bind its
+exact bytes from `manifest.json`. The schedule records every actual measurement
+and the source/workload/configuration set identity. `--resume` loads that saved
+order without constructing a PRNG; it checks parameters, set identity, coverage,
+hash and the command journal's dispatched prefix. Changing seed/order parameters,
+the saved source snapshot, CPU allowance or trial/job counts is refused. Previously admitted commands
+still require verified journal outcomes and artifacts; cancellation/unknown effects
+never authorize automatic replay. Saved order remains usable when the original
+PRNG/runtime version is no longer installed. Newly generated `dotnet` schedules
+are runtime-version-specific.
+
+Older archives remain renderable. On explicit resume, a **completed** legacy
+archive can migrate the actual order already recorded in its command journal,
+without drawing random values. An interrupted old archive with unrecorded future
+order cannot safely migrate and is refused; use a fresh output directory. Existing
+archives are not silently reinterpreted or imported as the new format.
+
+A successful new capture writes `historical-completion.json`, binding manifest,
+schedule, raw rows and summary hashes. `history import` recognizes this format;
+recursive import of a multi-seed directory creates one history run per child.
+Seed/block/pair provenance stays in measurement workload metadata, rather than
+being counted as additional independent replicates. Incomplete or changed evidence
+is not imported as completed data.
+
+The tests include reference PRNG vectors, exact legacy ordering, permutations,
+complete paired blocks, balance, CLI refusal, saved-order recovery and active
+process cancellation. The NativeAOT consumer runs every PRNG and strategy:
+
+```sh
+dotnet publish CMakeWorkflow.Profiling.AotSmoke -c Release -r linux-x64 \
+  -p:TreatWarningsAsErrors=true -o out/profiling-aot
+out/profiling-aot/CMakeWorkflow.Profiling.AotSmoke
+```
 
 ### Live progress E2E (Linux)
 

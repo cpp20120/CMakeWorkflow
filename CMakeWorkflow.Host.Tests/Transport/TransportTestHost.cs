@@ -1,5 +1,7 @@
-using CMakeWorkflow.Client;
-using CMakeWorkflow.Host;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+
+namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal sealed class TransportTestHost : IAsyncDisposable
 {

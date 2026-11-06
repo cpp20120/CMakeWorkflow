@@ -1,14 +1,21 @@
 using System.Diagnostics;
 using System.Text.Json;
-using CMakeWorkflow;
-using CMakeWorkflow.Host;
 using CMakeWorkflow.Client;
-using StreamJsonRpc;
 using CMakeWorkflow.Client.Campaigns;
 using CMakeWorkflow.Client.Recipes;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Host.Profiling;
+using CMakeWorkflow.Host.Recipes;
+using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Host.Workflows;
+using StreamJsonRpc;
+using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
+using CMakeWorkflow.CMake.Serialization;
+
+namespace CMakeWorkflow.Host.Tests.Application;
 
 internal static class ProfileWorkflowWireTests
 {
@@ -51,7 +58,7 @@ internal static class ProfileWorkflowWireTests
 
         using Stream wire = await LocalTransport.ConnectAsync(endpoint, cancellationToken);
         using JsonRpc rpc = HostConnection.Create(wire);
-        IHostRpc client = rpc.Attach<IHostRpc>();
+        Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
         rpc.StartListening();
         _ = await client.InitializeAsync(new(1, workspace), cancellationToken);
         // The platform-incompatible backend makes capture fail deterministically
@@ -91,9 +98,9 @@ internal static class ProfileWorkflowWireTests
         }
 
         WorkflowReport report = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(
-                             Path.Combine(runDirectory, "run.json"), cancellationToken),
-                         WorkflowJson.Default.WorkflowReport)
-                     ?? throw new UnreachableException("Missing profile workflow report.");
+                                        Path.Combine(runDirectory, "run.json"), cancellationToken),
+                                    WorkflowJson.Default.WorkflowReport)
+                                ?? throw new UnreachableException("Missing profile workflow report.");
         NodeResult timing = report.Nodes.Single(node => node.Id == "timing_main_1");
         NodeResult capture = report.Nodes.Single(node => node.Id == "capture_main");
         if (timing.Status != "succeeded" || capture.Status != "failed" ||
@@ -199,7 +206,7 @@ internal static class ProfileWorkflowWireTests
             string sdkPlatform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
             PreparedRecipe sdkProfileRecipe = await sdk.Recipes.PrepareProfileAsync(new PrepareProfileRecipeOptions(
                     Guid.NewGuid().ToString("N"), Path.Combine(workspace, "sdk-profile-recipe.json"),
-                    new CMakeWorkflow.Profiling.ProfileRecipeV1("profile", 1,
+                    new ProfileRecipeV1("profile", 1,
                         [new("main", build)], "worker", "Debug", 1, 5, [], "auto", "cpu", sdkPlatform)),
                 cancellationToken);
             PreparedRecipe sdkTestMatrix = await sdk.Recipes.PrepareTestMatrixAsync(new PrepareTestMatrixOptions(

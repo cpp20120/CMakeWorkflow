@@ -1,4 +1,5 @@
 using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Planning;
 

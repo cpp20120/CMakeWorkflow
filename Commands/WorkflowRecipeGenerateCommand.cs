@@ -2,10 +2,12 @@ using System.Globalization;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Serialization;
-using CMakeWorkflow.Profiling;
+using CMakeWorkflow.Contracts.Recipes;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Profiling.Workflows;
 
-#pragma warning disable IDE0130 // Preserve the established namespace; folders only group implementation.
-namespace CMakeWorkflow;
+// Preserve the established namespace; folders only group implementation.
+namespace CMakeWorkflow.Commands;
 #pragma warning restore IDE0130
 
 internal static class WorkflowRecipeGenerateCommand
