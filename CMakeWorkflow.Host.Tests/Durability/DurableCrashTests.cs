@@ -34,7 +34,10 @@ internal static class DurableCrashTests
                     return;
                 }
 
-                await File.WriteAllTextAsync(signal, stage, ct);
+                // Publish a complete signal atomically, never expose a partially written file.
+                string pending = signal + ".pending";
+                await File.WriteAllTextAsync(pending, stage, ct);
+                File.Move(pending, signal);
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             });
         throw new UnreachableException("Fault worker unexpectedly completed.");
@@ -103,7 +106,6 @@ internal static class DurableCrashTests
             using Process child = Process.Start(psi) ?? throw new UnreachableException("Cannot start fault worker.");
             try
             {
-
 #pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
                 using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
 #pragma warning restore CA2000
@@ -134,7 +136,8 @@ internal static class DurableCrashTests
                         throw new UnreachableException($"Crash lost authorization: {state}");
                     }
 
-                    (string RunDirectory, string CheckpointSha256)? checkpoint = reopened.GetDispatchCheckpoint(operationId);
+                    (string RunDirectory, string CheckpointSha256)? checkpoint =
+                        reopened.GetDispatchCheckpoint(operationId);
                     if ((checkpoint is not null) != (stage != "authorized"))
                     {
                         throw new UnreachableException("Checkpoint visibility violates crash boundary.");
@@ -162,7 +165,9 @@ internal static class DurableCrashTests
                 {
                 }
 
-                if (stage == "effect" ? (await File.ReadAllLinesAsync(marker, CancellationToken.None)).Length != 1 : File.Exists(marker))
+                if (stage == "effect"
+                        ? (await File.ReadAllLinesAsync(marker, CancellationToken.None)).Length != 1
+                        : File.Exists(marker))
                 {
                     throw new UnreachableException("Retry executed external effect.");
                 }

@@ -15,6 +15,16 @@
     <Project Path="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
     <Project Path="CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
     <Project Path="CMakeWorkflow.Contracts.Tests/CMakeWorkflow.Contracts.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines/CMakeWorkflow.Pipelines.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Tests/CMakeWorkflow.Pipelines.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Persistence/CMakeWorkflow.Pipelines.Persistence.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Persistence.Tests/CMakeWorkflow.Pipelines.Persistence.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Coordinator/CMakeWorkflow.Pipelines.Coordinator.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Coordinator.Tests/CMakeWorkflow.Pipelines.Coordinator.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.GitHub/CMakeWorkflow.Pipelines.GitHub.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.GitHub.Tests/CMakeWorkflow.Pipelines.GitHub.Tests.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Federation/CMakeWorkflow.Pipelines.Federation.csproj"/>
+    <Project Path="CMakeWorkflow.Pipelines.Federation.Tests/CMakeWorkflow.Pipelines.Federation.Tests.csproj"/>
     <Project Path="CMakeWorkflow.History/CMakeWorkflow.History.csproj"/>
     <Project Path="CMakeWorkflow.History.Tests/CMakeWorkflow.History.Tests.csproj"/>
     <Project Path="CMakeWorkflow.csproj"/>

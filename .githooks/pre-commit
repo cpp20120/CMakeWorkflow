@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Never modify the working tree during commit. Check only staged C# paths.
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+staged=()
+while IFS= read -r -d '' path; do
+    case "$path" in
+        *.cs) staged+=("$path") ;;
+    esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if (( ${#staged[@]} == 0 )); then
+    exit 0
+fi
+
+# dotnet format reads the worktree, not Git's index. Refuse ambiguous mixed states:
+# otherwise a correctly formatted unstaged version could mask a bad staged blob.
+for path in "${staged[@]}"; do
+    if ! git diff --quiet -- "$path"; then
+        printf 'pre-commit: %s has unstaged changes in addition to staged changes.\n' "$path" >&2
+        printf 'Stage the intended content or separate the changes before committing.\n' >&2
+        exit 1
+    fi
+done
+
+if ! command -v dotnet >/dev/null 2>&1; then
+    printf 'pre-commit: .NET SDK is required to verify staged C# formatting.\n' >&2
+    exit 1
+fi
+
+if [[ ! -f CMakeWorkflow.slnx ]]; then
+    printf 'pre-commit: CMakeWorkflow.slnx was not found in the repository root.\n' >&2
+    exit 1
+fi
+
+printf 'pre-commit: checking %d staged C# file(s) (read-only).\n' "${#staged[@]}"
+
+# --include is essential: formatting the whole solution would flag unrelated files.
+# --verify-no-changes ensures the hook can never rewrite the worktree.
+if ! dotnet format whitespace CMakeWorkflow.slnx \
+    --no-restore --verify-no-changes --verbosity minimal --include "${staged[@]}"; then
+    printf 'pre-commit: whitespace formatting failed. Fix only the listed files and re-stage.\n' >&2
+    exit 1
+fi
+
+if ! dotnet format style CMakeWorkflow.slnx \
+    --no-restore --verify-no-changes --severity warn --verbosity minimal --include "${staged[@]}"; then
+    printf 'pre-commit: code-style formatting failed. Fix only the listed files and re-stage.\n' >&2
+    exit 1
+fi
+
+printf 'pre-commit: staged C# formatting OK.\n'
