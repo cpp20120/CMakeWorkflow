@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       - name: Build solution
-        run: dotnet build CMakeWorkflow.slnx -c Release
+        run: dotnet build CMakeWorkflow.slnx -c Release -p:TreatWarningsAsErrors=true
       - name: Pure workflow SDK checks
         run: dotnet CMakeWorkflow.Contracts.Tests/bin/Release/net10.0/CMakeWorkflow.Contracts.Tests.dll
       - name: Pure pipeline v1 planner checks
@@ -70,6 +70,8 @@ jobs:
         run: dotnet CMakeWorkflow.Pipelines.Coordinator.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.Coordinator.Tests.dll
       - name: GitHub Actions pinned attempt watch checks
         run: dotnet CMakeWorkflow.Pipelines.GitHub.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.GitHub.Tests.dll
+      - name: Federated artifacts recovery, isolation, expiry and integrity checks
+        run: dotnet CMakeWorkflow.Pipelines.Federation.Tests/bin/Release/net10.0/CMakeWorkflow.Pipelines.Federation.Tests.dll
       - name: Campaign checks
         run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
       - name: Generic CMake integration
