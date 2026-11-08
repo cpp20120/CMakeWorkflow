@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Core.Execution;
-#pragma warning restore IDE0130
 
 // These contracts describe a finite execution graph, not a CMake workflow.
 // The domain adapter owns the meaning and persistence of each node state.

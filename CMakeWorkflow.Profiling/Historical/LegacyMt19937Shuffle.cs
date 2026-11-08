@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Historical;
-#pragma warning restore IDE0130
 
 // LegacyMt19937Shuffle random.Random integer seed and _randbelow/getrandbits order used by
 // the archived DagFlow experiment. This preserves its paired shuffle schedule.

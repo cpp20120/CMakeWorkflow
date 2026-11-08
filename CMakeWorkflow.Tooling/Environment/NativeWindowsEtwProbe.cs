@@ -1,9 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Environment;
-#pragma warning restore IDE0130
 
 /// <summary>Explicit, short-lived ETW session admission probe; never stops sessions it does not own.</summary>
 public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
@@ -69,6 +67,8 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
         nint buffer = Marshal.AllocHGlobal(size);
         ulong handle = 0;
         bool started = false;
+        uint stopCode = 0;
+        EtwProbeResult result;
         try
         {
             for (int i = 0; i < size; i++)
@@ -101,33 +101,39 @@ public sealed class NativeWindowsEtwProbe : IWindowsEtwProbe
             uint rc = StartTrace(out handle, name, buffer);
             if (rc != 0)
             {
-                return new(capability, Classify(rc), (int)rc, new Win32Exception((int)rc).Message);
+                result = new(capability, Classify(rc), (int)rc, new Win32Exception((int)rc).Message);
             }
-
-            started = true;
-            // Admission only: this proves that the OS accepted the requested session settings,
-            // not that a consumer can retrieve events or that providers emitted samples.
-            return new(capability, "available", null, "ETW accepted the trace session; event delivery not verified.");
+            else
+            {
+                started = true;
+                // Admission only: this proves that the OS accepted the requested session settings,
+                // not that a consumer can retrieve events or that providers emitted samples.
+                result = new(capability, "available", null, "ETW accepted the trace session; event delivery not verified.");
+            }
         }
         finally
         {
-            if (started)
+            try
             {
-                // Never stop by global name alone; use only the handle acquired by this invocation.
-                uint stopCode = ControlTrace(handle, null, buffer, Stop);
-                if (stopCode != 0)
+                if (started)
                 {
-
-#pragma warning disable CA2219 // An owned-session or test cleanup failure must surface rather than report successful cleanup.
-                    throw new InvalidOperationException(
-                                            $"ETW probe session cleanup failed (Win32 {stopCode}); session {name} may remain active.");
-#pragma warning restore CA2219
-
+                    // Never stop by global name alone; use only the handle acquired by this invocation.
+                    stopCode = ControlTrace(handle, null, buffer, Stop);
                 }
             }
-
-            Marshal.FreeHGlobal(buffer);
+            finally
+            {
+                // Also free the native allocation if ControlTrace itself throws.
+                Marshal.FreeHGlobal(buffer);
+            }
         }
+
+        // Report cleanup failures only after releasing the buffer. Throwing from
+        // finally previously leaked the allocation and masked earlier failures.
+        return stopCode != 0
+            ? throw new InvalidOperationException(
+                $"ETW probe session cleanup failed (Win32 {stopCode}); session {name} may remain active.")
+            : result;
     }
 
     private static string Classify(uint code) => code switch

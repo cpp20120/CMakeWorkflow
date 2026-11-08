@@ -5,9 +5,7 @@ using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.CMake.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Commands;
-#pragma warning restore IDE0130
 
 internal static class WorkflowReportCommand
 {

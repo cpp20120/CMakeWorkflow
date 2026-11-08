@@ -258,10 +258,11 @@ public static class SshNetHostProvisioner
     }
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
+    // Digests are hexadecimal, not human-language text. Decode and re-encode
+    // their canonical lowercase representation for the signed manifest.
     private static string Manifest(IEnumerable<SshNetProvisionFile> files) => string.Concat(
-            files.Select(file => file.Sha256.ToLowerInvariant() + "  ./" + file.RelativePath + "\n"));
-#pragma warning restore CA1308
+        files.Select(file => Convert.ToHexStringLower(Convert.FromHexString(file.Sha256))
+            + "  ./" + file.RelativePath + "\n"));
 
 
     private static string Approval(SshNetProvisionOptions options, string manifest)

@@ -4,9 +4,7 @@ using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 // A typed non-CMake report view. Legacy operations/report stays CMake-specific.
 /// <summary>Reads process-domain terminal evidence only after ledger finalization.</summary>

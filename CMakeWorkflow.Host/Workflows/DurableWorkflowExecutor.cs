@@ -7,9 +7,7 @@ using CMakeWorkflow.Host.Toolchains;
 using CMakeWorkflow.Profiling.Workflows;
 using CMakeWorkflow.CMake.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Host-owned CMake execution bridge across durable acceptance and runner evidence.</summary>
 /// <remarks>

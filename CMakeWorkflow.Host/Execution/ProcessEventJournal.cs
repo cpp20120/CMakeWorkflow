@@ -2,9 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 // Non-authoritative event projection. A failed journal append cannot change a
 // durable checkpoint or license a retry of any external effect.

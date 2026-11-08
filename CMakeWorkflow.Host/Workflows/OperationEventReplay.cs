@@ -3,9 +3,7 @@ using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.CMake.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Reads operation audit/progress journals; events never authorize recovery dispatch.</summary>
 public static class OperationEventReplay

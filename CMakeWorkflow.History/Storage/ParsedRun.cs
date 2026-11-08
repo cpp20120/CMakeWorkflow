@@ -1,8 +1,6 @@
 using CMakeWorkflow.History.Models;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History.Storage;
-#pragma warning restore IDE0130
 
 /// <summary>Detached mutable import batch for one results directory before SQLite persistence.</summary>
 /// <remarks>

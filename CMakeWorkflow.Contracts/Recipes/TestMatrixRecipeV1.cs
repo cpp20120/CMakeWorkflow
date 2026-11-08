@@ -1,8 +1,6 @@
 using System.Text.Json.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Recipes;
-#pragma warning restore IDE0130
 
 /// <summary>Build once, then execute filtered CTest groups.</summary>
 /// <remarks>

@@ -1,8 +1,6 @@
 using System.Text.Json.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Recipes;
-#pragma warning restore IDE0130
 
 /// <summary>Build every target in every variant without adding artificial ordering dependencies.</summary>
 /// <remarks>

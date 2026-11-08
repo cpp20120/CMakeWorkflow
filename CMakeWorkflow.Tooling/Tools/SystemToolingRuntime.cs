@@ -1,9 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Tools;
-#pragma warning restore IDE0130
 
 public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToolingRuntime
 {

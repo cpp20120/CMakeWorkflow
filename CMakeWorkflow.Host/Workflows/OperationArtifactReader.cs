@@ -5,9 +5,7 @@ using CMakeWorkflow.Host.Execution;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Sessions;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // Read-only views over an operation's durably finalized results tree. This is
 // intentionally NOT a workspace filesystem API or an artifact upload service.
@@ -88,22 +86,12 @@ internal static class OperationArtifactReader
         {
             ct.ThrowIfCancellationRequested();
             string path = WithinResults(paths, report.RunDirectory, candidate.Path);
-            FileStream file;
-            try
-            {
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-                file = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path);
-#pragma warning restore CA2000
-            }
-            catch (FileNotFoundException) when (candidate.Id != "report")
+            await using FileStream? file = OperationArtifactFile.OpenCatalogFile(
+                paths.WorkspaceDirectory, path, optional: candidate.Id != "report");
+            if (file is null)
             {
                 continue; // A node not dispatched has no logs.
             }
-            catch (DirectoryNotFoundException) when (candidate.Id != "report")
-            {
-                continue;
-            }
-            await using FileStream owned = file;
             long size = file.Length;
             long stamp = File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks;
             string sha = Convert.ToHexString(await SHA256.HashDataAsync(file, ct));

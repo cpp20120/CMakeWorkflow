@@ -38,19 +38,15 @@ public sealed partial class DoctorSession
                 JsonSerializer.Serialize(workflow, WorkflowJson.Default.WorkflowDocument) + "\n");
             string hash = Convert.ToHexString(SHA256.HashData(bytes));
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
             string manifest = paths.Require(Path.Combine(output,
-                            "target-workflow-" + request.RequestId.ToLowerInvariant() + ".json"));
-#pragma warning restore CA1308
+                            "target-workflow-" + CanonicalRequestId(request.RequestId) + ".json"));
 
             string bindingDirectory = paths.Require(Path.Combine(paths.WorkspaceDirectory,
                 ".cmakeworkflow", "target-preparations"));
             _ = Directory.CreateDirectory(bindingDirectory);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
             string binding = paths.Require(Path.Combine(bindingDirectory,
-                            request.RequestId.ToLowerInvariant() + ".json"));
-#pragma warning restore CA1308
+                            CanonicalRequestId(request.RequestId) + ".json"));
 
             TargetPreparation prepared = new(1, manifest, hash, output);
             await CommitOnceAsync(binding,

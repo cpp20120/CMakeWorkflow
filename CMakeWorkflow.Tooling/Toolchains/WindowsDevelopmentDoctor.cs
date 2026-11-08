@@ -1,8 +1,6 @@
 using CMakeWorkflow.Tooling.Environment;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Toolchains;
-#pragma warning restore IDE0130
 
 public static class WindowsDevelopmentDoctor
 {

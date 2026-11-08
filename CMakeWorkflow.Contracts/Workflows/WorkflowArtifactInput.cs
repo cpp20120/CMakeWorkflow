@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Input evidence from a filesystem path or a named producer output.</summary>
 /// <remarks>

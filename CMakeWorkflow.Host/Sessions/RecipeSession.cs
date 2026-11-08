@@ -37,10 +37,8 @@ public sealed partial class DoctorSession
             ".cmakeworkflow", kind + "-preparations"));
         _ = Directory.CreateDirectory(bindingDirectory);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
         string binding = paths.Require(Path.Combine(bindingDirectory,
-                    requestId.ToLowerInvariant() + ".json"));
-#pragma warning restore CA1308
+                    CanonicalRequestId(requestId) + ".json"));
 
         await CommitOnceAsync(binding, bindingBytes, ct);
         _ = Directory.CreateDirectory(Path.GetDirectoryName(manifest)!);

@@ -1,8 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Builders;
-#pragma warning restore IDE0130
 
 /// <summary>A typed reference usable as the source of a run or profile node.</summary>
 public readonly record struct BuildNodeRef(string Id)

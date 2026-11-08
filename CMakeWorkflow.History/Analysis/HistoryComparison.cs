@@ -1,9 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.History.Models;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History.Analysis;
-#pragma warning restore IDE0130
 
 public static class HistoryComparison
 {

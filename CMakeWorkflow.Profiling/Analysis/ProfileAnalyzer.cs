@@ -5,9 +5,7 @@ using System.Text.RegularExpressions;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Capture;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Analysis;
-#pragma warning restore IDE0130
 
 public static class ProfileAnalyzer
 {

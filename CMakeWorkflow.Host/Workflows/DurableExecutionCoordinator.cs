@@ -2,9 +2,7 @@ using System.Collections.Concurrent;
 using CMakeWorkflow.Host.Execution;
 using CMakeWorkflow.Host.Sessions;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Owns background execution tasks independently of individual RPC connections.</summary>
 /// <remarks>

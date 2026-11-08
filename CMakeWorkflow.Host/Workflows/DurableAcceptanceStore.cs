@@ -4,9 +4,7 @@ using System.Text;
 using CMakeWorkflow.Host.Sessions;
 using Microsoft.Data.Sqlite;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Transactional workspace ledger for immutable acceptance, dispatch evidence and recovery.</summary>
 /// <remarks>
@@ -67,23 +65,23 @@ public sealed class DurableAcceptanceStore : IDisposable
         {
             if (!readOnly)
             {
-                Execute("PRAGMA journal_mode=DELETE;");
+                Execute(static command => command.CommandText = "PRAGMA journal_mode=DELETE;");
             }
 
             if (!readOnly)
             {
-                Execute("PRAGMA synchronous=FULL;");
+                Execute(static command => command.CommandText = "PRAGMA synchronous=FULL;");
             }
 
-            Execute("PRAGMA busy_timeout=30000;");
+            Execute(static command => command.CommandText = "PRAGMA busy_timeout=30000;");
             if (!readOnly)
             {
-                Execute("CREATE TABLE IF NOT EXISTS workspace_identity (id TEXT NOT NULL PRIMARY KEY);");
+                Execute(static command => command.CommandText = "CREATE TABLE IF NOT EXISTS workspace_identity (id TEXT NOT NULL PRIMARY KEY);");
             }
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS accepted_workflows (
                           request_id TEXT NOT NULL PRIMARY KEY,
                           operation_id TEXT NOT NULL UNIQUE,
@@ -99,7 +97,7 @@ public sealed class DurableAcceptanceStore : IDisposable
             // mean 'workflow'; new non-CMake operations carry a durable domain tag.
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_domains (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           domain_kind TEXT NOT NULL,
@@ -110,7 +108,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS dispatch_checkpoints (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           run_directory TEXT NOT NULL,
@@ -122,7 +120,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_results_reservations (
                           run_directory TEXT NOT NULL PRIMARY KEY,
                           operation_id TEXT NOT NULL UNIQUE,
@@ -133,7 +131,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_finalizations (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           run_directory TEXT NOT NULL,
@@ -147,7 +145,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_cancellations (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           revision INTEGER NOT NULL CHECK(revision = 1),
@@ -159,7 +157,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_reconciliations (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           revision INTEGER NOT NULL CHECK(revision = 1),
@@ -173,7 +171,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_resume_admissions (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           reconciliation_revision INTEGER NOT NULL,
@@ -186,7 +184,7 @@ public sealed class DurableAcceptanceStore : IDisposable
 
             if (!readOnly)
             {
-                Execute("""
+                Execute(static command => command.CommandText = """
                         CREATE TABLE IF NOT EXISTS operation_resume_attempts (
                           operation_id TEXT NOT NULL PRIMARY KEY,
                           attempt_id TEXT NOT NULL UNIQUE,
@@ -618,37 +616,44 @@ public sealed class DurableAcceptanceStore : IDisposable
         bool hasResume = schema.ExecuteScalar() is not null;
         using SqliteCommand cmd = connection.CreateCommand();
 
-#pragma warning disable CA2100 // SQL structure comes only from trusted internal statements; external values are bound as SQLite parameters.
-        cmd.CommandText = hasDecisions && hasResume ? """
-                                                      SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
-                                                             d.checkpoint_sha256, r.decision, COALESCE(x.revision,r.revision), r.note
-                                                      FROM accepted_workflows a
-                                                      LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
-                                                      LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
-                                                      LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
-                                                      LEFT JOIN operation_reconciliations r ON r.operation_id=a.operation_id
-                                                      LEFT JOIN operation_resume_admissions x ON x.operation_id=a.operation_id
-                                                      WHERE a.operation_id=$id;
-                                                      """ :
-                    hasDecisions ? """
-                           SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
-                                  d.checkpoint_sha256, r.decision, r.revision, r.note
-                           FROM accepted_workflows a
-                           LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
-                           LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
-                           LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
-                           LEFT JOIN operation_reconciliations r ON r.operation_id=a.operation_id
-                           WHERE a.operation_id=$id;
-                           """ : """
-                                 SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
-                                        d.checkpoint_sha256, NULL, NULL, NULL
-                                 FROM accepted_workflows a
-                                 LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
-                                 LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
-                                 LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
-                                 WHERE a.operation_id=$id;
-                                 """;
-#pragma warning restore CA2100
+        // Preserve the legacy projection for read-only stores without reconciliation tables.
+        // Each assignment is a literal SQL statement, never constructed from input.
+        cmd.CommandText = """
+                              SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
+                              d.checkpoint_sha256, NULL, NULL, NULL
+                              FROM accepted_workflows a
+                              LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
+                              LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
+                              LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
+                              WHERE a.operation_id=$id;
+                              """;
+        if (hasDecisions)
+        {
+            cmd.CommandText = """
+                              SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
+                              d.checkpoint_sha256, r.decision, r.revision, r.note
+                              FROM accepted_workflows a
+                              LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
+                              LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
+                              LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
+                              LEFT JOIN operation_reconciliations r ON r.operation_id=a.operation_id
+                              WHERE a.operation_id=$id;
+                              """;
+        }
+        if (hasDecisions && hasResume)
+        {
+            cmd.CommandText = """
+                              SELECT a.state, f.terminal_state, c.operation_id, d.run_directory,
+                              d.checkpoint_sha256, r.decision, COALESCE(x.revision,r.revision), r.note
+                              FROM accepted_workflows a
+                              LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
+                              LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
+                              LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
+                              LEFT JOIN operation_reconciliations r ON r.operation_id=a.operation_id
+                              LEFT JOIN operation_resume_admissions x ON x.operation_id=a.operation_id
+                              WHERE a.operation_id=$id;
+                              """;
+        }
 
         _ = cmd.Parameters.AddWithValue("$id", operationId);
         using SqliteDataReader reader = cmd.ExecuteReader();
@@ -1399,13 +1404,12 @@ public sealed class DurableAcceptanceStore : IDisposable
             : bytes;
     }
 
-    private void Execute(string sql)
+    private void Execute(Action<SqliteCommand> configure)
     {
         using SqliteCommand command = connection.CreateCommand();
 
-#pragma warning disable CA2100 // SQL structure comes only from trusted internal statements; external values are bound as SQLite parameters.
-        command.CommandText = sql;
-#pragma warning restore CA2100
+        // Keep schema statements literal at their call sites, separate from bound query values.
+        configure(command);
 
         _ = command.ExecuteNonQuery();
     }

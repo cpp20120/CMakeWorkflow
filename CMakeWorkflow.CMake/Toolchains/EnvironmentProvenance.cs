@@ -3,9 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.CMake.Toolchains;
-#pragma warning restore IDE0130
 
 /// <summary>Captures reproducibility metadata without reserving an immutable execution environment.</summary>
 /// <remarks>
@@ -238,10 +236,8 @@ internal static class EnvironmentProvenance
             : null;
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-    private static string Hash(string value) => Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
-#pragma warning restore CA1308
+    private static string Hash(string value) => Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
 
     private static string? HostId()

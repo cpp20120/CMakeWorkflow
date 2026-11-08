@@ -2,9 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.CMake.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // Compatibility adapter for the existing run.json report. All checks remain
 // byte-for-byte compatible with the old DurableAcceptanceStore call sites.

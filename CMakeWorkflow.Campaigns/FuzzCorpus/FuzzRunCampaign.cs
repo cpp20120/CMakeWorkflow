@@ -332,10 +332,8 @@ public static class FuzzRunCampaign
             }
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-            string logName = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                            System.Text.Encoding.UTF8.GetBytes(artifact))).ToLowerInvariant()[..16] + ".log";
-#pragma warning restore CA1308
+            string logName = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+                            System.Text.Encoding.UTF8.GetBytes(artifact)))[..16] + ".log";
 
             string logPath = Path.Combine(logDirectory, logName);
             await File.WriteAllTextAsync(logPath, result.Output, ct);
@@ -494,10 +492,7 @@ public static class FuzzRunCampaign
             if (File.Exists(target) && !File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes))
             {
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-                string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))
-                                    .ToLowerInvariant()[..12];
-#pragma warning restore CA1308
+                string hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes))[..12];
 
                 target = Path.Combine(destination, name + "-" + hash);
             }

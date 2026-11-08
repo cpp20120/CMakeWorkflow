@@ -1,8 +1,6 @@
 using System.Text.Json.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Recipes;
-#pragma warning restore IDE0130
 
 /// <summary>Named CTest selection with exactly one non-null filter.</summary>
 /// <remarks>

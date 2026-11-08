@@ -1,8 +1,6 @@
 using System.Text.Json.Nodes;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Analysis;
-#pragma warning restore IDE0130
 
 // Unweighted sampled call chains are evidence, never elapsed CPU time.
 // Frames are stored root-to-leaf; perf script and tracerpt supply leaf-first.

@@ -3,9 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CMakeWorkflow.History.Models;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History.Analysis;
-#pragma warning restore IDE0130
 
 // This is a one-sided test for a user-declared regression direction. It does
 // not claim that sequential benchmark samples are independent or free of drift.

@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // The immutable request identity is derived by a trusted domain adapter.
 // The SQLite v1 column names remain unchanged for on-disk compatibility.

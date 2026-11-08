@@ -5,9 +5,7 @@ using System.Text.Json;
 using CMakeWorkflow.Tooling.Tools;
 using Microsoft.Win32;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Toolchains;
-#pragma warning restore IDE0130
 
 public static class WindowsToolchains
 {
@@ -17,9 +15,7 @@ public static class WindowsToolchains
     {
         byte[] data = Encoding.UTF8.GetBytes(role + "\0" + Path.GetFullPath(path).ToUpperInvariant());
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-        return Convert.ToHexString(SHA256.HashData(data))[..24].ToLowerInvariant();
-#pragma warning restore CA1308
+        return Convert.ToHexStringLower(SHA256.HashData(data))[..24];
 
     }
 

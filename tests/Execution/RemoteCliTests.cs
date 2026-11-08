@@ -1,9 +1,7 @@
 using CMakeWorkflow.IntegrationTests.Support;
 using static CMakeWorkflow.IntegrationTests.Support.TestHarness;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.IntegrationTests.Execution;
-#pragma warning restore IDE0130
 
 // CLI input must fail before starting SSH. The existing Host SSH fixtures
 // exercise the actual RPC execution, durable lookup and artifact transfer.

@@ -406,14 +406,11 @@ try
         {
             byte[] archive = Archive(architecture);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-            string digest = Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant();
-#pragma warning restore CA1308
+            string digest = Convert.ToHexStringLower(SHA256.HashData(archive));
 
 
-#pragma warning disable CA2000 // The surrounding using HttpClient owns and disposes its handler.
-            using HttpClient client = new(new ReleaseHandler(archive, digest, architecture));
-#pragma warning restore CA2000
+            using ReleaseHandler handler = new(archive, digest, architecture);
+            using HttpClient client = new(handler, disposeHandler: false);
 
             await new VerifiedCMakeInstaller(client).InstallAsync(Path.Combine(root, "verified-bin"), default);
             Check(File.Exists(Path.Combine(root, "verified-bin", "cmake"))
@@ -435,9 +432,8 @@ try
                   && !File.Exists(Path.Combine(collision, "cmake")),
                 "collision preflight avoids partial links");
 
-#pragma warning disable CA2000 // The surrounding using HttpClient owns and disposes its handler.
-            using HttpClient badClient = new(new ReleaseHandler(archive, new string('0', 64), architecture));
-#pragma warning restore CA2000
+            using ReleaseHandler badHandler = new(archive, new string('0', 64), architecture);
+            using HttpClient badClient = new(badHandler, disposeHandler: false);
 
             try
             {

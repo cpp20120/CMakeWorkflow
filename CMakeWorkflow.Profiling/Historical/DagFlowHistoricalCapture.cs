@@ -6,9 +6,7 @@ using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Core.Persistence;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Historical;
-#pragma warning restore IDE0130
 
 // The old one-off stress-harness protocol lives in this DagFlow extension,
 // not in the workflow planner or the general profiler backend.

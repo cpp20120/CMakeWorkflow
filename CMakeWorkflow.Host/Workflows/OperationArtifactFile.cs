@@ -3,9 +3,7 @@ using System.Runtime.InteropServices;
 using CMakeWorkflow.Host.Protocol;
 using Microsoft.Win32.SafeHandles;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>
 /// Opens a report-bound artifact relative to an already opened workspace directory.
@@ -69,6 +67,25 @@ internal static class OperationArtifactFile
         {
             handle.Dispose();
             throw;
+        }
+    }
+
+    // Catalogs may omit logs for nodes that were never dispatched. Keep the
+    // missing-file policy confined to the open operation: failures while hashing
+    // an already opened artifact must never be mistaken for an absent log.
+    internal static FileStream? OpenCatalogFile(string workspace, string path, bool optional)
+    {
+        try
+        {
+            return OpenRead(workspace, path);
+        }
+        catch (FileNotFoundException) when (optional)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException) when (optional)
+        {
+            return null;
         }
     }
 
@@ -247,19 +264,53 @@ internal static class OperationArtifactFile
     }
 
 
-#pragma warning disable CA2101 // Unix open/openat paths are explicitly marshaled as UTF-8; Unicode marshaling would change the native filesystem ABI.
+    // open/openat receive UTF-8 bytes, not a managed string. Keep errno intact for
+    // UnixOpenError at the call site, including after freeing the temporary buffer.
+    private static int UnixOpen(string path, int flags)
+    {
+        nint utf8Path = Marshal.StringToCoTaskMemUTF8(path);
+        int fd;
+        int error;
+        try
+        {
+            fd = UnixOpenNative(utf8Path, flags);
+            error = Marshal.GetLastPInvokeError();
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8Path);
+        }
+
+        Marshal.SetLastPInvokeError(error);
+        return fd;
+    }
+
+    private static int UnixOpenAt(int dirfd, string name, int flags)
+    {
+        nint utf8Name = Marshal.StringToCoTaskMemUTF8(name);
+        int fd;
+        int error;
+        try
+        {
+            fd = UnixOpenAtNative(dirfd, utf8Name, flags);
+            error = Marshal.GetLastPInvokeError();
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8Name);
+        }
+
+        Marshal.SetLastPInvokeError(error);
+        return fd;
+    }
+
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static extern int UnixOpen([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-#pragma warning restore CA2101
+    private static extern int UnixOpenNative(nint utf8Path, int flags);
 
-
-
-#pragma warning disable CA2101 // Unix open/openat paths are explicitly marshaled as UTF-8; Unicode marshaling would change the native filesystem ABI.
     [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static extern int UnixOpenAt(int dirfd, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags);
-#pragma warning restore CA2101
+    private static extern int UnixOpenAtNative(int dirfd, nint utf8Name, int flags);
 
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]

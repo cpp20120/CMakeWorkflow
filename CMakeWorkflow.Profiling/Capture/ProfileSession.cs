@@ -2,9 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CMakeWorkflow.Core;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Capture;
-#pragma warning restore IDE0130
 
 public sealed class ProfileSession(string outputDirectory, string captureId)
 {

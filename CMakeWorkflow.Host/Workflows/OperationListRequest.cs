@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Query durable operations in this initialized workspace, newest first.</summary>
 /// <remarks>Cursor pagination excludes later admissions; mutable operation states may change between pages.</remarks>

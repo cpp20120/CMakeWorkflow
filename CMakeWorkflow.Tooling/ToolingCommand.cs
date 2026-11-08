@@ -205,19 +205,21 @@ public static class ToolingCommand
     }
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-    private static PackageManagerKind ParseManager(string value) => value.ToLowerInvariant() switch
-    {
-        "auto" => PackageManagerKind.Auto,
-        "none" => PackageManagerKind.None,
-        "apt" => PackageManagerKind.Apt,
-        "pacman" => PackageManagerKind.Pacman,
-        "dnf" => PackageManagerKind.Dnf,
-        "brew" => PackageManagerKind.Brew,
-        "winget" => PackageManagerKind.Winget,
-        _ => throw new ArgumentException("Package manager must be auto, none, apt, pacman, dnf, brew or winget.")
-    };
-#pragma warning restore CA1308
+    private static readonly Dictionary<string, PackageManagerKind> PackageManagers =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["auto"] = PackageManagerKind.Auto,
+            ["none"] = PackageManagerKind.None,
+            ["apt"] = PackageManagerKind.Apt,
+            ["pacman"] = PackageManagerKind.Pacman,
+            ["dnf"] = PackageManagerKind.Dnf,
+            ["brew"] = PackageManagerKind.Brew,
+            ["winget"] = PackageManagerKind.Winget
+        };
+
+    private static PackageManagerKind ParseManager(string value) =>
+        PackageManagers.TryGetValue(value, out PackageManagerKind manager) ? manager
+            : throw new ArgumentException("Package manager must be auto, none, apt, pacman, dnf, brew or winget.");
 
 
     private const string Usage =

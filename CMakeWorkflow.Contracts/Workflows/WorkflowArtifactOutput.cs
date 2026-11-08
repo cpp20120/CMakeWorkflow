@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Named output evidence captured after a node succeeds.</summary>
 /// <remarks>

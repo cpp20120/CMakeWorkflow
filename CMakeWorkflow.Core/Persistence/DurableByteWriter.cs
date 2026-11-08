@@ -1,9 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Core.Persistence;
-#pragma warning restore IDE0130
 
 // Atomically writes already-encoded bytes and durably commits the destination.
 // Callers own directory creation, leases, serialization and recovery policy.
@@ -33,10 +31,9 @@ internal static class DurableByteWriter
         {
             await stream.WriteAsync(bytes, ct);
             ct.ThrowIfCancellationRequested();
-
-#pragma warning disable CA1849 // Flush(true) must commit bytes to disk; FlushAsync only flushes buffers and cannot replace this durability boundary.
-            stream.Flush(flushToDisk: true);
-#pragma warning restore CA1849
+            // Flush managed buffers, then synchronize the OS file buffers to storage.
+            await stream.FlushAsync(ct);
+            RandomAccess.FlushToDisk(stream.SafeFileHandle);
 
             if (OperatingSystem.IsMacOS())
             {
@@ -143,11 +140,30 @@ internal static class DurableByteWriter
     }
 
 
-#pragma warning disable CA2101 // Unix open/openat paths are explicitly marshaled as UTF-8; Unicode marshaling would change the native filesystem ABI.
+    // Marshal the Unix path explicitly as UTF-8 without source-generated unsafe interop.
+    // Preserve errno across the native-buffer release: NativeError reads it at the call site.
+    private static int Open(string path, int flags)
+    {
+        nint utf8Path = Marshal.StringToCoTaskMemUTF8(path);
+        int fd;
+        int error;
+        try
+        {
+            fd = OpenNative(utf8Path, flags);
+            error = Marshal.GetLastPInvokeError();
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8Path);
+        }
+
+        Marshal.SetLastPInvokeError(error);
+        return fd;
+    }
+
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-#pragma warning restore CA2101
+    private static extern int OpenNative(nint utf8Path, int flags);
 
 
     [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]

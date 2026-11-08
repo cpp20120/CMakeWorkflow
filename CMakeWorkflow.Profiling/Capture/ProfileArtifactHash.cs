@@ -2,9 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CMakeWorkflow.Core;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Capture;
-#pragma warning restore IDE0130
 
 public static class ProfileArtifactHash
 {
@@ -31,9 +29,7 @@ public static class ProfileArtifactHash
         }
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-        return Convert.ToHexString(tree.GetHashAndReset()).ToLowerInvariant();
-#pragma warning restore CA1308
+        return Convert.ToHexStringLower(tree.GetHashAndReset());
 
     }
 }

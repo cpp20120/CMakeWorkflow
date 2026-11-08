@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Provisioning;
-#pragma warning restore IDE0130
 
 // Serializes Host installations for this user, including separate Host processes.
 // Native package managers retain their own locks; ordinary tooling setup is not

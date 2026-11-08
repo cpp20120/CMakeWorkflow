@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Tools;
-#pragma warning restore IDE0130
 
 public static class ToolCatalog
 {
@@ -14,13 +12,16 @@ public static class ToolCatalog
         ? value
         : throw new ArgumentException($"Unknown tool '{id}'.");
 
+    // Built-in profile IDs have canonical spellings. Resolve by ordinal,
+    // case-insensitive lookup, without rewriting arbitrary user input.
+    public static string CanonicalProfileId(string id) =>
+        Profiles.TryGetValue(id, out ToolProfile? value) ? value.Id : id;
+
     public static IReadOnlyList<ToolDefinition> ResolveProfiles(IEnumerable<string> profileIds,
         ToolPlatform platform)
     {
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-        string[] ids = [.. profileIds.Select(x => x.Trim().ToLowerInvariant())];
-#pragma warning restore CA1308
+        string[] ids = [.. profileIds.Select(x => x.Trim())];
 
         if (ids.Length == 0)
         {
@@ -68,7 +69,7 @@ public static class ToolCatalog
             ["dotnet", "cmake", "ctest", "cxx"]),
         new ToolProfile("all", "All relevant tools for this OS",
             ["cmake", "ctest", "cxx", "ninja", "clangxx", "native-profiler", "dotnet"])
-    }.ToDictionary(x => x.Id, StringComparer.Ordinal);
+    }.ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
 
     private static Dictionary<string, ToolDefinition> BuildTools()
     {

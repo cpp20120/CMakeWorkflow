@@ -30,7 +30,7 @@ internal static class SshTestPeer
         using HttpClient downloads = VerifiedCMakeInstaller.CreateDownloadClient();
         using DurableExecutionCoordinator executions = new(stop.Token);
         using JsonRpc rpc = HostConnection.Create(Console.OpenStandardInput(), Console.OpenStandardOutput());
-        DoctorSession session = new(
+        using DoctorSession session = new(
             workspace => new ToolingService(new SystemToolingRuntime(workspace), new VerifiedCMakeInstaller(downloads)),
             _ => Task.CompletedTask, stop.Token, fixes, _ => Task.CompletedTask, durableExecutions: executions);
         rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<Protocol.IHostRpc>(), session, null);

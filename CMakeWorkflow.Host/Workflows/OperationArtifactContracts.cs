@@ -1,7 +1,5 @@
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // Binary payloads are base64-encoded by the existing JSON-RPC serializer.
 public sealed record OperationArtifactListRequest(string OperationId);

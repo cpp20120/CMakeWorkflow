@@ -4,9 +4,7 @@ using System.Text.Json;
 using CMakeWorkflow.Tooling.Toolchains;
 using CMakeWorkflow.Tooling.Tools;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Environment;
-#pragma warning restore IDE0130
 
 public static class HostPreparation
 {

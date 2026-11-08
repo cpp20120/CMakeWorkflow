@@ -7,9 +7,7 @@ using System.Xml.Linq;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Capture;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Analysis;
-#pragma warning restore IDE0130
 
 public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 {

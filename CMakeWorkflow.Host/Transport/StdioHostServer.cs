@@ -4,9 +4,7 @@ using CMakeWorkflow.Host.Workflows;
 using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Transport;
-#pragma warning restore IDE0130
 
 /// <summary>
 /// Private, single-client Host over a binary stdio pair. The session owns the
@@ -33,7 +31,7 @@ internal static class StdioHostServer
         using HttpClient downloads = VerifiedCMakeInstaller.CreateDownloadClient();
         VerifiedCMakeInstaller installer = new(downloads);
         using JsonRpc rpc = HostConnection.Create(input, output);
-        DoctorSession session = new(
+        using DoctorSession session = new(
             workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
             value => rpc.NotifyAsync("tooling/progress", value), lifetime.Token,
             fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);

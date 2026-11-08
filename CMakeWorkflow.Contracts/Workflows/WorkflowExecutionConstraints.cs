@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Optional execution requirements checked before external dispatch.</summary>
 /// <remarks>

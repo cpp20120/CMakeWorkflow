@@ -34,9 +34,7 @@ internal static class WorkflowArtifacts
             RejectLink(path);
             await using FileStream stream = File.OpenRead(path);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-            return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
-#pragma warning restore CA1308
+            return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct));
 
         }
 
@@ -55,9 +53,7 @@ internal static class WorkflowArtifacts
         }
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-#pragma warning restore CA1308
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
 
     }
 

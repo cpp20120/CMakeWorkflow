@@ -1,8 +1,6 @@
 using CMakeWorkflow.Host.Execution;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // Composition boundary: each registered domain owns request semantics, executable
 // behavior and checkpoint evidence. The coordinator still owns operation lifetimes.

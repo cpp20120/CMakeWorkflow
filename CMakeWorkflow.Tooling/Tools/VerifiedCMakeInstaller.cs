@@ -4,9 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Tools;
-#pragma warning restore IDE0130
 
 public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeInstaller
 {

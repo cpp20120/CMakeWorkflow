@@ -4,9 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.History.Models;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History.Storage;
-#pragma warning restore IDE0130
 
 /// <summary>Reads completed result formats into detached history import evidence without database mutation.</summary>
 /// <remarks>
@@ -40,18 +38,14 @@ internal static class HistoryReports
             : null;
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-    private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-#pragma warning restore CA1308
+    private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
 
     private static string HashFile(string path)
     {
         using FileStream stream = File.OpenRead(path);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
-#pragma warning restore CA1308
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
 
     }
 

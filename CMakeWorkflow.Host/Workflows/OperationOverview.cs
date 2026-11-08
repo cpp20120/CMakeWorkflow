@@ -1,7 +1,5 @@
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>A durable read projection, independent of CMake and process report schemas.</summary>
 /// <remarks>Node information exists only after the Host verifies finalization and report bytes.

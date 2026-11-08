@@ -4,9 +4,7 @@ using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.Contracts.Recipes;
 using CMakeWorkflow.Contracts.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Workflows;
-#pragma warning restore IDE0130
 
 // Single typed graph builder for the CLI and the local Host. It does no I/O and
 // does not start a build or profiler. The caller owns persistence and admission.

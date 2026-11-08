@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Historical;
-#pragma warning restore IDE0130
 
 /// <summary>Historical capture inputs; schedule randomization is independent of trial counts.</summary>
 /// <remarks>

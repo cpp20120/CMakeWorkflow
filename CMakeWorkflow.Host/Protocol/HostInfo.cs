@@ -1,8 +1,6 @@
 using CMakeWorkflow.Tooling.Tools;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Protocol;
-#pragma warning restore IDE0130
 
 public sealed record HostInfo(
     int ProtocolVersion,

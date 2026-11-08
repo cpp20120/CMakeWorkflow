@@ -6,9 +6,7 @@ using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Core.Processes;
 using CMakeWorkflow.Host.Sessions;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 // Actual non-CMake domain consumer of ExecutionScheduler, DurableByteWriter
 // and WorkflowProcessBackend. Only this adapter knows the process manifest and

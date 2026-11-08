@@ -1,8 +1,6 @@
 using CMakeWorkflow.Tooling.Toolchains;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Tools;
-#pragma warning restore IDE0130
 
 public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller installer)
 {
@@ -15,11 +13,10 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
     {
         ArgumentNullException.ThrowIfNull(requestedProfiles);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
         string[] profiles = requestedProfiles.Count == 0
                     ? ["cmake"]
-                    : [.. requestedProfiles.Select(x => x.Trim().ToLowerInvariant()).Distinct(StringComparer.Ordinal)];
-#pragma warning restore CA1308
+                    : [.. requestedProfiles.Select(x => ToolCatalog.CanonicalProfileId(x.Trim()))
+                        .Distinct(StringComparer.Ordinal)];
 
         string directory = Path.GetFullPath(installDirectory ?? Path.Combine(
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), ".local", "bin"));

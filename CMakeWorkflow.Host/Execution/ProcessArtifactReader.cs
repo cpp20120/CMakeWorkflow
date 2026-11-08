@@ -3,9 +3,7 @@ using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 // Process-domain catalog over the same descriptor-anchored, no-follow artifact
 // reader as CMake. Never accept an arbitrary client path as a download request.
@@ -64,16 +62,12 @@ internal static class ProcessArtifactReader
         {
             ct.ThrowIfCancellationRequested();
             string path = PathFor(paths, directory, candidate);
-            FileStream file;
-            try
+            await using FileStream? file = OperationArtifactFile.OpenCatalogFile(
+                paths.WorkspaceDirectory, path, optional: candidate.Id != "report");
+            if (file is null)
             {
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-                file = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path);
-#pragma warning restore CA2000
+                continue;
             }
-            catch (FileNotFoundException) when (candidate.Id != "report") { continue; }
-            catch (DirectoryNotFoundException) when (candidate.Id != "report") { continue; }
-            await using FileStream opened = file;
             long size = file.Length;
             long stamp = File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks;
             string hash = Convert.ToHexString(await SHA256.HashDataAsync(file, ct));

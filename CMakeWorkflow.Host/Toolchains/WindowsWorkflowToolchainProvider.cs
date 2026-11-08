@@ -5,9 +5,7 @@ using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Tooling.Toolchains;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Toolchains;
-#pragma warning restore IDE0130
 
 // Opt-in runtime resolver. Discovery is authoritative for candidate IDs; the
 // requested environment is captured once per workflow (not once per node).

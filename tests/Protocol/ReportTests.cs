@@ -3,9 +3,7 @@ using System.Text.Json.Nodes;
 using CMakeWorkflow.IntegrationTests.Support;
 using static CMakeWorkflow.IntegrationTests.Support.TestHarness;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.IntegrationTests.Protocol;
-#pragma warning restore IDE0130
 
 internal static class ReportTests
 {

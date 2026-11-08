@@ -16,7 +16,6 @@ using StreamJsonRpc;
 
 namespace CMakeWorkflow.Host.Sessions;
 
-#pragma warning disable CA1001 // The session gate uses only managed async waiters, never AvailableWaitHandle; DrainAsync preserves the existing session lifecycle.
 public sealed partial class DoctorSession
 {
     private static readonly string[] SqliteSidecarSuffixes =
@@ -618,4 +617,3 @@ public sealed partial class DoctorSession
         }
     }
 }
-#pragma warning restore CA1001

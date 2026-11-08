@@ -46,13 +46,13 @@ internal static class FixTests
                     return Task.CompletedTask;
                 }, clock);
 
-        DoctorSession session = Session(runtime, installer);
+        using DoctorSession session = Session(runtime, installer);
         _ = await session.InitializeAsync(new(1, root), default);
         PlanFixRequest request = new(["cmake"], Path.Combine(root, "tools with spaces"), PackageManagerKind.None,
             true);
         FixPlan plan = await session.PlanFixAsync(request, default);
         Check(installer.Calls == 0 && !plan.Plan.Ready, "plan must be read only");
-        DoctorSession stranger = Session(runtime, installer);
+        using DoctorSession stranger = Session(runtime, installer);
         _ = await stranger.InitializeAsync(new(1, root), default);
         await Reject(() => stranger.ApplyFixAsync(new("foreign", plan.PlanId), default));
         Check(installer.Calls == 0, "foreign connection cannot apply a plan");
@@ -97,7 +97,7 @@ internal static class FixTests
         plan = await session.PlanFixAsync(request, default);
         FixRuntime otherRuntime = new();
         FixInstaller otherInstaller = new(otherRuntime);
-        DoctorSession other = Session(otherRuntime, otherInstaller);
+        using DoctorSession other = Session(otherRuntime, otherInstaller);
         _ = await other.InitializeAsync(new(1, root), default);
         FixPlan otherPlan = await other.PlanFixAsync(request, default);
         using CancellationTokenSource cancel = new();
@@ -121,7 +121,7 @@ internal static class FixTests
 
         using CancellationTokenSource disconnected = new();
         installer.Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        DoctorSession dropping = Session(runtime, installer, disconnected.Token);
+        using DoctorSession dropping = Session(runtime, installer, disconnected.Token);
         _ = await dropping.InitializeAsync(new(1, root), default);
         plan = await dropping.PlanFixAsync(request, default);
         running = dropping.ApplyFixAsync(new("disconnect", plan.PlanId), default);
@@ -165,6 +165,10 @@ internal static class FixTests
         await Reject(() => session.PlanFixAsync(bound with { Profiles = ["ninja"] }, default));
         await Reject(() => session.PlanFixAsync(bound with { RunDirectory = root + "-outside" }, default));
 
+        await session.DrainAsync();
+        await stranger.DrainAsync();
+        await other.DrainAsync();
+        // dropping was drained immediately after the disconnect test.
         Console.WriteLine(
             "Fix checks passed: plans, ownership, expiry, revalidation, installs, failures, locks, cancel and disconnect.");
     }

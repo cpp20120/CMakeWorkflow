@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Transport;
-#pragma warning restore IDE0130
 
 /// <summary>A byte tunnel to a persistent Host, with no ownership of that Host.</summary>
 public static class StdioBridge

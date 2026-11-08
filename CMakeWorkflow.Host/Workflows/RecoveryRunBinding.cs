@@ -1,9 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 internal sealed record RecoveryRunBinding(string Directory, string Snapshot)
 {

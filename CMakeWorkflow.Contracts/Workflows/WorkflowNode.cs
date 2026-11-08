@@ -1,8 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>One DAG node with kind-specific execution and evidence requirements.</summary>
 /// <remarks>

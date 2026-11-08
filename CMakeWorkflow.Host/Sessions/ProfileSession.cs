@@ -41,10 +41,8 @@ public sealed partial class DoctorSession
 
         string output = paths.Require(request.ResultsDirectory);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
         string manifest = paths.Require(Path.Combine(output,
-                    "profile-workflow-" + request.RequestId.ToLowerInvariant() + ".json"));
-#pragma warning restore CA1308
+                    "profile-workflow-" + CanonicalRequestId(request.RequestId) + ".json"));
 
         ProfileVariant[] variants = [.. request.Variants.Select(v => new ProfileVariant(v.Name,
             paths.Require(v.BuildDirectory)))];
@@ -80,10 +78,8 @@ public sealed partial class DoctorSession
             ".cmakeworkflow", "profile-preparations"));
         _ = Directory.CreateDirectory(bindingDirectory);
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
         string binding = paths.Require(Path.Combine(bindingDirectory,
-                    request.RequestId.ToLowerInvariant() + ".json"));
-#pragma warning restore CA1308
+                    CanonicalRequestId(request.RequestId) + ".json"));
 
         ProfilePreparation preparation = new(1, manifest, hash, output);
         byte[] bindingBytes = JsonSerializer.SerializeToUtf8Bytes(preparation, HostJson.Default.ProfilePreparation);

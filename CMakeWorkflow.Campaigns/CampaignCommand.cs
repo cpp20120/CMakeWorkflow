@@ -125,12 +125,10 @@ public static class CampaignCommand
                 && File.GetLastWriteTimeUtc(reportPath) >= started.UtcDateTime)
             {
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
                 CampaignCompletion value = new(1, campaign, Path.GetFileName(reportPath),
-                                    Convert.ToHexString(SHA256.HashData(
-                                        await File.ReadAllBytesAsync(reportPath))).ToLowerInvariant(),
+                                    Convert.ToHexStringLower(SHA256.HashData(
+                                        await File.ReadAllBytesAsync(reportPath))),
                                     started, DateTimeOffset.UtcNow, status);
-#pragma warning restore CA1308
 
                 string temporary = marker + ".tmp";
                 await File.WriteAllTextAsync(temporary,

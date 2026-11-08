@@ -1,8 +1,6 @@
 using CMakeWorkflow.Contracts.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Builders;
-#pragma warning restore IDE0130
 
 /// <summary>
 /// Builds schema-v2 workflow documents in memory. Never invokes CMake, the Host, or the filesystem.

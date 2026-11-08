@@ -1,8 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Mutable serialized workflow definition; construction alone does not validate or execute it.</summary>
 /// <remarks>

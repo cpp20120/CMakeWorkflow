@@ -3,7 +3,6 @@
 using CMakeWorkflow.CMake.Execution;
 
 namespace CMakeWorkflow.Profiling.Historical;
-#pragma warning restore IDE0130
 
 // A view of the durable command journal, not a second owner of operation state.
 // The percentage counts finished command steps, never elapsed wall-clock time.

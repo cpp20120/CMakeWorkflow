@@ -1,7 +1,6 @@
 // Preserve the established namespace; folders only group implementation.
 
 namespace CMakeWorkflow.Core.Execution;
-#pragma warning restore IDE0130
 
 // The scheduler owns ready/active admission and bounded dispatch. A domain
 // adapter owns authoritative state, durable commits and dispatch authorization.

@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // Facts validated from a runner-owned checkpoint by a trusted domain codec.
 // The Host store binds their originating bytes and operation identity under

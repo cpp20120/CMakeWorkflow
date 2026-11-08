@@ -7,9 +7,7 @@ using CMakeWorkflow.Host.Workflows;
 using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Transport;
-#pragma warning restore IDE0130
 
 /// <summary>Hosts initialized RPC sessions and shared durable execution coordinators.</summary>
 public static class HostServer
@@ -51,7 +49,7 @@ public static class HostServer
                 using (CancellationTokenSource disconnected = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 using (JsonRpc rpc = HostConnection.Create(stream))
                 {
-                    DoctorSession session = new(
+                    using DoctorSession session = new(
                         workspace => new ToolingService(new SystemToolingRuntime(workspace), installer),
                         value => rpc.NotifyAsync("tooling/progress", value), disconnected.Token,
                         fixes, value => rpc.NotifyAsync("tooling/fixProgress", value), durableExecutions: executions);

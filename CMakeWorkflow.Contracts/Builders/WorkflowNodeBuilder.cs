@@ -1,8 +1,6 @@
 using CMakeWorkflow.Contracts.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Builders;
-#pragma warning restore IDE0130
 
 /// <summary>Mutable fluent adapter over a workflow DTO.</summary>
 /// <remarks>

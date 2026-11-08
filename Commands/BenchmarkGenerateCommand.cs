@@ -3,9 +3,7 @@ using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.Contracts.Recipes;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Commands;
-#pragma warning restore IDE0130
 
 internal static class BenchmarkGenerateCommand
 {

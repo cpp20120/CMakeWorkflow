@@ -6,9 +6,7 @@ using System.Text.Json;
 using CMakeWorkflow.History.Models;
 using Microsoft.Data.Sqlite;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.History.Storage;
-#pragma warning restore IDE0130
 
 public sealed class HistoryStore : IDisposable
 {
@@ -98,7 +96,7 @@ public sealed class HistoryStore : IDisposable
     private void Migrate0To1()
     {
         using SqliteTransaction tx = db.BeginTransaction();
-        Execute("""
+        Execute(static command => command.CommandText = """
                 CREATE TABLE IF NOT EXISTS runs (
                   id TEXT PRIMARY KEY, directory TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
                   workflow TEXT, manifest_hash TEXT, started_at TEXT, finished_at TEXT,
@@ -119,44 +117,44 @@ public sealed class HistoryStore : IDisposable
                 CREATE INDEX IF NOT EXISTS runs_status_time ON runs(status,started_at);
                 CREATE INDEX IF NOT EXISTS measurements_metric ON measurements(metric,variant,scenario);
                 """, tx);
-        Execute("PRAGMA user_version=1", tx);
+        Execute(static command => command.CommandText = "PRAGMA user_version=1", tx);
         tx.Commit();
     }
 
     private void Migrate1To2()
     {
         using SqliteTransaction tx = db.BeginTransaction();
-        Execute("ALTER TABLE runs ADD COLUMN indexer_version INTEGER NOT NULL DEFAULT 0", tx);
-        Execute("PRAGMA user_version=2", tx);
+        Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN indexer_version INTEGER NOT NULL DEFAULT 0", tx);
+        Execute(static command => command.CommandText = "PRAGMA user_version=2", tx);
         tx.Commit();
     }
 
     private void Migrate2To3()
     {
         using SqliteTransaction tx = db.BeginTransaction();
-        Execute("ALTER TABLE runs ADD COLUMN host_id TEXT", tx);
-        Execute("ALTER TABLE runs ADD COLUMN environment_fingerprint TEXT", tx);
-        Execute("ALTER TABLE runs ADD COLUMN environment_json TEXT", tx);
-        Execute("PRAGMA user_version=3", tx);
+        Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN host_id TEXT", tx);
+        Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN environment_fingerprint TEXT", tx);
+        Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN environment_json TEXT", tx);
+        Execute(static command => command.CommandText = "PRAGMA user_version=3", tx);
         tx.Commit();
     }
 
     private void Migrate3To4()
     {
         using SqliteTransaction tx = db.BeginTransaction();
-        Execute("ALTER TABLE runs ADD COLUMN build_environment_json TEXT", tx);
-        Execute("PRAGMA user_version=4", tx);
+        Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN build_environment_json TEXT", tx);
+        Execute(static command => command.CommandText = "PRAGMA user_version=4", tx);
         tx.Commit();
     }
 
-    private void Execute(string sql, SqliteTransaction? tx = null, params object?[] args)
+    private void Execute(Action<SqliteCommand> configure, SqliteTransaction? tx = null, params object?[] args)
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.Transaction = tx;
 
-#pragma warning disable CA2100 // SQL structure comes only from trusted internal statements; external values are bound as SQLite parameters.
-        cmd.CommandText = sql;
-#pragma warning restore CA2100
+        // SQL text is assigned from static call-site lambdas containing only literal statements.
+        // Runtime values remain bound through SQLite parameters.
+        configure(cmd);
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -226,12 +224,10 @@ public sealed class HistoryStore : IDisposable
         using SqliteTransaction tx = db.BeginTransaction();
         foreach (ParsedRun parsed in changed)
         {
-            Execute(
-                "DELETE FROM measurements WHERE run_id=$p0; DELETE FROM artifacts WHERE run_id=$p0; DELETE FROM nodes WHERE run_id=$p0; DELETE FROM runs WHERE id=$p0;",
+            Execute(static command => command.CommandText = "DELETE FROM measurements WHERE run_id=$p0; DELETE FROM artifacts WHERE run_id=$p0; DELETE FROM nodes WHERE run_id=$p0; DELETE FROM runs WHERE id=$p0;",
                 tx, parsed.Run.Id);
             HistoryRun r = parsed.Run;
-            Execute(
-                "INSERT INTO runs (id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,indexer_version,host_id,environment_fingerprint,environment_json,build_environment_json) VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11,$p12,$p13,$p14)",
+            Execute(static command => command.CommandText = "INSERT INTO runs (id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,indexer_version,host_id,environment_fingerprint,environment_json,build_environment_json) VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11,$p12,$p13,$p14)",
                 tx,
                 r.Id, r.Directory, r.Format, r.Workflow, r.ManifestHash, r.StartedAt,
                 r.FinishedAt, r.Status, r.Revision, r.SourceHash, CurrentIndexerVersion,
@@ -245,21 +241,21 @@ public sealed class HistoryStore : IDisposable
                         HistoryJson.Default.ListHistoryBuildEnvironment));
             foreach (HistoryNode n in parsed.Nodes)
             {
-                Execute("INSERT INTO nodes VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8)", tx,
+                Execute(static command => command.CommandText = "INSERT INTO nodes VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8)", tx,
                     n.RunId, n.Id, n.Kind, n.Status, n.DurationSeconds, n.Dependencies,
                     n.BuildDirectory, n.Configuration, n.Target);
             }
 
             foreach (HistoryMeasurement m in parsed.Measurements)
             {
-                Execute("INSERT INTO measurements VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11)", tx,
+                Execute(static command => command.CommandText = "INSERT INTO measurements VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11)", tx,
                     m.RunId, m.NodeId, m.Metric, m.Unit, m.Value, m.Variant, m.Scenario,
                     m.Source, m.Method, m.SampleIndex, m.Workload, m.Environment);
             }
 
             foreach (HistoryArtifact? a in parsed.Artifacts.Distinct())
             {
-                Execute("INSERT INTO artifacts VALUES ($p0,$p1,$p2,$p3,$p4,$p5)", tx,
+                Execute(static command => command.CommandText = "INSERT INTO artifacts VALUES ($p0,$p1,$p2,$p3,$p4,$p5)", tx,
                     a.RunId, a.NodeId, a.Type, a.Path, a.Sha256, a.Metadata);
             }
 

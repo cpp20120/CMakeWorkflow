@@ -2,9 +2,7 @@ using System.Security.Cryptography;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 // The Host holds the same permanent authorization and execution lease as the
 // CMake runner. Resume is explicit and guarded by the existing one-shot claim.

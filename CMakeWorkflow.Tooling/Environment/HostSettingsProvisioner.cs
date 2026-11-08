@@ -1,8 +1,6 @@
 using System.Globalization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Environment;
-#pragma warning restore IDE0130
 
 public static class HostSettingsProvisioner
 {

@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Tooling.Environment;
-#pragma warning restore IDE0130
 
 // Deliberately separate machine observations from mutating tool installation.
 // A plan never modifies global kernel or CPU settings.

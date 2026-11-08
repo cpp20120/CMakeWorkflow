@@ -1,8 +1,6 @@
 using System.Text.Json.Serialization;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Contracts.Recipes;
-#pragma warning restore IDE0130
 
 /// <summary>Named build-tree variant used by matrix recipes.</summary>
 /// <remarks>

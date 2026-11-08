@@ -401,7 +401,7 @@ try
     FakeRuntime runtime = new();
     ToolingService service = new(runtime, new NoInstaller());
     List<DoctorProgress> events = [];
-    DoctorSession session = new(directory =>
+    using DoctorSession session = new(directory =>
         {
             Check(directory == root, "workspace passed to runtime factory");
             return service;
@@ -547,9 +547,10 @@ try
     await session.DrainAsync();
     runtime.Delay = false;
     Check((await session.DoctorAsync(request, default)).Ready, "connection can check again after cancellation");
+    await session.DrainAsync();
 
     using CancellationTokenSource disconnect = new();
-    DoctorSession disconnectedSession = new(_ => service, _ => Task.CompletedTask, disconnect.Token, fixes,
+    using DoctorSession disconnectedSession = new(_ => service, _ => Task.CompletedTask, disconnect.Token, fixes,
         _ => Task.CompletedTask);
     _ = await disconnectedSession.InitializeAsync(new(1, root), default);
     runtime.Delay = true;

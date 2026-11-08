@@ -4,9 +4,7 @@ using CMakeWorkflow.Host.Execution;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Sessions;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Read-only domain projection. Never interprets an unfinalized run.json as evidence.</summary>
 internal static class OperationOverviewReader

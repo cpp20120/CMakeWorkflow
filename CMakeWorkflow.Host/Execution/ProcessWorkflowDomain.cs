@@ -4,9 +4,7 @@ using System.Text.Json;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 // Domain-owned input validation, request identity and report interpretation.
 /// <summary>Validates process-domain input and derives immutable admission identity.</summary>

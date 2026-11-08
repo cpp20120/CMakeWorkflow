@@ -152,10 +152,9 @@ internal static class OperationArtifactDownloader
                 {
                     // Persist bytes BEFORE committing the resumable offset. On a crash,
                     // uncommitted tail bytes are truncated and verified on the next call.
-
-#pragma warning disable CA1849 // Flush(true) must commit bytes to disk; FlushAsync only flushes buffers and cannot replace this durability boundary.
-                    output.Flush(flushToDisk: true);
-#pragma warning restore CA1849
+                    // Flush managed buffers, then synchronize the OS file buffers to storage.
+                    await output.FlushAsync(ct);
+                    RandomAccess.FlushToDisk(output.SafeFileHandle);
 
                     await SaveCheckpointAsync(checkpointFile, identity, offset,
                         Convert.ToHexString(hash.GetCurrentHash()), ct);
@@ -220,10 +219,9 @@ internal static class OperationArtifactDownloader
             {
                 byte[] bytes = Encoding.UTF8.GetBytes(data);
                 await file.WriteAsync(bytes, ct);
-
-#pragma warning disable CA1849 // Flush(true) must commit bytes to disk; FlushAsync only flushes buffers and cannot replace this durability boundary.
-                file.Flush(flushToDisk: true);
-#pragma warning restore CA1849
+                // Flush managed buffers, then synchronize the OS file buffers to storage.
+                await file.FlushAsync(ct);
+                RandomAccess.FlushToDisk(file.SafeFileHandle);
 
             }
             File.Move(staging, path, overwrite: true);

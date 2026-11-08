@@ -269,10 +269,8 @@ try
     }
 
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-    string reportHash = Convert.ToHexString(SHA256.HashData(
-            await File.ReadAllBytesAsync(Path.Combine(campaign, "report.json"), CancellationToken.None))).ToLowerInvariant();
-#pragma warning restore CA1308
+    string reportHash = Convert.ToHexStringLower(SHA256.HashData(
+            await File.ReadAllBytesAsync(Path.Combine(campaign, "report.json"), CancellationToken.None)));
 
     Write(campaign, "campaign-completion.json", $$"""
                                                   {"schemaVersion":1,"campaign":"weak-memory","report":"report.json",
@@ -889,10 +887,8 @@ try
     _ = Directory.CreateDirectory(harnessArtifacts);
     Write(harnessArtifacts, "manifest.json", /*lang=json,strict*/ "{\"schemaVersion\":1}");
 
-#pragma warning disable CA1308 // Lowercase values are part of the existing persisted hash, identifier, or command protocol.
-    string harnessHash = Convert.ToHexString(SHA256.HashData(
-            await File.ReadAllBytesAsync(Path.Combine(harnessArtifacts, "manifest.json"), CancellationToken.None))).ToLowerInvariant();
-#pragma warning restore CA1308
+    string harnessHash = Convert.ToHexStringLower(SHA256.HashData(
+            await File.ReadAllBytesAsync(Path.Combine(harnessArtifacts, "manifest.json"), CancellationToken.None)));
 
     Write(harnessArtifacts, "summary.json", /*lang=json,strict*/ """
                                             {"status":"passed","manifest_sha256":"hash","cases":{

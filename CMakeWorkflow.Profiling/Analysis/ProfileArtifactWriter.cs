@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Analysis;
-#pragma warning restore IDE0130
 
 /// <summary>Publishes analysis text by moving a unique temporary sibling over its destination.</summary>
 /// <remarks>

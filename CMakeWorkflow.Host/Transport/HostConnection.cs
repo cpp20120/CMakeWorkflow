@@ -2,9 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.Host.Protocol;
 using StreamJsonRpc;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Transport;
-#pragma warning restore IDE0130
 
 /// <summary>Creates header-delimited JSON-RPC connections using closed source-generated Host DTOs.</summary>
 /// <remarks>

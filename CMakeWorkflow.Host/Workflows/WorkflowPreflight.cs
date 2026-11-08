@@ -1,7 +1,5 @@
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Workflows;
-#pragma warning restore IDE0130
 
 // A read-only observation of the exact manifest bytes supplied to planning.
 // This is not an admission token: workflow/start must still validate and durably

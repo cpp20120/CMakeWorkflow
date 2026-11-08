@@ -2,9 +2,7 @@ using System.Text.RegularExpressions;
 using CMakeWorkflow.Contracts.Recipes;
 using CMakeWorkflow.Contracts.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Workflows;
-#pragma warning restore IDE0130
 
 /// <summary>Validates a versioned profile recipe and derives platform-specific capture dependencies.</summary>
 /// <remarks>

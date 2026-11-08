@@ -3,7 +3,6 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.Host.Protocol;
 
 namespace CMakeWorkflow.Host.Sessions;
-#pragma warning restore IDE0130
 
 // The first API slice allows only the initialized workspace. Additional roots
 // must be a future explicit server policy, never supplied by a request to itself.

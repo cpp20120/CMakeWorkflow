@@ -4,9 +4,7 @@ using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Host.Execution;
-#pragma warning restore IDE0130
 
 /// <summary>Validates process recovery evidence without inferring success from interrupted running intents.</summary>
 internal static class ProcessWorkflowRecovery

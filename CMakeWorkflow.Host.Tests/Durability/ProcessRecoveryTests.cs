@@ -131,7 +131,10 @@ internal static class ProcessRecoveryTests
             {
                 if (child.HasExited)
                 {
-                    throw new UnreachableException("Fault worker exited: " + await stderr + await stdout);
+                    throw new UnreachableException(
+                        $"Fault worker exited before reaching '{point}' (exit code {child.ExitCode}). " +
+                        "Rebuild with -p:RecoveryFaultInjection=true to enable test barriers. " +
+                        "stderr: " + await stderr + " stdout: " + await stdout);
                 }
 
                 await Task.Delay(20, deadline.Token);

@@ -5,9 +5,7 @@ using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Analysis;
 using CMakeWorkflow.Profiling.Workflows;
 
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Profiling.Replay;
-#pragma warning restore IDE0130
 
 // Replay never profiles a CMake UTILITY wrapper. Direct run nodes and opted-in
 // native harness cases are replayable only with preserved binary identity.

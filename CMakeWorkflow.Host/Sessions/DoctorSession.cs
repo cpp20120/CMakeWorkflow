@@ -17,15 +17,28 @@ public sealed partial class DoctorSession(
     FixCoordinator fixes,
     Func<FixProgress, Task> fixProgress,
     TimeProvider? timeProvider = null,
-    DurableExecutionCoordinator? durableExecutions = null) : IHostRpc
+    DurableExecutionCoordinator? durableExecutions = null) : IHostRpc, IDisposable
 {
     private string? workspace;
     private readonly SemaphoreSlim gate = new(1, 1);
+
+    // Call only after the 32-digit hex request-ID guard. This representation is
+    // stable for on-disk preparation binding names across platforms.
+    private static string CanonicalRequestId(string value) =>
+        Convert.ToHexStringLower(Convert.FromHexString(value));
 
     public async Task DrainAsync()
     {
         await gate.WaitAsync();
         _ = gate.Release();
+    }
+
+    // The connection owner calls DrainAsync after RPC shutdown before disposing
+    // the per-session gate. Durable operations are owned by the Host coordinator.
+    public void Dispose()
+    {
+        gate.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     public Task<HostInfo> InitializeAsync(InitializeRequest request, CancellationToken cancellationToken)

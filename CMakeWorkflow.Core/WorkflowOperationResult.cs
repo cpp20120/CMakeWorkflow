@@ -1,6 +1,4 @@
-// Preserve the established namespace; folders only group implementation.
 namespace CMakeWorkflow.Core;
-#pragma warning restore IDE0130
 
 /// <summary>Extension outcome awaiting runner integration and durable persistence.</summary>
 /// <param name="ExitCode">Native/backend status code; zero conventionally indicates success.</param>
