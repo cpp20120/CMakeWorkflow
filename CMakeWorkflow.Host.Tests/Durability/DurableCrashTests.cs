@@ -106,20 +106,7 @@ internal static class DurableCrashTests
             using Process child = Process.Start(psi) ?? throw new UnreachableException("Cannot start fault worker.");
             try
             {
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-                using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
-#pragma warning restore CA2000
-
-                while (!File.Exists(signal))
-                {
-                    if (child.HasExited)
-                    {
-                        throw new UnreachableException(
-                            $"Fault worker exited {child.ExitCode}: {await child.StandardError.ReadToEndAsync()}");
-                    }
-
-                    await Task.Delay(25, deadline.Token);
-                }
+                await WaitForSignalAsync(child, signal);
 
                 if (stage != "effect" && await File.ReadAllTextAsync(signal) != stage)
                 {
@@ -184,6 +171,28 @@ internal static class DurableCrashTests
 
         Console.WriteLine(
             "Durable SIGKILL checks passed: authorization/checkpoint/external-effect crash, persistence, deduplication and no implicit redispatch.");
+    }
+
+    private static async Task WaitForSignalAsync(Process child, string signal)
+    {
+        CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
+        try
+        {
+            while (!File.Exists(signal))
+            {
+                if (child.HasExited)
+                {
+                    throw new UnreachableException(
+                        $"Fault worker exited {child.ExitCode}: {await child.StandardError.ReadToEndAsync()}");
+                }
+
+                await Task.Delay(25, deadline.Token);
+            }
+        }
+        finally
+        {
+            deadline.Dispose();
+        }
     }
 
     private static async Task ProcessOk(string executable, string[] args)

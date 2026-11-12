@@ -157,7 +157,7 @@ internal sealed class SshNetConnection : IRemoteSshConnection
     /// <remarks>
     /// Uses only the supplied private key and pin, not ssh-agent, ssh config or known_hosts. The connect token
     /// is checked during connection and before exec; execution itself uses CancellationToken.None and must be
-    /// closed by transport disposal. Construction failure disposes stdin, command, client and key in sequence; a cleanup exception can interrupt later disposal.
+    /// closed by transport disposal. Construction failure attempts disposal of stdin, command, client and key independently, preserving the original failure.
     /// </remarks>
     private static async Task<SshNetConnection> ConnectCommandAsync(string host, int port, string username,
         string privateKeyPath, TimeSpan connectionTimeout, byte[] expected, string remoteCommand,
@@ -172,15 +172,10 @@ internal sealed class SshNetConnection : IRemoteSshConnection
         Stream? stdin = null;
         try
         {
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-            PrivateKeyConnectionInfo connection = new(host, port, username, key)
-            {
-                Timeout = connectionTimeout
-            };
-#pragma warning restore CA2000
-
-            client = new SshClient(connection);
+            // The host/port/key overload owns its ConnectionInfo; the overload
+            // accepting an existing ConnectionInfo does not.
+            client = new SshClient(host, port, username, key);
+            client.ConnectionInfo.Timeout = connectionTimeout;
             client.HostKeyReceived += (_, args) =>
             {
                 byte[] actual = SHA256.HashData(args.HostKey);
@@ -194,18 +189,18 @@ internal sealed class SshNetConnection : IRemoteSshConnection
             stdin = command.CreateInputStream();
             return new(client, key, command, executing, stdin);
         }
-        catch
+        catch (Exception failure)
         {
-            if (stdin is not null)
-            {
-                await stdin.DisposeAsync();
-            }
-            command?.Dispose();
-#pragma warning disable CA1508 // Construction may fail before assignment; cleanup must preserve that failure.
-            client?.Dispose();
+            CleanupFailures cleanup = new();
+            cleanup.Add(failure);
+            await cleanup.DisposeAsync(stdin);
+            cleanup.Dispose(command);
+#pragma warning disable CA1508 // Construction can fail before client assignment; release only initialized resources.
+            cleanup.Dispose(client);
 #pragma warning restore CA1508
-            key.Dispose();
-            throw;
+            cleanup.Dispose(key);
+            cleanup.ThrowIfAny("SSH.NET connection and cleanup reported multiple failures.");
+            throw; // ThrowIfAny always throws because the primary error was added first.
         }
     }
 
@@ -237,10 +232,10 @@ internal sealed class SshNetConnection : IRemoteSshConnection
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Sequentially repeatable; concurrent calls are not synchronized. Closes stdin/client/command/key rather
-    /// than sending durable cancellation or awaiting workflow completion. Waits at most two seconds for stderr
-    /// after synchronous teardown; this is not a deadline covering every disposal call or remote Host cleanup.
-    /// An early exec failure is observed by its continuation; disposal does not guarantee a clean remote exit.
+    /// Sequentially repeatable; concurrent calls are not synchronized. Attempts stdin/client/command/key
+    /// disposal independently rather than sending durable cancellation or awaiting workflow completion.
+    /// Waits at most two seconds for stderr after teardown; this is not a deadline covering every disposal
+    /// call or remote Host cleanup. An early exec failure is observed by its continuation.
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
@@ -252,17 +247,51 @@ internal sealed class SshNetConnection : IRemoteSshConnection
         disposed = true;
         // Closing a persistent bridge does not cancel Host work. An ephemeral
         // stdio Host instead observes EOF and cancels its private coordinator.
-        try { Output.Dispose(); }
-        finally
+        CleanupFailures cleanup = new();
+        cleanup.Dispose(Output);
+        // Direct field disposal is intentional: CA2213 cannot infer ownership
+        // release through CleanupFailures.Dispose(IDisposable).
+#pragma warning disable CA1031 // Continue releasing all SSH.NET resources after any Dispose failure.
+        try
         {
-            try { client.Dispose(); }
-            finally
-            {
-                command.Dispose();
-                key.Dispose();
-            }
+            client.Dispose();
         }
-        try { await stderr.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            cleanup.Add(error);
+        }
+
+        try
+        {
+            command.Dispose();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            cleanup.Add(error);
+        }
+
+        try
+        {
+            key.Dispose();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            cleanup.Add(error);
+        }
+#pragma warning restore CA1031
+
+        try
+        {
+            await stderr.WaitAsync(TimeSpan.FromSeconds(2));
+        }
         catch (TimeoutException) { /* Never wait unboundedly for remote stderr EOF. */ }
+#pragma warning disable CA1031 // Observe stderr errors without masking earlier disposal failures.
+        catch (Exception error) when (error is not OutOfMemoryException)
+#pragma warning restore CA1031
+        {
+            cleanup.Add(error);
+        }
+
+        cleanup.ThrowIfAny("SSH.NET teardown reported multiple failures.");
     }
 }

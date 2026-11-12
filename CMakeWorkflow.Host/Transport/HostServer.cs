@@ -83,17 +83,20 @@ public static class HostServer
             }
         }
 
-        void Accept(Stream stream)
+        // The accept loop owns a pending stream until registration succeeds.
+        // Clearing the ref transfers it to ServeAsync, which releases it on disconnect.
+        void Accept<TStream>(ref TStream? pending) where TStream : Stream
         {
+            TStream stream = pending ?? throw new ArgumentNullException(nameof(pending));
             long id = Interlocked.Increment(ref next);
-            // Task.Run prevents a synchronously completed connection from being
-            // removed before it is registered below.
+            // The gate prevents synchronous completion before the task is registered.
             TaskCompletionSource start = new(TaskCreationOptions.RunContinuationsAsynchronously);
             clients[id] = Task.Run(async () =>
             {
                 await start.Task;
                 await ServeAsync(stream, id);
-            }, ct);
+            }, CancellationToken.None);
+            pending = null;
             start.SetResult();
         }
 
@@ -113,27 +116,29 @@ public static class HostServer
                 while (!ct.IsCancellationRequested)
                 {
                     await slots.WaitAsync(ct);
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-                    NamedPipeServerStream pipe = new(name, PipeDirection.InOut,
-                                            NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
-                                            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-#pragma warning restore CA2000
-
-                    if (!announced)
-                    {
-                        await Console.Error.WriteLineAsync($"[Host] Listening: {endpoint}");
-                        announced = true;
-                    }
-
                     try
                     {
-                        await pipe.WaitForConnectionAsync(ct);
-                        Accept(pipe);
+                        if (!announced)
+                        {
+                            await Console.Error.WriteLineAsync($"[Host] Listening: {endpoint}");
+                            announced = true;
+                        }
+
+                        NamedPipeServerStream? pipe = await WaitForClientPipeAsync(name, ct);
+                        try
+                        {
+                            Accept(ref pipe); // Transfer only after the worker is registered.
+                        }
+                        finally
+                        {
+                            if (pipe is not null)
+                            {
+                                await pipe.DisposeAsync();
+                            }
+                        }
                     }
                     catch
                     {
-                        await pipe.DisposeAsync();
                         _ = slots.Release();
                         throw;
                     }
@@ -154,11 +159,18 @@ public static class HostServer
                         await slots.WaitAsync(ct);
                         try
                         {
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-                            Accept(new NetworkStream(await listener.AcceptAsync(ct), ownsSocket: true));
-#pragma warning restore CA2000
-
+                            NetworkStream? stream = await AcceptSocketAsync(listener, ct);
+                            try
+                            {
+                                Accept(ref stream); // Transfer only after the worker is registered.
+                            }
+                            finally
+                            {
+                                if (stream is not null)
+                                {
+                                    await stream.DisposeAsync();
+                                }
+                            }
                         }
                         catch
                         {
@@ -181,6 +193,39 @@ public static class HostServer
             await shutdownHost.CancelAsync();
             await Task.WhenAll(clients.Values);
             await executions.DrainAsync();
+        }
+    }
+
+    // These factories dispose an unaccepted resource on failure and transfer it only on success.
+    // The caller transfers the successful result to ServeAsync, which owns its disposal.
+    private static async Task<NamedPipeServerStream> WaitForClientPipeAsync(string name, CancellationToken ct)
+    {
+        NamedPipeServerStream pipe = new(name, PipeDirection.InOut,
+            NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        try
+        {
+            await pipe.WaitForConnectionAsync(ct);
+            return pipe;
+        }
+        catch
+        {
+            await pipe.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task<NetworkStream> AcceptSocketAsync(Socket listener, CancellationToken ct)
+    {
+        Socket socket = await listener.AcceptAsync(ct);
+        try
+        {
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
         }
     }
 }

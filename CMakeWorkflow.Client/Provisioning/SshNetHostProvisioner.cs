@@ -275,26 +275,35 @@ public static class SshNetHostProvisioner
 
     private static SshClient CreateSsh(SshNetProvisionOptions options, PrivateKeyFile key)
     {
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-        SshClient ssh = new(new PrivateKeyConnectionInfo(options.Host, options.Port, options.Username, key)
-        { Timeout = options.ConnectionTimeout });
-#pragma warning restore CA2000
-
-        Pin(ssh, options.HostKeySha256);
-        return ssh;
+        // This overload owns and disposes its internally created ConnectionInfo.
+        SshClient ssh = new(options.Host, options.Port, options.Username, key);
+        try
+        {
+            ssh.ConnectionInfo.Timeout = options.ConnectionTimeout;
+            Pin(ssh, options.HostKeySha256);
+            return ssh;
+        }
+        catch
+        {
+            ssh.Dispose();
+            throw;
+        }
     }
 
     private static SftpClient CreateSftp(SshNetProvisionOptions options, PrivateKeyFile key)
     {
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-        SftpClient sftp = new(new PrivateKeyConnectionInfo(options.Host, options.Port, options.Username, key)
-        { Timeout = options.ConnectionTimeout });
-#pragma warning restore CA2000
-
-        Pin(sftp, options.HostKeySha256);
-        return sftp;
+        SftpClient sftp = new(options.Host, options.Port, options.Username, key);
+        try
+        {
+            sftp.ConnectionInfo.Timeout = options.ConnectionTimeout;
+            Pin(sftp, options.HostKeySha256);
+            return sftp;
+        }
+        catch
+        {
+            sftp.Dispose();
+            throw;
+        }
     }
 
     private static void Pin(BaseClient client, string provided)

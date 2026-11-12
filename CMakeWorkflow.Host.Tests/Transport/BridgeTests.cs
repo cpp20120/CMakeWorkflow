@@ -92,50 +92,62 @@ internal static class BridgeTests
         using (CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
 
-#pragma warning disable CA2025 // Disposing the transport intentionally signals EOF; the forwarding/server task is awaited before leaving the ownership scope.
-            Task forwarding = StdioBridge.ForwardAsync(bridgeInput, bridgeInput, bridgeHost, stop.Token);
-#pragma warning restore CA2025
-
-            byte[] payload = [.. Enumerable.Range(0, 65537).Select(i => (byte)i)];
-            byte[] receive = new byte[payload.Length];
-            Task read = host.ReadExactlyAsync(receive, ct).AsTask();
-            await client.WriteAsync(payload, ct);
-            await read;
-            if (!payload.SequenceEqual(receive))
-            {
-                throw new UnreachableException("Upstream bytes changed.");
-            }
-
-            read = client.ReadExactlyAsync(receive, ct).AsTask();
-            await host.WriteAsync(payload, ct);
-            await read;
-            if (!payload.SequenceEqual(receive))
-            {
-                throw new UnreachableException("Downstream bytes changed.");
-            }
-
-            if (cancel)
-            {
-                await stop.CancelAsync();
-            }
-            else if (hostEof)
-            {
-                await host.DisposeAsync();
-            }
-            else
-            {
-                await client.DisposeAsync();
-            }
-
+            async Task ForwardUntilStoppedAsync() =>
+                await StdioBridge.ForwardAsync(bridgeInput, bridgeInput, bridgeHost, stop.Token);
+            Task forwarding = ForwardUntilStoppedAsync();
             try
             {
-                await forwarding.WaitAsync(ct);
+                byte[] payload = [.. Enumerable.Range(0, 65537).Select(i => (byte)i)];
+                byte[] receive = new byte[payload.Length];
+                Task read = host.ReadExactlyAsync(receive, ct).AsTask();
+                await client.WriteAsync(payload, ct);
+                await read;
+                if (!payload.SequenceEqual(receive))
+                {
+                    throw new UnreachableException("Upstream bytes changed.");
+                }
+
+                read = client.ReadExactlyAsync(receive, ct).AsTask();
+                await host.WriteAsync(payload, ct);
+                await read;
+                if (!payload.SequenceEqual(receive))
+                {
+                    throw new UnreachableException("Downstream bytes changed.");
+                }
+
                 if (cancel)
                 {
-                    throw new UnreachableException("Cancellation was not propagated.");
+                    await stop.CancelAsync();
                 }
+                else if (hostEof)
+                {
+                    await host.DisposeAsync();
+                }
+                else
+                {
+                    await client.DisposeAsync();
+                }
+
+                try
+                {
+                    await forwarding.WaitAsync(ct);
+                    if (cancel)
+                    {
+                        throw new UnreachableException("Cancellation was not propagated.");
+                    }
+                }
+                catch (OperationCanceledException) when (cancel && !ct.IsCancellationRequested) { }
             }
-            catch (OperationCanceledException) when (cancel && !ct.IsCancellationRequested) { }
+            finally
+            {
+                await stop.CancelAsync();
+                try
+                {
+                    await forwarding.WaitAsync(TimeSpan.FromSeconds(8), CancellationToken.None);
+                    await forwarding; // Join before disposing any captured stream.
+                }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+            }
         }
     }
 

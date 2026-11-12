@@ -22,13 +22,55 @@ public static class HostConnection
     public static JsonRpc Create(Stream input, Stream output)
     {
 
-#pragma warning disable CA2000 // The returned JsonRpc owns its message handler; the caller owns and disposes the connection.
-        ApplicationRpc rpc = new(new HeaderDelimitedMessageHandler(output, input, CreateFormatter()));
+#pragma warning disable CA2000 // The handler transfers to ApplicationRpc after construction succeeds.
+        HeaderDelimitedMessageHandler handler = new(output, input, CreateFormatter());
 #pragma warning restore CA2000
+        ApplicationRpc rpc;
+        try
+        {
+#pragma warning disable CA2000 // ApplicationRpc owns its handler after construction; caller owns the returned RPC.
+            rpc = new(handler);
+#pragma warning restore CA2000
+        }
+        catch (Exception constructionFailure)
+        {
+            try
+            {
+                ((IDisposable)handler).Dispose();
+            }
+#pragma warning disable CA1031 // Preserve both a failed RPC constructor and a failed handler cleanup.
+            catch (Exception cleanupFailure) when (cleanupFailure is not OutOfMemoryException)
+#pragma warning restore CA1031
+            {
+                throw new AggregateException("RPC construction and handler cleanup both failed.",
+                    constructionFailure, cleanupFailure);
+            }
+
+            throw;
+        }
 
 #if RPC_CANCELLATION_TESTING
-        rpc.TraceSource.Switch.Level = System.Diagnostics.SourceLevels.All;
-        rpc.TraceSource.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(Console.Error));
+        try
+        {
+            rpc.TraceSource.Switch.Level = System.Diagnostics.SourceLevels.All;
+            _ = rpc.TraceSource.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(Console.Error));
+        }
+        catch (Exception traceFailure)
+        {
+            try
+            {
+                rpc.Dispose();
+            }
+#pragma warning disable CA1031 // Preserve trace setup failure even if RPC cleanup also fails.
+            catch (Exception cleanupFailure) when (cleanupFailure is not OutOfMemoryException)
+#pragma warning restore CA1031
+            {
+                throw new AggregateException("RPC trace setup and cleanup both failed.",
+                    traceFailure, cleanupFailure);
+            }
+
+            throw;
+        }
 #endif
         return rpc;
     }

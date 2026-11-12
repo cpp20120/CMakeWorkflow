@@ -66,9 +66,9 @@ internal static class SshNetContractTests
         using (hostStream)
         {
 
-#pragma warning disable CA2025 // Disposing the transport intentionally signals EOF; the forwarding/server task is awaited before leaving the ownership scope.
-            Task server = HostServer.RunStdioAsync(hostStream, hostStream, timeout.Token);
-#pragma warning restore CA2025
+            async Task ServePrivateHostAsync() =>
+                await HostServer.RunStdioAsync(hostStream, hostStream, timeout.Token);
+            Task server = ServePrivateHostAsync();
 
             try
             {
@@ -94,6 +94,7 @@ internal static class SshNetContractTests
                 }
 
                 await server.WaitAsync(TimeSpan.FromSeconds(8));
+                await server; // Join before either in-memory transport is disposed.
             }
         }
         try

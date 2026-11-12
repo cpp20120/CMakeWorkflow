@@ -142,46 +142,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         try
         {
             process = Process.Start(start) ?? throw new InvalidOperationException("Host did not start.");
-            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(15));
-            while (true)
-            {
-                timeout.Token.ThrowIfCancellationRequested();
-                if (process.HasExited)
-                {
-                    throw new IOException($"Host exited with code {process.ExitCode} before accepting connections.");
-                }
-
-                try
-                {
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-                    using CancellationTokenSource connect = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
-#pragma warning restore CA2000
-
-                    connect.CancelAfter(TimeSpan.FromMilliseconds(150));
-                    Stream stream = await ConnectTransportAsync(endpoint, connect.Token);
-                    try
-                    {
-                        return await InitializeAsync(stream, workspace, process, dir, timeout.Token);
-                    }
-                    catch
-                    {
-                        await stream.DisposeAsync();
-                        throw;
-                    }
-                }
-                catch (Exception e) when (e is IOException or SocketException or TimeoutException
-                                              or OperationCanceledException)
-                {
-                    if (timeout.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-
-                    await Task.Delay(50, timeout.Token);
-                }
-            }
+            return await ConnectLaunchedHostAsync(process, endpoint, workspace, dir, ct);
         }
         catch
         {
@@ -204,6 +165,56 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
 
             throw;
         }
+    }
+
+    /// <summary>Waits for the owned Host to accept a connection; cancellation sources stay scoped to this probe.</summary>
+    private static async Task<CMakeWorkflowClient> ConnectLaunchedHostAsync(
+        Process process, string endpoint, string workspace, string? directory, CancellationToken ct)
+    {
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        while (true)
+        {
+            timeout.Token.ThrowIfCancellationRequested();
+            if (process.HasExited)
+            {
+                throw new IOException($"Host exited with code {process.ExitCode} before accepting connections.");
+            }
+
+            try
+            {
+                Stream stream = await ConnectTransportForStartupProbeAsync(endpoint, timeout.Token);
+                try
+                {
+                    return await InitializeAsync(stream, workspace, process, directory, timeout.Token);
+                }
+                catch
+                {
+                    await stream.DisposeAsync();
+                    throw;
+                }
+            }
+            catch (Exception e) when (e is IOException or SocketException or TimeoutException
+                                          or OperationCanceledException)
+            {
+                if (timeout.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                await Task.Delay(50, timeout.Token);
+            }
+        }
+    }
+
+    // Only the transport connection has a 150 ms probe deadline. The RPC handshake
+    // uses the outer startup deadline and must not hold on to this linked CTS.
+    private static async Task<Stream> ConnectTransportForStartupProbeAsync(
+        string endpoint, CancellationToken startupToken)
+    {
+        using CancellationTokenSource probe = CancellationTokenSource.CreateLinkedTokenSource(startupToken);
+        probe.CancelAfter(TimeSpan.FromMilliseconds(150));
+        return await ConnectTransportAsync(endpoint, probe.Token);
     }
 
     // StreamJsonRpc 2.26 annotates the formatter constructor because its default
@@ -229,21 +240,35 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
 #pragma warning restore CA2000
 
 
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-        ApplicationRpc rpc = new(new HeaderDelimitedMessageHandler(output ?? stream, stream, formatter));
+#pragma warning disable CA2000 // The handler transfers to ApplicationRpc on successful construction.
+        HeaderDelimitedMessageHandler handler = new(output ?? stream, stream, formatter);
 #pragma warning restore CA2000
-
-        // Diagnostic opt-in for NativeAOT RPC smoke. A lost $/cancelRequest is
-        // otherwise invisible when StreamJsonRpc dispatches it asynchronously.
-        if (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_RPC_TRACE") == "1")
+        ApplicationRpc rpc;
+        try
         {
-            rpc.TraceSource.Switch.Level = SourceLevels.All;
-            _ = rpc.TraceSource.Listeners.Add(new TextWriterTraceListener(Console.Error));
+#pragma warning disable CA2000 // ApplicationRpc owns its handler after construction; failure path disposes the handler.
+            rpc = new(handler);
+#pragma warning restore CA2000
+        }
+        catch (Exception failure)
+        {
+            CleanupFailures cleanup = new();
+            cleanup.Add(failure);
+            cleanup.Dispose(handler);
+            cleanup.ThrowIfAny("RPC construction and handler cleanup reported multiple failures.");
+            throw;
         }
 
         Task<HostIdentity>? initialization = null;
         try
         {
+            // Trace configuration belongs inside the initialization failure boundary.
+            if (Environment.GetEnvironmentVariable("CMAKEWORKFLOW_RPC_TRACE") == "1")
+            {
+                rpc.TraceSource.Switch.Level = SourceLevels.All;
+                _ = rpc.TraceSource.Listeners.Add(new TextWriterTraceListener(Console.Error));
+            }
+
             IClientRpc proxy = rpc.Attach<IClientRpc>();
             rpc.StartListening();
             initialization = proxy.InitializeAsync(new(1, workspace), ct);
@@ -254,27 +279,26 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
                 ? throw new InvalidDataException("Unsupported Host protocol version.")
                 : new(stream, rpc, proxy, info, process, directory, ssh);
         }
-        catch
+        catch (Exception failure)
         {
-            // Terminate/reap SSH before disposing handlers with pending pipe I/O.
-            try
+            // Stop/reap SSH before disposing handlers with pending pipe I/O.
+            // Do not replace the handshake error with a later cleanup failure.
+            CleanupFailures cleanup = new();
+            cleanup.Add(failure);
+            if (ssh is not null)
             {
-                if (ssh is not null)
-                {
-                    await ssh.DisposeAsync();
-                }
+                await cleanup.DisposeAsync(ssh);
             }
-            finally
+
+            cleanup.Dispose(rpc);
+            if (ssh is not null && initialization is not null)
             {
-                rpc.Dispose();
-                if (ssh is not null && initialization is not null)
-                {
-                    // Dispose completes pending RPC invocations; observe the failed
-                    // handshake even when process teardown itself reported an error.
-                    try { _ = await initialization; }
-                    catch (Exception error) when (error is not OutOfMemoryException) { }
-                }
+                // Observe the failed handshake after the transport is shut down.
+                try { _ = await initialization; }
+                catch (Exception error) when (error is not OutOfMemoryException) { }
             }
+
+            cleanup.ThrowIfAny("RPC initialization and cleanup reported multiple failures.");
             throw;
         }
     }
@@ -372,38 +396,61 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         }
 
         disposed = true;
-        // Closing a remote connection owns only SSH, not persistent Host work.
+        // Always close all owned resources. In particular, a failing RPC Dispose
+        // must not leave the transport or launched private Host running.
+        CleanupFailures cleanup = new();
+        if (sshConnection is not null)
+        {
+            await cleanup.DisposeAsync(sshConnection);
+        }
+
+        // CA2213 requires direct field disposal inside the owning type. Keep
+        // the exception boundary here so later cleanup still runs.
+#pragma warning disable CA1031 // Record arbitrary Dispose failures without skipping transport or process cleanup.
         try
         {
-            if (sshConnection is not null)
-            {
-                await sshConnection.DisposeAsync();
-            }
-        }
-        finally
-        {
             rpc.Dispose();
-            await transport.DisposeAsync();
         }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            cleanup.Add(error);
+        }
+#pragma warning restore CA1031
+
+        await cleanup.DisposeAsync(transport);
         if (ownedHost is not null)
         {
-            try
+            await cleanup.AttemptAsync(async () =>
             {
                 if (!ownedHost.HasExited)
                 {
                     ownedHost.Kill(entireProcessTree: true);
                     await ownedHost.WaitForExitAsync();
                 }
-            }
-            finally
+            });
+#pragma warning disable CA1031 // Always release the owned Process even if stopping it failed.
+            try
             {
                 ownedHost.Dispose();
             }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                cleanup.Add(error);
+            }
+#pragma warning restore CA1031
         }
 
-        if (ownedSocketDirectory is not null && Directory.Exists(ownedSocketDirectory))
+        if (ownedSocketDirectory is not null)
         {
-            Directory.Delete(ownedSocketDirectory, recursive: true);
+            cleanup.Attempt(() =>
+            {
+                if (Directory.Exists(ownedSocketDirectory))
+                {
+                    Directory.Delete(ownedSocketDirectory, recursive: true);
+                }
+            });
         }
+
+        cleanup.ThrowIfAny("Client connection and cleanup reported multiple failures.");
     }
 }

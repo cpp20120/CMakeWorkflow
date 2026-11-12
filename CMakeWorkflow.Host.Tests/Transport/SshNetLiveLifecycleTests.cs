@@ -289,22 +289,26 @@ internal static class SshNetLiveLifecycleTests
         internal Probe(SshNetLaunchOptions options)
         {
             key = new PrivateKeyFile(options.PrivateKeyPath);
-
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-            PrivateKeyConnectionInfo connection = new(options.Host, options.Port, options.Username, key)
+            SshClient? connected = null;
+            try
             {
-                Timeout = TimeSpan.FromSeconds(12)
-            };
-#pragma warning restore CA2000
-
-            client = new SshClient(connection);
-            string pin = options.HostKeySha256.StartsWith("SHA256:", StringComparison.Ordinal)
-                ? options.HostKeySha256[7..] : options.HostKeySha256;
-            byte[] expected = Convert.FromBase64String(pin + "=");
-            client.HostKeyReceived += (_, args) =>
-                args.CanTrust = CryptographicOperations.FixedTimeEquals(SHA256.HashData(args.HostKey), expected);
-            try { client.Connect(); }
-            catch { client.Dispose(); key.Dispose(); throw; }
+                // This overload owns its ConnectionInfo. The outer Probe owns the SSH client.
+                connected = new SshClient(options.Host, options.Port, options.Username, key);
+                connected.ConnectionInfo.Timeout = TimeSpan.FromSeconds(12);
+                string pin = options.HostKeySha256.StartsWith("SHA256:", StringComparison.Ordinal)
+                    ? options.HostKeySha256[7..] : options.HostKeySha256;
+                byte[] expected = Convert.FromBase64String(pin + "=");
+                connected.HostKeyReceived += (_, args) =>
+                    args.CanTrust = CryptographicOperations.FixedTimeEquals(SHA256.HashData(args.HostKey), expected);
+                connected.Connect();
+                client = connected;
+            }
+            catch
+            {
+                connected?.Dispose();
+                key.Dispose();
+                throw;
+            }
         }
 
         internal string Run(string shell)

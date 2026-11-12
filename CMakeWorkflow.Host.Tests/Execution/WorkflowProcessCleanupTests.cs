@@ -130,11 +130,15 @@ internal static class WorkflowProcessCleanupTests
         try
         {
             await WaitForTree(fixture);
-            await cancellation.CancelAsync();
+            // The duration observer runs synchronously after process cleanup.
+            // Start cancellation without awaiting it yet: the observer may block
+            // until release.Set(), so waiting here can deadlock.
+            Task cancelTask = cancellation.CancelAsync();
             await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             await RequireTreeStopped(fixture,
                 "Process cleanup waited for a blocked duration callback.");
             release.Set();
+            await cancelTask;
             Exception failure = await CaptureFailure(execution);
             AssertFailureOrder(failure,
                 error => error is OperationCanceledException,
@@ -177,11 +181,11 @@ internal static class WorkflowProcessCleanupTests
     {
         Fixture fixture = CreateFixture(root, "sink", flood: true);
         using CancellationTokenSource cancellation = new();
-        CancellationOverlapSink sink = new();
-
-#pragma warning disable CA2025 // Run owns the sink and awaits backend completion before disposal; this test drains execution in finally.
-        Task<WorkflowProcessBackend.Outcome> execution = Run(fixture, null, _ => { }, sink, cancellation: cancellation.Token);
-#pragma warning restore CA2025
+        using CancellationOverlapSink sink = new();
+        // The test retains ownership of sink. The asynchronous consumer is always joined before disposal.
+        async Task<WorkflowProcessBackend.Outcome> ExecuteWithSinkAsync() =>
+            await Run(fixture, null, _ => { }, sink, cancellation: cancellation.Token);
+        Task<WorkflowProcessBackend.Outcome> execution = ExecuteWithSinkAsync();
 
         try
         {
@@ -201,18 +205,23 @@ internal static class WorkflowProcessCleanupTests
         {
             sink.ReleaseFailure();
             await StopFixture(fixture, cancellation, execution);
+            // The caller owns sink: join its only consumer before Dispose.
+            // The scenario asserts the failure before reaching this cleanup path.
+            try { _ = await execution; }
+            catch (IOException) { }
+            catch (OperationCanceledException) { }
+            catch (AggregateException) { }
         }
     }
 
     private static async Task SinkFailureWithoutCancellation(string root)
     {
         Fixture fixture = CreateFixture(root, "sink-live", flood: true);
-        ThrowingSink sink = new();
+        using ThrowingSink sink = new();
         using CancellationTokenSource cancellation = new();
-
-#pragma warning disable CA2025 // Run owns the sink and awaits backend completion before disposal; this test drains execution in finally.
-        Task<WorkflowProcessBackend.Outcome> execution = Run(fixture, null, _ => { }, sink, cancellation: cancellation.Token);
-#pragma warning restore CA2025
+        async Task<WorkflowProcessBackend.Outcome> ExecuteWithSinkAsync() =>
+            await Run(fixture, null, _ => { }, sink, cancellation: cancellation.Token);
+        Task<WorkflowProcessBackend.Outcome> execution = ExecuteWithSinkAsync();
 
         try
         {
@@ -231,6 +240,12 @@ internal static class WorkflowProcessCleanupTests
         {
             sink.ReleaseFailure();
             await StopFixture(fixture, cancellation, execution);
+            // The caller owns sink: join its only consumer before Dispose.
+            // The scenario asserts the failure before reaching this cleanup path.
+            try { _ = await execution; }
+            catch (IOException) { }
+            catch (OperationCanceledException) { }
+            catch (AggregateException) { }
         }
     }
 
@@ -379,8 +394,15 @@ internal static class WorkflowProcessCleanupTests
             start.ArgumentList.Add(argument);
         }
 
-        await using Stream stdout = stdoutSink ?? File.Create(fixture.Stdout);
         await using FileStream stderr = File.Create(fixture.Stderr);
+        if (stdoutSink is not null)
+        {
+            // Borrow only. The test owns the injected sink and joins this task before disposing it.
+            return await WorkflowProcessBackend.RunAsync(new WorkflowProcessBackend.Specification(start,
+                stdoutSink, stderr), heartbeat, duration, ct: cancellation);
+        }
+
+        await using FileStream stdout = File.Create(fixture.Stdout);
         return await WorkflowProcessBackend.RunAsync(new WorkflowProcessBackend.Specification(start,
             stdout, stderr), heartbeat, duration, ct: cancellation);
     }

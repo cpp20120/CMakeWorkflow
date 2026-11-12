@@ -26,10 +26,9 @@ internal static class SshNetProvisionTests
         CancellationToken ct = deadline.Token;
         using PrivateKeyFile key = new(options.PrivateKeyPath);
 
-#pragma warning disable CA2000 // Ownership transfers to the returned object or connection task; surrounding using/catch/finally paths release failures.
-        using SshClient ssh = new(new PrivateKeyConnectionInfo(options.Host, options.Port, options.Username, key)
-        { Timeout = options.ConnectionTimeout });
-#pragma warning restore CA2000
+        using PrivateKeyConnectionInfo connection = new(options.Host, options.Port, options.Username, key)
+        { Timeout = options.ConnectionTimeout };
+        using SshClient ssh = new(connection);
 
         string pin = options.HostKeySha256.StartsWith("SHA256:", StringComparison.Ordinal)
             ? options.HostKeySha256[7..] : options.HostKeySha256;
