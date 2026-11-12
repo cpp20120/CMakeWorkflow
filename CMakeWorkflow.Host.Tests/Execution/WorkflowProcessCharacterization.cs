@@ -53,7 +53,7 @@ internal static class WorkflowProcessCharacterization
 
         Check(exitCode == 0, "Normal child exit code changed.");
         Check(result.ProcessDurationSeconds is > 0, "Successful child duration was not recorded.");
-        JsonElement details = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath)).RootElement;
+        JsonElement details = JsonElement.Parse(await File.ReadAllTextAsync(reportPath));
         Check(details.GetProperty("workingDirectory").GetString() == workingDirectory,
             "Child working directory changed.");
         Check(string.IsNullOrEmpty(details.GetProperty("stdin").GetString()), "Child stdin was not closed immediately.");
@@ -454,7 +454,7 @@ internal static class WorkflowProcessTestWorker
                     {
                         controller = Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_CONTROLLER_BUILD_DIR"),
                         ownedTrees = Environment.GetEnvironmentVariable("CMAKE_WORKFLOW_OWNED_TREES") is { } raw
-                            ? JsonDocument.Parse(raw).RootElement.EnumerateArray().Select(x => x.GetString()).ToArray()
+                            ? JsonElement.Parse(raw).EnumerateArray().Select(x => x.GetString()).ToArray()
                             : [],
                         inherited = Environment.GetEnvironmentVariable("PROCESS_CHARACTERIZATION_INHERITED"),
                         explicitValue = Environment.GetEnvironmentVariable("PROCESS_CHARACTERIZATION_EXPLICIT"),

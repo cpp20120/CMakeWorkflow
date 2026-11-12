@@ -152,7 +152,7 @@ try
             Console.SetOut(old);
         }
 
-        Check(JsonDocument.Parse(output.ToString()).RootElement.GetArrayLength() == 2, "JSON output");
+        Check(JsonElement.Parse(output.ToString()).GetArrayLength() == 2, "JSON output");
     }
 
     string bad = Path.Combine(root, "bad");

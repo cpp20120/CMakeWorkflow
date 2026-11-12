@@ -206,7 +206,7 @@ internal static class ProcessRecoveryTests
                 using DurableAcceptanceStore store = f.Store();
                 Check(store.GetFinalization(f.Id) is { State: "succeeded" } && f.Read().ResumeCount == 1,
                     "Resumed report did not finalize through SQLite.");
-                long[] events = [.. (await File.ReadAllLinesAsync(Path.Combine(f.Output, "events.jsonl"), CancellationToken.None)).Select(line => JsonDocument.Parse(line).RootElement.GetProperty("sequence").GetInt64())];
+                long[] events = [.. (await File.ReadAllLinesAsync(Path.Combine(f.Output, "events.jsonl"), CancellationToken.None)).Select(line => JsonElement.Parse(line).GetProperty("sequence").GetInt64())];
                 Check(events.Distinct().Count() == events.Length, "Resume reused journal sequence numbers.");
             }
             await Reject(() => DurableProcessWorkflowExecutor.ExecuteResumedAsync(f.Root, f.Id, default), point);
