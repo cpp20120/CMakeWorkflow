@@ -1,11 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.Contracts.Workflows;
 
 /// <summary>One DAG node with kind-specific execution and evidence requirements.</summary>
 /// <remarks>
-/// Kinds are inspect, configure, build, invoke, run, profile and ctest. IDs must be unique.
-/// Run/profile inherit context and target from a build node through From; other kinds use Context.
+/// Kinds are inspect, configure, build, invoke, run, profile, profile_snapshot and ctest. IDs must be unique.
+/// Run/profile inherit context and target from a build node through From; context-based kinds use Context.
 /// DependsOn, From and producer artifact references contribute dependencies. A node runs only after its prerequisites succeed.
 /// Collections must be non-null; construction does not validate kind-specific combinations.
 /// After interruption, a persisted running intent is uncertain evidence and must not be blindly re-executed.
@@ -14,7 +15,7 @@ public sealed class WorkflowNode
 {
     /// <summary>Nonempty node identifier; unique in the document.</summary>
     public string Id { get; set; } = "";
-    /// <summary>Execution kind: inspect, configure, build, invoke, run, profile or ctest.</summary>
+    /// <summary>Execution kind: inspect, configure, build, invoke, run, profile, profile_snapshot or ctest.</summary>
     public string Kind { get; set; } = "";
     /// <summary>Context key for context-based nodes; null for run/profile, which inherit it through From.</summary>
     public string? Context { get; set; }
@@ -22,11 +23,17 @@ public sealed class WorkflowNode
     public string? Target { get; set; }
     /// <summary>Build-node ID supplying the executable to run/profile; null for other kinds.</summary>
     public string? From { get; set; }
+    /// <summary>Absolute immutable executable path for a buildless profiling replay node.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SnapshotExecutable { get; set; }
+    /// <summary>Expected SHA-256 of the replay executable; checked before and after capture.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SnapshotSha256 { get; set; }
     /// <summary>Explicit prerequisite IDs; empty means no explicit prerequisites.</summary>
     [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.DependsOn exposes List<string>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
     [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.DependsOn supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<string> DependsOn { get; set; } = [];
-    /// <summary>Literal process arguments for run/profile, without shell parsing or NUL characters.</summary>
+    /// <summary>Literal process arguments for run, profile and profile_snapshot, without shell parsing or NUL characters.</summary>
     [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Arguments exposes List<string>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
     [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Arguments supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<string> Arguments { get; set; } = [];

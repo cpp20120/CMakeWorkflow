@@ -35,7 +35,7 @@ validation alone does not establish that compatibility.
 
 These eight assemblies are not part of the audited external .NET SDK package boundary. Their `public` declarations
 allow cross-assembly composition inside the repository; the modifier alone does not establish an embedding or plugin
-contract. Their 267 publicly accessible source types are listed separately in
+contract. Their 268 publicly accessible source types are listed separately in
 [Implementation assembly API inventory](implementation-api.md).
 
 CLI commands and the negotiated Host JSON-RPC wire protocol are external integration surfaces in their own right.
@@ -90,9 +90,9 @@ Release assembly metadata.
 
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
-| [CMakeWorkflow.Client](#cmakeworkflowclient) | 106 | 103 |
-| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 22 | 81 |
-| **Total** | **128** | **184** |
+| [CMakeWorkflow.Client](#cmakeworkflowclient) | 107 | 104 |
+| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 22 | 83 |
+| **Total** | **129** | **187** |
 
 ## CMakeWorkflow.Client
 
@@ -450,12 +450,23 @@ Source: [CMakeWorkflow.Client/Profiling/PrepareProfileOptions.cs](../CMakeWorkfl
 public sealed record PrepareProfileOptions(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Client.Profiling.ProfileVariantOptions> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
 ```
 
+#### `PrepareReplayProfileOptions`
+
+Identifies two saved runs and the node to replay. `ResultsDirectory` is the Host directory for the prepared manifest.
+
+Source: [CMakeWorkflow.Client/Profiling/PrepareReplayProfileOptions.cs](../CMakeWorkflow.Client/Profiling/PrepareReplayProfileOptions.cs#L4)
+
+```csharp
+public sealed record PrepareReplayProfileOptions(string RequestId, string ResultsDirectory, string BaselineDirectory, string CandidateDirectory, string NodeId, string? CaseName = null, int HarnessIndex = 0, string Backend = "auto", double TimeoutSeconds = 300);
+```
+
 #### `ProfileService`
 
 Host profile preparation, analysis and request-scoped replay; borrows the client lifetime.
 
 Paths are interpreted on the Host. Calls propagate cancellation and transport failures without automatic retry. Replay
-executes work under request/connection lifetime, unlike durable Workflows.StartAsync.
+executes work under the request and connection lifetime. `PrepareReplayAsync` prepares a replay manifest for explicit
+durable admission through `Workflows.StartAsync`.
 
 Source: [CMakeWorkflow.Client/Profiling/ProfileService.cs](../CMakeWorkflow.Client/Profiling/ProfileService.cs#L11)
 
@@ -464,6 +475,7 @@ public sealed class ProfileService(CMakeWorkflow.Client.CMakeWorkflowClient clie
 {
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.PreparedWorkflow> PrepareAsync(CMakeWorkflow.Client.Profiling.PrepareProfileOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Profiling.AnalyzedProfile> AnalyzeAsync(CMakeWorkflow.Client.Profiling.AnalyzeProfileOptions options, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.PreparedWorkflow> PrepareReplayAsync(CMakeWorkflow.Client.Profiling.PrepareReplayProfileOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Profiling.ReplayProfileResult> ReplayAsync(CMakeWorkflow.Client.Profiling.ReplayProfileOptions options, System.Threading.CancellationToken ct = default);
 }
 ```
@@ -1615,8 +1627,9 @@ public sealed class WorkflowExecutionConstraints
 
 One DAG node with kind-specific execution and evidence requirements.
 
-Kinds are inspect, configure, build, invoke, run, profile and ctest. IDs must be unique. Run/profile inherit context and
-target from a build node through From; other kinds use Context. DependsOn, From and producer artifact references
+Kinds are inspect, configure, build, invoke, run, profile, profile_snapshot and ctest. IDs must be unique. Run/profile
+inherit context and target from a build node through From. `profile_snapshot` requires schema version 2 and pins an
+executable by absolute path and SHA-256. DependsOn, From and producer artifact references
 contribute dependencies. A node runs only after its prerequisites succeed. Collections must be non-null; construction
 does not validate kind-specific combinations. After interruption, a persisted running intent is uncertain evidence and
 must not be blindly re-executed.
@@ -1631,6 +1644,8 @@ public sealed class WorkflowNode
     public string? Context { get; set; }
     public string? Target { get; set; }
     public string? From { get; set; }
+    public string? SnapshotExecutable { get; set; }
+    public string? SnapshotSha256 { get; set; }
     public System.Collections.Generic.List<string> DependsOn { get; set; }
     public System.Collections.Generic.List<string> Arguments { get; set; }
     public string? WorkingDirectory { get; set; }

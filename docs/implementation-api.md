@@ -27,13 +27,13 @@ Release assembly metadata.
 | --- | ---: | ---: |
 | [CMakeWorkflow.Core](#cmakeworkflowcore) | 5 | 4 |
 | [CMakeWorkflow.CMake](#cmakeworkflowcmake) | 58 | 133 |
-| [CMakeWorkflow.Host](#cmakeworkflowhost) | 98 | 153 |
-| [CMakeWorkflow.Profiling](#cmakeworkflowprofiling) | 28 | 38 |
+| [CMakeWorkflow.Host](#cmakeworkflowhost) | 99 | 155 |
+| [CMakeWorkflow.Profiling](#cmakeworkflowprofiling) | 28 | 39 |
 | [CMakeWorkflow.History](#cmakeworkflowhistory) | 17 | 11 |
 | [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 47 | 61 |
 | [CMakeWorkflow.Campaigns](#cmakeworkflowcampaigns) | 14 | 45 |
 | [CMakeWorkflow](#cmakeworkflow) | 0 | 0 |
-| **Total** | **267** | **445** |
+| **Total** | **268** | **448** |
 
 ## CMakeWorkflow.Core
 
@@ -992,6 +992,14 @@ Source: [CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs](../CMakeWorkflow
 public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Host.Profiling.ProfileVariantRequest> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
 ```
 
+#### `ProfileReplayPrepareRequest`
+
+Source: [CMakeWorkflow.Host/Profiling/ProfileReplayPrepareRequest.cs](../CMakeWorkflow.Host/Profiling/ProfileReplayPrepareRequest.cs#L5)
+
+```csharp
+public sealed record ProfileReplayPrepareRequest(string RequestId, string ResultsDirectory, string BaselineDirectory, string CandidateDirectory, string NodeId, string? CaseName = null, int HarnessIndex = 0, string Backend = "auto", double TimeoutSeconds = 300);
+```
+
 #### `ProfileReplayRequest`
 
 Source: [CMakeWorkflow.Host/Profiling/ProfileReplayRequest.cs](../CMakeWorkflow.Host/Profiling/ProfileReplayRequest.cs#L7)
@@ -1091,6 +1099,7 @@ public interface IHostRpc
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.BenchmarkMatrixPreparation> BenchmarkMatrixPrepareAsync(CMakeWorkflow.Host.Recipes.BenchmarkMatrixPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfileAnalysis> ProfileAnalyzeAsync(CMakeWorkflow.Host.Profiling.ProfileAnalyzeRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Workflows.TargetPreparation> TargetPrepareAsync(CMakeWorkflow.Host.Workflows.TargetPrepareRequest request, System.Threading.CancellationToken cancellationToken);
+    System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfilePreparation> ProfileReplayPrepareAsync(CMakeWorkflow.Host.Profiling.ProfileReplayPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfileReplayResponse> ProfileReplayAsync(CMakeWorkflow.Host.Profiling.ProfileReplayRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Campaigns.CampaignExecutionResult> CampaignMutationAsync(CMakeWorkflow.Host.Campaigns.CampaignMutationRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Campaigns.CampaignExecutionResult> CampaignWeakMemoryAsync(CMakeWorkflow.Host.Campaigns.CampaignWeakMemoryRequest request, System.Threading.CancellationToken cancellationToken);
@@ -1299,7 +1308,7 @@ public sealed record TestMatrixPrepareRequest(string RequestId, string OutputPat
 
 #### `DoctorSession`
 
-Source: [CMakeWorkflow.Host/Sessions/ApplicationSession.cs](../CMakeWorkflow.Host/Sessions/ApplicationSession.cs#L20), [CMakeWorkflow.Host/Sessions/BenchmarkSession.cs](../CMakeWorkflow.Host/Sessions/BenchmarkSession.cs#L10), [CMakeWorkflow.Host/Sessions/DoctorSession.cs](../CMakeWorkflow.Host/Sessions/DoctorSession.cs#L12), [CMakeWorkflow.Host/Sessions/EnvironmentSession.cs](../CMakeWorkflow.Host/Sessions/EnvironmentSession.cs#L7), [CMakeWorkflow.Host/Sessions/ExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ExecutionSession.cs#L5), [CMakeWorkflow.Host/Sessions/FixSession.cs](../CMakeWorkflow.Host/Sessions/FixSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs#L7), [CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs](../CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProfileSession.cs](../CMakeWorkflow.Host/Sessions/ProfileSession.cs#L13), [CMakeWorkflow.Host/Sessions/RecipeSession.cs](../CMakeWorkflow.Host/Sessions/RecipeSession.cs#L13), [CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs](../CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs#L19), [CMakeWorkflow.Host/Sessions/ToolchainSession.cs](../CMakeWorkflow.Host/Sessions/ToolchainSession.cs#L7), [CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs](../CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs#L9)
+Source: [CMakeWorkflow.Host/Sessions/ApplicationSession.cs](../CMakeWorkflow.Host/Sessions/ApplicationSession.cs#L20), [CMakeWorkflow.Host/Sessions/BenchmarkSession.cs](../CMakeWorkflow.Host/Sessions/BenchmarkSession.cs#L10), [CMakeWorkflow.Host/Sessions/DoctorSession.cs](../CMakeWorkflow.Host/Sessions/DoctorSession.cs#L12), [CMakeWorkflow.Host/Sessions/EnvironmentSession.cs](../CMakeWorkflow.Host/Sessions/EnvironmentSession.cs#L7), [CMakeWorkflow.Host/Sessions/ExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ExecutionSession.cs#L5), [CMakeWorkflow.Host/Sessions/FixSession.cs](../CMakeWorkflow.Host/Sessions/FixSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs](../CMakeWorkflow.Host/Sessions/ProcessExecutionSession.cs#L7), [CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs](../CMakeWorkflow.Host/Sessions/ProfileAnalysisSession.cs#L9), [CMakeWorkflow.Host/Sessions/ProfileReplayPreparationSession.cs](../CMakeWorkflow.Host/Sessions/ProfileReplayPreparationSession.cs#L12), [CMakeWorkflow.Host/Sessions/ProfileSession.cs](../CMakeWorkflow.Host/Sessions/ProfileSession.cs#L13), [CMakeWorkflow.Host/Sessions/RecipeSession.cs](../CMakeWorkflow.Host/Sessions/RecipeSession.cs#L13), [CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs](../CMakeWorkflow.Host/Sessions/TargetCampaignSession.cs#L19), [CMakeWorkflow.Host/Sessions/ToolchainSession.cs](../CMakeWorkflow.Host/Sessions/ToolchainSession.cs#L7), [CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs](../CMakeWorkflow.Host/Sessions/WorkflowPreflightSession.cs#L9)
 
 ```csharp
 public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tools.ToolingService> createTooling, System.Func<CMakeWorkflow.Host.Provisioning.DoctorProgress, System.Threading.Tasks.Task> progress, System.Threading.CancellationToken disconnected, CMakeWorkflow.Host.Provisioning.FixCoordinator fixes, System.Func<CMakeWorkflow.Host.Provisioning.FixProgress, System.Threading.Tasks.Task> fixProgress, System.TimeProvider? timeProvider = null, CMakeWorkflow.Host.Workflows.DurableExecutionCoordinator? durableExecutions = null) : CMakeWorkflow.Host.Protocol.IHostRpc
@@ -1347,6 +1356,7 @@ public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tool
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.BuildMatrixPreparation> BuildMatrixPrepareAsync(CMakeWorkflow.Host.Recipes.BuildMatrixPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.BenchmarkMatrixPreparation> BenchmarkMatrixPrepareAsync(CMakeWorkflow.Host.Recipes.BenchmarkMatrixPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Workflows.TargetPreparation> TargetPrepareAsync(CMakeWorkflow.Host.Workflows.TargetPrepareRequest request, System.Threading.CancellationToken cancellationToken);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfilePreparation> ProfileReplayPrepareAsync(CMakeWorkflow.Host.Profiling.ProfileReplayPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfileReplayResponse> ProfileReplayAsync(CMakeWorkflow.Host.Profiling.ProfileReplayRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Campaigns.CampaignExecutionResult> CampaignMutationAsync(CMakeWorkflow.Host.Campaigns.CampaignMutationRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Campaigns.CampaignExecutionResult> CampaignWeakMemoryAsync(CMakeWorkflow.Host.Campaigns.CampaignWeakMemoryRequest request, System.Threading.CancellationToken cancellationToken);
@@ -2135,6 +2145,7 @@ Source: [CMakeWorkflow.Profiling/Replay/ProfileReplayCommand.cs](../CMakeWorkflo
 public static class ProfileReplayCommand
 {
     public static System.Threading.Tasks.Task<int> ExecuteAsync(string[] args, System.Threading.CancellationToken ct, System.Action<string>? onRunDirectory = null);
+    public static System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.WorkflowDocument> PrepareWorkflowAsync(CMakeWorkflow.Profiling.Replay.ProfileReplayOptions request, System.Action<string>? pathGuard, System.Threading.CancellationToken ct);
     public static System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Replay.ProfileReplayOutcome> ReplayAsync(CMakeWorkflow.Profiling.Replay.ProfileReplayOptions request, System.Threading.CancellationToken ct, System.Action<string>? onRunDirectory = null, System.Action<string>? pathGuard = null);
 }
 ```

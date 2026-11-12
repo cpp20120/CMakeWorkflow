@@ -56,6 +56,10 @@ public static class WorkflowPlanner
             }
 
             ValidateNode(node);
+            if (node.Kind == "profile_snapshot" && document.SchemaVersion != 2)
+            {
+                throw new ArgumentException($"{node.Id}: profile_snapshot requires schemaVersion 2.");
+            }
         }
 
         string[] orderedNodeIds = [.. document.Nodes.Select(node => node.Id)];
@@ -89,7 +93,8 @@ public static class WorkflowPlanner
 
                 deps.Add(node.From);
             }
-            else if (node.Context is null || !document.Contexts.ContainsKey(node.Context))
+            else if (node.Kind != "profile_snapshot" &&
+                     (node.Context is null || !document.Contexts.ContainsKey(node.Context)))
             {
                 throw new ArgumentException($"{node.Id}: unknown context '{node.Context}'.");
             }
@@ -121,6 +126,35 @@ public static class WorkflowPlanner
         List<PlannedNode> plan = [];
         foreach (WorkflowNode? node in ordered.Where(n => selected.Contains(n.Id)))
         {
+            if (node.Kind == "profile_snapshot")
+            {
+                string executable = node.SnapshotExecutable!;
+                string snapshotWorkingDirectory = node.WorkingDirectory!;
+                readGuard?.Invoke(executable);
+                readGuard?.Invoke(snapshotWorkingDirectory);
+                string location = Path.GetDirectoryName(executable)!;
+                List<PlanDiagnostic> snapshotDiagnostics =
+                [
+                    new("Runtime", "Buildless profile replay; executable SHA-256 is verified before and after capture.")
+                ];
+                if (!File.Exists(executable))
+                {
+                    snapshotDiagnostics.Add(new("Error", "Snapshot executable does not exist."));
+                }
+                if (!Directory.Exists(snapshotWorkingDirectory))
+                {
+                    snapshotDiagnostics.Add(new("Error", "Snapshot working directory does not exist."));
+                }
+                // Synthetic context is for stable report shape only. No CMake inspection,
+                // build-tree ownership, or toolchain resolution is performed for this node.
+                plan.Add(new PlannedNode(node, new CMakeTargetRef(location, "", null),
+                    snapshotWorkingDirectory, dependencies[node.Id],
+                    new RequestedBuildContext(location, Mode: "snapshot"),
+                    new ObservedBuildContext { BuildDirectory = location, State = "Snapshot" },
+                    snapshotDiagnostics));
+                continue;
+            }
+
             WorkflowNode owner = node.Kind is "run" or "profile" ? nodes[node.From!] : node;
             string contextName = owner.Context!;
             if (!contexts.TryGetValue(contextName, out (RequestedBuildContext Request, ObservedBuildContext Observed) context))
@@ -335,7 +369,7 @@ public static class WorkflowPlanner
                 context.Request, context.Observed, diagnostics, document.Contexts[contextName].Toolchain));
         }
 
-        foreach (IGrouping<string, PlannedNode> tree in plan.Where(n => n.Definition.Kind != "inspect")
+        foreach (IGrouping<string, PlannedNode> tree in plan.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot"))
                      .GroupBy(n => n.Target.BuildDirectory, PathComparer))
         {
             if (tree.Select(n => (n.Requested.Mode, n.Requested.ProvenancePolicy)).Distinct().Count() != 1)
@@ -394,7 +428,7 @@ public static class WorkflowPlanner
 
     private static void ValidateNode(WorkflowNode n)
     {
-        if (n.Kind is not ("inspect" or "configure" or "build" or "invoke" or "run" or "profile" or "ctest"))
+        if (n.Kind is not ("inspect" or "configure" or "build" or "invoke" or "run" or "profile" or "profile_snapshot" or "ctest"))
         {
             throw new ArgumentException($"{n.Id}: unknown workflow node kind.");
         }
@@ -435,6 +469,22 @@ public static class WorkflowPlanner
             throw new ArgumentException($"{n.Id}: {n.Kind} inherits target and context through from.");
         }
 
+        if (n.Kind == "profile_snapshot")
+        {
+            if (n.From is not null || n.Context is not null || n.Target is not null ||
+                n.WorkingDirectory is null || !Path.IsPathFullyQualified(n.WorkingDirectory) ||
+                n.SnapshotExecutable is null || !Path.IsPathFullyQualified(n.SnapshotExecutable) ||
+                n.SnapshotSha256 is null || !WorkflowArtifacts.ValidSha256(n.SnapshotSha256) ||
+                n.Environment.Count != 0 || n.Inputs is not { Count: 0 } || n.Outputs is not { Count: 0 })
+            {
+                throw new ArgumentException($"{n.Id}: profile_snapshot requires absolute executable/cwd, SHA256 and no CMake context, environment or declared artifacts.");
+            }
+        }
+        else if (n.SnapshotExecutable is not null || n.SnapshotSha256 is not null)
+        {
+            throw new ArgumentException($"{n.Id}: snapshot executable fields require profile_snapshot.");
+        }
+
         if (n.HarnessDirectory is not null)
         {
             if (n.Kind != "invoke" || string.IsNullOrWhiteSpace(n.HarnessDirectory)
@@ -446,7 +496,7 @@ public static class WorkflowPlanner
             }
         }
 
-        if (n.Kind != "profile" && n.Options.Count > 0)
+        if (n.Kind is not ("profile" or "profile_snapshot") && n.Options.Count > 0)
         {
             throw new ArgumentException($"{n.Id}: options are only valid for profile.");
         }
@@ -509,7 +559,7 @@ public static class WorkflowPlanner
                 throw new ArgumentException($"{n.Id}: inspect has no execution to constrain.");
             }
 
-            if (requirements.CpuSet is not null && n.Kind is not ("run" or "profile"))
+            if (requirements.CpuSet is not null && n.Kind is not ("run" or "profile" or "profile_snapshot"))
             {
                 throw new ArgumentException(
                     $"{n.Id}: required CPU affinity is supported only for run and profile execution.");
@@ -520,7 +570,7 @@ public static class WorkflowPlanner
                 throw new ArgumentException($"{n.Id}: invalid required CPU set.");
             }
 
-            if (requirements.Profiler is { } profiler && (n.Kind != "profile"
+            if (requirements.Profiler is { } profiler && (n.Kind is not ("profile" or "profile_snapshot")
                                                           || string.IsNullOrWhiteSpace(profiler.Backend) ||
                                                           profiler.Backend == "auto"
                                                           || string.IsNullOrWhiteSpace(profiler.Mode)

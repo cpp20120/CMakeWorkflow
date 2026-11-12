@@ -113,6 +113,12 @@ internal static class ApplicationTests
                                                           info.Capabilities.Contains("profile/prepare")
                                                           && info.Capabilities.Contains("benchmark/prepare"),
             "Capabilities omit implemented profile/workflow lifecycle");
+        Check(info.Capabilities.Contains("profileReplay/prepare"),
+            "Host did not advertise durable replay preparation.");
+        await Refused(() => client.ProfileReplayPrepareAsync(new ProfileReplayPrepareRequest(
+            "bad", Path.Combine(root, "replay-definitions"), root, root, "benchmark"), ct),
+            "invalid_argument");
+
         ProfilePrepareRequest prepareRequest = new("0123456789abcdef0123456789abcdef",
             Path.Combine(root, "profile definitions"), "worker", [new("main", build)],
             Repeats: 1, Arguments: ["--case", "chain"]);
@@ -146,6 +152,64 @@ internal static class ApplicationTests
             "path_not_allowed");
         await Refused(() => client.ProfilePrepareAsync(prepareRequest with { RequestId = "../escape" }, ct),
             "invalid_argument");
+        string[] replaySources =
+        [
+            Directory.CreateDirectory(Path.Combine(root, "replay baseline")).FullName,
+            Directory.CreateDirectory(Path.Combine(root, "replay candidate")).FullName
+        ];
+        for (int index = 0; index < replaySources.Length; index++)
+        {
+            string binary = Path.Combine(replaySources[index], "saved-binary");
+            await File.WriteAllTextAsync(binary, "replay-test-" + index, ct);
+            string digest = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(binary, ct)));
+            WorkflowReport replaySource = new()
+            {
+                Status = "succeeded",
+                Nodes = [new NodeResult
+                {
+                    Id = "benchmark", Kind = "run", Status = "succeeded",
+                    WorkingDirectory = replaySources[index],
+                    EnvironmentOverrideHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    Arguments = ["--case", "small"],
+                    Artifact = new("build",
+                        new CMakeTargetRef(replaySources[index], "worker", null), binary, digest,
+                        "VerifiedAfterBuild")
+                }]
+            };
+            await File.WriteAllBytesAsync(Path.Combine(replaySources[index], "run.json"),
+                JsonSerializer.SerializeToUtf8Bytes(replaySource, WorkflowJson.Default.WorkflowReport), ct);
+        }
+        ProfileReplayPrepareRequest replayRequest = new(
+            "dddddddddddddddddddddddddddddddd", Path.Combine(root, "replay-definitions"),
+            replaySources[0], replaySources[1], "benchmark");
+        ProfilePreparation replayPrepared = await client.ProfileReplayPrepareAsync(replayRequest, ct);
+        Check(File.Exists(replayPrepared.Manifest) && replayPrepared.ManifestSha256 ==
+              Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(replayPrepared.Manifest, ct))),
+            "Durable replay preparation did not persist an immutable manifest.");
+        Check(replayPrepared == await client.ProfileReplayPrepareAsync(replayRequest, ct),
+            "Durable replay preparation must be idempotent.");
+        await using (CMakeWorkflowClient sdk = await CMakeWorkflowClient.ConnectAsync(new(endpoint, root), ct))
+        {
+            PreparedWorkflow sdkReplay = await sdk.Profiles.PrepareReplayAsync(new(replayRequest.RequestId,
+                replayRequest.ResultsDirectory, replayRequest.BaselineDirectory, replayRequest.CandidateDirectory,
+                replayRequest.NodeId), ct);
+            Check(sdkReplay.Manifest == replayPrepared.Manifest && sdkReplay.ManifestSha256 == replayPrepared.ManifestSha256,
+                "The SDK did not read the same replay preparation as the Host wire client.");
+        }
+
+        WorkflowPlanView replayPlan = await client.WorkflowPlanAsync(new(replayPrepared.Manifest), ct);
+        Check(replayPlan.Valid && replayPlan.Nodes.All(n => n.Kind == "profile_snapshot"),
+            "Host durable replay plan should contain only buildless capture nodes.");
+        await Refused(() => client.ProfileReplayPrepareAsync(replayRequest with
+        {
+            Backend = "perf"
+        }, ct), "request_id_conflict");
+        await Refused(() => client.ProfileReplayPrepareAsync(replayRequest with
+        {
+            RequestId = Guid.NewGuid().ToString("N"),
+            CandidateDirectory = outside
+        }, ct), "path_not_allowed");
+
         BenchmarkRecipeV1 benchmarkRecipe = new("benchmark", 1, build, "worker", "Debug",
             10, 30, ["--case", "a b", ""]);
         BenchmarkPrepareRequest benchmarkRequest = new("abcdef0123456789abcdef0123456789",

@@ -70,6 +70,11 @@ internal static class CMakeWorkflowNodeExecutor
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
         }
 
+        if (definition.Kind == "profile_snapshot")
+        {
+            return await ExecuteProfileSnapshotAsync(node, result, extension, output, timer, deadline.Token, ct);
+        }
+
         try
         {
             if (toolchain is not null)
@@ -417,6 +422,76 @@ internal static class CMakeWorkflowNodeExecutor
 
         result.SessionAfter ??= session.State(node.Requested,
             result.ObservationAfter ?? result.ObservedContext ?? node.Observed);
+        result.FinishedAt = DateTimeOffset.UtcNow;
+        result.DurationSeconds = timer.Elapsed.TotalSeconds;
+        return result;
+    }
+
+    // Snapshot replay is a buildless extension node. Hash checks bracket the
+    // external capture and the runner persists its running intent before entry.
+    private static async Task<NodeResult> ExecuteProfileSnapshotAsync(PlannedNode node, NodeResult result,
+        IWorkflowOperationExecutor? extension, string output, Stopwatch timer,
+        CancellationToken deadline, CancellationToken cancellationToken)
+    {
+        WorkflowNode definition = node.Definition;
+        result.Executable = definition.SnapshotExecutable;
+        result.Arguments = [.. definition.Arguments];
+        try
+        {
+            if (extension is null || !extension.Supports("profile"))
+            {
+                throw new InvalidOperationException("Profile executor is unavailable.");
+            }
+
+            result.ExecutionConditions = WorkflowExecutionAdmission.Require(definition.Constraints);
+            string expected = definition.SnapshotSha256!;
+            string actual = await HashExecutableAsync(result.Executable!, deadline);
+            if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Replay executable changed before profiler dispatch.");
+            }
+
+            result.ExecutableSha256 = actual;
+            WorkflowOperationResult captured = await extension.ExecuteAsync(new WorkflowOperationRequest(
+                "profile", result.Executable!, result.Arguments, node.WorkingDirectory,
+                definition.Environment, definition.Options, output, definition.Id,
+                definition.Constraints?.CpuSet, definition.Constraints?.Profiler,
+                result.ExecutionConditions.GetValueOrDefault("cpuAffinityLauncher")), deadline);
+            result.ExitCode = captured.ExitCode;
+            result.Outputs = new Dictionary<string, string>(captured.Outputs);
+            result.ExperimentResult = captured.Status;
+            result.Error = captured.Message;
+            // Even a successful profiler result is invalid if the original binary
+            // was replaced while the capture was in progress.
+            if (!string.Equals(await HashExecutableAsync(result.Executable!, deadline), expected,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Replay executable changed during profiler capture.");
+            }
+
+            result.Artifact = new ArtifactReference(definition.Id, node.Target,
+                result.Executable!, actual, "VerifiedSnapshot");
+            result.Status = captured.ExitCode == 0 ? "succeeded" : "failed";
+            if (captured.ExitCode != 0)
+            {
+                result.Error ??= $"Profiler exited with code {captured.ExitCode}.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            result.Status = cancellationToken.IsCancellationRequested ? "canceled" : "failed";
+            result.Error = cancellationToken.IsCancellationRequested ? "Canceled." : "Profile replay timed out.";
+            result.ExperimentResult = cancellationToken.IsCancellationRequested ? "canceled" : "timedOut";
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException
+                                      or InvalidOperationException or ArgumentException or NotSupportedException
+                                      or MissingWorkflowToolException)
+        {
+            result.Status = "failed";
+            result.Error = error.Message;
+            result.ExperimentResult = "failed";
+        }
+
         result.FinishedAt = DateTimeOffset.UtcNow;
         result.DurationSeconds = timer.Elapsed.TotalSeconds;
         return result;

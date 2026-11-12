@@ -166,7 +166,7 @@ internal sealed class WorkflowEventJournal : IDisposable
             }
         }
 
-        if (node.Kind == "profile")
+        if (node.Kind is "profile" or "profile_snapshot")
         {
             Add("capture-manifest", node.Id + ".manifest.json");
             Add("capture-result", node.Id + ".results.json");

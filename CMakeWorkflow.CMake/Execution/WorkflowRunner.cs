@@ -56,7 +56,7 @@ public static class WorkflowRunner
         // Otherwise another cooperating runner can change the tree in between.
         using BuildTreeOwnership? resumedOwnership = resume
             ? await BuildTreeOwnership.AcquireAsync(
-                plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory), ct)
+                plan.Nodes.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot")).Select(n => n.Target.BuildDirectory), ct)
             : null;
         WorkflowReport report = new()
         {
@@ -132,7 +132,7 @@ public static class WorkflowRunner
 
             // Compare the latest successful observation for each physical tree;
             // earlier configure/build nodes may legitimately observe older generations.
-            foreach (IGrouping<string, NodeResult> tree in saved.Nodes.Where(n => n.Status == "succeeded" && n.Kind != "inspect")
+            foreach (IGrouping<string, NodeResult> tree in saved.Nodes.Where(n => n.Status == "succeeded" && n.Kind is not ("inspect" or "profile_snapshot"))
                          .GroupBy(n => n.BuildDirectory, WorkflowPlanner.PathComparer))
             {
                 NodeResult? last = tree.LastOrDefault(n => n.ObservationAfter is not null || n.ObservedContext is not null);
@@ -209,7 +209,8 @@ public static class WorkflowRunner
         }
 
         Dictionary<string, NodeResult> states = report.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
-        Dictionary<string, BuildContextSession> sessions = plan.Nodes.Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
+        Dictionary<string, BuildContextSession> sessions = plan.Nodes.Where(n => n.Definition.Kind != "profile_snapshot")
+            .Select(n => n.Target.BuildDirectory).Distinct(WorkflowPlanner.PathComparer)
             .ToDictionary(p => p, _ => new BuildContextSession(), WorkflowPlanner.PathComparer);
         if (resume)
         {
@@ -218,7 +219,7 @@ public static class WorkflowRunner
             {
                 NodeResult saved = states[node.Definition.Id];
                 ObservedBuildContext? observed = saved.ObservationAfter ?? saved.ObservedContext;
-                if (observed is null || node.Definition.Kind == "inspect")
+                if (observed is null || node.Definition.Kind is "inspect" or "profile_snapshot")
                 {
                     continue;
                 }
@@ -241,7 +242,8 @@ public static class WorkflowRunner
         await SaveAsync(report, output, events);
         try
         {
-            string[] mutationTrees = [.. plan.Nodes.Where(n => n.Definition.Kind != "inspect").Select(n => n.Target.BuildDirectory)];
+            string[] mutationTrees = [.. plan.Nodes.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot"))
+                .Select(n => n.Target.BuildDirectory)];
             if (mutationTrees.Length != 0 && !resume)
             {
                 ownership = await BuildTreeOwnership.AcquireAsync(mutationTrees, stop.Token);
@@ -307,8 +309,9 @@ public static class WorkflowRunner
                             .ToDictionary(id => id, id => states[id], StringComparer.Ordinal);
                         return CMakeWorkflowNodeExecutor.ExecuteAsync(node,
                             node.Definition.From is { } source ? states[source] : null,
-                            snapshot, sessions[node.Target.BuildDirectory], output, LogStem(report, item.Id),
-extension,
+                            snapshot, node.Definition.Kind == "profile_snapshot"
+                                ? new BuildContextSession() : sessions[node.Target.BuildDirectory],
+                            output, LogStem(report, item.Id), extension,
                             toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources, ct: token);
                     },
                     AfterExecute = (item, token) => RecoveryFaults.HitAsync("after-execution", item.Id, token),
@@ -381,7 +384,8 @@ extension,
         try
         {
             report.EnvironmentAtEnd = EnvironmentProvenance.CaptureHost();
-            report.BuildEnvironments = [.. report.Nodes.Select(n => (n.BuildDirectory, n.Configuration))
+            report.BuildEnvironments = [.. report.Nodes.Where(n => n.Kind != "profile_snapshot")
+                .Select(n => (n.BuildDirectory, n.Configuration))
                 .Where(x => !string.IsNullOrWhiteSpace(x.BuildDirectory)).Distinct()
                 .Select(x => EnvironmentProvenance.CaptureBuild(x.BuildDirectory, x.Configuration))
                 .OfType<BuildEnvironment>()];

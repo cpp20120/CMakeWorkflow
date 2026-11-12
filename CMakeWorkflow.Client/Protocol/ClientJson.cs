@@ -46,6 +46,7 @@ namespace CMakeWorkflow.Client.Protocol;
 [JsonSerializable(typeof(PreparedRecipe))]
 [JsonSerializable(typeof(AnalyzeProfileOptions))]
 [JsonSerializable(typeof(AnalyzedProfile))]
+[JsonSerializable(typeof(PrepareReplayProfileOptions))]
 [JsonSerializable(typeof(ReplayProfileOptions))]
 [JsonSerializable(typeof(ReplayProfileResult))]
 [JsonSerializable(typeof(PrepareTargetOptions))]

@@ -35,6 +35,7 @@ Directory.CreateDirectory(root);
 try
 {
     await HistoricalScheduleTests.RunAsync();
+    await DurableReplayTests.RunAsync(root);
     Check(HistoricalProgress.TotalOperations(5, 3) == 397,
         "Historical progress step count changed.");
     // A real process executed through the shared workflow process owner must

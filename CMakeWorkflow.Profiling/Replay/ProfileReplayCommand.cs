@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CMakeWorkflow.Core;
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Profiling.Analysis;
 using CMakeWorkflow.Profiling.Workflows;
 
@@ -256,6 +257,81 @@ public static class ProfileReplayCommand
                 : double.NaN), ct, onRunDirectory);
         Console.WriteLine($"Profile replay: {result.RunDirectory}");
         return 0;
+    }
+
+    /// <summary>Creates a buildless, serial durable replay graph without starting capture.</summary>
+    /// <remarks>
+    /// The returned document must be persisted and admitted through workflow/start.
+    /// Captures are durable; the caller can run profile/analyze on the completed run directory.
+    /// No automatic retry is authorized for an interrupted capture.
+    /// </remarks>
+    public static async Task<WorkflowDocument> PrepareWorkflowAsync(ProfileReplayOptions request,
+        Action<string>? pathGuard, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.NodeId) || request.HarnessIndex is < 0 or > 1000 ||
+            (request.CaseName is null && request.HarnessIndex != 0) ||
+            !double.IsFinite(request.TimeoutSeconds) || request.TimeoutSeconds is <= 0 or > 86400 ||
+            request.Backend is not ("auto" or "perf" or "etw" or "instruments"))
+        {
+            throw new ArgumentException("Invalid replay request.");
+        }
+
+        pathGuard?.Invoke(request.BaselineDirectory);
+        pathGuard?.Invoke(request.CandidateDirectory);
+        pathGuard?.Invoke(request.ResultsDirectory);
+        Input before = await LoadAsync(request.BaselineDirectory, request.NodeId,
+            request.CaseName, request.HarnessIndex, ct, pathGuard);
+        Input after = await LoadAsync(request.CandidateDirectory, request.NodeId,
+            request.CaseName, request.HarnessIndex, ct, pathGuard);
+        if (!before.Arguments.SequenceEqual(after.Arguments, StringComparer.Ordinal) ||
+            !string.Equals(before.WorkloadRecipe, after.WorkloadRecipe, StringComparison.Ordinal) ||
+            !string.Equals(before.CpuSet, after.CpuSet, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Replay inputs differ in argv, workload recipe or CPU affinity.");
+        }
+
+        if (string.Equals(before.Executable, after.Executable,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Replay requires independently preserved baseline and candidate binaries.");
+        }
+
+        string[] modes = OperatingSystem.IsLinux() ? ["counters", "cpu", "scheduler"]
+            : OperatingSystem.IsWindows() ? ["cpu", "scheduler"] : ["cpu"];
+        List<WorkflowNode> nodes = [];
+        string? previous = null;
+        foreach (string mode in modes)
+        {
+            foreach ((string label, Input item) in new[] { ("before", before), ("after", after) })
+            {
+                string id = $"{(mode == "counters" ? "counters" : mode == "scheduler" ? "scheduler" : "capture")}_{label}";
+                nodes.Add(new WorkflowNode
+                {
+                    Id = id,
+                    Kind = "profile_snapshot",
+                    SnapshotExecutable = item.Executable,
+                    SnapshotSha256 = item.Sha256,
+                    WorkingDirectory = item.WorkingDirectory,
+                    Arguments = [.. item.Arguments],
+                    DependsOn = previous is null ? [] : [previous],
+                    Exclusive = true,
+                    Resources = ["measurement-host"],
+                    TimeoutSeconds = request.TimeoutSeconds + 180,
+                    Constraints = item.CpuSet is null ? null : new WorkflowExecutionConstraints { CpuSet = item.CpuSet },
+                    Options = new Dictionary<string, string>
+                    {
+                        ["backend"] = request.Backend,
+                        ["mode"] = mode,
+                        ["captureTimeoutSeconds"] = request.TimeoutSeconds.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture)
+                    }
+                });
+                previous = id;
+            }
+        }
+
+        return new WorkflowDocument { SchemaVersion = 2, Contexts = [], Nodes = nodes };
     }
 
     // Typed application entry: validation/replay are shared by the CLI adapter

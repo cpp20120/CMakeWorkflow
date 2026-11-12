@@ -114,6 +114,10 @@ public partial interface IHostRpc
     [JsonRpcMethod("target/prepare")]
     Task<TargetPreparation> TargetPrepareAsync(TargetPrepareRequest request, CancellationToken cancellationToken);
 
+    [JsonRpcMethod("profileReplay/prepare")]
+    Task<ProfilePreparation> ProfileReplayPrepareAsync(ProfileReplayPrepareRequest request,
+        CancellationToken cancellationToken);
+
     [JsonRpcMethod("profile/replay")]
     Task<ProfileReplayResponse> ProfileReplayAsync(ProfileReplayRequest request, CancellationToken cancellationToken);
 

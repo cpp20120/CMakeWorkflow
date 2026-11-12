@@ -31,6 +31,20 @@ public sealed class ProfileService(CMakeWorkflowClient client)
         return client.Proxy.ProfileAnalyzeAsync(options, ct);
     }
 
+    /// <summary>Prepares a durable replay DAG for explicit workflow/start admission.</summary>
+    /// <remarks>
+    /// Preparation is commit-once, not execution. Use Workflows.StartAsync with the
+    /// returned manifest/hash and recover the operation by its stable client request ID.
+    /// Completed capture nodes survive reconnect; interrupted captures require reconciliation.
+    /// Analyze the completed run explicitly with AnalyzeAsync.
+    /// </remarks>
+    public Task<PreparedWorkflow> PrepareReplayAsync(PrepareReplayProfileOptions options,
+        CancellationToken ct = default)
+    {
+        client.RequireCapability("profileReplay/prepare");
+        return client.Proxy.ProfileReplayPrepareAsync(options, ct);
+    }
+
     /// <summary>Executes a profile replay under request/connection lifetime.</summary>
     /// <remarks>
     /// This is not durable acceptance. Cancellation/disconnect can leave external effects or partial artifacts.

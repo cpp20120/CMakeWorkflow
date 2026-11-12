@@ -11,6 +11,22 @@ client can connect to the same process. Fix delegates installation to the existi
 profiling and campaigns also expose typed Host entry points. There is no second scheduler, HTTP listener or new history
 store.
 
+## Durable profiling replay (opt-in)
+
+`profileReplay/prepare` validates the saved baseline/candidate evidence and writes a commit-once
+schema-v2 manifest containing serial `profile_snapshot` nodes (no CMake rebuild). Each
+node pins the original absolute executable, argv, working directory and SHA-256,
+which are rechecked before and after capture. The Host does not profile at prepare time.
+
+Use the returned `manifest` and `manifestSha256` with `workflow/start`, a fresh
+`resultsDirectory` and a stable `clientRequestId`. Inspect/reconnect through
+`operations/find/get/events`; use `workflow/recoveryInspect` and explicit reconciliation
+for interrupted passes. **A running/uncertain capture must never be auto-retried.**
+After the capture workflow succeeds, invoke `profile/analyze` on its run directory
+(the analysis step is separately repeatable, not part of the durable DAG).
+The older `profile/replay` method is still connection-scoped and should not be
+confused with the durable preparation/start path.
+
 ## Additional workflow and history capabilities
 
 Besides Doctor and explicit Fix, newer Host builds negotiate a wider method set in
@@ -66,7 +82,7 @@ parameters array, as with existing methods):
 | Area              | RPC methods                                                                          | Lifetime                                                                          |
 |-------------------|--------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
 | Benchmark recipe  | `benchmark/prepare`                                                                  | Commit-once manifest preparation; execute through durable `workflow/start`        |
-| Profiling         | `profile/prepare`, `profile/analyze`, `profile/replay`                               | `prepare` creates an immutable manifest; `analyze`/`replay` are connection-scoped |
+| Profiling         | `profile/prepare`, `profileReplay/prepare`, `profile/analyze`, `profile/replay`                               | Both prepare methods commit immutable manifests; `analyze` and `replay` are connection-scoped |
 | Native targets    | `target/prepare` (`build`, `invoke`, `run`, `sequence`)                              | Metadata-only; execute through durable `workflow/start`                           |
 | DagFlow campaigns | `dagflow/mutation/run`, `dagflow/weakMemory/run`                                     | Connection-scoped                                                                 |
 | Fuzz              | `dagflow/fuzz/seed`, `dagflow/fuzz/run`, `dagflow/fuzz/triage`, `dagflow/fuzz/merge` | Connection-scoped                                                                 |
