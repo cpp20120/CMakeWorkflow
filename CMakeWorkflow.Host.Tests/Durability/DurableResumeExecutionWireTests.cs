@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.History;
+using CMakeWorkflow.History.Storage;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -118,7 +120,10 @@ internal static class DurableResumeExecutionWireTests
         string operationId;
         using (DurableAcceptanceStore store = new(root))
         {
-            operationId = store.Accept("resume-e2e", manifest, sha, 1, run).OperationId;
+            operationId = store.Accept(new WorkflowStartRequest("resume-e2e", manifest, sha, 1, run)
+            {
+                HistoryPolicy = new(HistoryPolicyMode.Default)
+            }).OperationId;
             store.ReserveResultsDirectory(operationId, run);
             _ = store.AuthorizeDispatch(operationId);
             // Reconstruct the existing runner dispatch binding while B is still
@@ -142,8 +147,8 @@ internal static class DurableResumeExecutionWireTests
                 "Reconcile failed");
         }
 
-        await using (CMakeWorkflow.Client.CMakeWorkflowClient sdk =
-                     await CMakeWorkflow.Client.CMakeWorkflowClient.ConnectAsync(new ClientOptions(endpoint, root), ct))
+        await using (CMakeWorkflowClient sdk =
+                     await CMakeWorkflowClient.ConnectAsync(new ClientOptions(endpoint, root), ct))
         {
             WorkflowOperation operation = sdk.Operations.GetHandle(operationId);
             RecoverySnapshot reconciled = await operation.InspectRecoveryAsync(ct);
@@ -176,6 +181,18 @@ internal static class DurableResumeExecutionWireTests
                 OperationReference current = await client.OperationGetAsync(new(operationId), timeout.Token);
                 if (current.State == "succeeded")
                 {
+                    HistoryIndexStatus indexed = await client.HistoryIndexStatusAsync(new(operationId), timeout.Token);
+                    if (indexed.State != HistoryIndexState.Indexed)
+                    {
+                        Check(indexed.State is HistoryIndexState.Pending or HistoryIndexState.Indexing,
+                            "Resumed workflow lost its History policy: " + indexed.State);
+                        await Task.Delay(30, timeout.Token);
+                        continue;
+                    }
+
+                    using HistoryStore history = new(Path.Combine(root, ".cmakeworkflow", "history.sqlite"), readOnly: true);
+                    Check(history.Runs(10, null, null, null, null, null, ct: timeout.Token) is [{ Status: "succeeded" }],
+                        "Resumed workflow did not index its terminal report.");
                     break;
                 }
 

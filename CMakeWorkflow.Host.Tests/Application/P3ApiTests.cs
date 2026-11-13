@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Provisioning;
 using CMakeWorkflow.Client.Workflows;
@@ -53,6 +54,32 @@ internal static class P3ApiTests
             catch (InvalidOperationException) { }
         }
         Check(!Directory.Exists(nonexistentOutput), "create start options performed dispatch");
+
+        BuildContextObservation observed = await sdk.Targets.InspectContextAsync(result.Nodes[0].BuildDirectory, ct);
+        Check(observed.BuildDirectory == result.Nodes[0].BuildDirectory &&
+              observed.Targets.Any(target => target.Name == "worker"), "typed build context round trip");
+        TargetResolution resolution = await sdk.Targets.ResolveAsync(observed.BuildDirectory, "worker", ct: ct);
+        Check(resolution.SchemaVersion == 1 && resolution.Target == "worker" &&
+              Path.IsPathFullyQualified(resolution.Executable), "typed target resolution round trip");
+
+        string selectedId = result.Nodes.Last().Id;
+        WorkflowPreflightResult selected = await sdk.Workflows.PreflightAsync(
+            new WorkflowPreflightOptions(manifest, digest, 2, nonexistentOutput)
+            {
+                Only = [selectedId, selectedId],
+                HistoryPolicy = new(HistoryPolicyMode.Default)
+            }, ct);
+        Check(selected.Only is { Count: 1 } && selected.Only[0] == selectedId &&
+              selected.Nodes.Any(node => node.Id == selectedId) &&
+              selected.Nodes.Count <= result.Nodes.Count,
+            "selected node preflight round trip");
+        if (selected.Valid)
+        {
+            StartWorkflowOptions start = selected.CreateStartOptions("p3-selected");
+            Check(start.Only is { Count: 1 } && start.Only[0] == selectedId &&
+                  start.HistoryPolicy?.Mode == HistoryPolicyMode.Default,
+                "selected node start handoff");
+        }
 
         bool refused = false;
         try

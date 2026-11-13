@@ -66,6 +66,7 @@ public sealed partial class DoctorSession(
         }
 
         directory = previous ?? directory;
+        durableExecutions?.ScheduleHistoryRecovery(directory);
         return Task.FromResult(new HostInfo(1, Environment.ProcessId, directory,
             [
                 "tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress",

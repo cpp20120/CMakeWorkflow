@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake;
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.CMake.Serialization;
@@ -42,7 +43,7 @@ internal static class WorkflowCliCommand
 
     private static async Task<int> RunAsync(string[] args, CancellationToken ct)
     {
-        (string[] commandArgs, string? database, bool disabled) = CliHistory.Parse(args);
+        (string[] commandArgs, HistoryPolicy? historyPolicy) = CliHistory.Parse(args);
         return await CliHistory.RunAndIndexAsync(async onRun =>
         {
             string? runDirectory = null;
@@ -60,6 +61,6 @@ internal static class WorkflowCliCommand
             }
 
             return code;
-        }, database, disabled);
+        }, historyPolicy);
     }
 }

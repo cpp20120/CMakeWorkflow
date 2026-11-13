@@ -142,9 +142,17 @@ internal static class HistoryReports
     /// hashed. If start/end Host identity or fingerprint disagrees, the comparison fingerprint is left null
     /// rather than asserting that measurements shared one environment. This does not verify a durable ledger row.
     /// </remarks>
-    private static ParsedRun? ParseWorkflow(string directory, string path)
+    internal static ParsedRun? ParseWorkflow(string directory, string path, string? reportSha256 = null,
+        Action<string>? pathGuard = null)
     {
+        pathGuard?.Invoke(path);
         byte[] bytes = File.ReadAllBytes(path);
+        string sourceHash = Hash(bytes);
+        if (reportSha256 is not null && !string.Equals(sourceHash, reportSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Workflow report differs from durable finalization.");
+        }
+
         using JsonDocument doc = JsonDocument.Parse(bytes);
         JsonElement root = doc.RootElement;
         Version(root, path, 1);
@@ -170,7 +178,7 @@ internal static class HistoryReports
         {
             Run = new(Id(directory), directory, "workflow", identity,
                 Str(root, "manifestHash"), Time(root, "startedAt"), Time(root, "finishedAt"),
-                status, null, Hash(bytes))
+                status, null, sourceHash)
         };
         if (run.Run.FinishedAt is null)
         {
@@ -253,7 +261,7 @@ internal static class HistoryReports
                                                 && m.Variant == variant), Json(node, "arguments"), null));
             }
 
-            ImportDagFlowHarness(directory, run, node, id);
+            ImportDagFlowHarness(directory, run, node, id, pathGuard);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
             AddArtifact(run, id, "stderr", Str(node, "stderr"));
             JsonElement? artifact = Obj(node, "artifact");
@@ -269,7 +277,7 @@ internal static class HistoryReports
             }
         }
 
-        ImportProfile(directory, run);
+        ImportProfile(directory, run, pathGuard);
         for (int i = 0; i < run.Measurements.Count; i++)
         {
             HistoryMeasurement measurement = run.Measurements[i];
@@ -302,7 +310,7 @@ internal static class HistoryReports
 
     // Only import snapshots explicitly recorded in run.json. No directory search,
     // and no reading mutable artifacts from the native build tree.
-    private static void ImportDagFlowHarness(string directory, ParsedRun run, JsonElement node, string id)
+    private static void ImportDagFlowHarness(string directory, ParsedRun run, JsonElement node, string id, Action<string>? pathGuard)
     {
         if (Obj(node, "outputs") is not { } outputs)
         {
@@ -311,17 +319,17 @@ internal static class HistoryReports
 
         if (outputs.TryGetProperty("dagflow-summary.json", out _))
         {
-            ImportDagFlowHarnessEntry(directory, run, outputs, id, "dagflow-", null);
+            ImportDagFlowHarnessEntry(directory, run, outputs, id, "dagflow-", null, pathGuard);
         }
         // Multiple harness results can originate from one native invoke.
         for (int index = 0; outputs.TryGetProperty($"dagflow-{index}-summary.json", out _); index++)
         {
-            ImportDagFlowHarnessEntry(directory, run, outputs, id, $"dagflow-{index}-", $"harness-{index}");
+            ImportDagFlowHarnessEntry(directory, run, outputs, id, $"dagflow-{index}-", $"harness-{index}", pathGuard);
         }
     }
 
     private static void ImportDagFlowHarnessEntry(string directory, ParsedRun run,
-        JsonElement outputs, string id, string prefix, string? variant)
+        JsonElement outputs, string id, string prefix, string? variant, Action<string>? pathGuard)
     {
         string Saved(string name)
         {
@@ -349,6 +357,7 @@ internal static class HistoryReports
                      ("dagflow-summary", summaryPath), ("dagflow-runs", runsPath)
                  })
         {
+            pathGuard?.Invoke(path);
             AddArtifact(run, id, type, path, HashFile(path));
         }
 
@@ -362,6 +371,7 @@ internal static class HistoryReports
                 throw new InvalidDataException($"{id}: invalid snapshotted replay binary.");
             }
 
+            pathGuard?.Invoke(original);
             AddArtifact(run, id, "dagflow-replay-binary", original, HashFile(original));
         }
 
@@ -680,10 +690,17 @@ internal static class HistoryReports
     /// metadata reads may fail; database mutation is deferred until the caller has parsed the entire batch.
     /// Raw trace references/hashes are metadata; merely importing them does not attest current trace contents.
     /// </remarks>
-    private static void ImportProfile(string directory, ParsedRun run)
+    private static void ImportProfile(string directory, ParsedRun run, Action<string>? pathGuard = null)
     {
+        string GuardedHash(string file)
+        {
+            pathGuard?.Invoke(file);
+            return HashFile(file);
+        }
+
         foreach (string? path in Directory.GetFiles(directory, "*.results.json").Order(StringComparer.Ordinal))
         {
+            pathGuard?.Invoke(path);
             using JsonDocument doc = Read(path);
             JsonElement root = doc.RootElement;
             string? id = Str(root, "captureId");
@@ -698,6 +715,7 @@ internal static class HistoryReports
             string manifest = Path.Combine(directory, id + ".manifest.json");
             if (File.Exists(manifest))
             {
+                pathGuard?.Invoke(manifest);
                 using JsonDocument md = Read(manifest);
                 Version(md.RootElement, manifest, 1);
                 AddArtifact(run, id, "capture-manifest", manifest, Hash(File.ReadAllBytes(manifest)));
@@ -712,10 +730,12 @@ internal static class HistoryReports
             {
                 if (name == "comparison.json")
                 {
+                    pathGuard?.Invoke(path);
                     using JsonDocument doc = Read(path);
                     Version(doc.RootElement, path, 1);
                 }
 
+                pathGuard?.Invoke(path);
                 AddArtifact(run, null, name, path, Hash(File.ReadAllBytes(path)));
             }
         }
@@ -723,6 +743,7 @@ internal static class HistoryReports
         string counterPath = Path.Combine(directory, "counter-comparison.json");
         if (File.Exists(counterPath))
         {
+            pathGuard?.Invoke(counterPath);
             using JsonDocument doc = Read(counterPath);
             JsonElement root = doc.RootElement;
             if (Num(root, "schemaVersion") is not (1 or 2))
@@ -765,6 +786,7 @@ internal static class HistoryReports
         HashSet<string> failedAnalyses = new(StringComparer.Ordinal);
         if (File.Exists(analysisPath))
         {
+            pathGuard?.Invoke(analysisPath);
             using JsonDocument doc = Read(analysisPath);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
@@ -822,6 +844,7 @@ internal static class HistoryReports
         string normalized = Path.Combine(directory, "traces", "normalized");
         if (Directory.Exists(normalized))
         {
+            pathGuard?.Invoke(normalized);
             foreach (string file in Directory.GetFiles(normalized, "*.stacks.json"))
             {
                 string captureId = Path.GetFileName(file)[..^".stacks.json".Length];
@@ -830,6 +853,7 @@ internal static class HistoryReports
                     continue;
                 }
 
+                pathGuard?.Invoke(file);
                 using JsonDocument parsed = Read(file);
                 if (Num(parsed.RootElement, "schemaVersion") is not (1 or 2))
                 {
@@ -844,7 +868,7 @@ internal static class HistoryReports
             foreach (string file in Directory.GetFiles(normalized, "*.timeline.jsonl"))
             {
                 AddArtifact(run, Path.GetFileName(file)[..^".timeline.jsonl".Length],
-                    "scheduler-timeline", file, HashFile(file));
+                    "scheduler-timeline", file, GuardedHash(file));
             }
         }
 
@@ -852,6 +876,7 @@ internal static class HistoryReports
         {
             foreach (string? path in Directory.GetFiles(normalized, "*.etw.json").Order(StringComparer.Ordinal))
             {
+                pathGuard?.Invoke(path);
                 using JsonDocument doc = Read(path);
                 JsonElement root = doc.RootElement;
                 Version(root, path, 1);

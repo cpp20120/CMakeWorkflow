@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.History;
+
 namespace CMakeWorkflow.Host.Workflows;
 
 public sealed record WorkflowStartRequest(
@@ -5,4 +7,9 @@ public sealed record WorkflowStartRequest(
     string Manifest,
     string ManifestSha256,
     int Jobs,
-    string ResultsDirectory);
+    string ResultsDirectory)
+{
+    public IReadOnlyList<string>? Only { get; init; }
+
+    public HistoryPolicy? HistoryPolicy { get; init; }
+}

@@ -1,5 +1,6 @@
 // Preserve the established namespace; folders only group implementation.
 using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.Host.Protocol;
 
 namespace CMakeWorkflow.Host.Sessions;
@@ -86,15 +87,24 @@ internal sealed class WorkspaceReadPaths(string workspace)
     /// </remarks>
     public string Database(string path)
     {
+        string full = DatabaseForWrite(path);
+        return !File.Exists(full)
+            ? throw new ApplicationRefusal("not_found", "History database does not exist; import results explicitly.")
+            : full;
+    }
+
+    internal string DatabaseForWrite(string path)
+    {
         string full = Require(path);
         foreach (string? suffix in new[] { "-wal", "-shm", "-journal" })
         {
-            _ = Require(full + suffix);
+            string sidecar = full + suffix;
+            if (!WorkflowPlanner.PathComparer.Equals(Require(sidecar), sidecar))
+            {
+                throw new ApplicationRefusal("path_not_allowed", "SQLite sidecars cannot be redirected.");
+            }
         }
 
-        return !File.Exists(full)
-            ? throw new ApplicationRefusal("not_found",
-                "History database does not exist; import results explicitly with the CLI.")
-            : full;
+        return full;
     }
 }

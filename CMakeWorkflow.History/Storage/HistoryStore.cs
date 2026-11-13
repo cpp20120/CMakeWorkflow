@@ -44,7 +44,9 @@ public sealed class HistoryStore : IDisposable
                 _ = foreignKeys.ExecuteNonQuery();
             }
 
+            using SqliteTransaction? migration = readOnly ? null : db.BeginTransaction();
             using SqliteCommand version = db.CreateCommand();
+            version.Transaction = migration;
             version.CommandText = "PRAGMA user_version";
             int current = Convert.ToInt32(version.ExecuteScalar(), CultureInfo.CurrentCulture);
             if (readOnly)
@@ -65,26 +67,28 @@ public sealed class HistoryStore : IDisposable
 
             if (current == 0)
             {
-                Migrate0To1();
+                Migrate0To1(migration!);
                 current = 1;
             }
 
             if (current == 1)
             {
-                Migrate1To2();
+                Migrate1To2(migration!);
                 current = 2;
             }
 
             if (current == 2)
             {
-                Migrate2To3();
+                Migrate2To3(migration!);
                 current = 3;
             }
 
             if (current == 3)
             {
-                Migrate3To4();
+                Migrate3To4(migration!);
             }
+
+            migration!.Commit();
         }
         catch
         {
@@ -93,9 +97,8 @@ public sealed class HistoryStore : IDisposable
         }
     }
 
-    private void Migrate0To1()
+    private void Migrate0To1(SqliteTransaction tx)
     {
-        using SqliteTransaction tx = db.BeginTransaction();
         Execute(static command => command.CommandText = """
                 CREATE TABLE IF NOT EXISTS runs (
                   id TEXT PRIMARY KEY, directory TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
@@ -118,33 +121,26 @@ public sealed class HistoryStore : IDisposable
                 CREATE INDEX IF NOT EXISTS measurements_metric ON measurements(metric,variant,scenario);
                 """, tx);
         Execute(static command => command.CommandText = "PRAGMA user_version=1", tx);
-        tx.Commit();
     }
 
-    private void Migrate1To2()
+    private void Migrate1To2(SqliteTransaction tx)
     {
-        using SqliteTransaction tx = db.BeginTransaction();
         Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN indexer_version INTEGER NOT NULL DEFAULT 0", tx);
         Execute(static command => command.CommandText = "PRAGMA user_version=2", tx);
-        tx.Commit();
     }
 
-    private void Migrate2To3()
+    private void Migrate2To3(SqliteTransaction tx)
     {
-        using SqliteTransaction tx = db.BeginTransaction();
         Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN host_id TEXT", tx);
         Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN environment_fingerprint TEXT", tx);
         Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN environment_json TEXT", tx);
         Execute(static command => command.CommandText = "PRAGMA user_version=3", tx);
-        tx.Commit();
     }
 
-    private void Migrate3To4()
+    private void Migrate3To4(SqliteTransaction tx)
     {
-        using SqliteTransaction tx = db.BeginTransaction();
         Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN build_environment_json TEXT", tx);
         Execute(static command => command.CommandText = "PRAGMA user_version=4", tx);
-        tx.Commit();
     }
 
     private void Execute(Action<SqliteCommand> configure, SqliteTransaction? tx = null, params object?[] args)
@@ -189,8 +185,6 @@ public sealed class HistoryStore : IDisposable
         }
 
         IEnumerable<string> dirs = recursive ? CandidateDirectories(directory) : [directory];
-        int imported = 0;
-        int unchanged = 0;
         int skipped = 0;
         List<ParsedRun> parsedRuns = [];
         foreach (string path in dirs)
@@ -206,12 +200,34 @@ public sealed class HistoryStore : IDisposable
             parsedRuns.Add(parsed);
         }
 
+        (int imported, int unchanged) = WriteRuns(parsedRuns);
+        onComplete?.Invoke(new(1, imported, unchanged, skipped));
+        return $"Imported {imported}; unchanged {unchanged}; skipped {skipped}.";
+    }
+
+    /// <summary>Indexes a verified workflow finalization through the ordinary history writer.</summary>
+    public HistoryImportResult ImportFinalizedWorkflow(string directory, string reportSha256, Action<string> pathGuard)
+    {
+        ArgumentNullException.ThrowIfNull(pathGuard);
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        pathGuard(root);
+        ParsedRun parsed = HistoryReports.ParseWorkflow(root, Path.Combine(root, "run.json"), reportSha256, pathGuard)
+            ?? throw new InvalidDataException("Finalized workflow is not importable.");
+        (int imported, int unchanged) = WriteRuns([parsed]);
+        return new(1, imported, unchanged, 0);
+    }
+
+    private (int Imported, int Unchanged) WriteRuns(IReadOnlyList<ParsedRun> parsedRuns)
+    {
+        int imported = 0;
+        int unchanged = 0;
+        using SqliteTransaction tx = db.BeginTransaction();
         List<ParsedRun> changed = [];
         foreach (ParsedRun parsed in parsedRuns)
         {
-            (string? Hash, int IndexerVersion) = ExistingHash(parsed.Run.Id);
+            (string? Hash, int IndexerVersion) = ExistingHash(parsed.Run.Id, tx);
             if (Hash == parsed.Run.SourceHash && IndexerVersion == CurrentIndexerVersion
-                                                  && !ProfileMetadataChanged(parsed))
+                                                  && !ProfileMetadataChanged(parsed, tx))
             {
                 unchanged++;
             }
@@ -221,7 +237,6 @@ public sealed class HistoryStore : IDisposable
             }
         }
 
-        using SqliteTransaction tx = db.BeginTransaction();
         foreach (ParsedRun parsed in changed)
         {
             Execute(static command => command.CommandText = "DELETE FROM measurements WHERE run_id=$p0; DELETE FROM artifacts WHERE run_id=$p0; DELETE FROM nodes WHERE run_id=$p0; DELETE FROM runs WHERE id=$p0;",
@@ -263,8 +278,7 @@ public sealed class HistoryStore : IDisposable
         }
 
         tx.Commit();
-        onComplete?.Invoke(new(1, imported, unchanged, skipped));
-        return $"Imported {imported}; unchanged {unchanged}; skipped {skipped}.";
+        return (imported, unchanged);
     }
 
     /// <summary>Enumerates result roots while pruning beneath recognized reports and bulky artifact directories.</summary>
@@ -305,17 +319,19 @@ public sealed class HistoryStore : IDisposable
     /// value and must be combined with SourceHash and indexer-version checks in Import. Uses the store-owned
     /// SQLite connection; callers serialize access to that connection.
     /// </remarks>
-    private bool ProfileMetadataChanged(ParsedRun run)
+    private bool ProfileMetadataChanged(ParsedRun run, SqliteTransaction tx)
     {
         using SqliteCommand cmd = db.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT count(*) FROM artifacts WHERE run_id=$p0";
         _ = cmd.Parameters.AddWithValue("$p0", run.Run.Id);
         return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.CurrentCulture) != run.Artifacts.Distinct().Count();
     }
 
-    private (string? Hash, int IndexerVersion) ExistingHash(string id)
+    private (string? Hash, int IndexerVersion) ExistingHash(string id, SqliteTransaction tx)
     {
         using SqliteCommand cmd = db.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT source_hash,indexer_version FROM runs WHERE id=$p0";
         _ = cmd.Parameters.AddWithValue("$p0", id);
         using SqliteDataReader reader = cmd.ExecuteReader();

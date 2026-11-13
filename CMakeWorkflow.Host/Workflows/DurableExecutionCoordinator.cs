@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Host.Execution;
+using CMakeWorkflow.Host.History;
 using CMakeWorkflow.Host.Sessions;
 
 namespace CMakeWorkflow.Host.Workflows;
@@ -31,8 +33,7 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         }
 
         using DurableAcceptanceStore store = new(workspace);
-        AcceptedWorkflow accepted = store.Accept(request.ClientRequestId, request.Manifest,
-            request.ManifestSha256, request.Jobs, request.ResultsDirectory);
+        AcceptedWorkflow accepted = store.Accept(request);
         OperationReference reference = new(accepted.WorkspaceId, accepted.OperationId,
             accepted.ClientRequestId, "workflow", accepted.State,
             accepted.ManifestSha256, accepted.ManifestBaseDirectory);
@@ -65,8 +66,11 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
             try
             {
                 _ = await DurableWorkflowExecutor.ExecuteAcceptedAsync(workspace, accepted.OperationId,
-                    request.ClientRequestId, request.Manifest, request.ManifestSha256,
-                    request.Jobs, request.ResultsDirectory, tokenSource.Token);
+                    request, accepted, null, tokenSource.Token);
+                if (request.HistoryPolicy is { Mode: not HistoryPolicyMode.Disabled })
+                {
+                    ScheduleHistoryRecovery(workspace);
+                }
                 _ = tcs.TrySetResult();
             }
             catch (OperationCanceledException) when (tokenSource.IsCancellationRequested)
@@ -221,6 +225,10 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
             try
             {
                 _ = await HostOperationComposition.ResumeAsync(domain, workspace, operationId, linked.Token);
+                if (domain == "workflow")
+                {
+                    ScheduleHistoryRecovery(workspace);
+                }
                 _ = completion.TrySetResult();
             }
             catch (OperationCanceledException) when (linked.IsCancellationRequested)
@@ -245,6 +253,36 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         });
         _ = completion.Task.ContinueWith(task => _ = task.Exception,
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+    }
+
+    internal void ScheduleHistoryRecovery(string workspace)
+    {
+        if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)
+        {
+            return;
+        }
+
+        string key = "history:" + Guid.NewGuid().ToString("N");
+        TaskCompletionSource done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = active.TryAdd(key, done.Task);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DurableHistoryIndexer.RecoverAsync(new WorkspaceReadPaths(workspace), shutdown);
+            }
+            catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
+            catch (Exception error) when (error is IOException or InvalidOperationException or UnauthorizedAccessException
+                                          or Microsoft.Data.Sqlite.SqliteException or Protocol.ApplicationRefusal)
+            {
+                await Console.Error.WriteLineAsync($"[Host history] Recovery deferred: {error.GetType().Name}");
+            }
+            finally
+            {
+                _ = active.TryRemove(key, out _);
+                _ = done.TrySetResult();
+            }
+        });
     }
 
     /// <summary>Persists cancellation intent before signaling any registered worker token.</summary>

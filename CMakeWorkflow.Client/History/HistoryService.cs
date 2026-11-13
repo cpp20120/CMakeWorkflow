@@ -1,3 +1,6 @@
+using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Contracts.History;
+
 namespace CMakeWorkflow.Client.History;
 
 /// <summary>Typed reads, analysis and imports over a Host-owned history database.</summary>
@@ -7,6 +10,20 @@ namespace CMakeWorkflow.Client.History;
 /// </remarks>
 public sealed class HistoryService(CMakeWorkflowClient client)
 {
+    /// <summary>Reads indexing state independently of the workflow terminal outcome.</summary>
+    public Task<HistoryIndexStatus> GetIndexStatusAsync(string operationId, CancellationToken ct = default)
+    {
+        client.RequireCapability("history/indexStatus");
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryIndexStatusAsync(new(operationId), ct));
+    }
+
+    /// <summary>Attempts indexing for a finalized operation without dispatching workflow nodes.</summary>
+    public Task<HistoryIndexStatus> RetryIndexAsync(string operationId, CancellationToken ct = default)
+    {
+        client.RequireCapability("history/retryIndex");
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryRetryIndexAsync(new(operationId), ct));
+    }
+
     /// <summary>Imports Host run evidence into the history database.</summary>
     /// <remarks>
     /// Writes Host history state. Cancellation or loss of reply may follow committed changes; inspect history before retrying.
@@ -14,7 +31,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     public Task<ImportHistoryResult> ImportAsync(ImportHistoryOptions options, CancellationToken ct = default)
     {
         client.RequireCapability("history/import");
-        return client.Proxy.HistoryImportAsync(options, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryImportAsync(options, ct));
     }
 
     /// <summary>Reads imported run summaries.</summary>
@@ -25,7 +42,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/runs");
-        return client.Proxy.HistoryRunsAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryRunsAsync(query, ct));
     }
 
     /// <summary>Browse all imported runs using stable keyset pages; never re-imports data.</summary>
@@ -33,7 +50,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/runsPage");
-        return client.Proxy.HistoryRunsPageAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryRunsPageAsync(query, ct));
     }
 
     /// <summary>Reads one imported run and its detail.</summary>
@@ -44,7 +61,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/show");
-        return client.Proxy.HistoryShowAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryShowAsync(query, ct));
     }
 
     /// <summary>Reads imported measurement evidence.</summary>
@@ -55,7 +72,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/metrics");
-        return client.Proxy.HistoryMetricsAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryMetricsAsync(query, ct));
     }
 
     /// <summary>Queries imported measurement evidence using the metrics alias.</summary>
@@ -66,7 +83,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/query");
-        return client.Proxy.HistoryQueryAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryQueryAsync(query, ct));
     }
 
     /// <summary>Compares imported measurements.</summary>
@@ -77,7 +94,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/compare");
-        return client.Proxy.HistoryCompareAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryCompareAsync(query, ct));
     }
 
     /// <summary>Computes detections from imported history.</summary>
@@ -88,6 +105,6 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/detect");
-        return client.Proxy.HistoryDetectAsync(query, ct);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryDetectAsync(query, ct));
     }
 }

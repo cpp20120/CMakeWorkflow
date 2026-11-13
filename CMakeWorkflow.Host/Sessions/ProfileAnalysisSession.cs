@@ -33,55 +33,63 @@ public sealed partial class DoctorSession
     // benchmark run or as new uninstrumented timing samples.
     public Task<ProfileAnalysis> ProfileAnalyzeAsync(ProfileAnalyzeRequest request,
         CancellationToken cancellationToken) =>
-        ApplicationCallAsync(request, async (paths, ct) =>
+        ApplicationCallAsync(request, (paths, ct) => AnalyzeProfileAsync(paths, request.RunDirectory, ct),
+            cancellationToken);
+
+    internal static async Task<ProfileAnalysis> AnalyzeProfileAsync(WorkspaceReadPaths paths, string runDirectory,
+        CancellationToken ct)
+    {
+        string root = paths.Require(runDirectory);
+        if (!Directory.Exists(root))
         {
-            string root = paths.Require(request.RunDirectory);
-            if (!Directory.Exists(root))
+            throw new DirectoryNotFoundException(root);
+        }
+
+        string[] captures = Directory.GetFiles(root, "*.results.json", SearchOption.TopDirectoryOnly);
+        if (captures.Length is < 1 or > 256)
+        {
+            throw new ApplicationRefusal("invalid_data", "Expected 1..256 capture result files.");
+        }
+        // ProfileAnalyzer uses capture identifiers for output paths; validate
+        // names and linked paths before invoking external analysis tools.
+        foreach (string capture in captures)
+        {
+            paths.Read(capture);
+            using JsonDocument doc = JsonDocument.Parse(await File.ReadAllTextAsync(capture, ct));
+            JsonElement item = doc.RootElement;
+            string? captureId = ReadCaptureText(item, "captureId");
+            string? raw = ReadCaptureText(item, "rawTrace");
+            if (captureId is null || !Regex.IsMatch(captureId, "^[a-zA-Z0-9_-]{1,80}$",
+                    RegexOptions.CultureInvariant) || string.IsNullOrWhiteSpace(raw))
             {
-                throw new DirectoryNotFoundException(root);
+                throw new ApplicationRefusal("invalid_data", "Invalid profile capture identity.");
             }
 
-            string[] captures = Directory.GetFiles(root, "*.results.json", SearchOption.TopDirectoryOnly);
-            if (captures.Length is < 1 or > 256)
+            _ = paths.Require(Path.Combine(root, raw));
+            foreach (string? suffix in ProfileTraceSidecarSuffixes)
             {
-                throw new ApplicationRefusal("invalid_data", "Expected 1..256 capture result files.");
-            }
-            // ProfileAnalyzer uses capture identifiers for output paths; validate
-            // names and linked paths before invoking external analysis tools.
-            foreach (string capture in captures)
-            {
-                paths.Read(capture);
-                using JsonDocument doc = JsonDocument.Parse(await File.ReadAllTextAsync(capture, ct));
-                JsonElement item = doc.RootElement;
-                string? captureId = item.GetProperty("captureId").GetString();
-                string? raw = item.GetProperty("rawTrace").GetString();
-                if (captureId is null || !Regex.IsMatch(captureId, "^[a-zA-Z0-9_-]{1,80}$",
-                        RegexOptions.CultureInvariant) || string.IsNullOrWhiteSpace(raw))
-                {
-                    throw new ApplicationRefusal("invalid_data", "Invalid profile capture identity.");
-                }
-
-                _ = paths.Require(Path.Combine(root, raw));
-                foreach (string? suffix in ProfileTraceSidecarSuffixes)
-                {
-                    _ = paths.Require(Path.Combine(root, captureId + suffix));
-                }
-
-                foreach (string? suffix in ProfileSummarySidecarSuffixes)
-                {
-                    _ = paths.Require(Path.Combine(root, "traces", "normalized", captureId + suffix));
-                }
+                _ = paths.Require(Path.Combine(root, captureId + suffix));
             }
 
-            foreach (string? artifact in ProfileRootReportNames)
+            foreach (string? suffix in ProfileSummarySidecarSuffixes)
             {
-                _ = paths.Require(Path.Combine(root, artifact));
+                _ = paths.Require(Path.Combine(root, "traces", "normalized", captureId + suffix));
             }
+        }
 
-            _ = await ProfileAnalyzer.AnalyzeAsync(root, ct, emitResultPath: false);
-            string analysis = paths.Require(Path.Combine(root, "analysis.json"));
-            return !File.Exists(analysis)
-                ? throw new InvalidDataException("Profiler analysis did not produce analysis.json.")
-                : new ProfileAnalysis(1, root, analysis);
-        }, cancellationToken);
+        foreach (string? artifact in ProfileRootReportNames)
+        {
+            _ = paths.Require(Path.Combine(root, artifact));
+        }
+
+        _ = await ProfileAnalyzer.AnalyzeAsync(root, ct, emitResultPath: false);
+        string analysis = paths.Require(Path.Combine(root, "analysis.json"));
+        return !File.Exists(analysis)
+            ? throw new InvalidDataException("Profiler analysis did not produce analysis.json.")
+            : new ProfileAnalysis(1, root, analysis);
+    }
+    private static string? ReadCaptureText(JsonElement item, string name) =>
+        item.ValueKind == JsonValueKind.Object && item.TryGetProperty(name, out JsonElement value) &&
+        value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
 }

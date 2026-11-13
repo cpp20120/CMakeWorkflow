@@ -1,4 +1,5 @@
 using CMakeWorkflow.History.Storage;
+using CMakeWorkflow.Contracts.History;
 
 namespace CMakeWorkflow.Commands;
 
@@ -6,7 +7,7 @@ namespace CMakeWorkflow.Commands;
 /// <remarks>Expected indexing failures are diagnostic only and do not replace the workflow result.</remarks>
 internal static class CliHistory
 {
-    internal static (string[] Args, string? Database, bool Disabled) Parse(string[] args)
+    internal static (string[] Args, HistoryPolicy? Policy) Parse(string[] args)
     {
         List<string> clean = new(args.Length);
         string? database = null;
@@ -42,11 +43,12 @@ internal static class CliHistory
 
         return disabled && database is not null
             ? throw new ArgumentException("--no-history and --history-db cannot be combined.")
-            : ((string[] Args, string? Database, bool Disabled))(clean.ToArray(), database, disabled);
+            : (clean.ToArray(), disabled ? new(HistoryPolicyMode.Disabled)
+                : database is null ? null : new(HistoryPolicyMode.ExplicitDatabase, database));
     }
 
     internal static async Task<int> RunAndIndexAsync(Func<Action<string>, Task<int>> run,
-        string? database, bool disabled)
+        HistoryPolicy? policy)
     {
         string? directory = null;
         try
@@ -55,14 +57,14 @@ internal static class CliHistory
         }
         finally
         {
-            if (!disabled && directory is not null)
+            if (policy is not { Mode: HistoryPolicyMode.Disabled } && directory is not null)
             {
                 try
                 {
                     if (File.Exists(Path.Combine(directory, "run.json")) ||
                         Directory.EnumerateFiles(directory, "*.results.json").Any())
                     {
-                        string path = database ?? HistoryStore.DefaultDatabasePath;
+                        string path = policy?.DatabasePath ?? HistoryStore.DefaultDatabasePath;
                         using HistoryStore store = new(path);
                         string summary = store.Import(directory, recursive: false);
                         await Console.Error.WriteLineAsync($"[CMakeWorkflow] History: {summary} Database: {Path.GetFullPath(path)}");

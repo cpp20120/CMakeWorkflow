@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using System.Text.Json;
 using CMakeWorkflow.Client.Campaigns;
 using CMakeWorkflow.Client.History;
@@ -69,6 +70,12 @@ internal partial interface IClientRpc
     [JsonRpcMethod("profile/replay")]
     Task<ReplayProfileResult> ProfileReplayAsync(ReplayProfileOptions request, CancellationToken ct);
 
+    [JsonRpcMethod("context/inspect")]
+    Task<BuildContextObservation> InspectContextAsync(ContextInspectRequest request, CancellationToken ct);
+
+    [JsonRpcMethod("target/resolve")]
+    Task<TargetResolution> ResolveTargetAsync(TargetResolveRequest request, CancellationToken ct);
+
     [JsonRpcMethod("target/prepare")]
     Task<PreparedWorkflow> TargetPrepareAsync(PrepareTargetOptions request, CancellationToken ct);
 
@@ -110,6 +117,12 @@ internal partial interface IClientRpc
 
     [JsonRpcMethod("history/detect")]
     Task<HistoryDetectionReport> HistoryDetectAsync(HistoryDetectQuery request, CancellationToken ct);
+
+    [JsonRpcMethod("history/indexStatus")]
+    Task<HistoryIndexStatus> HistoryIndexStatusAsync(OpIdRequest request, CancellationToken ct);
+
+    [JsonRpcMethod("history/retryIndex")]
+    Task<HistoryIndexStatus> HistoryRetryIndexAsync(OpIdRequest request, CancellationToken ct);
 
     [JsonRpcMethod("history/import")]
     Task<ImportHistoryResult> HistoryImportAsync(ImportHistoryOptions request, CancellationToken ct);

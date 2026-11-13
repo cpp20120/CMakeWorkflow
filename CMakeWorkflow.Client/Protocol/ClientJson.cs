@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Client.Campaigns;
@@ -50,6 +51,10 @@ namespace CMakeWorkflow.Client.Protocol;
 [JsonSerializable(typeof(ReplayProfileOptions))]
 [JsonSerializable(typeof(ReplayProfileResult))]
 [JsonSerializable(typeof(PrepareTargetOptions))]
+[JsonSerializable(typeof(BuildContextObservation))]
+[JsonSerializable(typeof(TargetResolution))]
+[JsonSerializable(typeof(ContextInspectRequest))]
+[JsonSerializable(typeof(TargetResolveRequest))]
 [JsonSerializable(typeof(MutationCampaignOptions))]
 [JsonSerializable(typeof(WeakMemoryCampaignOptions))]
 [JsonSerializable(typeof(FuzzSeedCampaignOptions))]
@@ -57,6 +62,8 @@ namespace CMakeWorkflow.Client.Protocol;
 [JsonSerializable(typeof(FuzzTriageCampaignOptions))]
 [JsonSerializable(typeof(FuzzMergeCampaignOptions))]
 [JsonSerializable(typeof(CampaignResult))]
+[JsonSerializable(typeof(HistoryPolicy))]
+[JsonSerializable(typeof(HistoryIndexStatus))]
 [JsonSerializable(typeof(ImportHistoryOptions))]
 [JsonSerializable(typeof(ImportHistoryResult))]
 [JsonSerializable(typeof(HistoryRunsPageQuery))]

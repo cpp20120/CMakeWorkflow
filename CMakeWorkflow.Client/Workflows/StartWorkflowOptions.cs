@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.History;
+
 namespace CMakeWorkflow.Client.Workflows;
 
 /// <summary>Immutable durable workflow admission inputs interpreted on the connected Host.</summary>
@@ -15,4 +17,10 @@ public sealed record StartWorkflowOptions(
     string Manifest,
     string ManifestSha256,
     int Jobs,
-    string ResultsDirectory);
+    string ResultsDirectory)
+{
+    /// <summary>Selected node IDs. An empty selection runs the full graph; dependencies are included by the Host.</summary>
+    public IReadOnlyList<string>? Only { get; init; }
+
+    public HistoryPolicy? HistoryPolicy { get; init; }
+}

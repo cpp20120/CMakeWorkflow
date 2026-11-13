@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using System.Diagnostics.CodeAnalysis;
 namespace CMakeWorkflow.Client.Workflows;
 
@@ -11,7 +12,13 @@ namespace CMakeWorkflow.Client.Workflows;
 /// <param name="Jobs">Proposed positive maximum node parallelism.</param>
 /// <param name="ResultsDirectory">Proposed absolute Host output directory inside the workspace.</param>
 public sealed record WorkflowPreflightOptions(
-    string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
+    string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory)
+{
+    /// <summary>Selected node IDs, whose transitive prerequisites the Host includes.</summary>
+    public IReadOnlyList<string>? Only { get; init; }
+
+    public HistoryPolicy? HistoryPolicy { get; init; }
+}
 
 /// <summary>One planner diagnostic; does not establish future runtime availability.</summary>
 /// <param name="Severity">Planner severity such as Error or Warning.</param>
@@ -56,6 +63,11 @@ public sealed record WorkflowPreflightResult(
     string ResultsDirectory, bool Valid, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.WorkflowPreflightResult.Nodes (List<WorkflowPreflightNode>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowService.PreflightAsync; retain this Client SDK property signature.")]
 List<WorkflowPreflightNode> Nodes)
 {
+    /// <summary>Canonical selected node IDs returned by the Host, or null for the full graph.</summary>
+    public IReadOnlyList<string>? Only { get; init; }
+
+    public HistoryPolicy? HistoryPolicy { get; init; }
+
     /// <summary>Construct an explicit start request from reviewed Host values; does not dispatch.</summary>
     public StartWorkflowOptions CreateStartOptions(string clientRequestId)
     {
@@ -63,6 +75,6 @@ List<WorkflowPreflightNode> Nodes)
             ? throw new InvalidOperationException("Cannot start an invalid or unsupported preflight result.")
             : string.IsNullOrWhiteSpace(clientRequestId)
             ? throw new ArgumentException("A durable client request ID is required.", nameof(clientRequestId))
-            : new(clientRequestId, Manifest, ManifestSha256, Jobs, ResultsDirectory);
+            : new(clientRequestId, Manifest, ManifestSha256, Jobs, ResultsDirectory) { Only = Only, HistoryPolicy = HistoryPolicy };
     }
 }

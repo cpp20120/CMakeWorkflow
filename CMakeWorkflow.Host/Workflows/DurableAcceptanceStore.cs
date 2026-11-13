@@ -1,6 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.History;
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Host.Sessions;
 using Microsoft.Data.Sqlite;
 
@@ -13,7 +17,7 @@ namespace CMakeWorkflow.Host.Workflows;
 /// Only a verified runner checkpoint binds possible external effects; authorization alone does not prove launch.
 /// Results reservations and uncertain attempts survive failure. This store does not launch processes, prove quiescence or clean run files.
 /// </remarks>
-public sealed class DurableAcceptanceStore : IDisposable
+public sealed partial class DurableAcceptanceStore : IDisposable
 {
     private readonly SqliteConnection connection;
     private readonly IOperationCheckpointEvidenceCodec checkpointCodec;
@@ -225,6 +229,22 @@ public sealed class DurableAcceptanceStore : IDisposable
                 MigrateAcceptanceStateConstraint();
             }
 
+            if (!readOnly)
+            {
+                Execute(static command => command.CommandText = """
+                        CREATE TABLE IF NOT EXISTS workflow_selections (
+                          operation_id TEXT NOT NULL PRIMARY KEY,
+                          node_ids TEXT NOT NULL,
+                          FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
+                        );
+                        """);
+            }
+
+            if (!readOnly)
+            {
+                CreateHistoryIntentTable();
+            }
+
             using SqliteTransaction? transaction = readOnly ? null : connection.BeginTransaction();
             if (!readOnly)
             {
@@ -306,8 +326,12 @@ public sealed class DurableAcceptanceStore : IDisposable
     /// <param name="jobs">Positive maximum workflow node parallelism; part of request identity.</param>
     /// <param name="resultsDirectory">Absolute Host results path; part of request identity, reserved separately.</param>
     public AcceptedWorkflow Accept(string clientRequestId, string manifestPath, string expectedManifestSha256,
-        int jobs, string resultsDirectory)
+        int jobs, string resultsDirectory) =>
+        Accept(new WorkflowStartRequest(clientRequestId, manifestPath, expectedManifestSha256, jobs, resultsDirectory));
+
+    internal AcceptedWorkflow Accept(WorkflowStartRequest request)
     {
+        (string clientRequestId, string manifestPath, string expectedManifestSha256, int jobs, string resultsDirectory) = request;
         ArgumentNullException.ThrowIfNull(expectedManifestSha256);
         if (string.IsNullOrWhiteSpace(clientRequestId) || clientRequestId.Length > 128 || jobs < 1
             || !Path.IsPathFullyQualified(manifestPath) || !Path.IsPathFullyQualified(resultsDirectory)
@@ -319,12 +343,25 @@ public sealed class DurableAcceptanceStore : IDisposable
         WorkspaceReadPaths paths = new(workspace);
         string source = paths.Require(manifestPath);
         string result = paths.Require(resultsDirectory);
-        string digest = Hex(Encoding.UTF8.GetBytes(string.Join("\n", "workflow/start:v1", source,
-            expectedManifestSha256.ToUpperInvariant(), jobs.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            result)));
+        string[] selection = WorkflowNodeSelection.Normalize(request.Only);
+        string? selectionJson = selection.Length == 0 ? null
+            : JsonSerializer.Serialize(selection, HostJson.Default.StringArray);
+        string identity = string.Join("\n", "workflow/start:v1", source,
+            expectedManifestSha256.ToUpperInvariant(), jobs.ToString(System.Globalization.CultureInfo.InvariantCulture), result);
+        string digest = Hex(Encoding.UTF8.GetBytes(identity));
+        if (selectionJson is not null)
+        {
+            digest = Hex(Encoding.UTF8.GetBytes($"workflow/start:selection:v1\n{digest}\n{selectionJson}"));
+        }
+        (HistoryPolicyMode historyMode, string? historyDatabase) = WorkflowHistoryPolicy.Normalize(request.HistoryPolicy, paths);
+        if (historyDatabase is not null)
+        {
+            digest = Hex(Encoding.UTF8.GetBytes($"workflow/start:history:v1\n{digest}\n{historyMode}\n{historyDatabase}"));
+        }
         // Do not resolve paths again between digest derivation and admission.
         return AcceptImmutableCanonical(new DurableImmutableRequest(clientRequestId, source,
-            expectedManifestSha256, result, digest));
+            expectedManifestSha256, result, digest, WorkflowSelection: selectionJson, HistoryDatabase: historyDatabase,
+            HistoryMode: historyMode));
     }
 
     // Neutral immutable admission: the trusted domain adapter owns the request digest.
@@ -404,6 +441,21 @@ public sealed class DurableAcceptanceStore : IDisposable
             _ = insert.Parameters.AddWithValue("$base", baseDirectory);
             insert.Parameters.Add("$snapshot", SqliteType.Blob).Value = snapshot;
             _ = insert.ExecuteNonQuery();
+        }
+
+        if (request.WorkflowSelection is { } selection)
+        {
+            using SqliteCommand insertSelection = connection.CreateCommand();
+            insertSelection.Transaction = transaction;
+            insertSelection.CommandText = "INSERT INTO workflow_selections(operation_id,node_ids) VALUES($id,$nodes);";
+            _ = insertSelection.Parameters.AddWithValue("$id", operationId);
+            _ = insertSelection.Parameters.AddWithValue("$nodes", selection);
+            _ = insertSelection.ExecuteNonQuery();
+        }
+
+        if (request.HistoryDatabase is { } historyDatabase)
+        {
+            InsertHistoryIntent(transaction, operationId, historyDatabase, request.HistoryMode);
         }
 
         if (request.DomainKind != "workflow")
@@ -1350,6 +1402,9 @@ public sealed class DurableAcceptanceStore : IDisposable
             _ = insert.ExecuteNonQuery();
         }
 
+        // Eligibility joins the intent saved at admission to this finalization.
+        // Both become visible together at this commit.
+        ActivateHistoryOnFinalization(tx, operationId);
         tx.Commit();
         return new(directory, hash, terminalState, exitCode);
     }
@@ -1384,6 +1439,18 @@ public sealed class DurableAcceptanceStore : IDisposable
         return !string.Equals(Hex(bytes), reader.GetString(1), StringComparison.OrdinalIgnoreCase)
             ? throw new InvalidDataException("Process dispatch evidence changed.")
             : bytes;
+    }
+
+    // All execution paths open a writable ledger, which creates this additive table for older workspaces.
+    internal string[] GetWorkflowSelection(string operationId)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT node_ids FROM workflow_selections WHERE operation_id=$id;";
+        _ = command.Parameters.AddWithValue("$id", operationId);
+        return command.ExecuteScalar() is string json
+            ? JsonSerializer.Deserialize(json, HostJson.Default.StringArray)
+                ?? throw new InvalidDataException("Missing accepted workflow selection.")
+            : [];
     }
 
     /// <summary>Returns the immutable accepted snapshot bytes, independent of the current manifest file.</summary>

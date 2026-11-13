@@ -90,9 +90,9 @@ Release assembly metadata.
 
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
-| [CMakeWorkflow.Client](#cmakeworkflowclient) | 107 | 104 |
-| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 22 | 83 |
-| **Total** | **129** | **187** |
+| [CMakeWorkflow.Client](#cmakeworkflowclient) | 111 | 114 |
+| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 26 | 93 |
+| **Total** | **137** | **207** |
 
 ## CMakeWorkflow.Client
 
@@ -381,6 +381,8 @@ Source: [CMakeWorkflow.Client/History/HistoryService.cs](../CMakeWorkflow.Client
 ```csharp
 public sealed class HistoryService(CMakeWorkflow.Client.CMakeWorkflowClient client)
 {
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> GetIndexStatusAsync(string operationId, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> RetryIndexAsync(string operationId, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.History.ImportHistoryResult> ImportAsync(CMakeWorkflow.Client.History.ImportHistoryOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<System.Collections.Generic.List<CMakeWorkflow.Client.History.HistoryRun>> RunsAsync(CMakeWorkflow.Client.History.HistoryRunsQuery query, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.History.HistoryRunPage> RunsPageAsync(CMakeWorkflow.Client.History.HistoryRunsPageQuery query, System.Threading.CancellationToken ct = default);
@@ -960,6 +962,14 @@ public sealed record SshNetLaunchOptions(string Host, string Username, string Pr
 
 ### Namespace `CMakeWorkflow.Client.Workflows`
 
+#### `BuildContextObservation`
+
+Source: [CMakeWorkflow.Client/Workflows/BuildContextObservation.cs](../CMakeWorkflow.Client/Workflows/BuildContextObservation.cs#L4)
+
+```csharp
+public sealed record BuildContextObservation(string BuildDirectory, string State, string Freshness, string PresetState, string? SourceDirectory, string? Generator, bool? MultiConfig, System.Collections.Generic.IReadOnlyList<string> Configurations, string? IndexFile, string? IndexHash, string? CMakeExecutable, string? CTestExecutable, bool HasCodeModel, bool HasCacheReply, System.Collections.Generic.IReadOnlyList<string> Toolchains, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Client.Workflows.TargetObservation> Targets, System.Collections.Generic.IReadOnlyList<string> Diagnostics, CMakeWorkflow.Client.Workflows.ConfigureObservation? ManagedConfigure);
+```
+
 #### `CancellationReceipt`
 
 Result of a durable cancellation-intent mutation.
@@ -971,6 +981,14 @@ Source: [CMakeWorkflow.Client/Workflows/CancellationReceipt.cs](../CMakeWorkflow
 
 ```csharp
 public sealed record CancellationReceipt(string OperationId, string State, long Revision, bool Requested);
+```
+
+#### `ConfigureObservation`
+
+Source: [CMakeWorkflow.Client/Workflows/BuildContextObservation.cs](../CMakeWorkflow.Client/Workflows/BuildContextObservation.cs#L29)
+
+```csharp
+public sealed record ConfigureObservation(string State, System.DateTimeOffset At, string BuildDirectory, string SourceDirectory, string? Preset, string? IndexFile, string? IndexHash, int? ExitCode, string? Executable, string? WorkingDirectory, System.Collections.Generic.IReadOnlyList<string> Arguments);
 ```
 
 #### `EventPage`
@@ -1170,7 +1188,27 @@ or a missing reply does not establish rejection. Persist the ID and find it in t
 Source: [CMakeWorkflow.Client/Workflows/StartWorkflowOptions.cs](../CMakeWorkflow.Client/Workflows/StartWorkflowOptions.cs#L13)
 
 ```csharp
-public sealed record StartWorkflowOptions(string ClientRequestId, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
+public sealed record StartWorkflowOptions(string ClientRequestId, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory)
+{
+    public System.Collections.Generic.IReadOnlyList<string>? Only { get; init; }
+    public CMakeWorkflow.Contracts.History.HistoryPolicy? HistoryPolicy { get; init; }
+}
+```
+
+#### `TargetObservation`
+
+Source: [CMakeWorkflow.Client/Workflows/BuildContextObservation.cs](../CMakeWorkflow.Client/Workflows/BuildContextObservation.cs#L25)
+
+```csharp
+public sealed record TargetObservation(string Name, string Configuration, string Type, string? Executable, string Evidence);
+```
+
+#### `TargetResolution`
+
+Source: [CMakeWorkflow.Client/Workflows/TargetResolution.cs](../CMakeWorkflow.Client/Workflows/TargetResolution.cs#L4)
+
+```csharp
+public sealed record TargetResolution(int SchemaVersion, string BuildDirectory, string Target, string? Configuration, string Executable);
 ```
 
 #### `TargetService`
@@ -1182,6 +1220,8 @@ Source: [CMakeWorkflow.Client/Workflows/TargetService.cs](../CMakeWorkflow.Clien
 ```csharp
 public sealed class TargetService(CMakeWorkflow.Client.CMakeWorkflowClient client)
 {
+    public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.BuildContextObservation> InspectContextAsync(string buildDirectory, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.TargetResolution> ResolveAsync(string buildDirectory, string target, string? configuration = null, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.PreparedWorkflow> PrepareAsync(CMakeWorkflow.Client.Workflows.PrepareTargetOptions options, System.Threading.CancellationToken ct = default);
 }
 ```
@@ -1255,7 +1295,11 @@ Canceling this read does not create or cancel a workflow operation.
 Source: [CMakeWorkflow.Client/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Client/Workflows/WorkflowPreflight.cs#L13)
 
 ```csharp
-public sealed record WorkflowPreflightOptions(string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
+public sealed record WorkflowPreflightOptions(string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory)
+{
+    public System.Collections.Generic.IReadOnlyList<string>? Only { get; init; }
+    public CMakeWorkflow.Contracts.History.HistoryPolicy? HistoryPolicy { get; init; }
+}
 ```
 
 #### `WorkflowPreflightResult`
@@ -1270,6 +1314,8 @@ Source: [CMakeWorkflow.Client/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.C
 ```csharp
 public sealed record WorkflowPreflightResult(int SchemaVersion, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory, bool Valid, System.Collections.Generic.List<CMakeWorkflow.Client.Workflows.WorkflowPreflightNode> Nodes)
 {
+    public System.Collections.Generic.IReadOnlyList<string>? Only { get; init; }
+    public CMakeWorkflow.Contracts.History.HistoryPolicy? HistoryPolicy { get; init; }
     public CMakeWorkflow.Client.Workflows.StartWorkflowOptions CreateStartOptions(string clientRequestId);
 }
 ```
@@ -1399,6 +1445,18 @@ Source: [CMakeWorkflow.Contracts/Builders/WorkflowNodeRef.cs](../CMakeWorkflow.C
 
 ```csharp
 public readonly record struct WorkflowNodeRef(string Id);
+```
+
+### Namespace `CMakeWorkflow.Contracts.History`
+
+Source: [History policy](../CMakeWorkflow.Contracts/History/HistoryPolicy.cs) and
+[indexing status](../CMakeWorkflow.Contracts/History/HistoryIndexStatus.cs).
+
+```csharp
+public sealed record HistoryPolicy(CMakeWorkflow.Contracts.History.HistoryPolicyMode Mode, string? DatabasePath = null);
+public enum HistoryPolicyMode { None, Disabled, Default, ExplicitDatabase }
+public sealed record HistoryIndexStatus(string OperationId, CMakeWorkflow.Contracts.History.HistoryIndexState State, string? DatabasePath, System.DateTimeOffset? UpdatedAt, string? DiagnosticCode);
+public enum HistoryIndexState { Disabled, AwaitingFinalization, Pending, Indexing, Indexed, Failed }
 ```
 
 ### Namespace `CMakeWorkflow.Contracts.Recipes`

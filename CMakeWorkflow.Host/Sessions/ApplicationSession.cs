@@ -4,6 +4,7 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.History;
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.History.Analysis;
 using CMakeWorkflow.History.Models;
 using CMakeWorkflow.History.Storage;
@@ -18,12 +19,7 @@ namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {
-    private static readonly string[] SqliteSidecarSuffixes =
-    [
-    "-wal",
-    "-shm",
-    "-journal"
-];
+
     private static readonly string[] CompletedReportNames =
     [
     "run.json",
@@ -35,8 +31,8 @@ public sealed partial class DoctorSession
         "context/inspect", "target/resolve", "workflow/plan", "workflow/preflight", "runs/get",
         "profile/prepare", "profileReplay/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/list", "operations/cancel",
-        "workflow/start", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
-        "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "history/import", "history/runs", "history/show", "history/metrics", "history/query",
+        "workflow/start", "workflow/nodeSelection", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
+        "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "operations/artifacts/timestampText", "history/import", "history/indexStatus", "history/retryIndex", "workflow/historyPolicy", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "history/runsPage", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
         "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"
@@ -71,8 +67,21 @@ public sealed partial class DoctorSession
         string output = paths.Require(request.ResultsDirectory);
         // Accept commits the immutable manifest before any response or scheduling.
         // Request cancellation is intentionally not propagated after acceptance.
-        return Task.FromResult(durableExecutions.Start(paths.WorkspaceDirectory,
-            request with { Manifest = manifest, ResultsDirectory = output }));
+        try
+        {
+            return Task.FromResult(durableExecutions.Start(paths.WorkspaceDirectory,
+                request with { Manifest = manifest, ResultsDirectory = output }));
+        }
+        catch (ApplicationRefusal error)
+        {
+            throw new LocalRpcException(error.Message)
+            { ErrorCode = 1001, ErrorData = new ApplicationError(error.Code, error.Message) };
+        }
+        catch (InvalidOperationException error) when (error.Message is "request_id_conflict" or "stale_manifest")
+        {
+            throw new LocalRpcException(error.Message)
+            { ErrorCode = 1001, ErrorData = new ApplicationError(error.Message, error.Message) };
+        }
     }
 
     /// <summary>Commits durable stop intent and signals Host-owned execution separately from this RPC.</summary>
@@ -390,7 +399,7 @@ public sealed partial class DoctorSession
 
     public Task<OperationArtifactChunk> OperationArtifactReadAsync(OperationArtifactChunkRequest request,
         CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => OperationArtifactReader.ReadChunkAsync(paths, request, ct),
+        ReadAsync(request, (paths, ct) => OperationArtifactReader.ReadChunkAsync(paths, request.NormalizeTimestamp(), ct),
             cancellationToken);
 
     public Task<ObservedBuildContext> ContextInspectAsync(ContextInspectRequest request,
@@ -408,16 +417,13 @@ public sealed partial class DoctorSession
     public Task<WorkflowPlanView> WorkflowPlanAsync(WorkflowPlanRequest request, CancellationToken cancellationToken) =>
         ReadAsync(request, async (paths, ct) =>
         {
-            if (request.Only is { Length: > 1000 } || request.Only?.Any(string.IsNullOrWhiteSpace) == true)
-            {
-                throw new ArgumentException("only must contain at most 1000 nonempty node IDs.");
-            }
+            string[] selection = WorkflowNodeSelection.Normalize(request.Only);
 #if RPC_CANCELLATION_TESTING
             await RpcCancellationTestGate.WaitAsync(paths, request.Manifest, cancellationToken, disconnected, ct);
 #endif
             string? controller = request.ControllerBuildDirectory is { } value ? paths.Require(value) : null;
             return WorkflowQueries.PlanView(await WorkflowPlanner.LoadAsync(paths.Require(request.Manifest),
-                request.Only ?? [], controller, ct, paths.Read));
+                selection, controller, ct, paths.Read));
         }, cancellationToken);
 
     public Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken) =>
@@ -425,15 +431,30 @@ public sealed partial class DoctorSession
             (paths, ct) => WorkflowQueries.ReportAsync(paths.Require(request.RunDirectory), ct, paths.Read),
             cancellationToken);
 
+    public Task<HistoryIndexStatus> HistoryIndexStatusAsync(HistoryOperationRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, (paths, _) =>
+        {
+            using DurableAcceptanceStore store = DurableHistoryIndexer.OpenReadOnly(paths);
+            HistoryIndexStatus status = store.GetHistoryIndexStatus(request.OperationId);
+            return Task.FromResult(status.DatabasePath is { } database && !paths.Contains(database)
+                ? status with { DatabasePath = null } : status);
+        }, cancellationToken);
+
+    public Task<HistoryIndexStatus> HistoryRetryIndexAsync(HistoryOperationRequest request,
+        CancellationToken cancellationToken) =>
+        ApplicationCallAsync(request, async (paths, ct) =>
+        {
+            HistoryIndexStatus status = await DurableHistoryIndexer.IndexAsync(paths, request.OperationId, retry: true, ct);
+            return status.DatabasePath is { } database && !paths.Contains(database)
+                ? status with { DatabasePath = null } : status;
+        }, cancellationToken);
+
     public Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request,
         CancellationToken cancellationToken) =>
         ApplicationCallAsync(request, (paths, ct) =>
         {
-            string database = paths.Require(request.DatabasePath);
-            foreach (string? suffix in SqliteSidecarSuffixes)
-            {
-                _ = paths.Require(database + suffix);
-            }
+            string database = DurableHistoryIndexer.AuthorizeDatabase(paths, request.DatabasePath);
 
             string directory = paths.Require(request.Directory);
             ct.ThrowIfCancellationRequested();

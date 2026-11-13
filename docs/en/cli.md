@@ -76,6 +76,16 @@ while `query` requires `--metric`; both support filtering. `detect` can narrow t
 `--scenario`. Use `--db` for query commands, `--history-db` or `--no-history` for workflow/profile execution (not both).
 `CMAKEWORKFLOW_HISTORY_DB` selects a shared default.
 
+For a Host-backed CLI submission, use `remote start` with
+`--transport local --endpoint SOCKET --workspace DIR` on the same machine, or
+the existing SSH transport options. Pass `--history-default`, an absolute
+Host `--history-db PATH`, or `--no-history`. An omitted policy retains the
+historical behavior of Host-backed start (no automatic index). Use
+`remote history-status --operation ID` or `remote history-retry --operation ID`
+with the same connection options. These commands report History state without
+changing the workflow outcome. The standalone `workflow run`, `profile run`
+and `profile replay` commands retain their existing History defaults.
+
 ## Profiling and DagFlow campaigns
 
 ```sh

@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.History;
+
 namespace CMakeWorkflow.Host.Workflows;
 
 // The immutable request identity is derived by a trusted domain adapter.
@@ -13,6 +15,9 @@ namespace CMakeWorkflow.Host.Workflows;
 /// <param name="SnapshotSha256">Expected SHA-256 of those bytes.</param>
 /// <param name="ResultsDirectory">Absolute authorized results path; ownership is reserved separately before authorization.</param>
 /// <param name="RequestDigest">SHA-256 of canonical request identity, including domain semantics.</param>
+/// <param name="HistoryMode">Normalized policy mode.</param>
+/// <param name="HistoryDatabase">Canonical Host database path, or null when indexing is disabled.</param>
+/// <param name="WorkflowSelection">Canonical JSON for the selected CMake node IDs, or null for a full graph.</param>
 /// <param name="DomainKind">Persisted execution domain; legacy CMake acceptance uses workflow.</param>
 internal sealed record DurableImmutableRequest(
     string ClientRequestId,
@@ -20,4 +25,7 @@ internal sealed record DurableImmutableRequest(
     string SnapshotSha256,
     string ResultsDirectory,
     string RequestDigest,
-    string DomainKind = "workflow");
+    string DomainKind = "workflow",
+    string? WorkflowSelection = null,
+    string? HistoryDatabase = null,
+    HistoryPolicyMode HistoryMode = HistoryPolicyMode.Disabled);

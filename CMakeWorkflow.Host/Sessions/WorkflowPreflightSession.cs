@@ -1,7 +1,9 @@
+using CMakeWorkflow.Contracts.History;
 using System.Security.Cryptography;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.History;
 using CMakeWorkflow.Host.Workflows;
 
 namespace CMakeWorkflow.Host.Sessions;
@@ -21,6 +23,7 @@ public sealed partial class DoctorSession
             throw new ApplicationRefusal("invalid_argument", "ManifestSha256 must be a SHA-256 hex digest.");
         }
 
+        (HistoryPolicyMode historyMode, string? historyDatabase) = WorkflowHistoryPolicy.Normalize(request.HistoryPolicy, paths);
         string manifest = paths.Require(request.Manifest);
         string results = paths.Require(request.ResultsDirectory);
         paths.Read(manifest);
@@ -33,12 +36,18 @@ public sealed partial class DoctorSession
 
         // The planner consumes the verified bytes instead of reopening the file.
         // Read guards on referenced inputs/contexts are identical to workflow/plan.
+        string[] selection = WorkflowNodeSelection.Normalize(request.Only);
         WorkflowPlanView plan = WorkflowQueries.PlanView(await WorkflowPlanner.LoadSnapshotAsync(
-            manifest, bytes, [], null, ct, paths.Read));
+            manifest, bytes, selection, null, ct, paths.Read));
         return new WorkflowPreflightResult(1, manifest, digest, request.Jobs, results, plan.Valid,
             [.. plan.Nodes.Select(node => new WorkflowPreflightNode(node.Id, node.Kind, node.Target,
                 node.BuildDirectory, node.Configuration, [.. node.Dependencies],
                 [.. node.Resources], node.Exclusive, node.ObservedState,
-                [.. node.Diagnostics.Select(d => new WorkflowPreflightDiagnostic(d.Severity, d.Message))]))]);
+                [.. node.Diagnostics.Select(d => new WorkflowPreflightDiagnostic(d.Severity, d.Message))]))])
+        {
+            Only = selection.Length == 0 ? null : selection,
+            HistoryPolicy = request.HistoryPolicy is null ? null
+                : new(historyMode, historyMode == HistoryPolicyMode.ExplicitDatabase ? historyDatabase : null)
+        };
     }, cancellationToken);
 }

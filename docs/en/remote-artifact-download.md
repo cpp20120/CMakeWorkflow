@@ -46,3 +46,11 @@ run is not proof of end-to-end security against concurrent hostile filesystem
 mutations: D2 currently validates the path before opening and does not bind a
 stable file descriptor identity across all requests. Harden this independently
 before advertising a malicious multi-user Host.
+
+
+For clients with JavaScript number semantics, Hosts advertising
+`operations/artifacts/timestampText` return `lastWriteUtcTicksText` in both the
+catalog and chunk response. Send the exact decimal string as
+`expectedLastWriteUtcTicksText` when reading a chunk, leaving the numeric
+`expectedLastWriteUtcTicks` at zero or omitted. Existing clients may continue
+to send exact 64-bit numeric ticks.

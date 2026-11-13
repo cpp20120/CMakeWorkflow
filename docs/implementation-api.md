@@ -27,13 +27,13 @@ Release assembly metadata.
 | --- | ---: | ---: |
 | [CMakeWorkflow.Core](#cmakeworkflowcore) | 5 | 4 |
 | [CMakeWorkflow.CMake](#cmakeworkflowcmake) | 58 | 133 |
-| [CMakeWorkflow.Host](#cmakeworkflowhost) | 99 | 155 |
+| [CMakeWorkflow.Host](#cmakeworkflowhost) | 100 | 168 |
 | [CMakeWorkflow.Profiling](#cmakeworkflowprofiling) | 28 | 39 |
-| [CMakeWorkflow.History](#cmakeworkflowhistory) | 17 | 11 |
+| [CMakeWorkflow.History](#cmakeworkflowhistory) | 17 | 12 |
 | [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 47 | 61 |
 | [CMakeWorkflow.Campaigns](#cmakeworkflowcampaigns) | 14 | 45 |
 | [CMakeWorkflow](#cmakeworkflow) | 0 | 0 |
-| **Total** | **268** | **448** |
+| **Total** | **269** | **462** |
 
 ## CMakeWorkflow.Core
 
@@ -921,6 +921,14 @@ Source: [CMakeWorkflow.Host/History/HistoryMetricsRequest.cs](../CMakeWorkflow.H
 public sealed record HistoryMetricsRequest(string DatabasePath, string? RunId = null, string? Metric = null, string? Variant = null, string? Scenario = null);
 ```
 
+#### `HistoryOperationRequest`
+
+Source: [CMakeWorkflow.Host/History/WorkflowHistoryPolicy.cs](../CMakeWorkflow.Host/History/WorkflowHistoryPolicy.cs)
+
+```csharp
+public sealed record HistoryOperationRequest(string OperationId);
+```
+
 #### `HistoryRunsPageRequest`
 
 Source: [CMakeWorkflow.Host/History/HistoryRunsPageRequest.cs](../CMakeWorkflow.Host/History/HistoryRunsPageRequest.cs#L5)
@@ -1108,6 +1116,8 @@ public interface IHostRpc
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Campaigns.CampaignExecutionResult> CampaignFuzzTriageAsync(CMakeWorkflow.Host.Campaigns.CampaignFuzzTriageRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Campaigns.CampaignExecutionResult> CampaignFuzzMergeAsync(CMakeWorkflow.Host.Campaigns.CampaignFuzzMergeRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.CMake.Reporting.WorkflowReportSnapshot> RunGetAsync(CMakeWorkflow.Host.Workflows.RunGetRequest request, System.Threading.CancellationToken cancellationToken);
+    System.Threading.Tasks.Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> HistoryIndexStatusAsync(CMakeWorkflow.Host.History.HistoryOperationRequest request, System.Threading.CancellationToken cancellationToken);
+    System.Threading.Tasks.Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> HistoryRetryIndexAsync(CMakeWorkflow.Host.History.HistoryOperationRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.History.Models.HistoryImportResult> HistoryImportAsync(CMakeWorkflow.Host.History.HistoryImportRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.History.HistoryRunPage> HistoryRunsPageAsync(CMakeWorkflow.Host.History.HistoryRunsPageRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryRun>> HistoryRunsAsync(CMakeWorkflow.Host.History.HistoryRunsRequest request, System.Threading.CancellationToken cancellationToken);
@@ -1331,6 +1341,8 @@ public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tool
     public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.TargetResolutionView> TargetResolveAsync(CMakeWorkflow.Host.Workflows.TargetResolveRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Planning.WorkflowPlanView> WorkflowPlanAsync(CMakeWorkflow.Host.Workflows.WorkflowPlanRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Reporting.WorkflowReportSnapshot> RunGetAsync(CMakeWorkflow.Host.Workflows.RunGetRequest request, System.Threading.CancellationToken cancellationToken);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> HistoryIndexStatusAsync(CMakeWorkflow.Host.History.HistoryOperationRequest request, System.Threading.CancellationToken cancellationToken);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> HistoryRetryIndexAsync(CMakeWorkflow.Host.History.HistoryOperationRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.History.Models.HistoryImportResult> HistoryImportAsync(CMakeWorkflow.Host.History.HistoryImportRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.History.HistoryRunPage> HistoryRunsPageAsync(CMakeWorkflow.Host.History.HistoryRunsPageRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryRun>> HistoryRunsAsync(CMakeWorkflow.Host.History.HistoryRunsRequest request, System.Threading.CancellationToken cancellationToken);
@@ -1619,7 +1631,10 @@ public sealed record ExecutionStartRequest(string Domain, string ClientRequestId
 Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L18)
 
 ```csharp
-public sealed record OperationArtifactChunk(string ArtifactId, long Offset, long TotalSize, long LastWriteUtcTicks, byte[] Content, bool Eof);
+public sealed record OperationArtifactChunk(string ArtifactId, long Offset, long TotalSize, long LastWriteUtcTicks, byte[] Content, bool Eof)
+{
+    public string LastWriteUtcTicksText { get; }
+}
 ```
 
 #### `OperationArtifactChunkRequest`
@@ -1627,7 +1642,10 @@ public sealed record OperationArtifactChunk(string ArtifactId, long Offset, long
 Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L8)
 
 ```csharp
-public sealed record OperationArtifactChunkRequest(string OperationId, string ArtifactId, long Offset, int Count, long ExpectedSize, long ExpectedLastWriteUtcTicks);
+public sealed record OperationArtifactChunkRequest(string OperationId, string ArtifactId, long Offset, int Count, long ExpectedSize, long ExpectedLastWriteUtcTicks)
+{
+    public string? ExpectedLastWriteUtcTicksText { get; init; }
+}
 ```
 
 #### `OperationArtifactInfo`
@@ -1635,7 +1653,10 @@ public sealed record OperationArtifactChunkRequest(string OperationId, string Ar
 Source: [CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs](../CMakeWorkflow.Host/Workflows/OperationArtifactContracts.cs#L11)
 
 ```csharp
-public sealed record OperationArtifactInfo(string ArtifactId, string Kind, string? NodeId, string RelativePath, long Size, long LastWriteUtcTicks, string Sha256);
+public sealed record OperationArtifactInfo(string ArtifactId, string Kind, string? NodeId, string RelativePath, long Size, long LastWriteUtcTicks, string Sha256)
+{
+    public string LastWriteUtcTicksText { get; }
+}
 ```
 
 #### `OperationArtifactList`
@@ -1849,7 +1870,11 @@ public sealed record WorkflowPreflightNode(string Id, string Kind, string Target
 Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L9)
 
 ```csharp
-public sealed record WorkflowPreflightRequest(string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
+public sealed record WorkflowPreflightRequest(string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory)
+{
+    public System.Collections.Generic.IReadOnlyList<string>? Only { get; init; }
+    public CMakeWorkflow.Contracts.History.HistoryPolicy? HistoryPolicy { get; init; }
+}
 ```
 
 #### `WorkflowPreflightResult`
@@ -1857,7 +1882,11 @@ public sealed record WorkflowPreflightRequest(string Manifest, string ManifestSh
 Source: [CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs](../CMakeWorkflow.Host/Workflows/WorkflowPreflight.cs#L22)
 
 ```csharp
-public sealed record WorkflowPreflightResult(int SchemaVersion, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory, bool Valid, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.WorkflowPreflightNode> Nodes);
+public sealed record WorkflowPreflightResult(int SchemaVersion, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory, bool Valid, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.WorkflowPreflightNode> Nodes)
+{
+    public System.Collections.Generic.IReadOnlyList<string>? Only { get; init; }
+    public CMakeWorkflow.Contracts.History.HistoryPolicy? HistoryPolicy { get; init; }
+}
 ```
 
 #### `WorkflowResumeRequest`
@@ -1873,7 +1902,11 @@ public sealed record WorkflowResumeRequest(string OperationId, long ExpectedRevi
 Source: [CMakeWorkflow.Host/Workflows/WorkflowStartRequest.cs](../CMakeWorkflow.Host/Workflows/WorkflowStartRequest.cs#L5)
 
 ```csharp
-public sealed record WorkflowStartRequest(string ClientRequestId, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
+public sealed record WorkflowStartRequest(string ClientRequestId, string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory)
+{
+    public System.Collections.Generic.IReadOnlyList<string>? Only { get; init; }
+    public CMakeWorkflow.Contracts.History.HistoryPolicy? HistoryPolicy { get; init; }
+}
 ```
 
 ## CMakeWorkflow.Profiling
@@ -2375,6 +2408,7 @@ public sealed class HistoryStore : System.IDisposable
     public static string DefaultDatabasePath { get; }
     public HistoryStore(string path, bool readOnly = false);
     public string Import(string directory, bool recursive, System.Action<CMakeWorkflow.History.Models.HistoryImportResult>? onComplete = null, System.Action<string>? pathGuard = null);
+    public CMakeWorkflow.History.Models.HistoryImportResult ImportFinalizedWorkflow(string directory, string reportSha256, System.Action<string> pathGuard);
     public System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryRun> Runs(int limit, string? status, string? since, string? until, string? workflow, string? variant, System.Func<string, bool>? includeDirectory = null, System.Threading.CancellationToken ct = default);
     public CMakeWorkflow.History.HistoryRunPage RunsPage(string databaseIdentity, int limit, string? status, string? since, string? until, string? workflow, string? variant, string? cursor, System.Func<string, bool>? includeDirectory = null, System.Threading.CancellationToken ct = default);
     public CMakeWorkflow.History.Models.HistoryDetail Show(string id, System.Action<string>? validateDirectory = null, int maxMeasurements = 2147483647, System.Func<string, bool>? artifactAllowed = null, System.Threading.CancellationToken ct = default);

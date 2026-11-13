@@ -211,6 +211,16 @@ if (args.Length > 0 && args[0] == "--durable-workflow-wire-tests")
     await using TransportTestHost host = new();
     await host.ReadyAsync(deadline.Token);
     await DurableWorkflowWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
+    await DurableResumeExecutionWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--durable-cancellation-wire-tests")
+{
+    using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
+    await using TransportTestHost host = new();
+    await host.ReadyAsync(deadline.Token);
+    await DurableCancellationWireTests.RunAsync(host.Endpoint, host.Root, deadline.Token);
     return;
 }
 

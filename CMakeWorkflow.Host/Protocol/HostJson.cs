@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
@@ -21,6 +22,7 @@ using CMakeWorkflow.Tooling.Tools;
 
 namespace CMakeWorkflow.Host.Protocol;
 
+[JsonSerializable(typeof(string[]))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     Converters =
     [
@@ -94,6 +96,9 @@ namespace CMakeWorkflow.Host.Protocol;
 [JsonSerializable(typeof(ProfileVariantRequest))]
 [JsonSerializable(typeof(List<ProfileVariantRequest>))]
 [JsonSerializable(typeof(RunGetRequest))]
+[JsonSerializable(typeof(HistoryPolicy))]
+[JsonSerializable(typeof(HistoryIndexStatus))]
+[JsonSerializable(typeof(HistoryOperationRequest))]
 [JsonSerializable(typeof(HistoryImportRequest))]
 [JsonSerializable(typeof(HistoryImportResult))]
 [JsonSerializable(typeof(HistoryRunsPageRequest))]

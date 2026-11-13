@@ -1,3 +1,4 @@
+using System.Globalization;
 
 namespace CMakeWorkflow.Host.Workflows;
 
@@ -5,10 +6,29 @@ namespace CMakeWorkflow.Host.Workflows;
 public sealed record OperationArtifactListRequest(string OperationId);
 public sealed record OperationArtifactChunkRequest(
     string OperationId, string ArtifactId, long Offset, int Count,
-    long ExpectedSize, long ExpectedLastWriteUtcTicks);
+    long ExpectedSize, long ExpectedLastWriteUtcTicks)
+{
+    public string? ExpectedLastWriteUtcTicksText { get; init; }
+
+    internal OperationArtifactChunkRequest NormalizeTimestamp() =>
+        ExpectedLastWriteUtcTicksText is { } text
+            ? this with { ExpectedLastWriteUtcTicks = ParseTimestamp(text) }
+            : this;
+
+    private long ParseTimestamp(string text)
+    {
+        return !long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long ticks) ||
+            (ExpectedLastWriteUtcTicks != 0 && ExpectedLastWriteUtcTicks != ticks)
+            ? throw new ArgumentException("Invalid artifact timestamp.")
+            : ticks;
+    }
+}
 public sealed record OperationArtifactInfo(
     string ArtifactId, string Kind, string? NodeId, string RelativePath,
-    long Size, long LastWriteUtcTicks, string Sha256);
+    long Size, long LastWriteUtcTicks, string Sha256)
+{
+    public string LastWriteUtcTicksText => LastWriteUtcTicks.ToString(CultureInfo.InvariantCulture);
+}
 
 public sealed record OperationArtifactList(
     string OperationId, string ReportSha256,
@@ -19,4 +39,7 @@ public sealed record OperationArtifactChunk(
 #pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
 byte[] Content
 #pragma warning restore CA1819
-, bool Eof);
+, bool Eof)
+{
+    public string LastWriteUtcTicksText => LastWriteUtcTicks.ToString(CultureInfo.InvariantCulture);
+}

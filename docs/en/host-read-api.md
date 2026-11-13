@@ -33,22 +33,33 @@ run, or Host operation. No request can cross the initialized workspace boundary.
 
 ## History SDK parity
 
-All existing Host history read/analysis RPCs now have public typed SDK methods:
+The Host history RPCs have public typed SDK methods:
 
 | RPC | SDK |
 | --- | --- |
+| `history/import` | `client.History.ImportAsync(...)` |
+| `history/runsPage` | `client.History.RunsPageAsync(...)` |
 | `history/runs` | `client.History.RunsAsync(...)` |
 | `history/show` | `client.History.ShowAsync(...)` |
 | `history/metrics` | `client.History.MetricsAsync(...)` |
 | `history/query` | `client.History.QueryAsync(...)` |
 | `history/compare` | `client.History.CompareAsync(...)` |
 | `history/detect` | `client.History.DetectAsync(...)` |
+| `history/indexStatus` | `client.History.GetIndexStatusAsync(operationId, ...)` |
+| `history/retryIndex` | `client.History.RetryIndexAsync(operationId, ...)` |
 
 These methods use SDK-owned source-generated wire DTOs without bringing the History
 SQLite implementation into the Client assembly. `DatabasePath` and run directories
 refer to the initialized Host workspace, including over SSH; there is no implicit
 local path translation. The Host's existing bounds, data validation, workspace
 confinement and refusal codes remain authoritative.
+
+The standalone History CLI commands share the same History storage and analysis
+implementation. The Host keeps workspace confinement and its existing response
+limits. `history/runsPage` supports browsing beyond a single `history/runs` limit.
+Metrics and run details still have a 50,000-row Host limit. Use the documented
+run, metric, variant and scenario filters to narrow those requests. Durable
+indexing status and retry are described in [workflow authoring](workflow-authoring-api.md#durable-history-indexing).
 
 ```csharp
 await using var client = await CMakeWorkflowClient.ConnectAsync(options);

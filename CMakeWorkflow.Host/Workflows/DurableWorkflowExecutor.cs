@@ -50,7 +50,8 @@ public static class DurableWorkflowExecutor
             await File.ReadAllBytesAsync(checkpointPath, cancellationToken),
             WorkflowJson.Default.WorkflowReport) ?? throw new InvalidDataException("Invalid checkpoint.");
         string manifest = paths.Require(saved.Workflow);
-        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, store.GetSnapshot(operationId), [], null,
+        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, store.GetSnapshot(operationId),
+            store.GetWorkflowSelection(operationId), null,
             cancellationToken, paths.Read);
         if (!string.Equals(plan.ManifestHash, accepted.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
@@ -85,12 +86,20 @@ public static class DurableWorkflowExecutor
     /// The runner must persist running intent and bind its checkpoint before external launch. After authorization, interruption
     /// cannot authorize implicit retry. Finalizes only runner return codes 0, 1 or 130; exceptions retain recovery evidence.
     /// </remarks>
-    public static async Task<int> ExecuteAcceptedAsync(string workspace, string operationId,
+    public static Task<int> ExecuteAcceptedAsync(string workspace, string operationId,
         string clientRequestId, string originalManifestPath, string expectedManifestHash,
         int jobs, string resultsDirectory, CancellationToken cancellationToken,
-        Func<string, CancellationToken, Task>? faultBarrier = null)
+        Func<string, CancellationToken, Task>? faultBarrier = null) =>
+        ExecuteAcceptedAsync(workspace, operationId,
+            new WorkflowStartRequest(clientRequestId, originalManifestPath, expectedManifestHash, jobs, resultsDirectory),
+            null, faultBarrier, cancellationToken);
+
+    internal static async Task<int> ExecuteAcceptedAsync(string workspace, string operationId,
+        WorkflowStartRequest request, AcceptedWorkflow? admitted, Func<string, CancellationToken, Task>? faultBarrier,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operationId);
+        (_, string originalManifestPath, _, int jobs, string resultsDirectory) = request;
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentOutOfRangeException.ThrowIfLessThan(jobs, 1);
 
@@ -117,14 +126,16 @@ public static class DurableWorkflowExecutor
         }
         // A repeat cannot replace accepted parameters. Accept compares the original
         // request digest BEFORE reading the current manifest, including after edits.
-        AcceptedWorkflow verified = store.Accept(clientRequestId, manifest, expectedManifestHash, jobs, output);
-        if (verified.OperationId != operationId || verified.ManifestBaseDirectory != Path.GetDirectoryName(manifest))
+        AcceptedWorkflow verified = admitted ?? store.Accept(request with { Manifest = manifest, ResultsDirectory = output });
+        if (verified.OperationId != operationId || verified.RequestDigest != existing.RequestDigest ||
+            verified.ManifestBaseDirectory != Path.GetDirectoryName(manifest))
         {
             throw new InvalidOperationException("operation_request_mismatch");
         }
 
         byte[] snapshot = store.GetSnapshot(operationId);
-        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, snapshot, [], null,
+        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, snapshot,
+            store.GetWorkflowSelection(operationId), null,
             cancellationToken, paths.Read);
         if (!string.Equals(plan.ManifestHash, existing.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {

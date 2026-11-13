@@ -26,12 +26,22 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(options);
         client.RequireCapability("workflow/start");
+        if (options.HistoryPolicy is not null)
+        {
+            client.RequireCapability("workflow/historyPolicy");
+        }
+
+        if (options.Only is { Count: > 0 })
+        {
+            client.RequireCapability("workflow/nodeSelection");
+        }
+
         if (string.IsNullOrWhiteSpace(options.ClientRequestId))
         {
             throw new ArgumentException("ClientRequestId is required.");
         }
 
-        OperationSnapshot result = await client.Proxy.StartAsync(options, ct);
+        OperationSnapshot result = await RpcRefusals.TranslateAsync(() => client.Proxy.StartAsync(options, ct));
         return new WorkflowOperation(client, result.OperationId);
     }
 
@@ -45,6 +55,16 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(options);
         client.RequireCapability("workflow/preflight");
+        if (options.HistoryPolicy is not null)
+        {
+            client.RequireCapability("workflow/historyPolicy");
+        }
+
+        if (options.Only is { Count: > 0 })
+        {
+            client.RequireCapability("workflow/nodeSelection");
+        }
+
         return RpcRefusals.TranslateAsync(() => client.Proxy.PreflightAsync(options, ct));
     }
 

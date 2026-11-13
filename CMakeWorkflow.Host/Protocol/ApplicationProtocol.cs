@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
@@ -147,6 +148,12 @@ public partial interface IHostRpc
 
     [JsonRpcMethod("runs/get")]
     Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken);
+
+    [JsonRpcMethod("history/indexStatus")]
+    Task<HistoryIndexStatus> HistoryIndexStatusAsync(HistoryOperationRequest request, CancellationToken cancellationToken);
+
+    [JsonRpcMethod("history/retryIndex")]
+    Task<HistoryIndexStatus> HistoryRetryIndexAsync(HistoryOperationRequest request, CancellationToken cancellationToken);
 
     [JsonRpcMethod("history/import")]
     Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request, CancellationToken cancellationToken);

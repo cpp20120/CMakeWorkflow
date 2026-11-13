@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.History;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -32,7 +33,7 @@ internal static class RemoteCommand
         Usage: CMakeWorkflow remote COMMAND --endpoint REMOTE_SOCKET --workspace REMOTE_DIR [CONNECTION] [OPTIONS]
         Commands:
           provision plan|apply  (SSH.NET user-scoped Host installation; see remote provision help)
-          start     --request-id ID --manifest REMOTE_FILE --manifest-sha256 SHA256 --results-dir REMOTE_DIR [--jobs N]
+          start     --request-id ID --manifest REMOTE_FILE --manifest-sha256 SHA256 --results-dir REMOTE_DIR [--jobs N] [--only NODE]... [--history-db REMOTE_FILE | --history-default | --no-history]
           find      --request-id ID
           status    --operation ID
           inspect   --operation ID   (recovery revision/checkpoint)
@@ -41,7 +42,10 @@ internal static class RemoteCommand
           artifacts --operation ID
           download  --operation ID --artifact-id ID --output LOCAL_FILE
           cancel    --operation ID --revision N
+          history-status --operation ID
+          history-retry  --operation ID
         Connection options: [--remote-executable PATH] [--connect-timeout-seconds N]
+        Local transport: --transport local --endpoint SOCKET --workspace DIR
         Default transport: OpenSSH, --destination USER@HOST [--ssh-executable PATH]
         SSH.NET transport: --transport sshnet --host HOST --user USER --key-file LOCAL_PRIVATE_KEY
           --host-key-sha256 SHA256:PIN [--port 22] (no ssh-agent or ~/.ssh/config)
@@ -65,14 +69,34 @@ internal static class RemoteCommand
         }
 
         string action = args[0];
-        Dictionary<string, string> values = Parse(action, args[1..]);
+        (string[] options, HistoryPolicy? historyPolicy) = action == "start"
+            ? CliHistory.Parse(args[1..]) : (args[1..], null);
+        bool historyDefault = action == "start" && options.Contains("--history-default", StringComparer.Ordinal);
+        if (historyDefault && historyPolicy is not null)
+        {
+            throw new ArgumentException("--history-default cannot be combined with --history-db or --no-history.");
+        }
+
+        if (historyDefault)
+        {
+            options = [.. options.Where(option => option != "--history-default")];
+            historyPolicy = new(HistoryPolicyMode.Default);
+        }
+
+        (Dictionary<string, string> values, List<string> only) = Parse(action, options);
+        if (historyPolicy?.DatabasePath is { } path && string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("--history-db requires a Host path.");
+        }
         // Reject malformed input before spawning SSH or accepting any workflow.
         Validate(action, values);
         TimeSpan timeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600));
         string transport = Get(values, "--transport") ?? "openssh";
-        // Both paths connect to the same durable Host and identical RPC surface.
+        // All transports connect to the same durable Host and identical RPC surface.
         // No auto-reconnect or retry of an uncertain workflow/start response.
-        await using CMakeWorkflowClient client = transport == "sshnet"
+        await using CMakeWorkflowClient client = transport == "local"
+            ? await CMakeWorkflowClient.ConnectAsync(new(Require(values, "--endpoint"), Require(values, "--workspace")), ct)
+            : transport == "sshnet"
             ? await CMakeWorkflowClient.ConnectSshNetAsync(new SshNetHostOptions(
                 Require(values, "--host"), Require(values, "--user"),
                 Require(values, "--key-file"), Require(values, "--host-key-sha256"),
@@ -99,7 +123,11 @@ internal static class RemoteCommand
                     WorkflowOperation operation = await client.Workflows.StartAsync(new StartWorkflowOptions(
                         Require(values, "--request-id"), Require(values, "--manifest"),
                         Require(values, "--manifest-sha256"), (int)Number(values, "--jobs", 1, 1, 4096),
-                        Require(values, "--results-dir")), ct);
+                        Require(values, "--results-dir"))
+                    {
+                        Only = only.Count == 0 ? null : only,
+                        HistoryPolicy = historyPolicy
+                    }, ct);
                     Print(new RemoteStartReceipt(operation.OperationId, Require(values, "--request-id")),
                         RemoteCliJson.Default.RemoteStartReceipt);
                     return 0;
@@ -144,6 +172,14 @@ internal static class RemoteCommand
                         RemoteCliJson.Default.RemoteDownloadReceipt);
                     return 0;
                 }
+            case "history-status":
+                Print(await client.History.GetIndexStatusAsync(Require(values, "--operation"), ct),
+                    RemoteCliJson.Default.HistoryIndexStatus);
+                return 0;
+            case "history-retry":
+                Print(await client.History.RetryIndexAsync(Require(values, "--operation"), ct),
+                    RemoteCliJson.Default.HistoryIndexStatus);
+                return 0;
             case "cancel":
                 Print(await client.Operations.GetHandle(Require(values, "--operation"))
                         .RequestCancellationAsync(Number(values, "--revision", 0, 0, long.MaxValue), ct),
@@ -154,14 +190,15 @@ internal static class RemoteCommand
         }
     }
 
-    private static Dictionary<string, string> Parse(string action, string[] args)
+    private static (Dictionary<string, string> Options, List<string> Only) Parse(string action, string[] args)
     {
-        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "cancel"))
+        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "cancel" or "history-status" or "history-retry"))
         {
             throw new ArgumentException($"Unknown remote command '{action}'.\n{Usage}");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
+        List<string> only = [];
         for (int i = 0; i < args.Length; i += 2)
         {
             if (i + 1 >= args.Length || !args[i].StartsWith("--", StringComparison.Ordinal) ||
@@ -170,12 +207,24 @@ internal static class RemoteCommand
                 throw new ArgumentException($"Remote CLI expects --option VALUE pairs.\n{Usage}");
             }
 
+            if (action == "start" && args[i] == "--only")
+            {
+                string node = args[i + 1];
+                if (only.Count >= 1000 || string.IsNullOrWhiteSpace(node) || node.Any(char.IsControl))
+                {
+                    throw new ArgumentException("--only accepts at most 1000 nonempty node IDs without control characters.");
+                }
+
+                only.Add(node);
+                continue;
+            }
+
             if (!options.TryAdd(args[i], args[i + 1]))
             {
                 throw new ArgumentException($"Duplicate option '{args[i]}'.");
             }
         }
-        return options;
+        return (options, only);
     }
 
     private static void Validate(string action, Dictionary<string, string> values)
@@ -184,7 +233,7 @@ internal static class RemoteCommand
         {
             "start" => ["--request-id", "--manifest", "--manifest-sha256", "--results-dir", "--jobs"],
             "find" => ["--request-id"],
-            "status" or "inspect" or "report" or "artifacts" => ["--operation"],
+            "status" or "inspect" or "report" or "artifacts" or "history-status" or "history-retry" => ["--operation"],
             "events" => ["--operation", "--after", "--limit"],
             "download" => ["--operation", "--artifact-id", "--output"],
             "cancel" => ["--operation", "--revision"],
@@ -203,9 +252,9 @@ internal static class RemoteCommand
             }
         }
         string transport = Get(values, "--transport") ?? "openssh";
-        if (transport is not ("openssh" or "sshnet"))
+        if (transport is not ("openssh" or "sshnet" or "local"))
         {
-            throw new ArgumentException("--transport must be openssh or sshnet.");
+            throw new ArgumentException("--transport must be openssh, sshnet or local.");
         }
 
         foreach (string? key in new[] { "--endpoint", "--workspace" })
@@ -226,6 +275,14 @@ internal static class RemoteCommand
             }
 
             _ = Number(values, "--port", 22, 1, 65535);
+        }
+        else if (transport == "local")
+        {
+            if (SshNetOnlyOptions.Any(values.ContainsKey) || values.ContainsKey("--destination") ||
+                values.ContainsKey("--ssh-executable") || values.ContainsKey("--remote-executable"))
+            {
+                throw new ArgumentException("SSH options are unavailable with --transport local.");
+            }
         }
         else
         {
@@ -300,6 +357,7 @@ internal sealed record RemoteDownloadReceipt(string OperationId, string Artifact
     long Size, string Sha256);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(HistoryIndexStatus))]
 [JsonSerializable(typeof(OperationSnapshot))]
 [JsonSerializable(typeof(RecoverySnapshot))]
 [JsonSerializable(typeof(OperationReportSnapshot))]

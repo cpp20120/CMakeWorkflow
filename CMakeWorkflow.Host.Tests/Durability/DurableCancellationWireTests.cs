@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.History;
+using CMakeWorkflow.History.Storage;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -22,6 +24,7 @@ internal static class DurableCancellationWireTests
     {
         // Cancellation during an active external process, initiated by another RPC session.
         Fixture fixture = await Fixture.CreateAsync(parent, "cancel", 12, ct);
+        WorkflowStartRequest historyRequest = fixture.Request with { HistoryPolicy = new(HistoryPolicyMode.Default) };
         string operationId;
         using (Stream wire = await LocalTransport.ConnectAsync(endpoint, ct))
         using (JsonRpc rpc = HostConnection.Create(wire))
@@ -29,7 +32,7 @@ internal static class DurableCancellationWireTests
             Protocol.IHostRpc client = rpc.Attach<Protocol.IHostRpc>();
             rpc.StartListening();
             _ = await client.InitializeAsync(new(1, fixture.Workspace), ct);
-            operationId = (await client.WorkflowStartAsync(fixture.Request, ct)).OperationId;
+            operationId = (await client.WorkflowStartAsync(historyRequest, ct)).OperationId;
             await WaitForAsync(() => fixture.Lines().Contains("started"), TimeSpan.FromSeconds(15), ct);
             Check(!fixture.Lines().Contains("finished"), "Cancellation fixture completed before cancel.");
             // The initiating client disconnects while the process is running.
@@ -73,9 +76,17 @@ internal static class DurableCancellationWireTests
             OperationCancelResult after = await client.OperationCancelAsync(new(operationId, 1), ct);
             Check(after.State == "canceled" && !after.Requested && after.Revision == 1,
                 "Cancel after terminal outcome must preserve finalization.");
-            OperationReference replay = await client.WorkflowStartAsync(fixture.Request, ct);
+            OperationReference replay = await client.WorkflowStartAsync(historyRequest, ct);
             Check(replay.OperationId == operationId && replay.State == "canceled",
                 "Retry after cancellation created an execution or hid terminal state.");
+
+            await WaitForAsync(async () =>
+                    (await client.HistoryIndexStatusAsync(new(operationId), ct)).State == HistoryIndexState.Indexed,
+                TimeSpan.FromSeconds(10), ct);
+            using HistoryStore history = new(Path.Combine(fixture.Workspace, ".cmakeworkflow", "history.sqlite"),
+                readOnly: true);
+            Check(history.Runs(10, null, null, null, null, null, ct: ct) is [{ Status: "canceled" }],
+                "Canceled finalization was not indexed into the Host default database.");
         }
 
         string[] before = fixture.Lines();

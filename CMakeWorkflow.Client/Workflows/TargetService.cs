@@ -1,8 +1,25 @@
+using CMakeWorkflow.Client.Protocol;
+
 namespace CMakeWorkflow.Client.Workflows;
 
-/// <summary>Prepares Host target workflows without admitting execution; borrows the client lifetime.</summary>
+/// <summary>Reads CMake target metadata and prepares Host target workflows; borrows the client lifetime.</summary>
 public sealed class TargetService(CMakeWorkflowClient client)
 {
+    /// <summary>Reads CMake metadata from a Host build directory without configuring it.</summary>
+    public Task<BuildContextObservation> InspectContextAsync(string buildDirectory, CancellationToken ct = default)
+    {
+        client.RequireCapability("context/inspect");
+        return RpcRefusals.TranslateAsync(() => client.Proxy.InspectContextAsync(new(buildDirectory), ct));
+    }
+
+    /// <summary>Resolves an executable through the Host CMake File API without building it.</summary>
+    public Task<TargetResolution> ResolveAsync(string buildDirectory, string target,
+        string? configuration = null, CancellationToken ct = default)
+    {
+        client.RequireCapability("target/resolve");
+        return RpcRefusals.TranslateAsync(() => client.Proxy.ResolveTargetAsync(new(buildDirectory, target, configuration), ct));
+    }
+
     // After PrepareAsync use Workflows.PlanAsync and Workflows.StartAsync for durable execution.
     /// <summary>Persists a target workflow manifest for subsequent explicit preflight/start.</summary>
     /// <remarks>
