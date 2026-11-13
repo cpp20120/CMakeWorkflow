@@ -33,9 +33,10 @@ Besides Doctor and explicit Fix, newer Host builds negotiate a wider method set 
 `initialize.capabilities`. Methods include `context/inspect`, `target/resolve`,
 `workflow/plan`, `workflow/start`, `workflow/recoveryInspect`, `workflow/reconcile`,
 `workflow/resume`, `workflow/resumeExecute`, `runs/get`, `operations/find`,
-`operations/get`, `operations/cancel`, `operations/events`, `history/runs`,
-`history/show`, `history/metrics`, `history/query`, `history/compare` and
-`history/detect`, along with environment planning/apply methods.
+`operations/get`, `operations/cancel` and `operations/events`. The
+[Host read API](host-read-api.md) lists operation pages, verified reports, artifacts
+and History endpoints, including `history/runsPage`. For workspace History policy,
+indexing status and retry, see [durable History indexing](workflow-authoring-api.md#durable-history-indexing).
 
 ### Benchmark recipes through the durable workflow API
 

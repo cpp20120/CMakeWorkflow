@@ -89,12 +89,15 @@ CMakeWorkflow history metrics --run RUN_ID --db out/history.sqlite --json
 CMakeWorkflow history query --metric process_wall_time --db out/history.sqlite --json
 ```
 
-Default catalog: `CMAKEWORKFLOW_HISTORY_DB` or the host's `LocalApplicationData/CMakeWorkflow/history.sqlite`.
+For the standalone CLI, the default catalog is `CMAKEWORKFLOW_HISTORY_DB` or the host's
+`LocalApplicationData/CMakeWorkflow/history.sqlite`. The Host's `Default` History policy uses
+`.cmakeworkflow/history.sqlite` inside the workspace. See [durable History indexing](workflow-authoring-api.md#durable-history-indexing)
+for status and recovery.
 `CMAKEWORKFLOW_STATE_DIR` relocates persistent local host state. The host identifier is random and local; it is not an
 OS machine ID or hostname. History uses transactional, idempotent import and migrations from schema 0→1→2→3→4, with
 indexer-version tracking for derived data. Moving and reimporting a run may produce a different **local** run ID.
 Active/partial reports are skipped; mutation and weak-memory reports require a checked completion marker. Do not query
-the SQLite schema directly from an editor: use the History CLI.
+the SQLite schema directly from an editor. Use the [History RPC](host-read-api.md) or the CLI.
 
 ## Comparable measurements versus regressions
 

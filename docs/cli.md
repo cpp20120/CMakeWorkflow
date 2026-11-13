@@ -84,6 +84,11 @@ CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric process_wall_time
 `--no-history`. Одновременная передача этих двух run-options запрещена. `CMAKEWORKFLOW_HISTORY_DB` задаёт общий default
 catalog.
 
+Для запуска через Host используйте `remote start` с `--history-default`, `--history-db PATH` или `--no-history`.
+Путь каталога для `--history-db` должен быть абсолютным и находиться внутри workspace Host. При отсутствии флагов
+индексация отключена. Команды `remote history-status --operation ID` и `remote history-retry --operation ID`
+показывают состояние и повторяют индексацию по ID операции. См. [справочник remote CLI](ru/remote-cli.md).
+
 ## Profiling и DagFlow
 
 ```sh

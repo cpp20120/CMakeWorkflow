@@ -124,14 +124,18 @@ runner **не запускает операции**:
 `history import PATH --recursive`. Активные отчёты пропускаются. Mutation и weak-memory reports требуют completion
 marker с hash; старый частичный JSON без такого маркера нельзя считать завершённой кампанией.
 
-Default database: `CMAKEWORKFLOW_HISTORY_DB`, иначе
+Для standalone CLI путь по умолчанию задаёт `CMAKEWORKFLOW_HISTORY_DB`, иначе используется
 `LocalApplicationData/CMakeWorkflow/history.sqlite`. Локальная host identity хранится под каталогом состояния
 CMakeWorkflow; `CMAKEWORKFLOW_STATE_DIR`
 позволяет изменить его расположение. Это локальная случайная identity, не hostname и не OS machine ID.
 
 Импорт транзакционный и идемпотентный. Каталог поддерживает миграции схемы 0→1→2→3→4 и версию indexer для обновления
-derived measurements. Перенос run в другой путь и повторный импорт создают другую локальную run identity. Не обращайтесь
-к таблицам SQLite напрямую из плагина: используйте History CLI.
+derived measurements. Перенос run в другой путь и повторный импорт создают другую локальную run identity.
+
+В Host режим `Default` сохраняет индекс в `.cmakeworkflow/history.sqlite` внутри workspace.
+Индексация идёт после финализации workflow. В VS Code состояние индексации видно в **Host Operations**,
+а активная база указана в **History & Comparison**. Повтор индексации использует финализированный отчёт.
+Доступ к каталогу идёт через [History RPC](en/host-read-api.md#history-sdk-parity).
 
 ## Сравнение и статистика
 

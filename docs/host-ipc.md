@@ -1,4 +1,4 @@
-# Local Host IPC preview
+# Local Host IPC
 
 > **Language / Язык:** [English](en/host-ipc.md) · [Русский](ru/host-ipc.md) · [Documentation index](README.md)
 
@@ -8,8 +8,8 @@ and see the [updated English guide](en/host-ipc.md). Installed older binaries ma
 
 `CMakeWorkflow host serve` hosts the existing `ToolingService` over local JSON-RPC. Both the CLI client and the VS Code
 client can connect to the same process. Fix delegates installation to the existing ToolingService. Workflow execution,
-History and profiling still use their existing CLI entry points. There is no second scheduler, HTTP listener or new
-history store.
+History and profiling have typed Host endpoints alongside their CLI commands. See the current
+[workflow authoring API](en/workflow-authoring-api.md) and [Host read API](en/host-read-api.md).
 
 ## Build and use
 

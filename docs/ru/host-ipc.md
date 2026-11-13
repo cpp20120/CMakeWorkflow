@@ -17,8 +17,8 @@ source-generated JSON/PolyType metadata.
 | Tooling     | `tooling/doctor`, `tooling/planFix`, `tooling/applyFix`, progress notifications                                 |
 | CMake       | `context/inspect`, `target/resolve`, `workflow/plan`                                                            |
 | Workflow    | `workflow/start`, `workflow/recoveryInspect`, `workflow/reconcile`, `workflow/resume`, `workflow/resumeExecute` |
-| Operations  | `operations/find`, `operations/get`, `operations/cancel`, `operations/events`, `runs/get`                       |
-| History     | `history/runs`, `history/show`, `history/metrics`, `history/query`, `history/compare`, `history/detect`         |
+| Operations  | `operations/list`, `operations/find`, `operations/get`, `operations/cancel`, `operations/events`, `operations/overview`, `operations/report` и [артефакты](../en/host-read-api.md)                       |
+| History     | `history/runsPage`, `history/runs`, `history/show`, `history/metrics`, `history/query`, `history/compare`, `history/detect`, `history/import`, `history/indexStatus`, `history/retryIndex`         |
 | Profiling   | `profile/prepare`, `profile/analyze`; исполнение — через `workflow/start`                                       |
 | Benchmark   | `benchmark/prepare`; подготовка манифеста без запуска, исполнение — через `workflow/start`                      |
 | Environment | `environment/plan`, `environment/apply`                                                                         |
@@ -54,7 +54,18 @@ workflow manifest без запуска. Точный
 `profile/analyze`: метод возвращает путь `analysis.json`. Сам анализ не является durable operation; после обрыва запроса
 прежде всего проверьте уже записанные артефакты.
 
-Для `profile/replay` и DagFlow campaigns typed RPC пока нет — их CLI-команды остаются доступными без изменений.
+Для durable replay используйте `profileReplay/prepare`, затем `workflow/start`.
+Подготовка проверяет сохранённые baseline и candidate и возвращает манифест с зафиксированными бинарниками и аргументами.
+После выполнения анализ доступен через `profile/analyze`.
+
+### Индексация History
+
+Передайте `historyPolicy` в `workflow/preflight` и `workflow/start`, если Host объявляет `workflow/historyPolicy`.
+`Default` использует `.cmakeworkflow/history.sqlite` внутри workspace, `Disabled` пропускает индексацию,
+`ExplicitDatabase` принимает абсолютный путь внутри workspace. При отсутствии политики применяется `Disabled`.
+Статус доступен через `history/indexStatus`, повтор индексации через `history/retryIndex` по `operationId`.
+Повтор использует финализированный отчёт и сверяет его SHA-256. Состояние workflow и его узлов сохраняется.
+Подробности восстановления приведены в [контракте History](../en/workflow-authoring-api.md#durable-history-indexing).
 
 ## Typed API для GUI
 

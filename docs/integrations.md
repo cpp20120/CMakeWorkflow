@@ -56,32 +56,18 @@ CMakeWorkflow не заменяет CTest discovery или coverage instrumentat
 
 ## VS Code extension
 
-Отдельный репозиторий:
-[cmake_workflow_vscode](https://github.com/cpp20120/cmake_workflow_vscode). Текущая реализация — workspace extension:
-CLI выполняется на том же workspace host, в том числе Remote SSH, WSL и Dev Container.
+[Расширение VS Code](https://github.com/cpp20120/cmake_workflow_vscode) работает на workspace host, включая
+Remote SSH, WSL и Dev Container. Укажите в `cmakeWorkflow.executable` нативный бинарник или `dotnet` и передайте
+абсолютный путь к DLL отдельным элементом `cmakeWorkflow.prefixArgs`.
 
-Используются `cmakeWorkflow.executable` и `cmakeWorkflow.prefixArgs`. Например, для development executable — `dotnet`, а
-prefixArgs содержит **один** аргумент с абсолютным путём к DLL. Не объединяйте executable и аргументы в shell string.
+Планирование и запуск workflow, в том числе отдельных узлов, чтение History и анализ сохранённых профилей используют Host RPC.
+**Host Operations** показывает состояние операции и узлов, индексацию History и отдельную вкладку событий.
+Форма **Open Host API** показывает методы, объявленные подключённым Host. **History & Comparison** показывает активный
+каталог и доступные причины пустого списка. В меню **… → Profiles** команда **Saved Profiles** предлагает найденные запуски,
+а **Open Existing Profile…** открывает выбранную папку.
 
-В локальном исходнике extension реализованы:
-
-- Выбор manifest/workspace, plan/run, отдельные или несколько узлов с prerequisites.
-- TreeView, diagnostics, артефакты, граф workflow и просмотр сохранённых runs.
-- History, baseline/candidate, сравнения, detection, метрики и descriptive charts.
-- Run/Profile Variants, ручной Replay, Analyze, просмотр profiles.
-- Target build/invoke/run, двухцелевой sequence, tooling plan/setup.
-- Параметры DagFlow mutation/weak-memory/fuzz-команд.
-
-Это описание доступного кода интеграции, а не гарантия публикации конкретной версии extension. Подробности установки,
-команд и settings находятся в её README.
-
-Плагин проверяет workspace trust, запускает CLI с массивом аргументов, разделяет stdout/stderr и после выполнения читает
-сохранённые результаты. Scheduler, provenance и statistical verdict остаются в CLI. `.binlog` или MSBuild backend сейчас
-не являются частью этого интерфейса.
-
-Для живого workflow UI использует JSONL; после обрыва потока не следует показывать успех без отчёта. Отмена на разных OS
-имеет разные механизмы:
-сохранение финального отчёта при forced termination не гарантировано.
+Отдельные мастера захвата и replay профилей, целей CMake, установки инструментов и кампаний DagFlow пока вызывают CLI.
+Настройки и совместимость описаны в [README расширения](https://github.com/cpp20120/cmake_workflow_vscode/blob/master/README.md).
 
 ## Проверки и ограничения покрытия
 

@@ -48,20 +48,19 @@ profiler artifacts, **not a CDash server**.
 
 ## VS Code extension
 
-The extension is maintained separately
-in [cpp20120/cmake_workflow_vscode](https://github.com/cpp20120/cmake_workflow_vscode). It runs the CLI on the
-**workspace host**, including Remote SSH, WSL and Dev Containers. Set `cmakeWorkflow.executable` to a native binary or
-`dotnet` and put the absolute DLL path as **one separate array element** in `cmakeWorkflow.prefixArgs`; do not
-concatenate arguments into a shell command string.
+The [VS Code extension](https://github.com/cpp20120/cmake_workflow_vscode) runs on the workspace host, including
+Remote SSH, WSL and Dev Containers. Set `cmakeWorkflow.executable` to a native binary or to `dotnet` with the absolute
+DLL path as a separate element in `cmakeWorkflow.prefixArgs`.
 
-The extension code provides manifest discovery/selection, read-only plans, selected-node runs with prerequisites,
-TreeView/diagnostics, saved artifacts, graph and execution timeline, History browsing/filtering/import,
-baseline/candidate selection, sample plots, regression detection, profile replay/analyze/results, target
-build/invoke/run, tooling setup and DagFlow campaigns. Availability and UI details depend on the installed extension
-version; read its README. The extension must respect workspace trust, keep stdout/stderr separate, prefer saved results
-after stream interruption, and never infer a successful workflow from a missing or corrupt report. On Windows forced
-`taskkill /T /F` may leave an incomplete checkpoint, unlike graceful cancellation; this is a known integration
-limitation.
+Workflow planning, full and selected-node runs, History, and saved profile analysis use Host RPC. **Host Operations**
+shows operation and node state, History indexing and a separate raw events tab. Its **Open Host API** form exposes
+methods advertised by the connected Host. **History & Comparison** shows the selected catalog and available indexing
+diagnostics when it is empty. In **… → Profiles**, use **Saved Profiles** to select a run or **Open Existing Profile…**
+to browse to a run folder.
+
+The dedicated profile capture and replay, target, tooling setup and DagFlow campaign wizards still invoke standalone
+CLI commands. See the [extension README](https://github.com/cpp20120/cmake_workflow_vscode/blob/master/README.md)
+for configuration and compatibility details.
 
 ## Testing boundaries
 
