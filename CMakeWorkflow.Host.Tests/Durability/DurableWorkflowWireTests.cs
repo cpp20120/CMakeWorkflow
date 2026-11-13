@@ -149,8 +149,16 @@ internal static class DurableWorkflowWireTests
         string digest, string marker, CancellationToken ct)
     {
         WorkspaceReadPaths paths = new(workspace);
-        string database = Path.Combine(workspace, "history.sqlite");
-        HistoryPolicy policy = new(HistoryPolicyMode.ExplicitDatabase, database);
+        string database = Path.Combine(paths.WorkspaceDirectory, "history.sqlite");
+        string requestedDatabase = Path.Combine(workspace, "history.sqlite");
+        if (!OperatingSystem.IsWindows())
+        {
+            // Exercise an alias even when the platform temp directory has no symlinked parents.
+            string alias = Path.Combine(workspace, "history-workspace-alias");
+            _ = Directory.CreateSymbolicLink(alias, paths.WorkspaceDirectory);
+            requestedDatabase = Path.Combine(alias, "history.sqlite");
+        }
+        HistoryPolicy policy = new(HistoryPolicyMode.ExplicitDatabase, requestedDatabase);
         WorkflowStartRequest request = new("history-crash", manifest, digest, 1, Path.Combine(workspace, "history-run"))
         {
             Only = ["effect"],
@@ -194,9 +202,11 @@ internal static class DurableWorkflowWireTests
         try
         {
             using DurableAcceptanceStore store = new(workspace);
-            Check(store.Accept(request).OperationId == accepted.OperationId &&
-                  store.GetHistoryIndexStatus(accepted.OperationId).DatabasePath == database,
-                "Removing the original manifest changed a previously accepted History policy.");
+            Check(store.Accept(request).OperationId == accepted.OperationId,
+                "Removing the original manifest changed the accepted operation identity.");
+            string? indexedDatabase = store.GetHistoryIndexStatus(accepted.OperationId).DatabasePath;
+            Check(indexedDatabase == database,
+                $"Expected the canonical History database '{database}' after retry, got '{indexedDatabase}'.");
         }
         finally
         {
