@@ -19,6 +19,7 @@ namespace CMakeWorkflow.Host.Workflows;
 /// <param name="HistoryDatabase">Canonical Host database path, or null when indexing is disabled.</param>
 /// <param name="WorkflowSelection">Canonical JSON for the selected CMake node IDs, or null for a full graph.</param>
 /// <param name="DomainKind">Persisted execution domain; legacy CMake acceptance uses workflow.</param>
+/// <param name="SourceSnapshotId">Optional content-addressed source snapshot identity bound to durable admission.</param>
 internal sealed record DurableImmutableRequest(
     string ClientRequestId,
     string SnapshotPath,
@@ -28,4 +29,5 @@ internal sealed record DurableImmutableRequest(
     string DomainKind = "workflow",
     string? WorkflowSelection = null,
     string? HistoryDatabase = null,
-    HistoryPolicyMode HistoryMode = HistoryPolicyMode.Disabled);
+    HistoryPolicyMode HistoryMode = HistoryPolicyMode.Disabled,
+    string? SourceSnapshotId = null);

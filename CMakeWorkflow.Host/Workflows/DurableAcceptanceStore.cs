@@ -245,6 +245,17 @@ public sealed partial class DurableAcceptanceStore : IDisposable
                 CreateHistoryIntentTable();
             }
 
+            if (!readOnly)
+            {
+                Execute(static command => command.CommandText = """
+                        CREATE TABLE IF NOT EXISTS operation_source_snapshots (
+                          operation_id TEXT NOT NULL PRIMARY KEY,
+                          snapshot_id TEXT NOT NULL CHECK(length(snapshot_id) = 64),
+                          FOREIGN KEY(operation_id) REFERENCES accepted_workflows(operation_id)
+                        );
+                        """);
+            }
+
             using SqliteTransaction? transaction = readOnly ? null : connection.BeginTransaction();
             if (!readOnly)
             {
@@ -335,7 +346,8 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         ArgumentNullException.ThrowIfNull(expectedManifestSha256);
         if (string.IsNullOrWhiteSpace(clientRequestId) || clientRequestId.Length > 128 || jobs < 1
             || !Path.IsPathFullyQualified(manifestPath) || !Path.IsPathFullyQualified(resultsDirectory)
-            || !IsSha256(expectedManifestSha256))
+            || !IsSha256(expectedManifestSha256) ||
+            (request.SourceSnapshotId is not null && !IsSha256(request.SourceSnapshotId)))
         {
             throw new ArgumentException("Invalid workflow admission request.");
         }
@@ -358,10 +370,16 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         {
             digest = Hex(Encoding.UTF8.GetBytes($"workflow/start:history:v1\n{digest}\n{historyMode}\n{historyDatabase}"));
         }
+        if (request.SourceSnapshotId is { } sourceSnapshotId)
+        {
+            // Extend rather than change the legacy digest: existing unsourced retries
+            // retain their exact request identity and on-disk compatibility.
+            digest = Hex(Encoding.UTF8.GetBytes($"workflow/start:source:v1\n{digest}\n{sourceSnapshotId.ToUpperInvariant()}"));
+        }
         // Do not resolve paths again between digest derivation and admission.
         return AcceptImmutableCanonical(new DurableImmutableRequest(clientRequestId, source,
             expectedManifestSha256, result, digest, WorkflowSelection: selectionJson, HistoryDatabase: historyDatabase,
-            HistoryMode: historyMode));
+            HistoryMode: historyMode, SourceSnapshotId: request.SourceSnapshotId?.ToUpperInvariant()));
     }
 
     // Neutral immutable admission: the trusted domain adapter owns the request digest.
@@ -377,7 +395,8 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             !Path.IsPathFullyQualified(request.SnapshotPath) ||
             !Path.IsPathFullyQualified(request.ResultsDirectory) ||
             !IsSha256(request.SnapshotSha256) || !IsSha256(request.RequestDigest) ||
-            string.IsNullOrWhiteSpace(request.DomainKind) || request.DomainKind.Length > 64)
+            string.IsNullOrWhiteSpace(request.DomainKind) || request.DomainKind.Length > 64 ||
+            (request.SourceSnapshotId is not null && !IsSha256(request.SourceSnapshotId)))
         {
             throw new ArgumentException("Invalid immutable operation admission request.");
         }
@@ -453,6 +472,16 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             _ = insertSelection.ExecuteNonQuery();
         }
 
+        if (request.SourceSnapshotId is { } sourceSnapshotId)
+        {
+            using SqliteCommand insertSource = connection.CreateCommand();
+            insertSource.Transaction = transaction;
+            insertSource.CommandText = "INSERT INTO operation_source_snapshots(operation_id,snapshot_id) VALUES($id,$snapshot);";
+            _ = insertSource.Parameters.AddWithValue("$id", operationId);
+            _ = insertSource.Parameters.AddWithValue("$snapshot", sourceSnapshotId.ToUpperInvariant());
+            _ = insertSource.ExecuteNonQuery();
+        }
+
         if (request.HistoryDatabase is { } historyDatabase)
         {
             InsertHistoryIntent(transaction, operationId, historyDatabase, request.HistoryMode);
@@ -472,6 +501,25 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         transaction.Commit();
         return new(WorkspaceId, operationId, clientRequestId, digest, expectedManifestSha256.ToUpperInvariant(),
             baseDirectory, "accepted_not_dispatched");
+    }
+
+    /// <summary>Read the independently persisted source identity for an accepted operation, if present.</summary>
+    public string? GetSourceSnapshotId(string operationId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        // The read-only ledger may predate the additive source-binding schema.
+        using SqliteCommand table = connection.CreateCommand();
+        table.CommandText =
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_source_snapshots';";
+        if (table.ExecuteScalar() is null)
+        {
+            return null;
+        }
+
+        using SqliteCommand read = connection.CreateCommand();
+        read.CommandText = "SELECT snapshot_id FROM operation_source_snapshots WHERE operation_id=$id;";
+        _ = read.Parameters.AddWithValue("$id", operationId);
+        return read.ExecuteScalar() as string;
     }
 
     // An old database may not have operation_domains. Such operations always

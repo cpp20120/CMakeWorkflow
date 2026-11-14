@@ -37,8 +37,12 @@ internal static class HostOperationComposition
         {
             "cmake" => coordinator.Start(workspace, new WorkflowStartRequest(
                 request.ClientRequestId, request.Manifest, request.ManifestSha256,
-                request.Jobs, request.ResultsDirectory)),
-            "process" => coordinator.StartProcess(workspace, request),
+                request.Jobs, request.ResultsDirectory)
+            {
+                SourceSnapshotId = request.SourceSnapshotId
+            }),
+            "process" when request.SourceSnapshotId is null => coordinator.StartProcess(workspace, request),
+            "process" => throw new InvalidOperationException("source_snapshot_unsupported_for_process"),
             _ => throw new InvalidOperationException("unknown_execution_domain")
         };
 }

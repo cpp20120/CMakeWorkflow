@@ -86,6 +86,15 @@ jobs:
         run: dotnet CMakeWorkflow.Profiling.Tests/bin/Release/net10.0/CMakeWorkflow.Profiling.Tests.dll
       - name: Tool provisioning checks
         run: dotnet CMakeWorkflow.Tooling.Tests/bin/Release/net10.0/CMakeWorkflow.Tooling.Tests.dll
+      - name: Lore source snapshot E2E (${{ matrix.rid }})
+        shell: pwsh
+        run: |
+          dotnet restore CMakeWorkflow.Sources.Tests/CMakeWorkflow.Sources.Tests.csproj -r ${{ matrix.rid }}
+          if ($LASTEXITCODE -ne 0) { throw "Lore restore failed: $LASTEXITCODE" }
+          dotnet build CMakeWorkflow.Sources.Tests/CMakeWorkflow.Sources.Tests.csproj -c Release -r ${{ matrix.rid }} --no-restore -p:TreatWarningsAsErrors=true
+          if ($LASTEXITCODE -ne 0) { throw "Lore build failed: $LASTEXITCODE" }
+          dotnet run --project CMakeWorkflow.Sources.Tests/CMakeWorkflow.Sources.Tests.csproj -c Release -r ${{ matrix.rid }} --no-build -- self-test
+          if ($LASTEXITCODE -ne 0) { throw "Lore snapshot E2E failed: $LASTEXITCODE" }
       - name: Host IPC and session checks
         run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll
       - name: Artifact handle-relative path security checks

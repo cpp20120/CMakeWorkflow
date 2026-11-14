@@ -12,4 +12,7 @@ public sealed record WorkflowStartRequest(
     public IReadOnlyList<string>? Only { get; init; }
 
     public HistoryPolicy? HistoryPolicy { get; init; }
+
+    /// <summary>Immutable source-content identity; unsupported by execution until source materialization is bound.</summary>
+    public string? SourceSnapshotId { get; init; }
 }

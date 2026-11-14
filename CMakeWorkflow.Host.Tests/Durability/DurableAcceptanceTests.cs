@@ -30,6 +30,63 @@ internal static class DurableAcceptanceTests
             }
         }
 
+        // Source identity is a separate durable fact, not the manifest bytes.
+        // A retry may neither replace it with a different source nor omit it.
+        string sourceId = new('A', 64);
+        WorkflowStartRequest sourcedRequest = new("client-source", manifest, hash, 1, workspace)
+        {
+            SourceSnapshotId = sourceId
+        };
+        string sourcedOperation;
+        using (DurableAcceptanceStore sourceStore = new(workspace))
+        {
+            AcceptedWorkflow sourced = sourceStore.Accept(sourcedRequest);
+            sourcedOperation = sourced.OperationId;
+            if (sourceStore.GetSourceSnapshotId(sourcedOperation) != sourceId ||
+                sourceStore.GetSourceSnapshotId(id) is not null)
+            {
+                throw new System.Diagnostics.UnreachableException("source snapshot binding was not committed atomically");
+            }
+        }
+
+        using (DurableAcceptanceStore reopenedSources = new(workspace))
+        {
+            if (reopenedSources.Accept(sourcedRequest).OperationId != sourcedOperation ||
+                reopenedSources.Accept(sourcedRequest with { SourceSnapshotId = new string('a', 64) }).OperationId
+                    != sourcedOperation ||
+                reopenedSources.GetSourceSnapshotId(sourcedOperation) != sourceId)
+            {
+                throw new System.Diagnostics.UnreachableException("source snapshot binding did not survive restart");
+            }
+
+            string?[] differentSnapshots = [new('B', 64), null];
+            foreach (string? different in differentSnapshots)
+            {
+                try
+                {
+                    _ = reopenedSources.Accept(sourcedRequest with { SourceSnapshotId = different });
+                    throw new System.Diagnostics.UnreachableException("source snapshot change escaped request identity");
+                }
+                catch (InvalidOperationException error) when (error.Message == "request_id_conflict")
+                {
+                }
+            }
+        }
+
+        // Neither RPC path may dispatch source-bound work until P4.2 rebinds the
+        // CMake source and build directories to an operation-owned snapshot.
+        using (DurableExecutionCoordinator coordinator = new(CancellationToken.None))
+        {
+            try
+            {
+                _ = coordinator.Start(workspace, sourcedRequest with { ClientRequestId = "client-source-refused" });
+                throw new System.Diagnostics.UnreachableException("source-bound work was dispatched without materialization");
+            }
+            catch (InvalidOperationException error) when (error.Message == "source_snapshot_execution_not_enabled")
+            {
+            }
+        }
+
         File.WriteAllText(manifest, "changed after acceptance");
         // The planner must read supplied snapshot bytes, never the current file.
         // The accepted example is schema v1 without nodes: it must fail with the
