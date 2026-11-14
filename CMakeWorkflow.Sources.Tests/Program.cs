@@ -48,7 +48,7 @@ try
 #pragma warning disable CA1031 // CLI boundary must turn any failure into nonzero exit.
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"{ex.GetType().Name}: {ex.Message}");
+    Console.Error.WriteLine(ex);
     return 1;
 }
 #pragma warning restore CA1031
@@ -157,6 +157,20 @@ static void SelfTest()
     {
         if (Directory.Exists(tmp))
         {
+            // Git marks loose objects read-only on some Windows installations.
+            // Clear only that attribute before removing our disposable test repo.
+            if (OperatingSystem.IsWindows())
+            {
+                foreach (string file in Directory.EnumerateFiles(tmp, "*", SearchOption.AllDirectories))
+                {
+                    FileAttributes attributes = File.GetAttributes(file);
+                    if ((attributes & FileAttributes.ReadOnly) != 0)
+                    {
+                        File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+                    }
+                }
+            }
+
             Directory.Delete(tmp, recursive: true);
         }
     }

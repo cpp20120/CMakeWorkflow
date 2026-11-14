@@ -30,12 +30,12 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
         {
             throw new DirectoryNotFoundException(root);
         }
-        string repositoryRoot = StrictUtf8.GetString(Run(root, true,
-            "rev-parse", "--show-toplevel").Output).TrimEnd('\r', '\n');
-        StringComparison pathComparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar)
-            .Equals(root.TrimEnd(Path.DirectorySeparatorChar), pathComparison))
+        // Git computes the prefix relative to the worktree root. This survives
+        // filesystem aliases such as macOS /var -> /private/var, unlike comparing
+        // two absolute path strings.
+        string prefix = StrictUtf8.GetString(Run(root, true,
+            "rev-parse", "--show-prefix").Output).TrimEnd('\r', '\n');
+        if (prefix.Length != 0)
         {
             throw new InvalidDataException("The source root must be the Git worktree root, not a subdirectory.");
         }
