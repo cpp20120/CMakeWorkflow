@@ -33,6 +33,8 @@
     <Project Path="CMakeWorkflow.Profiling.Tests/CMakeWorkflow.Profiling.Tests.csproj"/>
     <Project Path="CMakeWorkflow.Profiling.AotSmoke/CMakeWorkflow.Profiling.AotSmoke.csproj"/>
     <Project Path="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj"/>
+    <Project Path="CMakeWorkflow.Sources/CMakeWorkflow.Sources.csproj"/>
+    <Project Path="CMakeWorkflow.Sources.Tests/CMakeWorkflow.Sources.Tests.csproj"/>
     <Project Path="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj"/>
     <Project Path="CMakeWorkflow.Tooling.Tests/CMakeWorkflow.Tooling.Tests.csproj"/>
 </Solution>
