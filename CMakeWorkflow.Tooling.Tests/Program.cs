@@ -23,6 +23,8 @@ string root = Path.Combine(Path.GetTempPath(), "cmake-workflow-tooling-" + Guid.
 Directory.CreateDirectory(root);
 try
 {
+    await VisualStudioSetupTests.RunAsync();
+
     // The native probe is explicitly opt-in; CI exercises only the ordinary user logger.
     if (OperatingSystem.IsWindows())
     {

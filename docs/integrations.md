@@ -4,6 +4,9 @@
 
 ## Provisioning
 
+For Windows C++ workstation component installation, see
+[Visual Studio provisioning](windows-vs-provisioning.md) (`tooling vs plan/setup`).
+
 Tooling — явная подготовка окружения, независимая от scheduler:
 
 ```sh
