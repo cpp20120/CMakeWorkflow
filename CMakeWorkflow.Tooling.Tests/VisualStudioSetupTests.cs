@@ -36,7 +36,7 @@ internal static class VisualStudioSetupTests
 
         backend.Installed.Clear();
         VisualStudioSetupPlan stale = await service.PlanAsync(request, default);
-        backend.Installed.Add("Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+        _ = backend.Installed.Add("Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
         rejected = false;
         try
         {
@@ -97,7 +97,7 @@ internal static class VisualStudioSetupTests
             {
                 if (arguments[i] == "--add")
                 {
-                    Installed.Add(arguments[++i]);
+                    _ = Installed.Add(arguments[++i]);
                 }
             }
 

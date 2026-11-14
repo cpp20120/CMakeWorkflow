@@ -86,7 +86,7 @@ public static class VisualStudioProfileCatalog
 
             if (name.Equals("windows-cpp", StringComparison.OrdinalIgnoreCase))
             {
-                result.Add(buildTools ? WorkloadBuildTools : WorkloadIde);
+                _ = result.Add(buildTools ? WorkloadBuildTools : WorkloadIde);
             }
 
             result.UnionWith(entries);
@@ -120,11 +120,8 @@ public sealed class VisualStudioSetupService(IVisualStudioSetupBackend backend)
         VisualStudioInstance? selected = null;
         if (!string.IsNullOrWhiteSpace(request.InstanceId))
         {
-            selected = installed.SingleOrDefault(x => x.Id.Equals(request.InstanceId, StringComparison.OrdinalIgnoreCase));
-            if (selected is null)
-            {
-                throw new ArgumentException("Specified Visual Studio instance was not found.");
-            }
+            selected = installed.SingleOrDefault(x => x.Id.Equals(request.InstanceId, StringComparison.OrdinalIgnoreCase))
+                       ?? throw new ArgumentException("Specified Visual Studio instance was not found.");
         }
         else if (!string.IsNullOrWhiteSpace(request.InstallPath))
         {
@@ -158,7 +155,7 @@ public sealed class VisualStudioSetupService(IVisualStudioSetupBackend backend)
             : request.BuildTools;
         IReadOnlyList<string> requestedProfiles = request.Profiles.Count == 0
             ? ["windows-cpp"] : request.Profiles;
-        string[] profiles = [.. requestedProfiles.Select(x => x.Trim().ToLowerInvariant())
+        string[] profiles = [.. requestedProfiles.Select(x => x.Trim().ToUpperInvariant())
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
         IReadOnlyList<string> components = VisualStudioProfileCatalog.Resolve(profiles, buildTools);
         List<string> missing = [];

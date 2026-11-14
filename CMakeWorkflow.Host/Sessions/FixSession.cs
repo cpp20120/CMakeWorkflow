@@ -21,6 +21,11 @@ public sealed partial class DoctorSession
     {
         ArgumentNullException.ThrowIfNull(request);
         RequireWorkspace();
+        if (request.VisualStudio is not null)
+        {
+            return await PlanVisualStudioFixAsync(request, cancellationToken);
+        }
+
         ValidateProfiles(request.Profiles, request.InstallDirectory);
         RecoveryRunBinding? boundRun = request.RunDirectory is null
             ? null
@@ -68,6 +73,11 @@ public sealed partial class DoctorSession
             }
 
             pendingFix = null; // single use, including failed/canceled attempts
+            if (saved.Request.VisualStudio is not null)
+            {
+                return await ApplyVisualStudioFixAsync(saved, request, lifetime.Token);
+            }
+
             int sequence = 0;
 
             async Task Notify(string stage, string? tool = null, string? message = null)

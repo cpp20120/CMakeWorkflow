@@ -46,6 +46,8 @@ public sealed class SystemVisualStudioSetupBackend : IVisualStudioSetupBackend
 
     public async Task<bool> HasComponentAsync(string instanceId, string componentId, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(instanceId);
+        ArgumentNullException.ThrowIfNull(componentId);
         string exe = FindVsWhere() ?? throw new FileNotFoundException("vswhere.exe is required to inspect Visual Studio components.");
         ToolCommandResult result = await runtime.RunAsync(exe,
             ["-all", "-products", "*", "-prerelease", "-requires", componentId,
@@ -87,6 +89,8 @@ public sealed class SystemVisualStudioSetupBackend : IVisualStudioSetupBackend
 
     public async Task<int> RunInstallerAsync(string path, IReadOnlyList<string> arguments, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(arguments);
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException("Visual Studio provisioning requires Windows.");

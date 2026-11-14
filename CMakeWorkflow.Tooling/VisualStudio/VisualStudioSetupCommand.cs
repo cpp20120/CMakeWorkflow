@@ -13,6 +13,7 @@ public static class VisualStudioSetupCommand
     {
         try
         {
+            ArgumentNullException.ThrowIfNull(args);
             if (args.Length == 0 || args[0] is not ("doctor" or "plan" or "setup"))
             {
                 throw new ArgumentException(Usage);

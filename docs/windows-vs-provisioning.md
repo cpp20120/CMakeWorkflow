@@ -62,10 +62,40 @@ winget install --id Microsoft.WinDbg --exact --accept-package-agreements --accep
 
 WinDbg is not a prerequisite to compile or debug an ordinary C++ application in Visual Studio.
 
+## Host RPC and client SDK
+
+The existing `tooling/planFix` endpoint accepts the usual request with empty ordinary
+`profiles` and a `visualStudio` selection. For example:
+
+```json
+{
+  "profiles": [],
+  "installDirectory": null,
+  "visualStudio": {
+    "profiles": ["windows-cpp", "windows-cpp-perf"],
+    "instanceId": "YOUR_VS_INSTANCE_ID"
+  }
+}
+```
+
+The result has `visualStudioPlan` and an expiring `planId`. After presenting that plan
+for review, call `tooling/applyFix` with a new `operationId` and the reviewed `planId`.
+The Host serializes installations with the same cross-process lock as normal Fix,
+rechecks the VS component state before invoking the installer, and consumes plans on
+attempt, including failure/cancellation. `visualStudioInstallation` and
+`visualStudioVerification` carry the result. No automatic retries.
+
+Visual Studio plans cannot be bound to a suspended workflow run in this slice: they
+reject `runDirectory` and combinations with ordinary package-install profiles.
+The Host SDK exposes these wire fields as `HostVisualStudioSetupOptions` and related
+records. A VS Code command or GUI can use the same SDK call without installing
+anything on activation.
+
 ## Boundaries and follow-up
 
-* `tooling vs` is CLI-only in this slice. Existing `tooling/planFix` / `tooling/applyFix` RPC and
-  VS Code GUI do not yet expose the new Visual Studio component installer.
+* `tooling vs` supports CLI and Host `tooling/planFix` / `tooling/applyFix` via an explicit
+  `visualStudio` request, while ordinary package provisioning is unchanged. VS Code GUI
+  integration remains a separate extension change.
 * Reboot and installation interruption are **not** rollback or durability; run `doctor` again
   after recovery. Setup binaries and package versions are not pinned by the approval digest.
 * The approval hash guards against changed logical component and instance state. It does **not**

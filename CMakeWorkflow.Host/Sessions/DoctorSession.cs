@@ -17,7 +17,8 @@ public sealed partial class DoctorSession(
     FixCoordinator fixes,
     Func<FixProgress, Task> fixProgress,
     TimeProvider? timeProvider = null,
-    DurableExecutionCoordinator? durableExecutions = null) : IHostRpc, IDisposable
+    DurableExecutionCoordinator? durableExecutions = null,
+    Func<CMakeWorkflow.Tooling.VisualStudio.VisualStudioSetupService>? createVisualStudio = null) : IHostRpc, IDisposable
 {
     private string? workspace;
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -67,11 +68,18 @@ public sealed partial class DoctorSession(
 
         directory = previous ?? directory;
         durableExecutions?.ScheduleHistoryRecovery(directory);
+        string[] capabilities =
+        [
+            "tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress",
+            "environment/plan", "environment/apply", "request-cancellation", .. ReadCapabilities
+        ];
+        if (OperatingSystem.IsWindows())
+        {
+            capabilities = [.. capabilities, "tooling/visualStudioFix"];
+        }
+
         return Task.FromResult(new HostInfo(1, Environment.ProcessId, directory,
-            [
-                "tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress",
-                "environment/plan", "environment/apply", "request-cancellation", .. ReadCapabilities
-            ],
+            capabilities,
             [.. ToolCatalog.AllProfiles.Select(p => new ToolingProfileView(p.Id, p.Description, p.Tools))]));
     }
 
