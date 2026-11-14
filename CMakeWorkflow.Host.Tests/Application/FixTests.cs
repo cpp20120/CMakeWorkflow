@@ -51,7 +51,7 @@ internal static class FixTests
         PlanFixRequest request = new(["cmake"], Path.Combine(root, "tools with spaces"), PackageManagerKind.None,
             true);
         FixPlan plan = await session.PlanFixAsync(request, default);
-        Check(installer.Calls == 0 && !plan.Plan.Ready, "plan must be read only");
+        Check(installer.Calls == 0 && plan.Plan is { Ready: false }, "plan must be read only");
         using DoctorSession stranger = Session(runtime, installer);
         _ = await stranger.InitializeAsync(new(1, root), default);
         await Reject(() => stranger.ApplyFixAsync(new("foreign", plan.PlanId), default));
@@ -169,6 +169,7 @@ internal static class FixTests
         await stranger.DrainAsync();
         await other.DrainAsync();
         // dropping was drained immediately after the disconnect test.
+        await VisualStudioFixTests.RunAsync(root);
         Console.WriteLine(
             "Fix checks passed: plans, ownership, expiry, revalidation, installs, failures, locks, cancel and disconnect.");
     }

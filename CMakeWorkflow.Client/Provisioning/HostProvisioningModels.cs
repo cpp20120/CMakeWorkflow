@@ -22,7 +22,8 @@ string[] Profiles
 #pragma warning restore CA1819
 , string? InstallDirectory = null,
     HostPackageManagerKind PackageManager = HostPackageManagerKind.Auto,
-    bool AllowFallback = true, string? RunDirectory = null);
+    bool AllowFallback = true, string? RunDirectory = null,
+    HostVisualStudioSetupOptions? VisualStudio = null);
 public sealed record HostApplyFixOptions(string OperationId, string PlanId);
 
 public sealed record HostToolStatus(string Id, string DisplayName, bool Installed, string? Command,
@@ -57,12 +58,24 @@ string[] Failed
 string[] Diagnostics
 #pragma warning restore CA1819
 );
+public sealed record HostVisualStudioSetupOptions(IReadOnlyList<string> Profiles,
+    string? InstanceId = null, string? BootstrapperPath = null, string? InstallPath = null,
+    bool BuildTools = false);
+public sealed record HostVisualStudioSetupPlan(int SchemaVersion, string Mode, string? InstanceId,
+    string InstallPath, string InstallerPath, IReadOnlyList<string> Profiles,
+    IReadOnlyList<string> Components, IReadOnlyList<string> MissingComponents,
+    IReadOnlyList<string> Arguments, bool Ready, string ApprovalSha256, string? Diagnostic);
+public sealed record HostVisualStudioSetupResult(int SchemaVersion, bool Ready, int InstallerExitCode,
+    bool RestartRequired, HostVisualStudioSetupPlan Verification, string? Diagnostic);
 public sealed record HostFixPlan(int SchemaVersion, string PlanId, DateTimeOffset ExpiresAt,
-    HostToolingPlan Plan, string? RunDirectory = null, string? RunSnapshot = null);
+    HostToolingPlan? Plan, string? RunDirectory = null, string? RunSnapshot = null,
+    HostVisualStudioSetupPlan? VisualStudioPlan = null);
 public sealed record HostFixResult(int SchemaVersion, string Status,
     HostToolingResult? Installation, HostToolingPlan? Verification,
 
 #pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
 string[] Diagnostics
 #pragma warning restore CA1819
-, bool ReadyToResume = false);
+, bool ReadyToResume = false,
+    HostVisualStudioSetupResult? VisualStudioInstallation = null,
+    HostVisualStudioSetupPlan? VisualStudioVerification = null);

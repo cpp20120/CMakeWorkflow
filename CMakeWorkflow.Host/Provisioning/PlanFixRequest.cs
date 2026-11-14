@@ -1,4 +1,5 @@
 using CMakeWorkflow.Tooling.Tools;
+using CMakeWorkflow.Tooling.VisualStudio;
 
 namespace CMakeWorkflow.Host.Provisioning;
 
@@ -11,4 +12,5 @@ string[] Profiles
     string? InstallDirectory,
     PackageManagerKind PackageManager = PackageManagerKind.Auto,
     bool AllowFallback = true,
-    string? RunDirectory = null);
+    string? RunDirectory = null,
+    VisualStudioSetupRequest? VisualStudio = null);

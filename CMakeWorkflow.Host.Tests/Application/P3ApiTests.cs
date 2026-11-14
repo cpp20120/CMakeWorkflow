@@ -115,7 +115,7 @@ internal static class P3ApiTests
         HostFixPlan plan = await sdk.Provisioning.PlanFixAsync(new(["cmake"],
             PackageManager: HostPackageManagerKind.None), ct);
         Check(plan.SchemaVersion == 1 && !string.IsNullOrWhiteSpace(plan.PlanId) &&
-              plan.Plan.PackageManager == HostPackageManagerKind.None,
+              plan.Plan?.PackageManager == HostPackageManagerKind.None,
             "Fix-plan typed serialization and enum converter");
         // The SDK can invoke applyFix, but a nonexistent plan must fail before
         // any installation. The Host's own FixTests cover real one-shot application.

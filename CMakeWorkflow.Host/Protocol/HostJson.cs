@@ -19,6 +19,7 @@ using CMakeWorkflow.Host.Workflows;
 using CMakeWorkflow.Tooling.Environment;
 using CMakeWorkflow.Tooling.Toolchains;
 using CMakeWorkflow.Tooling.Tools;
+using CMakeWorkflow.Tooling.VisualStudio;
 
 namespace CMakeWorkflow.Host.Protocol;
 
@@ -39,6 +40,9 @@ namespace CMakeWorkflow.Host.Protocol;
 [JsonSerializable(typeof(ApplyFixRequest))]
 [JsonSerializable(typeof(FixProgress))]
 [JsonSerializable(typeof(FixResult))]
+[JsonSerializable(typeof(VisualStudioSetupRequest))]
+[JsonSerializable(typeof(VisualStudioSetupPlan))]
+[JsonSerializable(typeof(VisualStudioSetupResult))]
 [JsonSerializable(typeof(ToolchainDiscoverRequest))]
 [JsonSerializable(typeof(ToolchainResolveRequest))]
 [JsonSerializable(typeof(ToolchainInspectEnvironmentRequest))]

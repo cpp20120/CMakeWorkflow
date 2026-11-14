@@ -1,4 +1,5 @@
 using CMakeWorkflow.Tooling.Tools;
+using CMakeWorkflow.Tooling.VisualStudio;
 
 namespace CMakeWorkflow.Host.Provisioning;
 
@@ -12,4 +13,6 @@ public sealed record FixResult(
 string[] Diagnostics
 #pragma warning restore CA1819
 ,
-    bool ReadyToResume = false);
+    bool ReadyToResume = false,
+    VisualStudioSetupResult? VisualStudioInstallation = null,
+    VisualStudioSetupPlan? VisualStudioVerification = null);

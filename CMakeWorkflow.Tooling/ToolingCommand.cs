@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CMakeWorkflow.Tooling.Tools;
+using CMakeWorkflow.Tooling.VisualStudio;
 
 namespace CMakeWorkflow.Tooling;
 
@@ -13,6 +14,11 @@ public static class ToolingCommand
             if (args.Length == 0)
             {
                 throw new ArgumentException(Usage);
+            }
+
+            if (args[0] == "vs")
+            {
+                return await VisualStudioSetupCommand.ExecuteAsync(args[1..], ct);
             }
 
             string action = args[0];
@@ -223,5 +229,5 @@ public static class ToolingCommand
 
 
     private const string Usage =
-        "tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]";
+        "tooling <list|doctor|plan|setup|vs> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]";
 }

@@ -21,6 +21,12 @@ public sealed class HostProvisioningService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(options);
         client.RequireCapability("tooling/planFix");
+        if (options.VisualStudio is not null)
+        {
+            // Old Hosts ignore unknown JSON properties. Never silently fall back to ordinary tooling.
+            client.RequireCapability("tooling/visualStudioFix");
+        }
+
         return RpcRefusals.TranslateAsync(() => client.Proxy.PlanFixAsync(options, ct));
     }
 

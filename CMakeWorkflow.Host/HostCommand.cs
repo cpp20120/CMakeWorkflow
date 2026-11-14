@@ -105,6 +105,8 @@ public static class HostCommand
             }
 
             FixPlan reviewed = await host.PlanFixAsync(new([.. profiles], install, manager, fallback), ct);
+            ToolingPlan ordinaryPlan = reviewed.Plan
+                ?? throw new InvalidDataException("Host returned no ordinary tooling Fix plan.");
             if (!yes || dryRun)
             {
                 if (json)
@@ -113,17 +115,17 @@ public static class HostCommand
                 }
                 else
                 {
-                    PrintPlan(reviewed.Plan);
+                    PrintPlan(ordinaryPlan);
                 }
 
                 await Console.Error.WriteLineAsync(
                     "Plan only; no installation attempted. Use host fix --yes to explicitly authorize installation. Package versions are selected by the package manager/release source.");
-                return dryRun || reviewed.Plan.Ready ? 0 : 2;
+                return dryRun || ordinaryPlan.Ready ? 0 : 2;
             }
 
-            PrintPlan(reviewed.Plan, Console.Error);
+            PrintPlan(ordinaryPlan, Console.Error);
             await Console.Error.WriteLineAsync(
-                $"[Host fix] Applying reviewed plan {reviewed.PlanId}; directory: {reviewed.Plan.InstallDirectory}. Cancellation can leave partial installation; no rollback is available.");
+                $"[Host fix] Applying reviewed plan {reviewed.PlanId}; directory: {ordinaryPlan.InstallDirectory}. Cancellation can leave partial installation; no rollback is available.");
             FixResult result = await host.ApplyFixAsync(new(Guid.NewGuid().ToString("N"), reviewed.PlanId), ct);
             if (json)
             {
