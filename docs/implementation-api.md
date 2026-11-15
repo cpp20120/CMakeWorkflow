@@ -3102,6 +3102,24 @@ Source: [CMakeWorkflow.Campaigns/WeakMemory/WeakMemoryOptions.cs](../CMakeWorkfl
 public sealed record WeakMemoryOptions(string SourceDirectory, string Protocol, string RelacyDirectory, string Compiler = "c++", int TimeoutSeconds = 60, string? ReportPath = null, string? Mutant = null);
 ```
 
+## CMakeWorkflow.Sources
+
+### Namespace `CMakeWorkflow.Sources`
+
+#### `LoreSnapshotStore`
+
+Source: [CMakeWorkflow.Sources/LoreSnapshotStore.cs](../CMakeWorkflow.Sources/LoreSnapshotStore.cs#L20)
+
+```csharp
+public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
+{
+    public string Capture(string sourceRoot, System.Collections.Generic.IReadOnlyCollection<string> relativeFiles);
+    public SnapshotManifest Inspect(string snapshotId);
+    public SnapshotManifest Verify(string snapshotId, System.Threading.CancellationToken cancellationToken);
+    public void Materialize(string snapshotId, string destination);
+}
+```
+
 ## CMakeWorkflow
 
 This executable has no source-declared public CLR types. Integrate through its documented CLI commands or the Host

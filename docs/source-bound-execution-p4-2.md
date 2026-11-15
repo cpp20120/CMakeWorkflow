@@ -33,9 +33,9 @@ are out of scope: the Host must already have the Lore blobs in its own store.
 - Every context must explicitly declare `sourceDirectory`, be managed (or leave
   `mode` unspecified), and refer to **one canonical source root in the workspace**.
 - Every context's source path is rewritten to
-  `<workspace>/.cmakeworkflow/source-executions/<operationId>/source`.
-- Build paths are **new**, operation-private, and context-keyed below that same
-  operation directory. Existing nonempty build directories are rejected.
+  `<workspace>/.cw/<operationId>/s`.
+- Each context has a private build path under `<workspace>/.cw/<operationId>/b`.
+  Initial execution rejects an existing nonempty build directory.
 - At least `CMakeLists.txt` at snapshot root is required. Every Lore blob is
   hash/length-verified by the storage adapter during materialization. An
   accepted pre-dispatch retry may reuse an existing materialization only after
@@ -53,11 +53,16 @@ only; executability, symlinks and `.git` metadata are not restored by Lore v1.
 
 ## Recovery boundary
 
-P4.2 explicitly rejects `ExecuteResumedAsync` for source-bound operations
-(`source_snapshot_resume_requires_p4_3`). P4.3 will persist the binding in
-`run.json`, validate restored source/build evidence, integrate history, and test
-crash windows. An interrupted operation must not silently replan against its
-original working tree.
+The runner writes `sourceSnapshotId` to `run.json`. The Host checks that binding
+against the accepted operation before dispatch and again before claiming an
+operator-admitted resume. Recovery checks the Lore manifest and blobs, the
+materialized source tree, and the retained CMake build and artifact observations.
+Completed nodes are skipped. Checkpoints created before source provenance was
+recorded cannot resume source-bound execution.
+
+Operation overview exposes the accepted source identity. History imports the
+identity from the terminal report. Existing History databases migrate to schema
+5 when opened for writing, for example by `history import`.
 
 ## Tests
 

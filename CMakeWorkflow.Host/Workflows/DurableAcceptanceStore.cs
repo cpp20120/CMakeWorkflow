@@ -972,13 +972,14 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             verify.Transaction = tx;
             verify.CommandText = """
                                  SELECT a.state,a.manifest_sha256,d.run_directory,r.decision,x.revision,
-                                        f.operation_id,c.operation_id,d.checkpoint_sha256
+                                        f.operation_id,c.operation_id,d.checkpoint_sha256,s.snapshot_id
                                  FROM accepted_workflows a
                                  LEFT JOIN dispatch_checkpoints d ON d.operation_id=a.operation_id
                                  LEFT JOIN operation_reconciliations r ON r.operation_id=a.operation_id
                                  LEFT JOIN operation_resume_admissions x ON x.operation_id=a.operation_id
                                  LEFT JOIN operation_finalizations f ON f.operation_id=a.operation_id
                                  LEFT JOIN operation_cancellations c ON c.operation_id=a.operation_id
+                                 LEFT JOIN operation_source_snapshots s ON s.operation_id=a.operation_id
                                  WHERE a.operation_id=$id;
                                  """;
             _ = verify.Parameters.AddWithValue("$id", operationId);
@@ -994,6 +995,8 @@ public sealed partial class DurableAcceptanceStore : IDisposable
                 reader.IsDBNull(3) || reader.GetString(3) != "needs_attention" ||
                 reader.IsDBNull(4) || reader.GetInt64(4) != 2 ||
                 !reader.IsDBNull(5) || !reader.IsDBNull(6) || reader.IsDBNull(7) ||
+                !string.Equals(evidence.SourceSnapshotId, reader.IsDBNull(8) ? null : reader.GetString(8),
+                    StringComparison.Ordinal) ||
                 (evidence.ResumeSourceCheckpointSha256 is { } source &&
                 !string.Equals(source, reader.GetString(7), StringComparison.OrdinalIgnoreCase)))
             {
@@ -1295,7 +1298,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         {
             verify.Transaction = transaction;
             verify.CommandText =
-                "SELECT manifest_sha256,state,snapshot FROM accepted_workflows WHERE operation_id=$id;";
+                """
+                SELECT a.manifest_sha256,a.state,a.snapshot,s.snapshot_id
+                FROM accepted_workflows a
+                LEFT JOIN operation_source_snapshots s ON s.operation_id=a.operation_id
+                WHERE a.operation_id=$id;
+                """;
             _ = verify.Parameters.AddWithValue("$id", operationId);
             using SqliteDataReader reader = verify.ExecuteReader();
             if (!reader.Read())
@@ -1309,6 +1317,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("dispatch_checkpoint_mismatch");
+            }
+
+            if (!string.Equals(evidence.SourceSnapshotId, reader.IsDBNull(3) ? null : reader.GetString(3),
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("source_snapshot_dispatch_binding_mismatch");
             }
         }
 

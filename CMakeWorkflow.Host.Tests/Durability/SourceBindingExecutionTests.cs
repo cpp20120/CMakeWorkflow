@@ -137,6 +137,20 @@ internal static class SourceBindingExecutionTests
                 throw new UnreachableException("Native executable read live source or reused an existing build tree.");
             }
 
+            // A restarted Host may reuse a materialized snapshot only if all its bytes
+            // still match Lore; a corrupt source must never be used for resume.
+            await File.WriteAllTextAsync(Path.Combine(isolatedSource, "main.cpp"), "tampered");
+            try
+            {
+                _ = await WorkflowSourceSnapshotExecution.PlanAsync(
+                    new CMakeWorkflow.Host.Sessions.WorkspaceReadPaths(workspace), operation,
+                    manifest, output, manifestBytes, id, [], CancellationToken.None, resume: true);
+                throw new UnreachableException("Tampered materialization was accepted on resume.");
+            }
+            catch (InvalidDataException)
+            {
+            }
+
             // The source store must fail closed before AuthorizeDispatch.
             string missingOutput = Path.Combine(workspace, "missing-results");
             WorkflowStartRequest missing = new("missing-source", manifest, hash, 1, missingOutput)

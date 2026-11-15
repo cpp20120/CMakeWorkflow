@@ -146,6 +146,22 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         return manifest;
     }
 
+    // Recovery must prove that physical CAS blobs remain available even when
+    // operation-owned materialization was retained across a Host restart.
+    public SnapshotManifest Verify(string snapshotId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        SnapshotManifest manifest = Inspect(snapshotId);
+        LoreBindings bindings = ReadBindings(snapshotId, manifest);
+        using StorageSession lore = new(Path.Combine(_storeRoot, "lore"), initialize: false);
+        for (int i = 0; i < manifest.Files.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _ = ReadVerifiedBlob(lore, manifest.Files[i], bindings.Files[i]);
+        }
+        return manifest;
+    }
+
     public void Materialize(string snapshotId, string destination)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(snapshotId);
@@ -168,16 +184,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                 for (int i = 0; i < manifest.Files.Count; i++)
                 {
                     SnapshotFile entry = manifest.Files[i];
-                    LorePointer pointer = bindings.Files[i];
-                    byte[] bytes = lore.Get(new LoreAddress
-                    {
-                        Hash = new LoreHash(Convert.FromHexString(pointer.LoreHash)),
-                        Context = new LoreContext(Convert.FromHexString(pointer.LoreContext))
-                    });
-                    if (bytes.LongLength != entry.Size || !Sha256(bytes).Equals(entry.Sha256, StringComparison.Ordinal))
-                    {
-                        throw new InvalidDataException($"Corrupted Lore content for {entry.Path}");
-                    }
+                    byte[] bytes = ReadVerifiedBlob(lore, entry, bindings.Files[i]);
                     string path = Path.Combine(stage, entry.Path.Replace('/', Path.DirectorySeparatorChar));
                     _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                     File.WriteAllBytes(path, bytes);
@@ -192,6 +199,21 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                 Directory.Delete(stage, recursive: true);
             }
         }
+    }
+
+    private static byte[] ReadVerifiedBlob(StorageSession lore, SnapshotFile entry, LorePointer pointer)
+    {
+        byte[] bytes = lore.Get(new LoreAddress
+        {
+            Hash = new LoreHash(Convert.FromHexString(pointer.LoreHash)),
+            Context = new LoreContext(Convert.FromHexString(pointer.LoreContext))
+        });
+        if (bytes.LongLength != entry.Size || !Sha256(bytes).Equals(entry.Sha256, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"Corrupted Lore content for {entry.Path}");
+        }
+
+        return bytes;
     }
 
     private LoreBindings ReadBindings(string snapshotId, SnapshotManifest manifest)

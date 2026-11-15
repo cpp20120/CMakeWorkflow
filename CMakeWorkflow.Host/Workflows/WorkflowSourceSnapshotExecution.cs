@@ -14,14 +14,14 @@ namespace CMakeWorkflow.Host.Workflows;
 /// P4.2 intentionally supports only source-rooted managed CMake graphs. It is not
 /// a sandbox for arbitrary CMake code: absolute paths embedded in CMake scripts,
 /// external dependencies and network access are not made hermetic by this adapter.
-/// P4.3 must bind source evidence into run.json and implement checked recovery.
+/// Recovery reuses operation-owned paths from the accepted snapshot.
 /// </remarks>
 internal static class WorkflowSourceSnapshotExecution
 {
     internal static async Task<WorkflowPlan> PlanAsync(
         WorkspaceReadPaths paths, string operationId, string originalManifest,
         string resultsDirectory, byte[] acceptedManifest, string sourceSnapshotId, IReadOnlyList<string> only,
-        CancellationToken ct)
+        CancellationToken ct, bool resume = false)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(acceptedManifest);
@@ -97,7 +97,7 @@ internal static class WorkflowSourceSnapshotExecution
         {
             throw new InvalidOperationException("source_snapshot_results_overlap_materialization");
         }
-        if (Directory.Exists(buildRoot) && Directory.EnumerateFileSystemEntries(buildRoot).Any())
+        if (!resume && Directory.Exists(buildRoot) && Directory.EnumerateFileSystemEntries(buildRoot).Any())
         {
             throw new InvalidOperationException("source_snapshot_build_tree_not_fresh");
         }
@@ -105,12 +105,15 @@ internal static class WorkflowSourceSnapshotExecution
         // Read/verify the Lore manifest and every blob before touching the runner
         // checkpoint or authorizing external execution. No live-tree fallback.
         LoreSnapshotStore lore = new(SourceStorePaths.ForWorkspace(paths.WorkspaceDirectory));
-        SnapshotManifest sourceManifest = lore.Inspect(sourceSnapshotId);
+        bool hasMaterialization = Directory.Exists(materialized);
+        SnapshotManifest sourceManifest = resume && hasMaterialization
+            ? lore.Verify(sourceSnapshotId, ct)
+            : lore.Inspect(sourceSnapshotId);
         if (!sourceManifest.Files.Any(file => file.Path == "CMakeLists.txt"))
         {
             throw new InvalidDataException("Source snapshot does not contain CMakeLists.txt at its root.");
         }
-        if (!Directory.Exists(materialized))
+        if (!hasMaterialization)
         {
             lore.Materialize(sourceSnapshotId, materialized);
         }

@@ -1,11 +1,13 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.CMake.Toolchains;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Toolchains;
 using CMakeWorkflow.Profiling.Workflows;
-using CMakeWorkflow.CMake.Serialization;
 
 namespace CMakeWorkflow.Host.Workflows;
 
@@ -42,23 +44,25 @@ public static class DurableWorkflowExecutor
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         using DurableAcceptanceStore store = new(paths.WorkspaceDirectory);
         AcceptedWorkflow accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
-        // Source-bound recovery needs verified source/tree evidence in run.json (P4.3).
-        // Never resume such an operation by planning against its original live tree.
-        if (store.GetSourceSnapshotId(operationId) is not null)
-        {
-            throw new InvalidOperationException("source_snapshot_resume_requires_p4_3");
-        }
-        (string? RunDirectory, string? CheckpointSha256) = store.GetDispatchCheckpoint(operationId)
+        string? sourceId = store.GetSourceSnapshotId(operationId);
+        (string runDirectory, _) = store.GetDispatchCheckpoint(operationId)
                     ?? throw new InvalidOperationException("resume_checkpoint_missing");
-        string output = paths.Require(RunDirectory);
+        string output = paths.Require(runDirectory);
         string checkpointPath = paths.Require(Path.Combine(output, "run.json"));
-        WorkflowReport saved = System.Text.Json.JsonSerializer.Deserialize(
-            await File.ReadAllBytesAsync(checkpointPath, cancellationToken),
-            WorkflowJson.Default.WorkflowReport) ?? throw new InvalidDataException("Invalid checkpoint.");
+        byte[] checkpoint = await File.ReadAllBytesAsync(checkpointPath, cancellationToken);
+        WorkflowReport saved = JsonSerializer.Deserialize(checkpoint, WorkflowJson.Default.WorkflowReport) ?? throw new InvalidDataException("Invalid checkpoint.");
+        if (!string.Equals(saved.SourceSnapshotId, sourceId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("source_snapshot_resume_binding_mismatch");
+        }
         string manifest = paths.Require(saved.Workflow);
-        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, store.GetSnapshot(operationId),
-            store.GetWorkflowSelection(operationId), null,
-            cancellationToken, paths.Read);
+        byte[] manifestBytes = store.GetSnapshot(operationId);
+        IReadOnlyList<string> selection = store.GetWorkflowSelection(operationId);
+        WorkflowPlan plan = sourceId is null
+            ? await WorkflowPlanner.LoadSnapshotAsync(manifest, manifestBytes,
+                selection, null, cancellationToken, paths.Read)
+            : await WorkflowSourceSnapshotExecution.PlanAsync(paths, operationId, manifest,
+                output, manifestBytes, sourceId, selection, cancellationToken, resume: true);
         if (!string.Equals(plan.ManifestHash, accepted.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Resume snapshot mismatch.");
@@ -73,11 +77,12 @@ public static class DurableWorkflowExecutor
 
         WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
         // Permanent claim occurs before any runner mutation or external dispatch.
-        _ = store.ClaimResumeAttempt(operationId, output);
+        _ = store.ClaimResumeAttempt(operationId, output, Convert.ToHexString(SHA256.HashData(checkpoint)));
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId);
         int code = await WorkflowRunner.RunAsync(plan, 1, output, cancellationToken,
             extension: new ProfileWorkflowExecutor(), resume: true,
-            beforeExternalDispatch: gate.ConfirmAsync, toolchains: toolchains);
+            beforeExternalDispatch: gate.ConfirmAsync, toolchains: toolchains,
+            sourceSnapshotId: sourceId);
         if (code is 0 or 1 or 130)
         {
             _ = store.FinalizeExecution(operationId, output, code);

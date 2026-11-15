@@ -99,13 +99,17 @@ public static class WorkflowRunner
                     "Resume requires a needs_attention checkpoint with identical workflow and manifest; interrupted running checkpoints can only be quarantined.");
             }
 
+            // Execution can resolve a default configuration after configure. The
+            // requested configuration is the graph input recorded before dispatch.
             if (saved.Nodes.Count != report.Nodes.Count ||
                 saved.Nodes.Where((n, i) => n.Id != report.Nodes[i].Id || n.Kind != report.Nodes[i].Kind ||
                                             n.Target != report.Nodes[i].Target ||
                                             !WorkflowPlanner.PathComparer.Equals(
                                                 BuildTreeOwnership.CanonicalPath(n.BuildDirectory),
                                                 BuildTreeOwnership.CanonicalPath(report.Nodes[i].BuildDirectory)) ||
-                                            n.Configuration != report.Nodes[i].Configuration ||
+                                            (n.RequestedContext is { } requested
+                                                ? requested.Configuration != report.Nodes[i].RequestedContext?.Configuration
+                                                : n.Configuration != report.Nodes[i].Configuration) ||
                                             !n.Dependencies.SequenceEqual(report.Nodes[i].Dependencies)).Any())
             {
                 throw new InvalidDataException("Resume graph differs from saved execution.");

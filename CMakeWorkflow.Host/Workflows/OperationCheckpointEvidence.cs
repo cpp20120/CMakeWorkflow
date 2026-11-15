@@ -9,7 +9,8 @@ namespace CMakeWorkflow.Host.Workflows;
 /// Null terminal/resume-source fields mean that evidence is absent, never inferred success or safe retry.
 /// </remarks>
 internal sealed record OperationCheckpointEvidence(string SnapshotSha256,
-    string? TerminalState = null, int ResumeCount = 0, string? ResumeSourceCheckpointSha256 = null);
+    string? TerminalState = null, int ResumeCount = 0, string? ResumeSourceCheckpointSha256 = null,
+    string? SourceSnapshotId = null);
 
 /// <summary>Validates domain-specific checkpoint evidence for each durable transition.</summary>
 /// <remarks>

@@ -175,6 +175,7 @@ if (args.Length > 0 && args[0] == "--source-binding-tests")
     try
     {
         await SourceBindingExecutionTests.RunAsync(sourceRoot);
+        await SourceBindingRecoveryTests.RunAsync(sourceRoot);
     }
     finally
     {

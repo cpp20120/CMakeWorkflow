@@ -25,7 +25,7 @@ internal sealed class CMakeWorkflowCheckpointEvidenceCodec : IOperationCheckpoin
                      ?? throw new InvalidDataException("Invalid runner checkpoint.");
         return report.Status != "running" || !report.Nodes.Any(n => n.Status == "running")
             ? throw new InvalidDataException("Runner checkpoint has no admitted dispatch.")
-            : new(report.ManifestHash);
+            : new(report.ManifestHash, SourceSnapshotId: report.SourceSnapshotId);
     }
 
     /// <inheritdoc/>
@@ -41,7 +41,7 @@ internal sealed class CMakeWorkflowCheckpointEvidenceCodec : IOperationCheckpoin
             report.Nodes.Any(n => n.Status is "running" or "outcome_unknown") ||
             report.Nodes.Any(n => n.Status is not ("succeeded" or "needs_attention" or "pending" or "blocked"))
             ? throw new InvalidOperationException("resume_checkpoint_not_safe")
-            : new(report.ManifestHash);
+            : new(report.ManifestHash, SourceSnapshotId: report.SourceSnapshotId);
     }
 
     /// <inheritdoc/>
