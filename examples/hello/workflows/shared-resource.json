@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "debug": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed"
+    },
+    "release": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello-release",
+      "configuration": "Release",
+      "configurePreset": "release",
+      "mode": "managed"
+    },
+    "test": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello-demo",
+      "configuration": "Debug",
+      "configurePreset": "demo",
+      "mode": "managed"
+    }
+  },
+  "nodes": [
+    { "id": "configure-debug", "kind": "configure", "context": "debug" },
+    { "id": "configure-release", "kind": "configure", "context": "release" },
+    { "id": "configure-test", "kind": "configure", "context": "test" },
+    { "id": "build-debug", "kind": "build", "context": "debug", "target": "workflow_demo", "dependsOn": ["configure-debug"] },
+    { "id": "build-release", "kind": "build", "context": "release", "target": "workflow_demo", "dependsOn": ["configure-release"] },
+    { "id": "build-test", "kind": "build", "context": "test", "target": "workflow_demo", "dependsOn": ["configure-test"] },
+    {
+      "id": "measure-debug",
+      "kind": "run",
+      "from": "build-debug",
+      "dependsOn": ["build-release", "build-test"],
+      "resources": ["measurement-host"],
+      "arguments": ["--hold"]
+    },
+    {
+      "id": "measure-release",
+      "kind": "run",
+      "from": "build-release",
+      "dependsOn": ["build-debug", "build-test"],
+      "resources": ["measurement-host"],
+      "arguments": ["--hold"]
+    },
+    {
+      "id": "independent-test",
+      "kind": "ctest",
+      "context": "test",
+      "dependsOn": ["build-test", "build-debug", "build-release"],
+      "testRegex": "^scheduler-smoke$"
+    }
+  ]
+}

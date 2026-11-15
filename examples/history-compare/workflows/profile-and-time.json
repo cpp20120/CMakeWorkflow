@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "benchmark": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/history-compare/build",
+      "configuration": "Release",
+      "mode": "adopt",
+      "provenancePolicy": "allowUnverified"
+    }
+  },
+  "nodes": [
+    { "id": "build", "kind": "build", "context": "benchmark", "target": "median_bench" },
+    { "id": "timing_001", "kind": "run", "from": "build", "resources": ["measurement-host"], "timeoutSeconds": 30 },
+    {
+      "id": "profile-cpu",
+      "kind": "profile",
+      "from": "build",
+      "dependsOn": ["timing_001"],
+      "exclusive": true,
+      "timeoutSeconds": 45,
+      "options": { "backend": "auto", "mode": "cpu", "captureTimeoutSeconds": "30" }
+    }
+  ]
+}

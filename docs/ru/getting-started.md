@@ -46,5 +46,8 @@ dotnet bin/Release/net10.0/CMakeWorkflow.dll target resolve --build-dir BUILD_DI
 признание неполноты provenance, **не** разрешение игнорировать известные конфликты source/generator/configuration.
 `target run` всё равно запрашивает native build перед исполнением.
 
+Попробуйте [сравнить две сборки в History](history-compare-example.md), чтобы измерить эффект изменения кода и открыть
+сохранённые прогоны.
+
 Дальше: [манифесты](../workflows.md), [CLI](../cli.md), [результаты и History](../results-and-history.md), [recovery](../recovery.md)
 и [интеграции](../integrations.md).

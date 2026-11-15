@@ -53,6 +53,8 @@ previously existing executable is current.
 
 ## Next steps
 
+Try [comparing two C++ builds in History](history-compare-example.md) to measure a code change and inspect the saved runs.
+
 Read [workflow manifests](workflows.md) for dependencies and build-tree
 rules, [results and History](results-and-history.md) for saved data, and [recovery](recovery.md) before operating
 workflows with non-idempotent side effects. For integrated tools, [VS Code](integrations.md#vs-code-extension) and

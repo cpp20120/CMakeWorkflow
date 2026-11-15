@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "hello": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed"
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "hello" },
+    { "id": "build", "kind": "build", "context": "hello", "target": "hello", "dependsOn": ["configure"] },
+    {
+      "id": "read-pinned-message",
+      "kind": "run",
+      "from": "build",
+      "workingDirectory": "../../../out/workflow-examples/inputs",
+      "arguments": ["--read-message", "message.txt"],
+      "inputs": [
+        {
+          "path": "../../../out/workflow-examples/inputs/message.txt",
+          "sha256": "44331495ccab8bd462998c38102e6f121f32376cf082a081b6bdb9a0ab32c285",
+          "snapshot": true
+        }
+      ]
+    }
+  ]
+}

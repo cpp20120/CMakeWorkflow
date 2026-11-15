@@ -8,6 +8,22 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "release",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/../../out/hello-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "demo",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/../../out/hello-demo",
+      "cacheVariables": {
+        "ENABLE_SCHEDULER_DEMO_TEST": true
+      }
     }
   ]
 }

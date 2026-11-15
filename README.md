@@ -11,6 +11,8 @@ CMake and Ninja manage native builds. CMakeWorkflow coordinates the operations a
 ## Documentation
 
 - [Getting started](docs/en/getting-started.md) and [CLI reference](docs/en/cli.md)
+- [Compare two C++ builds in History](docs/en/history-compare-example.md) · [Пример сравнения сборок](docs/ru/history-compare-example.md)
+- [Ready-to-run JSON workflows](examples/README.md)
 - [Host RPC and .NET workflow API](docs/en/workflow-authoring-api.md), [operation and History read API](docs/en/host-read-api.md)
 - [VS Code integration](docs/en/integrations.md#vs-code-extension)
 - [Документация на русском](docs/ru/README.md)

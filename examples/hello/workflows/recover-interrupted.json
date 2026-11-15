@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "demo": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello-demo",
+      "configuration": "Debug",
+      "configurePreset": "demo",
+      "mode": "managed"
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "demo" },
+    { "id": "build", "kind": "build", "context": "demo", "target": "workflow_demo", "dependsOn": ["configure"] },
+    {
+      "id": "record-attempt",
+      "kind": "run",
+      "from": "build",
+      "arguments": ["--record-and-hold", "attempts.log"],
+      "workingDirectory": "../../../out/hello-demo",
+      "timeoutSeconds": 30
+    }
+  ]
+}

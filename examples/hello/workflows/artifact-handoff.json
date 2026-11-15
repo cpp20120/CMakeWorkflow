@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "hello": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed"
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "hello" },
+    { "id": "build", "kind": "build", "context": "hello", "target": "hello", "dependsOn": ["configure"] },
+    {
+      "id": "stage-message",
+      "kind": "invoke",
+      "context": "hello",
+      "target": "stage_message",
+      "dependsOn": ["configure"],
+      "outputs": [{ "name": "message", "path": "../../../out/hello/workflow-message.txt" }]
+    },
+    {
+      "id": "read-message",
+      "kind": "run",
+      "from": "build",
+      "inputs": [{ "from": "stage-message", "artifact": "message" }],
+      "workingDirectory": "../../../out/hello",
+      "arguments": ["--read-message", "workflow-message.txt"]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "debug": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed"
+    },
+    "release": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello-release",
+      "configuration": "Release",
+      "configurePreset": "release",
+      "mode": "managed"
+    }
+  },
+  "nodes": [
+    { "id": "configure-debug", "kind": "configure", "context": "debug" },
+    { "id": "build-debug", "kind": "build", "context": "debug", "target": "hello", "dependsOn": ["configure-debug"] },
+    { "id": "test-debug", "kind": "ctest", "context": "debug", "labelRegex": "smoke", "dependsOn": ["build-debug"] },
+    { "id": "configure-release", "kind": "configure", "context": "release" },
+    { "id": "build-release", "kind": "build", "context": "release", "target": "hello", "dependsOn": ["configure-release"] },
+    { "id": "test-release", "kind": "ctest", "context": "release", "labelRegex": "smoke", "dependsOn": ["build-release"] }
+  ]
+}

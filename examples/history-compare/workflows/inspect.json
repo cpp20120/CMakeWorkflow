@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "release": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/history-compare/build",
+      "configuration": "Release",
+      "mode": "observe"
+    }
+  },
+  "nodes": [
+    { "id": "inspect-release", "kind": "inspect", "context": "release" }
+  ]
+}
