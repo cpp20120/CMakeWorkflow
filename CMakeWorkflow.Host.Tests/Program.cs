@@ -168,6 +168,24 @@ if (args.Length > 0 && args[0] == "--durable-operation-tests")
     }
 }
 
+if (args.Length > 0 && args[0] == "--source-binding-tests")
+{
+    string sourceRoot = Path.Combine(Path.GetTempPath(), "cmwf-source-binding-tests-" + Guid.NewGuid().ToString("N"));
+    _ = Directory.CreateDirectory(sourceRoot);
+    try
+    {
+        await SourceBindingExecutionTests.RunAsync(sourceRoot);
+    }
+    finally
+    {
+        if (Directory.Exists(sourceRoot))
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+        }
+    }
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--durable-persistence-tests")
 {
     string persistenceRoot = Path.Combine(Path.GetTempPath(), "cmwf-persistence-" + Guid.NewGuid().ToString("N"));

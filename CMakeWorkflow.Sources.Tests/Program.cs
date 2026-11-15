@@ -5,7 +5,7 @@ using CMakeWorkflow.Sources;
 
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("Usage: capture-git <store> <repo-root> [--include-untracked] | capture-files <store> <source> <path>... | inspect <store> <id> | restore <store> <id> <destination> | self-test");
+    Console.Error.WriteLine("Usage: store-path <canonical-workspace> | capture-git <store> <repo-root> [--include-untracked] | capture-files <store> <source> <path>... | inspect <store> <id> | restore <store> <id> <destination> | self-test");
     return 2;
 }
 
@@ -13,6 +13,9 @@ try
 {
     switch (args[0])
     {
+        case "store-path" when args.Length == 2:
+            Console.WriteLine(SourceStorePaths.ForWorkspace(args[1]));
+            break;
         case "capture-git" when args.Length is 3 or 4:
             {
                 bool includeUntracked = args.Length == 4 && args[3] == "--include-untracked";

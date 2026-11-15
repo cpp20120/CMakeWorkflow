@@ -27,13 +27,6 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
     public OperationReference Start(string workspace, WorkflowStartRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        // P4.1 persists the source identity, but P4.2 must make CMake consume its
-        // materialized tree. Refuse the opt-in until that invariant is implemented.
-        if (request.SourceSnapshotId is not null)
-        {
-            throw new InvalidOperationException("source_snapshot_execution_not_enabled");
-        }
-
         if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)
         {
             throw new InvalidOperationException("host_shutting_down");

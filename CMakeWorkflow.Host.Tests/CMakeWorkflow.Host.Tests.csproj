@@ -9,5 +9,6 @@
         <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Host/CMakeWorkflow.Host.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.Sources/CMakeWorkflow.Sources.csproj"/>
     </ItemGroup>
 </Project>

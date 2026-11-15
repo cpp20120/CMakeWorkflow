@@ -23,4 +23,7 @@ public sealed record StartWorkflowOptions(
     public IReadOnlyList<string>? Only { get; init; }
 
     public HistoryPolicy? HistoryPolicy { get; init; }
+
+    /// <summary>Optional immutable Lore source ID; Host rewrites managed CMake paths to a materialized tree.</summary>
+    public string? SourceSnapshotId { get; init; }
 }

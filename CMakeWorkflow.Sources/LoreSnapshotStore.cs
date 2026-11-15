@@ -92,10 +92,11 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             pointers = [.. locations];
         }
 
-        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(new SnapshotManifest(SchemaVersion, entries));
+        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(
+            new SnapshotManifest(SchemaVersion, entries), SourceSnapshotJson.Default.SnapshotManifest);
         string snapshotId = Sha256(manifestBytes);
         byte[] bindingBytes = JsonSerializer.SerializeToUtf8Bytes(
-            new LoreBindings(SchemaVersion, snapshotId, pointers));
+            new LoreBindings(SchemaVersion, snapshotId, pointers), SourceSnapshotJson.Default.LoreBindings);
         string manifests = Path.Combine(_storeRoot, "manifests");
         _ = Directory.CreateDirectory(manifests);
         // Publish physical locators first, then the immutable logical manifest.
@@ -115,7 +116,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         {
             throw new InvalidDataException("Manifest hash does not match snapshot ID.");
         }
-        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(data)
+        SnapshotManifest manifest = JsonSerializer.Deserialize(data, SourceSnapshotJson.Default.SnapshotManifest)
             ?? throw new InvalidDataException("Invalid snapshot manifest.");
         if (manifest.SchemaVersion != SchemaVersion || manifest.Files is null)
         {
@@ -137,7 +138,8 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             }
             previous = file.Path;
         }
-        if (!JsonSerializer.SerializeToUtf8Bytes(manifest).AsSpan().SequenceEqual(data))
+        if (!JsonSerializer.SerializeToUtf8Bytes(manifest, SourceSnapshotJson.Default.SnapshotManifest)
+                .AsSpan().SequenceEqual(data))
         {
             throw new InvalidDataException("Noncanonical snapshot manifest encoding.");
         }
@@ -195,7 +197,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
     private LoreBindings ReadBindings(string snapshotId, SnapshotManifest manifest)
     {
         byte[] raw = File.ReadAllBytes(Path.Combine(_storeRoot, "manifests", snapshotId + ".lore.json"));
-        LoreBindings binding = JsonSerializer.Deserialize<LoreBindings>(raw)
+        LoreBindings binding = JsonSerializer.Deserialize(raw, SourceSnapshotJson.Default.LoreBindings)
             ?? throw new InvalidDataException("Invalid Lore bindings.");
         if (binding.SchemaVersion != SchemaVersion || binding.SnapshotId != snapshotId ||
             binding.Files is null || binding.Files.Length != manifest.Files.Count)
@@ -212,7 +214,8 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             ValidateHash(entry.LoreHash, 64);
             ValidateHash(entry.LoreContext, 32);
         }
-        if (!JsonSerializer.SerializeToUtf8Bytes(binding).AsSpan().SequenceEqual(raw))
+        if (!JsonSerializer.SerializeToUtf8Bytes(binding, SourceSnapshotJson.Default.LoreBindings)
+                .AsSpan().SequenceEqual(raw))
         {
             throw new InvalidDataException("Noncanonical Lore bindings.");
         }

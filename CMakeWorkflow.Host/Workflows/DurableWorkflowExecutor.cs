@@ -42,6 +42,12 @@ public static class DurableWorkflowExecutor
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         using DurableAcceptanceStore store = new(paths.WorkspaceDirectory);
         AcceptedWorkflow accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
+        // Source-bound recovery needs verified source/tree evidence in run.json (P4.3).
+        // Never resume such an operation by planning against its original live tree.
+        if (store.GetSourceSnapshotId(operationId) is not null)
+        {
+            throw new InvalidOperationException("source_snapshot_resume_requires_p4_3");
+        }
         (string? RunDirectory, string? CheckpointSha256) = store.GetDispatchCheckpoint(operationId)
                     ?? throw new InvalidOperationException("resume_checkpoint_missing");
         string output = paths.Require(RunDirectory);
@@ -134,9 +140,12 @@ public static class DurableWorkflowExecutor
         }
 
         byte[] snapshot = store.GetSnapshot(operationId);
-        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(manifest, snapshot,
-            store.GetWorkflowSelection(operationId), null,
-            cancellationToken, paths.Read);
+        string? sourceId = store.GetSourceSnapshotId(operationId);
+        WorkflowPlan plan = sourceId is null
+            ? await WorkflowPlanner.LoadSnapshotAsync(manifest, snapshot,
+                store.GetWorkflowSelection(operationId), null, cancellationToken, paths.Read)
+            : await WorkflowSourceSnapshotExecution.PlanAsync(paths, operationId, manifest,
+                output, snapshot, sourceId, store.GetWorkflowSelection(operationId), cancellationToken);
         if (!string.Equals(plan.ManifestHash, existing.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Immutable snapshot hash changed.");
