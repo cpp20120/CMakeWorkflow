@@ -176,9 +176,12 @@ internal static class HistoryReports
 
         ParsedRun run = new()
         {
-            Run = new(Id(directory), directory, "workflow", identity,
+            Run = new HistoryRun(Id(directory), directory, "workflow", identity,
                 Str(root, "manifestHash"), Time(root, "startedAt"), Time(root, "finishedAt"),
                 status, null, sourceHash)
+            {
+                SourceSnapshotId = Str(root, "sourceSnapshotId")
+            }
         };
         if (run.Run.FinishedAt is null)
         {

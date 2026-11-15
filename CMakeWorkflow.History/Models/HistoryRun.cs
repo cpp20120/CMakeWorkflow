@@ -17,4 +17,7 @@ public sealed record HistoryRun(
     string? EnvironmentFingerprint = null,
     HistoryHostEnvironment? Environment = null,
 
-List<HistoryBuildEnvironment>? BuildEnvironments = null);
+List<HistoryBuildEnvironment>? BuildEnvironments = null)
+{
+    public string? SourceSnapshotId { get; init; }
+}

@@ -338,7 +338,10 @@ public sealed record HistoryNode(string RunId, string Id, string Kind, string St
 Source: [CMakeWorkflow.Client/History/HistoryReadModels.cs](../CMakeWorkflow.Client/History/HistoryReadModels.cs#L74)
 
 ```csharp
-public sealed record HistoryRun(string Id, string Directory, string Format, string? Workflow, string? ManifestHash, string? StartedAt, string? FinishedAt, string Status, string? Revision, string SourceHash, bool SourceAvailable = true, string? HostId = null, string? EnvironmentFingerprint = null, CMakeWorkflow.Client.History.HistoryHostEnvironment? Environment = null, System.Collections.Generic.List<CMakeWorkflow.Client.History.HistoryBuildEnvironment>? BuildEnvironments = null);
+public sealed record HistoryRun(string Id, string Directory, string Format, string? Workflow, string? ManifestHash, string? StartedAt, string? FinishedAt, string Status, string? Revision, string SourceHash, bool SourceAvailable = true, string? HostId = null, string? EnvironmentFingerprint = null, CMakeWorkflow.Client.History.HistoryHostEnvironment? Environment = null, System.Collections.Generic.List<CMakeWorkflow.Client.History.HistoryBuildEnvironment>? BuildEnvironments = null)
+{
+    public string? SourceSnapshotId { get; init; }
+}
 ```
 
 #### `HistoryRunPage`
@@ -1080,7 +1083,10 @@ Even finalized reports may omit domain-specific environment/timing details.
 Source: [CMakeWorkflow.Client/Workflows/OperationOverview.cs](../CMakeWorkflow.Client/Workflows/OperationOverview.cs#L20)
 
 ```csharp
-public sealed record OperationOverview(int SchemaVersion, CMakeWorkflow.Client.Workflows.OperationSnapshot Operation, bool IsFinalized, string? RunDirectory, string? ReportSha256, System.DateTimeOffset? StartedAt, System.DateTimeOffset? FinishedAt, string? Error, string? HostId, string? EnvironmentFingerprint, System.Collections.Generic.List<CMakeWorkflow.Client.Workflows.OperationNodeView> Nodes);
+public sealed record OperationOverview(int SchemaVersion, CMakeWorkflow.Client.Workflows.OperationSnapshot Operation, bool IsFinalized, string? RunDirectory, string? ReportSha256, System.DateTimeOffset? StartedAt, System.DateTimeOffset? FinishedAt, string? Error, string? HostId, string? EnvironmentFingerprint, System.Collections.Generic.List<CMakeWorkflow.Client.Workflows.OperationNodeView> Nodes)
+{
+    public string? SourceSnapshotId { get; init; }
+}
 ```
 
 #### `OperationPage`

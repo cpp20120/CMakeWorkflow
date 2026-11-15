@@ -33,12 +33,14 @@ internal static class OperationOverviewReader
         _ = paths.Database(database);
         OperationReference operation;
         bool finalized;
+        string? sourceId;
         using (DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true))
         {
             AcceptedWorkflow accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
             operation = new OperationReference(accepted.WorkspaceId, accepted.OperationId,
                 accepted.ClientRequestId, store.GetDomainKind(operationId), accepted.State,
                 accepted.ManifestSha256, accepted.ManifestBaseDirectory);
+            sourceId = store.GetSourceSnapshotId(operationId);
             finalized = store.GetFinalization(operationId) is not null;
         }
 
@@ -46,18 +48,29 @@ internal static class OperationOverviewReader
         // The view deliberately does not expose mutable checkpoint/node state.
         if (!finalized)
         {
-            return new(1, operation, false, null, null, null, null, null, null, null, []);
+            return new OperationOverview(1, operation, false, null, null, null, null, null, null, null, [])
+            {
+                SourceSnapshotId = sourceId
+            };
         }
 
         if (operation.Kind == "workflow")
         {
             WorkflowReportSnapshot verified = await OperationArtifactReader.ReportAsync(paths, operationId, ct);
-            return new(1, operation, true, verified.RunDirectory, verified.Revision,
-                verified.Report.StartedAt, verified.Report.FinishedAt, verified.Report.Error,
-                verified.Report.Environment?.HostId, verified.Report.Environment?.Fingerprint,
-                [.. verified.Report.Nodes.Select(n => new OperationNodeView(n.Id, n.Kind, n.Status,
-                    [.. n.Dependencies], n.StartedAt, n.FinishedAt,
-                    n.ExitCode, n.Error, n.Stdout, n.Stderr))]);
+            // Older P4.2 reports predate provenance; still expose the immutable
+            // admission binding without treating those historical bytes as corrupted.
+            return verified.Report.SourceSnapshotId is not null &&
+                   !string.Equals(verified.Report.SourceSnapshotId, sourceId, StringComparison.Ordinal)
+                ? throw new ApplicationRefusal("report_changed", "Report source binding differs from admission.")
+                : new OperationOverview(1, operation, true, verified.RunDirectory, verified.Revision,
+                    verified.Report.StartedAt, verified.Report.FinishedAt, verified.Report.Error,
+                    verified.Report.Environment?.HostId, verified.Report.Environment?.Fingerprint,
+                    [.. verified.Report.Nodes.Select(n => new OperationNodeView(n.Id, n.Kind, n.Status,
+                        [.. n.Dependencies], n.StartedAt, n.FinishedAt,
+                        n.ExitCode, n.Error, n.Stdout, n.Stderr))])
+                {
+                    SourceSnapshotId = sourceId
+                };
         }
         if (operation.Kind == "process")
         {
@@ -79,11 +92,14 @@ internal static class OperationOverviewReader
             return verified.Report.Nodes.Any(n => !declared.ContainsKey(n.Id)) ||
                 verified.Report.Nodes.Select(n => n.Id).Distinct(StringComparer.Ordinal).Count() != declared.Count
                 ? throw new ApplicationRefusal("report_changed", "Process report node identities differ from admission.")
-                : new(1, operation, true, verified.Directory, verified.Revision,
+                : new OperationOverview(1, operation, true, verified.Directory, verified.Revision,
                 null, verified.Report.FinishedAt, verified.Report.Error, null, null,
                 [.. verified.Report.Nodes.Select(n => new OperationNodeView(n.Id, "process", n.Status,
                     [.. declared[n.Id].Dependencies ?? []], n.StartedAt, n.FinishedAt,
-                    n.ExitCode, n.Error, n.Stdout, n.Stderr))]);
+                    n.ExitCode, n.Error, n.Stdout, n.Stderr))])
+                {
+                    SourceSnapshotId = sourceId
+                };
         }
         throw new ApplicationRefusal("unknown_execution_domain", "Unsupported durable operation domain.");
     }

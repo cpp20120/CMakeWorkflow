@@ -88,7 +88,10 @@ public sealed record HistoryRun(
     string? EnvironmentFingerprint = null,
     HistoryHostEnvironment? Environment = null,
     [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.History.HistoryRun.BuildEnvironments (List<HistoryBuildEnvironment>?) is exposed through CMakeWorkflow.Client.History.HistoryService.RunsAsync; retain this Client SDK property signature.")]
-List<HistoryBuildEnvironment>? BuildEnvironments = null);
+List<HistoryBuildEnvironment>? BuildEnvironments = null)
+{
+    public string? SourceSnapshotId { get; init; }
+}
 
 public sealed record HistoryStats(
     int Count,

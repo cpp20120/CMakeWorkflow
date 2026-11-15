@@ -13,7 +13,7 @@ or an executable alone.
 | Workflow manifest input                                | `schemaVersion: 1` or `2` |
 | `WorkflowPlanView`, `WorkflowEvent`, target resolution | `schemaVersion: 1`        |
 | `WorkflowReport` in `run.json`                         | `schemaVersion: 1`        |
-| SQLite catalog                                         | `PRAGMA user_version = 4` |
+| SQLite catalog                                         | `PRAGMA user_version = 5` |
 
 These are not a single product version. The installed binary and client/extension compatibility must be checked
 separately.
@@ -53,7 +53,8 @@ Node states can be `pending`, `running`, `succeeded`, `failed`, `blocked`, `canc
 `outcome_unknown`; `running` is intermediate.
 
 **`run.json` is the authoritative workflow state**, not JSONL. It stores manifest identity, timestamps, overall state,
-individual node results, failure information and recorded host/build environments. The
+individual node results, failure information and recorded host/build environments. Host runs bound to a Lore snapshot
+also record `sourceSnapshotId`, which History imports. The
 complete [NodeResult implementation](../../CMakeWorkflow.CMake/Reporting/NodeResult.cs) also holds executable and artifact
 identity, arguments, timing and outputs. Node `stdout`, `stderr` and output paths may be relative to the run directory;
 event artifact paths may be absolute. Always validate an artifact path exists before opening it.
@@ -94,7 +95,7 @@ For the standalone CLI, the default catalog is `CMAKEWORKFLOW_HISTORY_DB` or the
 `.cmakeworkflow/history.sqlite` inside the workspace. See [durable History indexing](workflow-authoring-api.md#durable-history-indexing)
 for status and recovery.
 `CMAKEWORKFLOW_STATE_DIR` relocates persistent local host state. The host identifier is random and local; it is not an
-OS machine ID or hostname. History uses transactional, idempotent import and migrations from schema 0→1→2→3→4, with
+OS machine ID or hostname. History uses transactional, idempotent import and migrations from schema 0→1→2→3→4→5, with
 indexer-version tracking for derived data. Moving and reimporting a run may produce a different **local** run ID.
 Active/partial reports are skipped; mutation and weak-memory reports require a checked completion marker. Do not query
 the SQLite schema directly from an editor. Use the [History RPC](host-read-api.md) or the CLI.

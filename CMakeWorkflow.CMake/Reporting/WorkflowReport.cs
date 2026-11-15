@@ -8,6 +8,8 @@ public sealed class WorkflowReport
     public int SchemaVersion { get; set; } = 1;
     public string Workflow { get; set; } = "";
     public string ManifestHash { get; set; } = "";
+    // The exact Lore source identity bound at durable admission; null for legacy workflows.
+    public string? SourceSnapshotId { get; set; }
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
     public string Status { get; set; } = "running";

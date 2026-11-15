@@ -835,6 +835,7 @@ try
                               ALTER TABLE runs DROP COLUMN host_id;
                               ALTER TABLE runs DROP COLUMN environment_fingerprint;
                               ALTER TABLE runs DROP COLUMN environment_json;
+                              ALTER TABLE runs DROP COLUMN source_snapshot_id;
                               ALTER TABLE runs DROP COLUMN indexer_version;
                               PRAGMA user_version=1;
                               """;
@@ -846,7 +847,7 @@ try
     using (HistoryStore upgraded = new(oldPath))
     {
         Check(upgraded.Import(success, false).Contains("Imported 1", StringComparison.Ordinal), "v1 migration");
-        Check(upgraded.Import(success, false).Contains("unchanged 1", StringComparison.Ordinal), "v4 indexer version");
+        Check(upgraded.Import(success, false).Contains("unchanged 1", StringComparison.Ordinal), "current indexer version");
         Check(upgraded.Runs(50, null, null, null, null, null).Count == 1,
             "v1 migration preserved stable run identity");
     }
@@ -867,6 +868,7 @@ try
                               ALTER TABLE runs DROP COLUMN host_id;
                               ALTER TABLE runs DROP COLUMN environment_fingerprint;
                               ALTER TABLE runs DROP COLUMN environment_json;
+                              ALTER TABLE runs DROP COLUMN source_snapshot_id;
                               UPDATE runs SET indexer_version=2;
                               PRAGMA user_version=2;
                               """;

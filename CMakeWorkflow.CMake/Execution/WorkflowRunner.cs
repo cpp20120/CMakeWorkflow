@@ -34,11 +34,13 @@ public static class WorkflowRunner
     /// <param name="resume">Whether to validate and recover an existing checkpoint instead of initializing a new run.</param>
     /// <param name="beforeExternalDispatch">Optional post-checkpoint authorization callback, awaited before workers start; null omits the outer gate.</param>
     /// <param name="toolchains">Materialized Host toolchain runtimes; null uses an empty binding map.</param>
+    /// <param name="sourceSnapshotId">Optional immutable Lore source identity supplied by the durable Host.</param>
     /// <returns>Runner status code: 0 succeeded, 1 failed, 130 canceled; recovery refusal/uncertainty uses other nonterminal codes.</returns>
     public static async Task<int> RunAsync(WorkflowPlan plan, int jobs, string output, CancellationToken ct,
         IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false,
         Func<string, CancellationToken, Task>? beforeExternalDispatch = null,
-        IReadOnlyDictionary<string, WorkflowToolchainRuntime>? toolchains = null)
+        IReadOnlyDictionary<string, WorkflowToolchainRuntime>? toolchains = null,
+        string? sourceSnapshotId = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         toolchains ??= new Dictionary<string, WorkflowToolchainRuntime>(WorkflowPlanner.PathComparer);
@@ -62,6 +64,7 @@ public static class WorkflowRunner
         {
             Workflow = plan.File,
             ManifestHash = plan.ManifestHash,
+            SourceSnapshotId = sourceSnapshotId,
             Toolchains = WorkflowToolchainAdmission.Identities(toolchains),
             Nodes = [.. plan.Nodes.Select(n => new NodeResult
             {
@@ -88,6 +91,7 @@ public static class WorkflowRunner
                         ?? throw new InvalidDataException("Invalid resume report.");
             if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") ||
                 saved.ManifestHash != plan.ManifestHash ||
+                !string.Equals(saved.SourceSnapshotId, sourceSnapshotId, StringComparison.Ordinal) ||
                 !WorkflowPlanner.PathComparer.Equals(
                     BuildTreeOwnership.CanonicalPath(saved.Workflow), BuildTreeOwnership.CanonicalPath(plan.File)))
             {

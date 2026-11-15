@@ -110,6 +110,22 @@ internal static class SourceBindingExecutionTests
 
             string isolatedRoot = Path.Combine(workspace, ".cw", operation);
             string isolatedSource = Path.Combine(isolatedRoot, "s");
+            using (System.Text.Json.JsonDocument report = System.Text.Json.JsonDocument.Parse(
+                       await File.ReadAllBytesAsync(Path.Combine(output, "run.json"))))
+            {
+                if (report.RootElement.GetProperty("sourceSnapshotId").GetString() != id)
+                {
+                    throw new UnreachableException("Runner report lost immutable Lore identity.");
+                }
+            }
+            using (CMakeWorkflow.History.Storage.HistoryStore history = new(Path.Combine(workspace, "history-test.sqlite")))
+            {
+                _ = history.Import(output, recursive: false);
+                if (history.Runs(10, null, null, null, null, null).Single().SourceSnapshotId != id)
+                {
+                    throw new UnreachableException("History index lost immutable Lore identity.");
+                }
+            }
             string stdout = await File.ReadAllTextAsync(Path.Combine(output, "execute.stdout.log"));
             if (!stdout.Contains("captured", StringComparison.Ordinal) ||
                 stdout.Contains("live", StringComparison.Ordinal) ||

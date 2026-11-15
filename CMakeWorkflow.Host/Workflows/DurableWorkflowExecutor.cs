@@ -184,6 +184,7 @@ public static class DurableWorkflowExecutor
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId);
         int exitCode = await WorkflowRunner.RunAsync(plan, jobs, output, cancellationToken,
             extension: new ProfileWorkflowExecutor(), toolchains: toolchains,
+            sourceSnapshotId: sourceId,
             beforeExternalDispatch: async (checkpoint, ct) =>
             {
                 await gate.ConfirmAsync(checkpoint, ct);

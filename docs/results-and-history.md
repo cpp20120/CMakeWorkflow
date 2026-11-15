@@ -12,7 +12,7 @@ Language:** [Русский](results-and-history.md) · [English](en/results-and
 | Входной workflow manifest                              | 1 или 2                   |
 | `WorkflowPlanView`, `WorkflowEvent`, target resolution | `schemaVersion: 1`        |
 | Сохраняемый `WorkflowReport` (`run.json`)              | `schemaVersion: 1`        |
-| SQLite schema                                          | `PRAGMA user_version = 4` |
+| SQLite schema                                          | `PRAGMA user_version = 5` |
 
 Проверяйте схему конкретного ответа на стороне интеграции. Версия установленного бинарника и наличие дополнительных
 команд — отдельная задача совместимости.
@@ -65,7 +65,8 @@ CMakeWorkflow workflow report RUN_DIRECTORY --json
 
 Корневые поля отчёта: `schemaVersion`, `workflow`, `manifestHash`, `startedAt`,
 `finishedAt`, `status`, `nodes`, `error`, `environment`, `environmentAtEnd`,
-`buildEnvironments`. Полная модель `NodeResult`, включая observations, artifact identity, `outputs`, argv и timing,
+`buildEnvironments`. Host записывает `sourceSnapshotId` для workflow из снимка Lore. History импортирует это поле.
+Полная модель `NodeResult`, включая observations, artifact identity, `outputs`, argv и timing,
 находится в
 [WorkflowRunner.cs](../CMakeWorkflow.CMake/Execution/WorkflowRunner.cs).
 
@@ -129,7 +130,7 @@ marker с hash; старый частичный JSON без такого мар�
 CMakeWorkflow; `CMAKEWORKFLOW_STATE_DIR`
 позволяет изменить его расположение. Это локальная случайная identity, не hostname и не OS machine ID.
 
-Импорт транзакционный и идемпотентный. Каталог поддерживает миграции схемы 0→1→2→3→4 и версию indexer для обновления
+Импорт транзакционный и идемпотентный. Каталог поддерживает миграции схемы 0→1→2→3→4→5 и версию indexer для обновления
 derived measurements. Перенос run в другой путь и повторный импорт создают другую локальную run identity.
 
 В Host режим `Default` сохраняет индекс в `.cmakeworkflow/history.sqlite` внутри workspace.

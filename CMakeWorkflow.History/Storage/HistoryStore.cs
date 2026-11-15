@@ -10,7 +10,7 @@ namespace CMakeWorkflow.History.Storage;
 
 public sealed class HistoryStore : IDisposable
 {
-    private const int CurrentIndexerVersion = 8;
+    private const int CurrentIndexerVersion = 9;
 
     public static string DefaultDatabasePath =>
         Environment.GetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB") is { Length: > 0 } value
@@ -51,18 +51,18 @@ public sealed class HistoryStore : IDisposable
             int current = Convert.ToInt32(version.ExecuteScalar(), CultureInfo.CurrentCulture);
             if (readOnly)
             {
-                if (current != 4)
+                if (current != 5)
                 {
                     throw new InvalidDataException(
-                        $"History schema {current} requires an explicit CLI migration; read-only API supports schema 4.");
+                        $"History schema {current} requires an explicit CLI migration; read-only API supports schema 5.");
                 }
 
                 return;
             }
 
-            if (current > 4)
+            if (current > 5)
             {
-                throw new InvalidDataException($"History database schema {current} is newer than supported version 4.");
+                throw new InvalidDataException($"History database schema {current} is newer than supported version 5.");
             }
 
             if (current == 0)
@@ -86,6 +86,12 @@ public sealed class HistoryStore : IDisposable
             if (current == 3)
             {
                 Migrate3To4(migration!);
+                current = 4;
+            }
+
+            if (current == 4)
+            {
+                Migrate4To5(migration!);
             }
 
             migration!.Commit();
@@ -141,6 +147,12 @@ public sealed class HistoryStore : IDisposable
     {
         Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN build_environment_json TEXT", tx);
         Execute(static command => command.CommandText = "PRAGMA user_version=4", tx);
+    }
+
+    private void Migrate4To5(SqliteTransaction tx)
+    {
+        Execute(static command => command.CommandText = "ALTER TABLE runs ADD COLUMN source_snapshot_id TEXT", tx);
+        Execute(static command => command.CommandText = "PRAGMA user_version=5", tx);
     }
 
     private void Execute(Action<SqliteCommand> configure, SqliteTransaction? tx = null, params object?[] args)
@@ -242,7 +254,7 @@ public sealed class HistoryStore : IDisposable
             Execute(static command => command.CommandText = "DELETE FROM measurements WHERE run_id=$p0; DELETE FROM artifacts WHERE run_id=$p0; DELETE FROM nodes WHERE run_id=$p0; DELETE FROM runs WHERE id=$p0;",
                 tx, parsed.Run.Id);
             HistoryRun r = parsed.Run;
-            Execute(static command => command.CommandText = "INSERT INTO runs (id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,indexer_version,host_id,environment_fingerprint,environment_json,build_environment_json) VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11,$p12,$p13,$p14)",
+            Execute(static command => command.CommandText = "INSERT INTO runs (id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,indexer_version,host_id,environment_fingerprint,environment_json,build_environment_json,source_snapshot_id) VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11,$p12,$p13,$p14,$p15)",
                 tx,
                 r.Id, r.Directory, r.Format, r.Workflow, r.ManifestHash, r.StartedAt,
                 r.FinishedAt, r.Status, r.Revision, r.SourceHash, CurrentIndexerVersion,
@@ -253,7 +265,8 @@ public sealed class HistoryStore : IDisposable
                 r.BuildEnvironments is null
                     ? null
                     : JsonSerializer.Serialize(r.BuildEnvironments,
-                        HistoryJson.Default.ListHistoryBuildEnvironment));
+                        HistoryJson.Default.ListHistoryBuildEnvironment),
+                r.SourceSnapshotId);
             foreach (HistoryNode n in parsed.Nodes)
             {
                 Execute(static command => command.CommandText = "INSERT INTO nodes VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8)", tx,
@@ -347,7 +360,10 @@ public sealed class HistoryStore : IDisposable
         S(r, 13) is { } builds
             ? JsonSerializer.Deserialize(builds,
                 HistoryJson.Default.ListHistoryBuildEnvironment)
-            : null);
+            : null)
+    {
+        SourceSnapshotId = S(r, 14)
+    };
 
     [SuppressMessage("Design", "CA1002", Justification = "Materializes SQLite rows into an owned List for History result DTOs and Host response construction; the reader is disposed before the list escapes.")]
     public List<HistoryRun> Runs(int limit, string? status, string? since, string? until,
@@ -355,7 +371,7 @@ public sealed class HistoryStore : IDisposable
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
-                          SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json
+                          SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json,source_snapshot_id
                           FROM runs WHERE ($p0 IS NULL OR status=$p0)
                             AND ($p1 IS NULL OR started_at >= $p1)
                             AND ($p2 IS NULL OR started_at <= $p2)
@@ -449,7 +465,7 @@ public sealed class HistoryStore : IDisposable
 
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
-            SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json
+            SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json,source_snapshot_id
             FROM runs
             WHERE rowid <= $watermark
               AND ($status IS NULL OR status = $status)
@@ -512,7 +528,7 @@ public sealed class HistoryStore : IDisposable
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText =
-            "SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json FROM runs WHERE id=$p0";
+            "SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json,source_snapshot_id FROM runs WHERE id=$p0";
         _ = cmd.Parameters.AddWithValue("$p0", id);
         using SqliteDataReader r = cmd.ExecuteReader();
         if (!r.Read())

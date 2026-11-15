@@ -23,7 +23,10 @@ public sealed record OperationOverview(
     string? RunDirectory, string? ReportSha256,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Error,
     string? HostId, string? EnvironmentFingerprint, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.OperationOverview.Nodes (List<OperationNodeView>) is exposed through CMakeWorkflow.Client.Workflows.OperationService.GetOverviewAsync; retain this Client SDK property signature.")]
-List<OperationNodeView> Nodes);
+List<OperationNodeView> Nodes)
+{
+    public string? SourceSnapshotId { get; init; }
+}
 
 /// <summary>Verified terminal node evidence; fields may be unavailable for nodes that never executed.</summary>
 /// <param name="Id">Node identifier.</param>

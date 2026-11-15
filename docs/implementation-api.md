@@ -419,7 +419,7 @@ Source: [CMakeWorkflow.CMake/Execution/WorkflowRunner.cs](../CMakeWorkflow.CMake
 ```csharp
 public static class WorkflowRunner
 {
-    public static System.Threading.Tasks.Task<int> RunAsync(CMakeWorkflow.CMake.Planning.WorkflowPlan plan, int jobs, string output, System.Threading.CancellationToken ct, CMakeWorkflow.Core.IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false, System.Func<string, System.Threading.CancellationToken, System.Threading.Tasks.Task>? beforeExternalDispatch = null, System.Collections.Generic.IReadOnlyDictionary<string, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime>? toolchains = null);
+    public static System.Threading.Tasks.Task<int> RunAsync(CMakeWorkflow.CMake.Planning.WorkflowPlan plan, int jobs, string output, System.Threading.CancellationToken ct, CMakeWorkflow.Core.IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false, System.Func<string, System.Threading.CancellationToken, System.Threading.Tasks.Task>? beforeExternalDispatch = null, System.Collections.Generic.IReadOnlyDictionary<string, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime>? toolchains = null, string? sourceSnapshotId = null);
 }
 ```
 
@@ -675,6 +675,7 @@ public sealed class WorkflowReport
     public int SchemaVersion { get; set; }
     public string Workflow { get; set; }
     public string ManifestHash { get; set; }
+    public string? SourceSnapshotId { get; set; }
     public System.DateTimeOffset StartedAt { get; set; }
     public System.DateTimeOffset? FinishedAt { get; set; }
     public string Status { get; set; }
@@ -1774,7 +1775,10 @@ authoritative read state is the operation admission/cancellation state; use oper
 Source: [CMakeWorkflow.Host/Workflows/OperationOverview.cs](../CMakeWorkflow.Host/Workflows/OperationOverview.cs#L11)
 
 ```csharp
-public sealed record OperationOverview(int SchemaVersion, CMakeWorkflow.Host.Workflows.OperationReference Operation, bool IsFinalized, string? RunDirectory, string? ReportSha256, System.DateTimeOffset? StartedAt, System.DateTimeOffset? FinishedAt, string? Error, string? HostId, string? EnvironmentFingerprint, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.OperationNodeView> Nodes);
+public sealed record OperationOverview(int SchemaVersion, CMakeWorkflow.Host.Workflows.OperationReference Operation, bool IsFinalized, string? RunDirectory, string? ReportSha256, System.DateTimeOffset? StartedAt, System.DateTimeOffset? FinishedAt, string? Error, string? HostId, string? EnvironmentFingerprint, System.Collections.Generic.List<CMakeWorkflow.Host.Workflows.OperationNodeView> Nodes)
+{
+    public string? SourceSnapshotId { get; init; }
+}
 ```
 
 #### `OperationReference`
@@ -2393,7 +2397,10 @@ public sealed record HistoryNode(string RunId, string Id, string Kind, string St
 Source: [CMakeWorkflow.History/Models/HistoryRun.cs](../CMakeWorkflow.History/Models/HistoryRun.cs#L6)
 
 ```csharp
-public sealed record HistoryRun(string Id, string Directory, string Format, string? Workflow, string? ManifestHash, string? StartedAt, string? FinishedAt, string Status, string? Revision, string SourceHash, bool SourceAvailable = true, string? HostId = null, string? EnvironmentFingerprint = null, CMakeWorkflow.History.Models.HistoryHostEnvironment? Environment = null, System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryBuildEnvironment>? BuildEnvironments = null);
+public sealed record HistoryRun(string Id, string Directory, string Format, string? Workflow, string? ManifestHash, string? StartedAt, string? FinishedAt, string Status, string? Revision, string SourceHash, bool SourceAvailable = true, string? HostId = null, string? EnvironmentFingerprint = null, CMakeWorkflow.History.Models.HistoryHostEnvironment? Environment = null, System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryBuildEnvironment>? BuildEnvironments = null)
+{
+    public string? SourceSnapshotId { get; init; }
+}
 ```
 
 ### Namespace `CMakeWorkflow.History.Storage`

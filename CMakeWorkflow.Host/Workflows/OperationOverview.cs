@@ -11,7 +11,11 @@ public sealed record OperationOverview(
     string? RunDirectory, string? ReportSha256,
     DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Error,
     string? HostId, string? EnvironmentFingerprint,
-List<OperationNodeView> Nodes);
+List<OperationNodeView> Nodes)
+{
+    // Admission-ledger identity, available even before report finalization.
+    public string? SourceSnapshotId { get; init; }
+}
 
 public sealed record OperationNodeView(
     string Id, string Kind, string Status,
