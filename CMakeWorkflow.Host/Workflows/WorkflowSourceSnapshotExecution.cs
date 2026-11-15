@@ -1,5 +1,5 @@
+using System.Globalization;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Serialization;
@@ -74,12 +74,13 @@ internal static class WorkflowSourceSnapshotExecution
             }
         }
 
-        string operationPath = Path.Combine(paths.WorkspaceDirectory,
-            ".cmakeworkflow", "source-executions", operationId);
+        // Keep both source and build trees short: CMake/Ninja create deep
+        // CMakeFiles/CMakeScratch/TryCompile paths on Windows.
+        string operationPath = Path.Combine(paths.WorkspaceDirectory, ".cw", operationId);
         string executionRoot = paths.Require(operationPath);
-        string sourcePath = Path.Combine(executionRoot, "source");
+        string sourcePath = Path.Combine(executionRoot, "s");
         string materialized = paths.Require(sourcePath);
-        string buildPath = Path.Combine(executionRoot, "build");
+        string buildPath = Path.Combine(executionRoot, "b");
         string buildRoot = paths.Require(buildPath);
         if (!WorkflowPlanner.PathComparer.Equals(executionRoot, operationPath) ||
             !WorkflowPlanner.PathComparer.Equals(materialized, sourcePath) ||
@@ -119,14 +120,18 @@ internal static class WorkflowSourceSnapshotExecution
         }
         ct.ThrowIfCancellationRequested();
 
-        // Never inspect an old tree; every context receives a fresh, operation-scoped
-        // build path, even if the manifest asked to adopt an existing CMakeCache.
-        foreach ((string name, WorkflowContext context) in document.Contexts)
+        // Every context receives a fresh, operation-scoped build path. Assign
+        // collision-free, deterministic indices instead of 64-character hashes:
+        // accepted manifest bytes and ordinal key order define the mapping.
+        int contextIndex = 0;
+        foreach (string name in document.Contexts.Keys.Order(StringComparer.Ordinal))
         {
-            string contextKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)));
+            WorkflowContext context = document.Contexts[name];
             context.SourceDirectory = materialized;
-            context.BuildDirectory = paths.Require(Path.Combine(buildRoot, contextKey));
+            context.BuildDirectory = paths.Require(Path.Combine(buildRoot,
+                contextIndex.ToString(CultureInfo.InvariantCulture)));
             context.Mode = "managed";
+            contextIndex++;
         }
 
         byte[] rewritten = JsonSerializer.SerializeToUtf8Bytes(document, WorkflowJson.Default.WorkflowDocument);

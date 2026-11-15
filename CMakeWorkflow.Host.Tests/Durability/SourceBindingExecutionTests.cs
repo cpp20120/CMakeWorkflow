@@ -13,7 +13,8 @@ internal static class SourceBindingExecutionTests
 {
     internal static async Task RunAsync(string parent)
     {
-        string workspace = Path.Combine(parent, "source-binding-" + Guid.NewGuid().ToString("N"));
+        // The caller already creates a unique parent; avoid long Windows paths.
+        string workspace = Path.Combine(parent, "w");
         string source = Path.Combine(workspace, "source");
         string manifest = Path.Combine(workspace, "workflow.json");
         string output = Path.Combine(workspace, "results");
@@ -107,8 +108,8 @@ internal static class SourceBindingExecutionTests
                 operation = accepted.OperationId;
             }
 
-            string isolatedRoot = Path.Combine(workspace, ".cmakeworkflow", "source-executions", operation);
-            string isolatedSource = Path.Combine(isolatedRoot, "source");
+            string isolatedRoot = Path.Combine(workspace, ".cw", operation);
+            string isolatedSource = Path.Combine(isolatedRoot, "s");
             string stdout = await File.ReadAllTextAsync(Path.Combine(output, "execute.stdout.log"));
             if (!stdout.Contains("captured", StringComparison.Ordinal) ||
                 stdout.Contains("live", StringComparison.Ordinal) ||
