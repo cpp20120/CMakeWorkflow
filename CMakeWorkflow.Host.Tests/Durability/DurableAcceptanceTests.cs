@@ -73,20 +73,6 @@ internal static class DurableAcceptanceTests
             }
         }
 
-        // Neither RPC path may dispatch source-bound work until P4.2 rebinds the
-        // CMake source and build directories to an operation-owned snapshot.
-        using (DurableExecutionCoordinator coordinator = new(CancellationToken.None))
-        {
-            try
-            {
-                _ = coordinator.Start(workspace, sourcedRequest with { ClientRequestId = "client-source-refused" });
-                throw new System.Diagnostics.UnreachableException("source-bound work was dispatched without materialization");
-            }
-            catch (InvalidOperationException error) when (error.Message == "source_snapshot_execution_not_enabled")
-            {
-            }
-        }
-
         File.WriteAllText(manifest, "changed after acceptance");
         // The planner must read supplied snapshot bytes, never the current file.
         // The accepted example is schema v1 without nodes: it must fail with the

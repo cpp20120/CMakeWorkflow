@@ -74,11 +74,36 @@ internal static class SourceBindingExecutionTests
             {
                 AcceptedWorkflow accepted = db.Find("source-bound")
                     ?? throw new UnreachableException("Source operation disappeared.");
-                if (accepted.State != "succeeded" || db.GetSourceSnapshotId(accepted.OperationId) != id ||
+
+                if (accepted.State != "succeeded" ||
+                    db.GetSourceSnapshotId(accepted.OperationId) != id ||
                     db.GetDispatchCheckpoint(accepted.OperationId) is null)
                 {
-                    throw new UnreachableException("Source execution was not finalized with durable dispatch evidence.");
+                    string[] logFiles =
+                    [
+                        "configure.stdout.log",
+                        "configure.stderr.log"
+                    ];
+
+                    foreach (string name in logFiles)
+                    {
+                        string path = Path.Combine(output, name);
+
+                        if (File.Exists(path))
+                        {
+                            await Console.Error.WriteLineAsync($"===== {name} =====");
+                            await Console.Error.WriteLineAsync(
+                                await File.ReadAllTextAsync(path));
+                        }
+                    }
+
+                    await Console.Error.WriteLineAsync(
+                        $"Source workspace: {workspace.Length} chars; {workspace}");
+
+                    throw new UnreachableException(
+                        "Source execution was not finalized with durable dispatch evidence.");
                 }
+
                 operation = accepted.OperationId;
             }
 
