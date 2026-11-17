@@ -170,6 +170,28 @@ public static class HistoryCommand
 
                         break;
                     }
+                case "host-summary" when positional.Count is >= 1 and <= 32:
+                    {
+                        HistoryHostRow[] rows = [.. positional.Select(id => HistoryHostRow.From(db.Show(id, ct: ct)))];
+                        if (json)
+                        {
+                            Console.WriteLine(JsonSerializer.Serialize(rows, HistoryJson.Default.HistoryHostRowArray));
+                        }
+                        else
+                        {
+                            static string Number(double? value) =>
+                                value?.ToString("G6", CultureInfo.InvariantCulture) ?? "-";
+                            Console.WriteLine("Run\tHost\tBuild (s)\tHit rate\tCounter scope\tPeak RSS (B)\tCPU (s)\tMemory stalls\tArtifact bytes");
+                            foreach (HistoryHostRow row in rows)
+                            {
+                                Console.WriteLine($"{row.RunId}\t{row.HostId ?? "unknown"}\t{Number(row.BuildSeconds)}\t" +
+                                                  $"{Number(row.CacheHitRate)}\t{row.CacheCounterScope ?? "-"}\t" +
+                                                  $"{Number(row.PeakRssBytes)}\t{Number(row.CpuSeconds)}\t" +
+                                                  $"{Number(row.MemoryStalls)}\t{Number(row.ArtifactBytes)}");
+                            }
+                        }
+                        break;
+                    }
                 case "compare" when positional.Count == 2:
                     {
                         List<HistoryDifference> rows = Compare(db.Show(positional[0], ct: ct), db.Show(positional[1], ct: ct));
@@ -255,6 +277,7 @@ public static class HistoryCommand
                                  history metrics --run RUN_ID [--metric NAME] [--variant NAME] [--scenario NAME] [--json]
                                  history query --metric NAME [--run RUN_ID] [--variant NAME] [--json]
                                  history compare BASELINE_RUN CANDIDATE_RUN [--json]
+                                 history host-summary RUN_ID [RUN_ID...] [--db PATH] [--json]
                                  history detect BASELINE_RUN CANDIDATE_RUN --metric NAME --direction higher-worse|lower-worse --min-percent N [--variant NAME] [--scenario NAME] [--alpha N] [--json]
                                  """;
 

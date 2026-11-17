@@ -1,5 +1,6 @@
 using CMakeWorkflow.Contracts.History;
 using System.Security.Cryptography;
+using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Host.Protocol;
@@ -37,8 +38,9 @@ public sealed partial class DoctorSession
         // The planner consumes the verified bytes instead of reopening the file.
         // Read guards on referenced inputs/contexts are identical to workflow/plan.
         string[] selection = WorkflowNodeSelection.Normalize(request.Only);
-        WorkflowPlanView plan = WorkflowQueries.PlanView(await WorkflowPlanner.LoadSnapshotAsync(
-            manifest, bytes, selection, null, ct, paths.Read));
+        WorkflowPlan loaded = await WorkflowPlanner.LoadSnapshotAsync(manifest, bytes, selection, null, ct, paths.Read);
+        _ = await CompilerCacheProfile.ResolveAsync(loaded, ct);
+        WorkflowPlanView plan = WorkflowQueries.PlanView(loaded);
         return new WorkflowPreflightResult(1, manifest, digest, request.Jobs, results, plan.Valid,
             [.. plan.Nodes.Select(node => new WorkflowPreflightNode(node.Id, node.Kind, node.Target,
                 node.BuildDirectory, node.Configuration, [.. node.Dependencies],

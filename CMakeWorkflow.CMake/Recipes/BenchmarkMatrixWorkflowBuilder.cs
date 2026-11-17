@@ -52,6 +52,7 @@ public static class BenchmarkMatrixWorkflowBuilder
             RecipeRules.Id(variant.Name, "variant name");
             RecipeRules.Directory(variant.BuildDirectory, "buildDirectory");
             RecipeRules.Configuration(variant.Configuration);
+            RecipeRules.ValidateCompilerCacheProfile(variant.CompilerCacheProfile);
             if (!variantNames.Add(variant.Name))
             {
                 throw new ArgumentException($"Duplicate benchmark variant: {variant.Name}.");
@@ -125,7 +126,9 @@ public static class BenchmarkMatrixWorkflowBuilder
         List<WorkflowNode> nodes = new((int)nodesCount);
         foreach (BuildVariantV1 variant in recipe.Variants)
         {
-            contexts.Add(variant.Name, RecipeRules.Adopted(variant.BuildDirectory, variant.Configuration));
+            WorkflowContext context = RecipeRules.Adopted(variant.BuildDirectory, variant.Configuration);
+            context.CompilerCacheProfile = variant.CompilerCacheProfile;
+            contexts.Add(variant.Name, context);
             nodes.Add(new WorkflowNode
             {
                 Id = "build_" + variant.Name,

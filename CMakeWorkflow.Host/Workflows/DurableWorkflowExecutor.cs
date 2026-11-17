@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
@@ -76,6 +77,8 @@ public static class DurableWorkflowExecutor
         }
 
         WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
+        CompilerCacheProfile.RequireSameIdentity(plan, saved,
+            await CompilerCacheProfile.ResolveAsync(plan, cancellationToken));
         // Permanent claim occurs before any runner mutation or external dispatch.
         _ = store.ClaimResumeAttempt(operationId, output, Convert.ToHexString(SHA256.HashData(checkpoint)));
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId);

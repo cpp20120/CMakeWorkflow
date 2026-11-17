@@ -38,12 +38,14 @@ internal static class CMakeWorkflowNodeExecutor
     /// <param name="logStem">Runner-reserved log prefix.</param>
     /// <param name="extension">Optional profile executor; owns its child/capture cleanup through task completion.</param>
     /// <param name="toolchain">Materialized Host toolchain, or null for ambient tools.</param>
+    /// <param name="compilerCache">Execution-host compiler cache profile, when configured.</param>
     /// <param name="manifest">Original manifest path used to resolve relative evidence paths.</param>
     /// <param name="artifactSources">Borrowed producer results whose declared output evidence is already available.</param>
     /// <param name="ct">Node execution lifetime supplied by the runner, linked here to TimeoutSeconds.</param>
     internal static async Task<NodeResult> ExecuteAsync(PlannedNode node, NodeResult? prerequisite,
         bool snapshotExecutable, BuildContextSession session, string output, string logStem, IWorkflowOperationExecutor? extension, WorkflowToolchainRuntime? toolchain,
-        string manifest, IReadOnlyDictionary<string, NodeResult> artifactSources, CancellationToken ct)
+        CompilerCacheProfile? compilerCache, string manifest,
+        IReadOnlyDictionary<string, NodeResult> artifactSources, CancellationToken ct)
     {
         WorkflowNode definition = node.Definition;
         NodeResult result = new()
@@ -58,6 +60,7 @@ internal static class CMakeWorkflowNodeExecutor
             RequestedContext = node.Requested,
             EnvironmentOverrideHash = EnvironmentProvenance.FingerprintOverrides(definition.Environment),
             ToolchainFingerprint = toolchain?.Fingerprint,
+            CompilerCacheFingerprint = compilerCache?.Fingerprint,
             StartedAt = DateTimeOffset.UtcNow,
             Status = "running",
             Stdout = logStem + ".stdout.log",
@@ -75,6 +78,7 @@ internal static class CMakeWorkflowNodeExecutor
             return await ExecuteProfileSnapshotAsync(node, result, extension, output, timer, deadline.Token, ct);
         }
 
+        WorkflowActionCache? actionCache = null;
         try
         {
             if (toolchain is not null)
@@ -145,7 +149,7 @@ internal static class CMakeWorkflowNodeExecutor
             else if (definition.Kind == "configure")
             {
                 session.BeginConfigure();
-                await ConfigureAsync(node, result, session, output, toolchain, ct: deadline.Token);
+                await ConfigureAsync(node, result, session, output, toolchain, compilerCache, ct: deadline.Token);
             }
             else
             {
@@ -272,14 +276,44 @@ internal static class CMakeWorkflowNodeExecutor
                         DagFlowHarnessSnapshot.RequireFresh(node.Target.BuildDirectory, definition.HarnessDirectory);
                     }
 
-                    result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
-                        MergeEnvironment(toolchain, definition.Environment), output, deadline.Token,
-                        elapsed => Console.Error.WriteLine(
-                            $"[CMakeWorkflow] RUNNING {result.Id} {elapsed:hh\\:mm\\:ss} elapsed"));
+                    IReadOnlyDictionary<string, string> environment = MergeEnvironment(toolchain, definition.Environment);
+                    CompilerCacheMeasurement? cacheMeasurement = null;
+                    if (compilerCache is not null && definition.Kind is "build" or "invoke")
+                    {
+                        compilerCache.RequireConfigured(result.ObservedContext);
+                        cacheMeasurement = new(compilerCache, output, logStem, result.WorkingDirectory, environment);
+                        await cacheMeasurement.StartAsync(deadline.Token);
+                        environment = cacheMeasurement.Environment;
+                    }
+
+                    if (definition.ActionCache)
+                    {
+                        string cachedOutput = WorkflowArtifacts.OutputPath(manifest, output, definition.Outputs[0]);
+                        actionCache = WorkflowActionCache.Create(result, cachedOutput, environment);
+                        result.ActionDigest = actionCache.Key;
+                        result.ActionCacheHit = await actionCache.TryRestoreAsync(deadline.Token);
+                    }
+
+                    if (result.ActionCacheHit == true)
+                    {
+                        result.Stdout = null;
+                        result.Stderr = null;
+                    }
+                    else
+                    {
+                        result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
+                            environment, output, deadline.Token,
+                            elapsed => Console.Error.WriteLine(
+                                $"[CMakeWorkflow] RUNNING {result.Id} {elapsed:hh\\:mm\\:ss} elapsed"));
+                    }
+                    if (cacheMeasurement is not null)
+                    {
+                        result.CompilerCache = await cacheMeasurement.FinishAsync(deadline.Token);
+                    }
                 }
 
-                result.Status = result.ExitCode == 0 ? "succeeded" : "failed";
-                if (result.ExitCode != 0)
+                result.Status = result.ActionCacheHit == true || result.ExitCode == 0 ? "succeeded" : "failed";
+                if (result.ExitCode is not null and not 0)
                 {
                     result.Error ??= $"Process exited with code {result.ExitCode}.";
                 }
@@ -287,18 +321,20 @@ internal static class CMakeWorkflowNodeExecutor
                 // validation rejects the node and blocks dependent execution.
                 if (definition.Kind is "run" or "ctest" or "invoke")
                 {
-                    result.ExperimentResult = result.Status;
+                    result.ExperimentResult = result.ActionCacheHit == true ? "cache-hit" : result.Status;
                 }
 
                 if (definition.Kind == "build")
                 {
-                    result.BuildVerification = new(target, result.ExitCode == 0 ? "BackendSucceeded" : "BackendFailed",
-                        result.ExitCode.Value, result.ObservedContext.IndexFile,
+                    int nativeExitCode = result.ExitCode ?? throw new InvalidOperationException("Native build returned no exit code.");
+                    result.BuildVerification = new(target, nativeExitCode == 0 ? "BackendSucceeded" : "BackendFailed",
+                        nativeExitCode, result.ObservedContext.IndexFile,
                         GenerationObservation.From(result.ObservedContext));
                     if (result.ExitCode == 0)
                     {
                         result.ObservationAfter =
                             await CMakeInspection.InspectAsync(target.BuildDirectory, deadline.Token);
+                        compilerCache?.RequireConfigured(result.ObservationAfter);
                         result.BuildVerification = result.BuildVerification with
                         {
                             ObservationIndex = result.ObservationAfter.IndexFile,
@@ -384,6 +420,10 @@ internal static class CMakeWorkflowNodeExecutor
                     string path = WorkflowArtifacts.OutputPath(manifest, output, declared);
                     string sha = await WorkflowArtifacts.HashAsync(path, deadline.Token);
                     result.DeclaredArtifacts.Add(new(declared.Name, path, sha, "output"));
+                    if (actionCache is not null && result.ActionCacheHit == false)
+                    {
+                        await actionCache.PublishAsync(sha, deadline.Token);
+                    }
                 }
             }
         }
@@ -506,7 +546,7 @@ internal static class CMakeWorkflowNodeExecutor
     /// A provenance-write failure can propagate and replace the original exception; native/tree effects are not undone.
     /// </remarks>
     private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session,
-        string output, WorkflowToolchainRuntime? toolchain, CancellationToken ct)
+        string output, WorkflowToolchainRuntime? toolchain, CompilerCacheProfile? compilerCache, CancellationToken ct)
     {
         RequestedBuildContext request = node.Requested;
         if (request.SourceDirectory is null || !Directory.Exists(request.SourceDirectory))
@@ -548,6 +588,13 @@ internal static class CMakeWorkflowNodeExecutor
         }
 
         result.Arguments.AddRange(["-S", request.SourceDirectory, "-B", request.BuildDirectory]);
+        if (compilerCache is not null)
+        {
+            result.Arguments.AddRange([
+                "-DCMAKE_C_COMPILER_LAUNCHER:FILEPATH=" + compilerCache.Executable,
+                "-DCMAKE_CXX_COMPILER_LAUNCHER:FILEPATH=" + compilerCache.Executable
+            ]);
+        }
         result.Configure.Executable = result.Executable;
         result.Configure.WorkingDirectory = result.WorkingDirectory;
         result.Configure.Arguments = [.. result.Arguments];
@@ -561,8 +608,9 @@ internal static class CMakeWorkflowNodeExecutor
                 await File.WriteAllTextAsync(Path.Combine(query, kind), "", ct);
             }
 
+            IReadOnlyDictionary<string, string> environment = MergeEnvironment(toolchain, new Dictionary<string, string>());
             result.ExitCode = await WorkflowProcessDispatcher.RunAsync(result,
-                MergeEnvironment(toolchain, new Dictionary<string, string>()), output, ct,
+                compilerCache?.EnvironmentFor(environment) ?? environment, output, ct,
                 elapsed => Console.Error.WriteLine(
                     $"[CMakeWorkflow] RUNNING {result.Id} {elapsed:hh\\:mm\\:ss} elapsed"));
             result.Configure.ExitCode = result.ExitCode;
@@ -583,6 +631,7 @@ internal static class CMakeWorkflowNodeExecutor
                 // Verify requested selection against the new observation; never silently
                 // replace a requested Debug/Release configuration with the generated one.
                 CMakeInspection.ValidateIdentity(request, result.ObservationAfter);
+                compilerCache?.RequireConfigured(result.ObservationAfter);
                 if (request.Configuration is not null || result.ObservationAfter.MultiConfig == false)
                 {
                     result.Configuration = CMakeInspection.Resolve(request, result.ObservationAfter).Configuration;

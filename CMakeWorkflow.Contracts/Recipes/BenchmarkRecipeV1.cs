@@ -6,7 +6,7 @@ namespace CMakeWorkflow.Contracts.Recipes;
 // Recipe versioning is independent of WorkflowDocument.schemaVersion.
 /// <summary>Build followed by a serial chain of timing runs.</summary>
 /// <remarks>
-/// Kind is benchmark. Repeats is 1..1000. The existing build tree is adopted with allowUnverified provenance.
+/// Kind is benchmark. Repeats is 1..1000. Select a source directory and preset to configure a managed build tree.
 /// The DTO itself performs no I/O or validation; recipe builders enforce these requirements.
 /// </remarks>
 /// <param name="Kind">Exact recipe kind discriminator.</param>
@@ -30,4 +30,17 @@ public sealed record BenchmarkRecipeV1(
 #pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
 [property: JsonRequired] string[] Arguments
 #pragma warning restore CA1819
-);
+)
+{
+    /// <summary>Optional compiler cache profile resolved on the execution host.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompilerCacheProfile { get; init; }
+
+    /// <summary>Source directory for an explicit configure step using the named preset.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceDirectory { get; init; }
+
+    /// <summary>Configure preset for a managed benchmark tree.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigurePreset { get; init; }
+}

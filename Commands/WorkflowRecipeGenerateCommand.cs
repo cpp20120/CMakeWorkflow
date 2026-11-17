@@ -132,7 +132,11 @@ internal static class WorkflowRecipeGenerateCommand
                      ?? throw new JsonException("Empty Benchmark recipe.");
         return recipe.BuildDirectory is null
             ? throw new ArgumentException("Benchmark buildDirectory is required.")
-            : BenchmarkWorkflowBuilder.Build(recipe with { BuildDirectory = resolve(recipe.BuildDirectory) });
+            : BenchmarkWorkflowBuilder.Build(recipe with
+            {
+                BuildDirectory = resolve(recipe.BuildDirectory),
+                SourceDirectory = recipe.SourceDirectory is { } source ? resolve(source) : null
+            });
     }
 
     private static WorkflowDocument FromProfileFile(byte[] bytes, Func<string, string> resolve)

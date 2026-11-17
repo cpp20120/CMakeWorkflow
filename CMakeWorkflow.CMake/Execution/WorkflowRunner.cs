@@ -49,6 +49,9 @@ public static class WorkflowRunner
         {
             throw new InvalidOperationException("Selected toolchain was not materialized before workflow admission.");
         }
+        Dictionary<string, CompilerCacheProfile> cacheProfiles = await CompilerCacheProfile.ResolveAsync(plan, ct);
+        CompilerCacheProfile? CacheProfile(PlannedNode node) => node.CompilerCacheProfile is { } name
+            ? cacheProfiles.GetValueOrDefault(name) : null;
         // The run lease spans validation, the recovery checkpoint, execution and final persistence.
         // No second runner may inspect/commit the same persisted run concurrently.
         _ = Directory.CreateDirectory(output);
@@ -75,6 +78,7 @@ public static class WorkflowRunner
                 Configuration = n.Target.Configuration,
                 Target = n.Target.Target,
                 WorkingDirectory = n.WorkingDirectory,
+                CompilerCacheFingerprint = CacheProfile(n)?.Fingerprint,
                 RequestedContext = n.Requested
             })]
         };
@@ -116,6 +120,7 @@ public static class WorkflowRunner
             }
 
             WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
+            CompilerCacheProfile.RequireSameIdentity(plan, saved, cacheProfiles);
             // A write-ahead admission is not proof that a process started, nor
             // that it did not produce side effects. Classify before validating
             // old build/artifact observations: an interrupted operation may have
@@ -320,7 +325,8 @@ public static class WorkflowRunner
                             snapshot, node.Definition.Kind == "profile_snapshot"
                                 ? new BuildContextSession() : sessions[node.Target.BuildDirectory],
                             output, LogStem(report, item.Id), extension,
-                            toolchains.GetValueOrDefault(node.Target.BuildDirectory), plan.File, sources, ct: token);
+                            toolchains.GetValueOrDefault(node.Target.BuildDirectory), CacheProfile(node),
+                            plan.File, sources, ct: token);
                     },
                     AfterExecute = (item, token) => RecoveryFaults.HitAsync("after-execution", item.Id, token),
                     Complete = (item, result) =>

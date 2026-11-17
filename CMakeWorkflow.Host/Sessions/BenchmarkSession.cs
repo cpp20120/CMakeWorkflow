@@ -26,7 +26,11 @@ public sealed partial class DoctorSession
 
             string manifest = paths.Require(request.OutputPath);
             string build = paths.Require(request.Recipe.BuildDirectory);
-            BenchmarkRecipeV1 recipe = request.Recipe with { BuildDirectory = build };
+            BenchmarkRecipeV1 recipe = request.Recipe with
+            {
+                BuildDirectory = build,
+                SourceDirectory = request.Recipe.SourceDirectory is { } source ? paths.Require(source) : null
+            };
             WorkflowDocument document = BenchmarkWorkflowBuilder.Build(recipe);
             BenchmarkPreparation prepared = new(1, manifest, Hash(document));
             await CommitRecipeAsync(paths, "benchmark", request.RequestId, manifest,

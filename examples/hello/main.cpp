@@ -4,7 +4,8 @@
 
 int main(int argc, char* argv[])
 {
-    if (argc == 3 && std::string(argv[1]) == "--read-message")
+    const bool copy_message = argc == 4 && std::string(argv[1]) == "--copy-message";
+    if (copy_message || (argc == 3 && std::string(argv[1]) == "--read-message"))
     {
         std::ifstream input(argv[2]);
         std::string message;
@@ -14,6 +15,13 @@ int main(int argc, char* argv[])
             return 1;
         }
 
+        if (copy_message)
+        {
+            std::ofstream output(argv[3], std::ios::binary);
+            output << message << '\n';
+            output.close();
+            return output ? 0 : 1;
+        }
         std::cout << message << '\n';
         return 0;
     }

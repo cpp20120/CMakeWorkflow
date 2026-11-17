@@ -6,6 +6,14 @@ namespace CMakeWorkflow.CMake.Recipes;
 
 internal static class RecipeRules
 {
+    internal static void ValidateCompilerCacheProfile(string? name)
+    {
+        if (name is not null && !Build.CompilerCacheProfile.IsValidName(name))
+        {
+            throw new ArgumentException("Invalid compilerCacheProfile name.");
+        }
+    }
+
     internal static void Version(string kind, int version, string expected)
     {
         if (kind != expected || version != 1)

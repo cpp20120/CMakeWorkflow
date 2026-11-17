@@ -87,6 +87,33 @@ internal static class DurableByteWriter
         }
     }
 
+    // The caller has flushed a verified file on the same filesystem and holds the store lease.
+    internal static void PublishNewFile(string temporary, string destination)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (!MoveFileExW(WindowsPath(temporary), WindowsPath(destination), 0x8))
+            {
+                throw NativeError("Artifact publication");
+            }
+        }
+        else
+        {
+            File.Move(temporary, destination);
+            for (string? parent = Path.GetDirectoryName(destination); parent is not null;
+                 parent = Path.GetDirectoryName(parent))
+            {
+                SyncDirectory(parent);
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                using FileStream committed = File.Open(destination, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+                FullSync(committed);
+            }
+        }
+    }
+
     private static string WindowsPath(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path
         : path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
 

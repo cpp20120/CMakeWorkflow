@@ -26,7 +26,7 @@ internal static class BenchmarkGenerateCommand
 
             string option = args[i];
             if (option is not ("--build-dir" or "--target" or "--config" or "--repeats"
-                or "--timeout-seconds" or "--output"))
+                or "--timeout-seconds" or "--output" or "--compiler-cache-profile" or "--source-dir" or "--preset"))
             {
                 throw new ArgumentException($"Unknown benchmark generation option: {option}");
             }
@@ -60,7 +60,12 @@ internal static class BenchmarkGenerateCommand
         string build = Path.GetFullPath(Required("--build-dir"));
         string output = Path.GetFullPath(Required("--output"));
         BenchmarkRecipeV1 recipe = new("benchmark", 1, build, Required("--target"),
-            options.GetValueOrDefault("--config"), repeats, timeout, programArguments);
+            options.GetValueOrDefault("--config"), repeats, timeout, programArguments)
+        {
+            CompilerCacheProfile = options.GetValueOrDefault("--compiler-cache-profile"),
+            SourceDirectory = options.TryGetValue("--source-dir", out string? source) ? Path.GetFullPath(source) : null,
+            ConfigurePreset = options.GetValueOrDefault("--preset")
+        };
         await WorkflowManifestBytes.WriteNewAsync(output,
             BenchmarkWorkflowBuilder.Build(recipe), ct);
         Console.WriteLine(output);

@@ -44,6 +44,7 @@ public static class BuildMatrixWorkflowBuilder
             RecipeRules.Id(variant.Name, "variant name");
             RecipeRules.Directory(variant.BuildDirectory, "buildDirectory");
             RecipeRules.Configuration(variant.Configuration);
+            RecipeRules.ValidateCompilerCacheProfile(variant.CompilerCacheProfile);
             if (!names.Add(variant.Name))
             {
                 throw new ArgumentException($"Duplicate build variant: {variant.Name}.");
@@ -71,7 +72,9 @@ public static class BuildMatrixWorkflowBuilder
         List<WorkflowNode> nodes = new((int)count);
         foreach (BuildVariantV1 variant in recipe.Variants)
         {
-            contexts.Add(variant.Name, RecipeRules.Adopted(variant.BuildDirectory, variant.Configuration));
+            WorkflowContext context = RecipeRules.Adopted(variant.BuildDirectory, variant.Configuration);
+            context.CompilerCacheProfile = variant.CompilerCacheProfile;
+            contexts.Add(variant.Name, context);
             for (int targetIndex = 0; targetIndex < recipe.Targets.Length; targetIndex++)
             {
                 nodes.Add(new WorkflowNode

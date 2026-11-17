@@ -11,4 +11,7 @@ public sealed record PlannedNode(
     RequestedBuildContext Requested,
     ObservedBuildContext Observed,
     IReadOnlyList<PlanDiagnostic> Diagnostics,
-    WorkflowToolchainBinding? Toolchain = null);
+    WorkflowToolchainBinding? Toolchain = null)
+{
+    public string? CompilerCacheProfile { get; init; }
+}

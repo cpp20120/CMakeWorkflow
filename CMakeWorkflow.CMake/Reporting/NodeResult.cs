@@ -1,5 +1,6 @@
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
+using System.Text.Json.Serialization;
 namespace CMakeWorkflow.CMake.Reporting;
 
 public sealed class NodeResult
@@ -23,6 +24,14 @@ public sealed class NodeResult
     public List<string> Arguments { get; set; } = [];
     public string? EnvironmentOverrideHash { get; set; }
     public string? ToolchainFingerprint { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompilerCacheFingerprint { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CompilerCacheStatistics? CompilerCache { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ActionDigest { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ActionCacheHit { get; set; }
     public string WorkingDirectory { get; set; } = "";
     public string? Stdout { get; set; }
     public string? Stderr { get; set; }

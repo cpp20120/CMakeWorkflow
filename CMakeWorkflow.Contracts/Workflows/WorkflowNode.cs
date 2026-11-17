@@ -75,4 +75,8 @@ public sealed class WorkflowNode
     public List<WorkflowArtifactOutput> Outputs { get; set; } = [];
     /// <summary>Execution requirements, or null for no explicit requirements.</summary>
     public WorkflowExecutionConstraints? Constraints { get; set; }
+
+    /// <summary>Opt in to reuse of a deterministic run's single declared output.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ActionCache { get; set; }
 }

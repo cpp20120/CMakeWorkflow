@@ -389,7 +389,7 @@ public static class CMakeInspection
         File.Move(temporary, path, true);
     }
 
-    private static Dictionary<string, string> ReadObservedCache(string directory, Action<string>? readGuard)
+    internal static Dictionary<string, string> ReadObservedCache(string directory, Action<string>? readGuard)
     {
         Dictionary<string, string> values = new(StringComparer.Ordinal);
         string path = Path.Combine(directory, "CMakeCache.txt");
@@ -410,7 +410,8 @@ public static class CMakeInspection
 
             string key = line[..colon];
             if (key is "CMAKE_BUILD_TYPE" or "CMAKE_CONFIGURATION_TYPES" or "CMAKE_GENERATOR"
-                or "CMAKE_HOME_DIRECTORY" or "CMAKE_COMMAND")
+                or "CMAKE_HOME_DIRECTORY" or "CMAKE_COMMAND" or "CMAKE_C_COMPILER" or "CMAKE_CXX_COMPILER"
+                or "CMAKE_C_COMPILER_LAUNCHER" or "CMAKE_CXX_COMPILER_LAUNCHER")
             {
                 values[key] = line[(equals + 1)..];
             }

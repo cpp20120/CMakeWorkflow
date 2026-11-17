@@ -1515,13 +1515,18 @@ public sealed record BenchmarkMatrixRecipeV1(string Kind, int SchemaVersion, CMa
 
 Build followed by a serial chain of timing runs.
 
-Kind is benchmark. Repeats is 1..1000. The existing build tree is adopted with allowUnverified provenance. The DTO
-itself performs no I/O or validation; recipe builders enforce these requirements.
+Kind is benchmark. Repeats is 1..1000. The recipe can adopt an existing tree or configure a managed tree with
+`SourceDirectory` and `ConfigurePreset`. See [compiler cache profiles](en/compiler-cache.md).
 
 Source: [CMakeWorkflow.Contracts/Recipes/BenchmarkRecipeV1.cs](../CMakeWorkflow.Contracts/Recipes/BenchmarkRecipeV1.cs#L22)
 
 ```csharp
-public sealed record BenchmarkRecipeV1(string Kind, int SchemaVersion, string BuildDirectory, string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments);
+public sealed record BenchmarkRecipeV1(string Kind, int SchemaVersion, string BuildDirectory, string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments)
+{
+    public string? CompilerCacheProfile { get; init; }
+    public string? SourceDirectory { get; init; }
+    public string? ConfigurePreset { get; init; }
+}
 ```
 
 #### `BuildMatrixRecipeV1`
@@ -1547,7 +1552,10 @@ recipe builders enforce these requirements.
 Source: [CMakeWorkflow.Contracts/Recipes/BuildVariantV1.cs](../CMakeWorkflow.Contracts/Recipes/BuildVariantV1.cs#L15)
 
 ```csharp
-public sealed record BuildVariantV1(string Name, string BuildDirectory, string? Configuration = null);
+public sealed record BuildVariantV1(string Name, string BuildDirectory, string? Configuration = null)
+{
+    public string? CompilerCacheProfile { get; init; }
+}
 ```
 
 #### `ProfileRecipeV1`
@@ -1665,6 +1673,7 @@ public sealed class WorkflowContext
     public string? Generator { get; set; }
     public string ProvenancePolicy { get; set; }
     public CMakeWorkflow.Contracts.Workflows.WorkflowToolchainBinding? Toolchain { get; set; }
+    public string? CompilerCacheProfile { get; set; }
 }
 ```
 
@@ -1741,6 +1750,7 @@ public sealed class WorkflowNode
     public System.Collections.Generic.List<CMakeWorkflow.Contracts.Workflows.WorkflowArtifactInput> Inputs { get; set; }
     public System.Collections.Generic.List<CMakeWorkflow.Contracts.Workflows.WorkflowArtifactOutput> Outputs { get; set; }
     public CMakeWorkflow.Contracts.Workflows.WorkflowExecutionConstraints? Constraints { get; set; }
+    public bool ActionCache { get; set; }
 }
 ```
 

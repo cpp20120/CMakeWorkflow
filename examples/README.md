@@ -8,6 +8,7 @@ Run the commands from the repository root with the CMakeWorkflow executable on P
 | [hello/workflow.json](hello/workflow.json) | Configure, build, run, and test a small executable |
 | [test-matrix.json](hello/workflows/test-matrix.json) | Run labeled CTest tests against separate Debug and Release build trees |
 | [artifact-handoff.json](hello/workflows/artifact-handoff.json) | Run a CMake utility target and pass its verified output to an executable |
+| [action-cache.json](hello/workflows/action-cache.json) | Restore a deterministic node's declared file from CAS on a repeat run |
 | [inspect.json](history-compare/workflows/inspect.json) | Inspect an existing CMake build tree from a workflow |
 | [benchmark.json](history-compare/workflows/benchmark.json) | Collect three sequential process timings from an existing Release build tree |
 | [reproducible-run.json](hello/workflows/reproducible-run.json) | Pin an input by SHA-256 and save a snapshot with the run |
@@ -35,6 +36,9 @@ CMakeWorkflow workflow run examples/hello/workflows/artifact-handoff.json --resu
 `read-message` verifies that artifact as a declared input and runs `hello`, which reads the file.
 Its stdout contains `hello from a declared workflow artifact`. Find the log and recorded digest in the
 saved `run.json` under the directory printed as `Results:`.
+
+For a run that can restore its output without starting the executable a second time, see
+[the Action Cache example](../docs/en/artifact-cas.md#reuse-a-declared-action-output).
 
 ## Inspect or benchmark an existing build tree
 

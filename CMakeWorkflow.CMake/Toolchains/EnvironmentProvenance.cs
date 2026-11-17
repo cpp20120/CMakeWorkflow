@@ -240,7 +240,7 @@ internal static class EnvironmentProvenance
             SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
 
-    private static string? HostId()
+    internal static string? HostId()
     {
         try
         {

@@ -41,6 +41,7 @@ internal static class RemoteCommand
           report    --operation ID
           artifacts --operation ID
           download  --operation ID --artifact-id ID --output LOCAL_FILE
+          stash     --operation ID --store LOCAL_CAS
           cancel    --operation ID --revision N
           history-status --operation ID
           history-retry  --operation ID
@@ -49,7 +50,7 @@ internal static class RemoteCommand
         Default transport: OpenSSH, --destination USER@HOST [--ssh-executable PATH]
         SSH.NET transport: --transport sshnet --host HOST --user USER --key-file LOCAL_PRIVATE_KEY
           --host-key-sha256 SHA256:PIN [--port 22] (no ssh-agent or ~/.ssh/config)
-        All paths except --output and --key-file refer to the REMOTE filesystem.
+        All paths except --output, --store and --key-file refer to the REMOTE filesystem.
         The Host must already be running.
         On a lost start response use 'find' with the SAME request ID; do not silently start again.
         No command reconnects or retries a failed RPC automatically.
@@ -172,6 +173,10 @@ internal static class RemoteCommand
                         RemoteCliJson.Default.RemoteDownloadReceipt);
                     return 0;
                 }
+            case "stash":
+                ArtifactCasCommand.Print(await new ArtifactCas(Require(values, "--store")).ImportAsync(
+                    client.Operations.GetHandle(Require(values, "--operation")), ct));
+                return 0;
             case "history-status":
                 Print(await client.History.GetIndexStatusAsync(Require(values, "--operation"), ct),
                     RemoteCliJson.Default.HistoryIndexStatus);
@@ -192,7 +197,7 @@ internal static class RemoteCommand
 
     private static (Dictionary<string, string> Options, List<string> Only) Parse(string action, string[] args)
     {
-        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "cancel" or "history-status" or "history-retry"))
+        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "stash" or "cancel" or "history-status" or "history-retry"))
         {
             throw new ArgumentException($"Unknown remote command '{action}'.\n{Usage}");
         }
@@ -236,6 +241,7 @@ internal static class RemoteCommand
             "status" or "inspect" or "report" or "artifacts" or "history-status" or "history-retry" => ["--operation"],
             "events" => ["--operation", "--after", "--limit"],
             "download" => ["--operation", "--artifact-id", "--output"],
+            "stash" => ["--operation", "--store"],
             "cancel" => ["--operation", "--revision"],
             _ => throw new ArgumentException("Unknown remote command.")
         };
@@ -326,6 +332,10 @@ internal static class RemoteCommand
         {
             _ = Require(values, "--revision");
             _ = Number(values, "--revision", 0, 0, long.MaxValue);
+        }
+        if (action == "stash")
+        {
+            _ = Require(values, "--store");
         }
         _ = Number(values, "--connect-timeout-seconds", 15, 1, 3600);
     }

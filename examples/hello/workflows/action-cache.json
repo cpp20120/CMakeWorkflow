@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "hello": {
+      "sourceDirectory": "..",
+      "buildDirectory": "../../../out/hello",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed"
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "hello" },
+    { "id": "build", "kind": "build", "context": "hello", "target": "hello", "dependsOn": ["configure"] },
+    {
+      "id": "materialize-message",
+      "kind": "run",
+      "from": "build",
+      "actionCache": true,
+      "workingDirectory": "..",
+      "arguments": ["--copy-message", "message.txt", "../../out/hello/action-message.txt"],
+      "inputs": [{ "path": "../message.txt" }],
+      "outputs": [{ "name": "message", "path": "../../../out/hello/action-message.txt", "fresh": true }]
+    }
+  ]
+}

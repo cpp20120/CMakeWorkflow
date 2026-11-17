@@ -40,6 +40,11 @@ provenance conflicts still fail in the planner. The run journal records **uninst
 benchmark's internal metrics or a profiler trace. Ten repeats alone do not establish statistical significance; History
 compare and detect are separate operations with their own compatibility checks.
 
+Set `sourceDirectory` and `configurePreset` (or `--source-dir` and `--preset`) to add an explicit configure node
+before the benchmark build. The optional `compilerCacheProfile` (`--compiler-cache-profile`) selects a profile on
+the execution host. Build Matrix and Benchmark Matrix accept the same field on individual variants.
+See [compiler cache profiles and measurements](compiler-cache.md).
+
 ## Other recipe families
 
 Every recipe JSON has its own `kind` and `schemaVersion: 1`. All builders emit the **same ordinary `WorkflowDocument`

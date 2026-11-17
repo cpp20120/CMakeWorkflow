@@ -20,7 +20,7 @@ internal static class OperationArtifactReader
     internal const int MaximumChunkBytes = 64 * 1024;
     private const int MaximumCatalogEntries = 512;
 
-    private sealed record Candidate(string Id, string Kind, string? NodeId, string Path);
+    private sealed record Candidate(string Id, string Kind, string? NodeId, string Path, string? ExpectedDigest = null);
 
     /// <summary>Reads and verifies a finalized CMake report against ledger identity and terminal state.</summary>
     /// <remarks>
@@ -99,6 +99,10 @@ internal static class OperationArtifactReader
             {
                 throw new ApplicationRefusal("artifact_changed", "Artifact changed during catalog creation.");
             }
+            if (candidate.ExpectedDigest is { } digest && !string.Equals(sha, digest, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ApplicationRefusal("artifact_changed", "A saved executable no longer matches the report digest.");
+            }
 
             result.Add(new(candidate.Id, candidate.Kind, candidate.NodeId,
                 Path.GetRelativePath(report.RunDirectory, path).Replace('\\', '/'), size, stamp, sha));
@@ -166,6 +170,19 @@ internal static class OperationArtifactReader
             if (!string.IsNullOrWhiteSpace(node.Stderr))
             {
                 found.Add(new("stderr:" + node.Id, "stderr", node.Id, node.Stderr));
+            }
+
+            if (node.Artifact is { Executable: { } executable } artifact && IsLexicallyWithin(report.RunDirectory, executable))
+            {
+                found.Add(new("binary:" + node.Id, "binary", node.Id, executable, artifact.Sha256));
+            }
+
+            if (node.Kind is "profile" or "profile_snapshot"
+                && node.Outputs.TryGetValue("rawTrace", out string? trace)
+                && IsLexicallyWithin(report.RunDirectory, trace)
+                && !string.Equals(Path.GetExtension(trace), ".trace", StringComparison.OrdinalIgnoreCase))
+            {
+                found.Add(new("trace:" + node.Id, "trace", node.Id, trace));
             }
 
             for (int i = 0; i < node.DeclaredArtifacts.Count; i++)

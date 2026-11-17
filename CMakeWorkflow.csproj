@@ -18,6 +18,9 @@
         <Compile Include="Commands/TargetCommand.cs"/>
         <Compile Include="Commands/WorkflowCliCommand.cs"/>
         <Compile Include="Commands/RemoteCommand.cs"/>
+        <Compile Include="Commands/ArtifactCasCommand.cs"/>
+        <Compile Include="Commands/ArtifactCas.cs"/>
+        <Compile Include="Commands/ArtifactCasJson.cs"/>
         <Compile Include="Commands/RemoteProvisionCommand.cs"/>
         <Compile Include="Commands/BenchmarkGenerateCommand.cs"/>
         <Compile Include="Commands/RecipeJson.cs" />

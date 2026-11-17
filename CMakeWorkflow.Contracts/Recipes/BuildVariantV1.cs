@@ -14,4 +14,9 @@ namespace CMakeWorkflow.Contracts.Recipes;
 public sealed record BuildVariantV1(
     [property: JsonRequired] string Name,
     [property: JsonRequired] string BuildDirectory,
-    string? Configuration = null);
+    string? Configuration = null)
+{
+    /// <summary>Optional compiler cache profile for this adopted build tree.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompilerCacheProfile { get; init; }
+}

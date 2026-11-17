@@ -264,6 +264,7 @@ internal static class HistoryReports
                                                 && m.Variant == variant), Json(node, "arguments"), null));
             }
 
+            ImportBuildMeasurements(run, node, id);
             ImportDagFlowHarness(directory, run, node, id, pathGuard);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
             AddArtifact(run, id, "stderr", Str(node, "stderr"));
@@ -281,6 +282,33 @@ internal static class HistoryReports
         }
 
         ImportProfile(directory, run, pathGuard);
+        long observedBytes = 0;
+        bool observedFiles = false;
+        StringComparer paths = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        foreach (string artifact in run.Artifacts.Where(a => a.Type != "workflow-report")
+                     .Select(a => a.Path).Distinct(paths))
+        {
+            string relative = Path.GetRelativePath(directory, artifact);
+            if (Path.IsPathRooted(relative) || relative == ".."
+                || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            pathGuard?.Invoke(artifact);
+            FileInfo file = new(artifact);
+            if (file.Exists && file.LinkTarget is null)
+            {
+                observedFiles = true;
+                observedBytes = checked(observedBytes + file.Length);
+            }
+        }
+
+        if (observedFiles)
+        {
+            run.Measurements.Add(new(run.Run.Id, null, "artifact_result_bytes", "B", observedBytes,
+                null, null, "run.json", "referenced result files at import, distinct paths", 0, null, null));
+        }
         for (int i = 0; i < run.Measurements.Count; i++)
         {
             HistoryMeasurement measurement = run.Measurements[i];
@@ -308,7 +336,60 @@ internal static class HistoryReports
         }
 
         FinalizeHash(run);
+        if (observedFiles)
+        {
+            run.Run = run.Run with
+            {
+                SourceHash = Hash(Encoding.UTF8.GetBytes(run.Run.SourceHash + "|result-bytes:" +
+                    observedBytes.ToString(CultureInfo.InvariantCulture)))
+            };
+        }
         return run;
+    }
+
+    private static void ImportBuildMeasurements(ParsedRun run, JsonElement node, string id)
+    {
+        if (Str(node, "kind") is not ("build" or "invoke") || Str(node, "status") != "succeeded")
+        {
+            return;
+        }
+
+        string scenario = Str(node, "target") ?? "";
+        void Add(string metric, string unit, double? value, string method)
+        {
+            if (value is double n && double.IsFinite(n) && n >= 0)
+            {
+                run.Measurements.Add(new(run.Run.Id, id, metric, unit, n, id, scenario,
+                    "run.json", method, 0, null, null));
+            }
+        }
+
+        if (Str(node, "kind") == "build" || Obj(node, "compilerCache") is not null)
+        {
+            Add("build_wall_time", "s", Num(node, "processDurationSeconds"), "native build process wall time");
+        }
+
+        if (Obj(node, "compilerCache") is not { } cache || Num(cache, "schemaVersion") != 1
+            || Str(cache, "provider") is not ("ccache" or "sccache"))
+        {
+            return;
+        }
+
+        string provider = Str(cache, "provider")!;
+        string? scope = Str(cache, "scope");
+        if (scope is "build-attempt" or "shared-server")
+        {
+            string method = $"{provider} {scope} counters";
+            Add("compiler_cache_hits", "count", Num(cache, "hits"), method);
+            Add("compiler_cache_misses", "count", Num(cache, "misses"), method);
+            Add("compiler_cache_remote_read_hits", "count", Num(cache, "remoteReadHits"), method);
+            Add("compiler_cache_remote_writes", "count", Num(cache, "remoteWrites"), method);
+            Add("compiler_cache_reported_work_time", "s", Num(cache, "compilerWorkSeconds"), method);
+        }
+
+        Add("compiler_cache_bytes_read", "B", Num(cache, "bytesRead"), "per-attempt backend telemetry");
+        Add("compiler_cache_bytes_written", "B", Num(cache, "bytesWritten"), "per-attempt backend telemetry");
+        Add("compiler_time", "s", Num(cache, "compileSeconds"), "per-attempt backend telemetry");
     }
 
     // Only import snapshots explicitly recorded in run.json. No directory search,

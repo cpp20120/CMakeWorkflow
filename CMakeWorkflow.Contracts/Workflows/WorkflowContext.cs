@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CMakeWorkflow.Contracts.Workflows;
 
 /// <summary>Requested CMake build-tree identity and ownership policy.</summary>
@@ -31,4 +33,8 @@ public sealed class WorkflowContext
     // Opt-in. Candidate IDs are resolved on the execution host; not executable paths.
     /// <summary>Host-resolved toolchain binding, or null to use ambient tooling.</summary>
     public WorkflowToolchainBinding? Toolchain { get; set; }
+
+    /// <summary>Optional compiler cache profile resolved on the execution host.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompilerCacheProfile { get; set; }
 }

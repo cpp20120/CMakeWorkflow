@@ -29,6 +29,32 @@ try
     static void Write(string dir, string file, string text) =>
         File.WriteAllText(Path.Combine(dir, file), text);
 
+    string cached = Directory.CreateDirectory(Path.Combine(root, "compiler cache run")).FullName;
+    Write(cached, "run.json", """
+        {"schemaVersion":1,"workflow":"bench.json","manifestHash":"abc",
+         "startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:01:00Z",
+         "status":"succeeded","nodes":[
+           {"id":"build","kind":"build","status":"succeeded","target":"hello","processDurationSeconds":4,
+            "compilerCache":{"schemaVersion":1,"profile":"ci","provider":"ccache","scope":"build-attempt",
+             "hits":3,"misses":1,"bytesRead":128,"bytesWritten":null,"compileSeconds":0.5}},
+           {"id":"run","kind":"run","status":"succeeded","processDurationSeconds":0.1}]}
+        """);
+    using (HistoryStore cacheStore = new(Path.Combine(root, "cache-history.sqlite")))
+    {
+        Check(cacheStore.Import(cached, false).Contains("Imported 1", StringComparison.Ordinal), "cache import");
+        HistoryRun cachedRun = cacheStore.Runs(1, null, null, null, null, null).Single();
+        List<HistoryMeasurement> cacheMetrics = cacheStore.Metrics(cachedRun.Id, null, null, null);
+        HistoryMeasurement hits = cacheMetrics.Single(x => x.Metric == "compiler_cache_hits");
+        Check(hits is { NodeId: "build", Value: 3, Method: "ccache build-attempt counters" }, "cache hit attribution");
+        Check(cacheMetrics.Single(x => x.Metric == "compiler_cache_bytes_read").Value == 128
+              && cacheMetrics.Single(x => x.Metric == "compiler_time").Value == 0.5
+              && cacheMetrics.All(x => x.Metric != "compiler_cache_bytes_written"), "optional cache telemetry");
+        Check(cacheMetrics.Single(x => x.Metric == "build_wall_time").Value == 4
+              && cacheMetrics.Single(x => x.Metric == "process_wall_time").NodeId == "run",
+            "build and benchmark measurements share the same run");
+        Check(cacheStore.Import(cached, false).Contains("unchanged 1", StringComparison.Ordinal), "cache reimport");
+    }
+
     static string Workflow(string status, double first, double second, string workers = "1") => $$"""
           {"schemaVersion":1,"workflow":"bench.json","manifestHash":"abc",
            "startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:01:00Z",

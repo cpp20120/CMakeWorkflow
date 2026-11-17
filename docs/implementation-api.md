@@ -438,7 +438,10 @@ public sealed record PlanDiagnostic(string Severity, string Message);
 Source: [CMakeWorkflow.CMake/Planning/PlannedNode.cs](../CMakeWorkflow.CMake/Planning/PlannedNode.cs#L6)
 
 ```csharp
-public sealed record PlannedNode(CMakeWorkflow.Contracts.Workflows.WorkflowNode Definition, CMakeWorkflow.CMake.Build.CMakeTargetRef Target, string WorkingDirectory, System.Collections.Generic.IReadOnlyList<string> Dependencies, CMakeWorkflow.CMake.Build.RequestedBuildContext Requested, CMakeWorkflow.CMake.Build.ObservedBuildContext Observed, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.CMake.Planning.PlanDiagnostic> Diagnostics, CMakeWorkflow.Contracts.Workflows.WorkflowToolchainBinding? Toolchain = null);
+public sealed record PlannedNode(CMakeWorkflow.Contracts.Workflows.WorkflowNode Definition, CMakeWorkflow.CMake.Build.CMakeTargetRef Target, string WorkingDirectory, System.Collections.Generic.IReadOnlyList<string> Dependencies, CMakeWorkflow.CMake.Build.RequestedBuildContext Requested, CMakeWorkflow.CMake.Build.ObservedBuildContext Observed, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.CMake.Planning.PlanDiagnostic> Diagnostics, CMakeWorkflow.Contracts.Workflows.WorkflowToolchainBinding? Toolchain = null)
+{
+    public string? CompilerCacheProfile { get; init; }
+}
 ```
 
 #### `WorkflowPlan`
@@ -600,6 +603,17 @@ public sealed record WorkflowReconciliation(string Id, System.DateTimeOffset Tim
 
 ### Namespace `CMakeWorkflow.CMake.Reporting`
 
+#### `CompilerCacheStatistics`
+
+Source: [CMakeWorkflow.CMake/Reporting/CompilerCacheStatistics.cs](../CMakeWorkflow.CMake/Reporting/CompilerCacheStatistics.cs#L5)
+
+```csharp
+public sealed record CompilerCacheStatistics(int SchemaVersion, string Profile, string Provider, string Scope,
+    long? Hits = null, long? Misses = null, long? RemoteReadHits = null, long? RemoteWrites = null,
+    double? CompilerWorkSeconds = null, long? BytesRead = null, long? BytesWritten = null,
+    double? CompileSeconds = null);
+```
+
 #### `NodeResult`
 
 Source: [CMakeWorkflow.CMake/Reporting/NodeResult.cs](../CMakeWorkflow.CMake/Reporting/NodeResult.cs#L5)
@@ -624,6 +638,10 @@ public sealed class NodeResult
     public System.Collections.Generic.List<string> Arguments { get; set; }
     public string? EnvironmentOverrideHash { get; set; }
     public string? ToolchainFingerprint { get; set; }
+    public string? CompilerCacheFingerprint { get; set; }
+    public CMakeWorkflow.CMake.Reporting.CompilerCacheStatistics? CompilerCache { get; set; }
+    public string? ActionDigest { get; set; }
+    public bool? ActionCacheHit { get; set; }
     public string WorkingDirectory { get; set; }
     public string? Stdout { get; set; }
     public string? Stderr { get; set; }

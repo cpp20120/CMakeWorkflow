@@ -60,6 +60,10 @@ public static class WorkflowPlanner
             {
                 throw new ArgumentException($"{node.Id}: profile_snapshot requires schemaVersion 2.");
             }
+            if (node.ActionCache && document.SchemaVersion != 2)
+            {
+                throw new ArgumentException($"{node.Id}: actionCache requires schemaVersion 2.");
+            }
         }
 
         string[] orderedNodeIds = [.. document.Nodes.Select(node => node.Id)];
@@ -365,8 +369,26 @@ public static class WorkflowPlanner
                     $"Required profiler {profiler.Backend}/{profiler.Mode}: the profiling extension must confirm capabilities before capture."));
             }
 
+            string? compilerCache = document.Contexts[contextName].CompilerCacheProfile;
+            if (compilerCache is not null && !CompilerCacheProfile.IsValidName(compilerCache))
+            {
+                throw new ArgumentException($"{contextName}: invalid compilerCacheProfile name.");
+            }
+
+            if (compilerCache is not null && node.Kind is "configure" or "build" or "invoke")
+            {
+                diagnostics.Add(new("Runtime", $"Compiler cache profile '{compilerCache}' is resolved on the execution host."));
+            }
+            if (node.ActionCache)
+            {
+                diagnostics.Add(new("Runtime", "The verified action key and output are resolved on the execution host."));
+            }
+
             plan.Add(new PlannedNode(node, target, workingDirectory, dependencies[node.Id],
-                context.Request, context.Observed, diagnostics, document.Contexts[contextName].Toolchain));
+                context.Request, context.Observed, diagnostics, document.Contexts[contextName].Toolchain)
+            {
+                CompilerCacheProfile = compilerCache
+            });
         }
 
         foreach (IGrouping<string, PlannedNode> tree in plan.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot"))
@@ -382,6 +404,12 @@ public static class WorkflowPlanner
             {
                 throw new ArgumentException(
                     "Aliases of one physical build tree must use the same toolchain selection.");
+            }
+
+            if (tree.Select(n => n.CompilerCacheProfile).Distinct(StringComparer.Ordinal).Count() != 1)
+            {
+                throw new ArgumentException(
+                    "Aliases of one physical build tree must use the same compiler cache profile.");
             }
         }
 
@@ -521,6 +549,12 @@ public static class WorkflowPlanner
         if (n.Kind == "inspect" && n.Outputs.Count != 0)
         {
             throw new ArgumentException($"{n.Id}: inspect cannot produce declared artifacts.");
+        }
+        if (n.ActionCache && (n.Kind != "run" || n.Inputs.Count == 0 || n.Constraints is not null
+                              || n.Outputs is not [{ Fresh: true, Root: "manifest" }]))
+        {
+            throw new ArgumentException(
+                $"{n.Id}: actionCache requires a run with declared inputs, one fresh manifest-relative output and no execution constraints.");
         }
 
         HashSet<string> names = new(StringComparer.Ordinal);

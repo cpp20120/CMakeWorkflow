@@ -13,4 +13,5 @@ namespace CMakeWorkflow.History;
 [JsonSerializable(typeof(List<HistoryBuildEnvironment>))]
 [JsonSerializable(typeof(HistoryImportResult))]
 [JsonSerializable(typeof(HistoryDetectionReport))]
+[JsonSerializable(typeof(HistoryHostRow[]))]
 internal sealed partial class HistoryJson : JsonSerializerContext;

@@ -43,6 +43,11 @@ public static class ProfileReplayCommand
         }
 
         JsonElement node = matches[0];
+        if (node.TryGetProperty("actionCacheHit", out JsonElement hit) && hit.ValueKind == JsonValueKind.True)
+        {
+            throw new InvalidDataException("Profile replay requires an original process execution.");
+        }
+
         if (caseName is not null)
         {
             return node.GetProperty("kind").GetString() != "invoke"

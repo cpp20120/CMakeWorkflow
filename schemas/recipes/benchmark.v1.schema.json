@@ -35,6 +35,18 @@
       ],
       "pattern": "^[A-Za-z0-9_.+\\-]+$"
     },
+    "compilerCacheProfile": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    },
+    "sourceDirectory": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "configurePreset": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
     "repeats": {
       "type": "integer",
       "minimum": 1,

@@ -22,8 +22,11 @@ public static class HistoryComparison
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(candidate);
         static string Key(HistoryMeasurement m) => string.Join("\u001f", m.Metric, m.Variant, m.Scenario);
-        Dictionary<string, List<HistoryMeasurement>> a = baseline.Measurements.GroupBy(Key).ToDictionary(x => x.Key, x => x.ToList());
-        Dictionary<string, List<HistoryMeasurement>> b = candidate.Measurements.GroupBy(Key).ToDictionary(x => x.Key, x => x.ToList());
+        // Inventory bytes describe retained files, without a workload or a measurement environment.
+        Dictionary<string, List<HistoryMeasurement>> a = baseline.Measurements
+            .Where(m => m.Metric != "artifact_result_bytes").GroupBy(Key).ToDictionary(x => x.Key, x => x.ToList());
+        Dictionary<string, List<HistoryMeasurement>> b = candidate.Measurements
+            .Where(m => m.Metric != "artifact_result_bytes").GroupBy(Key).ToDictionary(x => x.Key, x => x.ToList());
         List<HistoryDifference> rows = [];
         if (a.Count == 0 && b.Count == 0)
         {

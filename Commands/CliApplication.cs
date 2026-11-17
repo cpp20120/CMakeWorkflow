@@ -14,6 +14,7 @@ internal static class CliApplication
     internal static Task<int> ExecuteAsync(string[] args, CancellationToken ct) => args switch
     {
         ["remote", .. string[] tail] => RemoteCommand.ExecuteAsync(tail, ct),
+        ["cas", .. string[] tail] => ArtifactCasCommand.ExecuteAsync(tail, ct),
         ["host", .. string[] tail] => HostCommand.ExecuteAsync(tail, ct),
         ["history", .. string[] tail] => HistoryCommand.ExecuteAsync(tail, ct),
         ["env", .. string[] tail] => EnvironmentCommand.ExecuteAsync(tail, ct),

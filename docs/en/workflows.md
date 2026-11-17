@@ -44,6 +44,7 @@ manifest file**. Relative CLI option paths normally resolve from the process wor
 | `configuration`    | Requested configuration, for example Debug or Release      |
 | `configurePreset`  | Literal CMake preset name; never inferred from cache       |
 | `generator`        | Expected generator identity, **not** a way to provide `-G` |
+| `compilerCacheProfile` | Optional [compiler cache profile](compiler-cache.md) configured on the execution host |
 | `mode`             | `observe`, `adopt`, `managed`                              |
 | `provenancePolicy` | `strict` (default), `allowUnverified`                      |
 

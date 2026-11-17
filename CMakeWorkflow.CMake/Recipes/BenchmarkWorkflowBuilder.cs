@@ -60,10 +60,32 @@ public static class BenchmarkWorkflowBuilder
             throw new ArgumentException("Benchmark arguments must be an array of strings without NUL characters.");
         }
 
-        List<WorkflowNode> nodes = new(recipe.Repeats + 1)
+        RecipeRules.ValidateCompilerCacheProfile(recipe.CompilerCacheProfile);
+        bool managed = recipe.SourceDirectory is not null || recipe.ConfigurePreset is not null;
+        if (managed && (string.IsNullOrWhiteSpace(recipe.SourceDirectory)
+                        || !Path.IsPathFullyQualified(recipe.SourceDirectory)
+                        || recipe.SourceDirectory.Contains('\0', StringComparison.Ordinal)
+                        || string.IsNullOrWhiteSpace(recipe.ConfigurePreset)
+                        || recipe.ConfigurePreset.StartsWith('-')
+                        || recipe.ConfigurePreset.Contains('\0', StringComparison.Ordinal)))
         {
-            new() { Id = "build", Kind = "build", Context = "benchmark", Target = recipe.Target }
-        };
+            throw new ArgumentException("Managed benchmark requires an absolute sourceDirectory and a literal configurePreset.");
+        }
+
+        List<WorkflowNode> nodes = new(recipe.Repeats + (managed ? 2 : 1));
+        if (managed)
+        {
+            nodes.Add(new() { Id = "configure", Kind = "configure", Context = "benchmark" });
+        }
+
+        nodes.Add(new()
+        {
+            Id = "build",
+            Kind = "build",
+            Context = "benchmark",
+            Target = recipe.Target,
+            DependsOn = managed ? ["configure"] : []
+        });
         for (int repeat = 1; repeat <= recipe.Repeats; repeat++)
         {
             nodes.Add(new WorkflowNode
@@ -87,8 +109,11 @@ public static class BenchmarkWorkflowBuilder
                 {
                     BuildDirectory = recipe.BuildDirectory,
                     Configuration = recipe.Configuration,
-                    Mode = "adopt",
-                    ProvenancePolicy = "allowUnverified"
+                    SourceDirectory = recipe.SourceDirectory,
+                    ConfigurePreset = recipe.ConfigurePreset,
+                    CompilerCacheProfile = recipe.CompilerCacheProfile,
+                    Mode = managed ? "managed" : "adopt",
+                    ProvenancePolicy = managed ? "strict" : "allowUnverified"
                 }
             },
             Nodes = nodes
