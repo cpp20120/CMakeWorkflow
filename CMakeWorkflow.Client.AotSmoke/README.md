@@ -1,5 +1,8 @@
 # NativeAOT SDK consumer smoke
 
+The consumer prepares and plans a durable profiling replay and renders a synthetic historical archive
+through the packaged SDK. This checks the profiling RPC serialization without requiring profiler permissions.
+
 The consumer also lists finalized artifacts, reads a byte range and downloads/verifies an artifact through the public
 operation handle. This exercises the SDK's internal artifact request DTOs and source-generated serialization without
 requiring consumers to reference those wire types.

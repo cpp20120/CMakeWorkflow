@@ -35,7 +35,7 @@ validation alone does not establish that compatibility.
 
 These eight assemblies are not part of the audited external .NET SDK package boundary. Their `public` declarations
 allow cross-assembly composition inside the repository; the modifier alone does not establish an embedding or plugin
-contract. Their 268 publicly accessible source types are listed separately in
+contract. Their publicly accessible source types are listed separately in
 [Implementation assembly API inventory](implementation-api.md).
 
 CLI commands and the negotiated Host JSON-RPC wire protocol are external integration surfaces in their own right.
@@ -467,7 +467,7 @@ public sealed record PrepareReplayProfileOptions(string RequestId, string Result
 
 #### `ProfileService`
 
-Host profile preparation, analysis and request-scoped replay; borrows the client lifetime.
+Host profile preparation, analysis, historical rendering and replay under the client lifetime.
 
 Paths are interpreted on the Host. Calls propagate cancellation and transport failures without automatic retry. Replay
 executes work under the request and connection lifetime. `PrepareReplayAsync` prepares a replay manifest for explicit
@@ -480,6 +480,7 @@ public sealed class ProfileService(CMakeWorkflow.Client.CMakeWorkflowClient clie
 {
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.PreparedWorkflow> PrepareAsync(CMakeWorkflow.Client.Profiling.PrepareProfileOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Profiling.AnalyzedProfile> AnalyzeAsync(CMakeWorkflow.Client.Profiling.AnalyzeProfileOptions options, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Client.Profiling.RenderedHistoricalProfile> RenderHistoricalAsync(CMakeWorkflow.Client.Profiling.RenderHistoricalProfileOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.PreparedWorkflow> PrepareReplayAsync(CMakeWorkflow.Client.Profiling.PrepareReplayProfileOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Profiling.ReplayProfileResult> ReplayAsync(CMakeWorkflow.Client.Profiling.ReplayProfileOptions options, System.Threading.CancellationToken ct = default);
 }
@@ -491,6 +492,22 @@ Source: [CMakeWorkflow.Client/Profiling/ProfileVariantOptions.cs](../CMakeWorkfl
 
 ```csharp
 public sealed record ProfileVariantOptions(string Name, string BuildDirectory, CMakeWorkflow.Contracts.Workflows.WorkflowToolchainBinding? Toolchain = null);
+```
+
+#### `RenderHistoricalProfileOptions`
+
+Source: [CMakeWorkflow.Client/Profiling/RenderHistoricalProfileOptions.cs](../CMakeWorkflow.Client/Profiling/RenderHistoricalProfileOptions.cs#L4)
+
+```csharp
+public sealed record RenderHistoricalProfileOptions(string RunDirectory);
+```
+
+#### `RenderedHistoricalProfile`
+
+Source: [CMakeWorkflow.Client/Profiling/RenderedHistoricalProfile.cs](../CMakeWorkflow.Client/Profiling/RenderedHistoricalProfile.cs#L4)
+
+```csharp
+public sealed record RenderedHistoricalProfile(int SchemaVersion, string RunDirectory, string IndexFile, string SamplingSummaryFile, string FramePointerSummaryFile, int FlamegraphCount);
 ```
 
 #### `ReplayProfileOptions`

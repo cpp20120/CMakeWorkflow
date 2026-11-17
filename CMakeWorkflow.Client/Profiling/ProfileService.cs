@@ -31,6 +31,15 @@ public sealed class ProfileService(CMakeWorkflowClient client)
         return client.Proxy.ProfileAnalyzeAsync(options, ct);
     }
 
+    /// <summary>Renders HTML, SVG and summary files from saved historical profile evidence on the Host.</summary>
+    /// <remarks>Runs under the RPC lifetime. Cancellation may leave some derived files published.</remarks>
+    public Task<RenderedHistoricalProfile> RenderHistoricalAsync(RenderHistoricalProfileOptions options,
+        CancellationToken ct = default)
+    {
+        client.RequireCapability("profile/renderHistorical");
+        return client.Proxy.HistoricalProfileRenderAsync(options, ct);
+    }
+
     /// <summary>Prepares a durable replay DAG for explicit workflow/start admission.</summary>
     /// <remarks>
     /// Preparation is commit-once, not execution. Use Workflows.StartAsync with the

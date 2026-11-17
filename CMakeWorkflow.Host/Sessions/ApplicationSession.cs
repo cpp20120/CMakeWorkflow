@@ -30,7 +30,7 @@ public sealed partial class DoctorSession
     [
         "context/inspect", "target/resolve", "workflow/plan", "workflow/preflight", "runs/get",
         "profile/prepare", "profileReplay/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
-        "benchmarkMatrix/prepare", "profile/analyze", "operations/find", "operations/get", "operations/list", "operations/cancel",
+        "benchmarkMatrix/prepare", "profile/analyze", "profile/renderHistorical", "operations/find", "operations/get", "operations/list", "operations/cancel",
         "workflow/start", "workflow/nodeSelection", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
         "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "operations/artifacts/timestampText", "history/import", "history/indexStatus", "history/retryIndex", "workflow/historyPolicy", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "history/runsPage", "toolchains/discover", "toolchains/resolve",

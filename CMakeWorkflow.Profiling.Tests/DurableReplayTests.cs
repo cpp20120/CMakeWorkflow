@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
@@ -111,6 +112,33 @@ internal static class DurableReplayTests
             WorkflowJson.Default.WorkflowReport)!;
         Check(quarantined.Status == "outcome_unknown" && quarantined.Nodes[0].Status == "outcome_unknown",
             "Interrupted capture must be marked outcome_unknown.");
+
+        for (int i = 0; i < runs.Length; i++)
+        {
+            string reportPath = Path.Combine(runs[i], "run.json");
+            JsonNode report = JsonNode.Parse(await File.ReadAllTextAsync(reportPath))!;
+            report["nodes"]![0]!["executionConditions"] = new JsonObject { ["cpuSetRequested"] = "2,4-5" };
+            await File.WriteAllTextAsync(reportPath, report.ToJsonString());
+        }
+
+        WorkflowDocument pinned = await ProfileReplayCommand.PrepareWorkflowAsync(
+            new(runs[0], runs[1], "benchmark", ResultsDirectory: definitions), null, CancellationToken.None);
+        Check(pinned.Nodes.All(x => x.Constraints?.CpuSet == "2,4-5"),
+            "Direct-run replay must preserve recorded affinity on each capture.");
+        string candidateReport = Path.Combine(runs[1], "run.json");
+        JsonNode mismatched = JsonNode.Parse(await File.ReadAllTextAsync(candidateReport))!;
+        mismatched["nodes"]![0]!["executionConditions"]!["cpuSetRequested"] = "3";
+        await File.WriteAllTextAsync(candidateReport, mismatched.ToJsonString());
+        try
+        {
+            _ = await ProfileReplayCommand.PrepareWorkflowAsync(
+                new(runs[0], runs[1], "benchmark", ResultsDirectory: definitions), null, CancellationToken.None);
+            throw new InvalidDataException("Replay accepted different baseline and candidate affinity.");
+        }
+        catch (InvalidOperationException error) when (error.Message.Contains("CPU affinity", StringComparison.Ordinal))
+        {
+            // Different CPU affinity describes a different experiment.
+        }
 
         await File.AppendAllTextAsync(manifest.Nodes[0].SnapshotExecutable!, "tampered");
         string brokenOutput = Path.Combine(source, "tampered");

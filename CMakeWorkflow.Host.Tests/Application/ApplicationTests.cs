@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.CMake.Build;
@@ -115,6 +116,21 @@ internal static class ApplicationTests
             "Capabilities omit implemented profile/workflow lifecycle");
         Check(info.Capabilities.Contains("profileReplay/prepare"),
             "Host did not advertise durable replay preparation.");
+        Check(info.Capabilities.Contains("profile/renderHistorical"),
+            "Host did not advertise historical profile rendering.");
+        await Refused(() => client.HistoricalProfileRenderAsync(new(outside), ct), "path_not_allowed");
+        string archive = Directory.CreateDirectory(Path.Combine(root, "historical archive")).FullName;
+        JsonObject historicalManifest = new()
+        {
+            ["source_sha256"] = new JsonObject(),
+            ["binaries"] = new JsonObject
+            {
+                ["o3"] = new JsonObject { ["path"] = Path.Combine(outside, "benchmark") }
+            }
+        };
+        await File.WriteAllTextAsync(Path.Combine(archive, "manifest.json"), historicalManifest.ToJsonString(), ct);
+        await Refused(() => client.HistoricalProfileRenderAsync(new(archive), ct), "path_not_allowed");
+        Check(!File.Exists(Path.Combine(archive, "index.html")), "Refused historical render published a report.");
         await Refused(() => client.ProfileReplayPrepareAsync(new ProfileReplayPrepareRequest(
             "bad", Path.Combine(root, "replay-definitions"), root, root, "benchmark"), ct),
             "invalid_argument");

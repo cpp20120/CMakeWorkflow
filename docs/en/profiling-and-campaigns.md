@@ -71,6 +71,10 @@ baseline and candidate sharing a mutable executable path can be rejected. Missin
 impossible. A replay is an **instrumented diagnostic experiment**, not new uninstrumented timing samples. Having two
 History entries with the same case name does not prove replayability.
 
+Direct-run replay also preserves the CPU set recorded by the original node. Both immediate replay and
+`Profiles.PrepareReplayAsync` require the two CPU sets to match. Durable preparation returns a manifest to admit
+through `Workflows.StartAsync`. See [durable profiling replay](host-ipc.md#durable-profiling-replay-opt-in).
+
 ## DagFlow harness
 
 An `invoke` workflow node may set `harnessDirectory`, relative to its **build tree**:
@@ -154,6 +158,13 @@ concrete quality warnings. Re-run `profile analyze RUN_DIRECTORY` against an exi
 CMakeWorkflow; no benchmark rerun is required.
 
 ## DagFlow historical O3/LTO capture: progress and recovery
+
+To regenerate HTML, SVG and sampling summaries from a saved campaign, run
+`CMakeWorkflow dagflow profile render-historical DIRECTORY` or call
+`client.Profiles.RenderHistoricalAsync(new(directory))` on a Host advertising `profile/renderHistorical`.
+The SDK call requires the campaign directory, recorded source and binaries to resolve within the initialized
+Host workspace. The response returns Host paths for the HTML and JSON summaries. Rendering uses saved evidence
+and can be performed wherever the recorded files are accessible.
 
 ```sh
 CMakeWorkflow dagflow profile run-historical --source-dir /path/to/DagFlow \

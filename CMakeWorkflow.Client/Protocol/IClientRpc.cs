@@ -64,6 +64,10 @@ internal partial interface IClientRpc
     [JsonRpcMethod("profile/analyze")]
     Task<AnalyzedProfile> ProfileAnalyzeAsync(AnalyzeProfileOptions request, CancellationToken ct);
 
+    [JsonRpcMethod("profile/renderHistorical")]
+    Task<RenderedHistoricalProfile> HistoricalProfileRenderAsync(RenderHistoricalProfileOptions request,
+        CancellationToken ct);
+
     [JsonRpcMethod("profileReplay/prepare")]
     Task<PreparedWorkflow> ProfileReplayPrepareAsync(PrepareReplayProfileOptions request, CancellationToken ct);
 

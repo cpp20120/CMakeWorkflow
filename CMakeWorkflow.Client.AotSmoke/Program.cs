@@ -54,6 +54,7 @@ try
         foreach (string? capability in new[]
                  {
                      "workflow/plan", "workflow/start", "benchmark/prepare",
+                     "profile/renderHistorical", "profileReplay/prepare",
                      "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare", "benchmarkMatrix/prepare",
                      "operations/get", "operations/find", "operations/cancel", "operations/events",
                      "operations/artifacts/list", "operations/artifacts/readChunk",
@@ -75,6 +76,7 @@ try
         // Never execute a repository workflow. All fixtures belong to this smoke.
         string fixture = Path.Combine(workspace, "sdk-aot-smoke-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(fixture);
+        await ProfilingSmoke.RunAsync(client, fixture, ct);
         string benchmarkBuild = Directory.CreateDirectory(Path.Combine(fixture, "benchmark build")).FullName;
         PrepareBenchmarkOptions benchmarkOptions = new(Guid.NewGuid().ToString("N"),
             Path.Combine(fixture, "benchmark.json"), new BenchmarkRecipeV1("benchmark", 1,

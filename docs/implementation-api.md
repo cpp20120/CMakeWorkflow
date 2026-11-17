@@ -969,6 +969,22 @@ public static class HostCommand
 
 ### Namespace `CMakeWorkflow.Host.Profiling`
 
+#### `HistoricalProfileRenderRequest`
+
+Source: [CMakeWorkflow.Host/Profiling/HistoricalProfileRenderRequest.cs](../CMakeWorkflow.Host/Profiling/HistoricalProfileRenderRequest.cs#L3)
+
+```csharp
+public sealed record HistoricalProfileRenderRequest(string RunDirectory);
+```
+
+#### `HistoricalProfileRenderResponse`
+
+Source: [CMakeWorkflow.Host/Profiling/HistoricalProfileRenderResponse.cs](../CMakeWorkflow.Host/Profiling/HistoricalProfileRenderResponse.cs#L3)
+
+```csharp
+public sealed record HistoricalProfileRenderResponse(int SchemaVersion, string RunDirectory, string IndexFile, string SamplingSummaryFile, string FramePointerSummaryFile, int FlamegraphCount);
+```
+
 #### `ProfileAnalysis`
 
 Source: [CMakeWorkflow.Host/Profiling/ProfileAnalysis.cs](../CMakeWorkflow.Host/Profiling/ProfileAnalysis.cs#L5)
@@ -1107,6 +1123,7 @@ public interface IHostRpc
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.BuildMatrixPreparation> BuildMatrixPrepareAsync(CMakeWorkflow.Host.Recipes.BuildMatrixPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.BenchmarkMatrixPreparation> BenchmarkMatrixPrepareAsync(CMakeWorkflow.Host.Recipes.BenchmarkMatrixPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfileAnalysis> ProfileAnalyzeAsync(CMakeWorkflow.Host.Profiling.ProfileAnalyzeRequest request, System.Threading.CancellationToken cancellationToken);
+    System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.HistoricalProfileRenderResponse> HistoricalProfileRenderAsync(CMakeWorkflow.Host.Profiling.HistoricalProfileRenderRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Workflows.TargetPreparation> TargetPrepareAsync(CMakeWorkflow.Host.Workflows.TargetPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfilePreparation> ProfileReplayPrepareAsync(CMakeWorkflow.Host.Profiling.ProfileReplayPrepareRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfileReplayResponse> ProfileReplayAsync(CMakeWorkflow.Host.Profiling.ProfileReplayRequest request, System.Threading.CancellationToken cancellationToken);
@@ -1363,6 +1380,7 @@ public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tool
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Provisioning.FixResult> ApplyFixAsync(CMakeWorkflow.Host.Provisioning.ApplyFixRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<System.Text.Json.JsonElement> ExecutionReportAsync(CMakeWorkflow.Host.Workflows.OperationGetRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfileAnalysis> ProfileAnalyzeAsync(CMakeWorkflow.Host.Profiling.ProfileAnalyzeRequest request, System.Threading.CancellationToken cancellationToken);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.HistoricalProfileRenderResponse> HistoricalProfileRenderAsync(CMakeWorkflow.Host.Profiling.HistoricalProfileRenderRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Profiling.ProfilePreparation> ProfilePrepareAsync(CMakeWorkflow.Host.Profiling.ProfilePrepareRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.ProfileRecipePreparation> ProfileRecipePrepareAsync(CMakeWorkflow.Host.Recipes.ProfileRecipePrepareRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Recipes.TestMatrixPreparation> TestMatrixPrepareAsync(CMakeWorkflow.Host.Recipes.TestMatrixPrepareRequest request, System.Threading.CancellationToken cancellationToken);
@@ -2156,6 +2174,7 @@ Source: [CMakeWorkflow.Profiling/Historical/DagFlowHistoricalReport.cs](../CMake
 public static class DagFlowHistoricalReport
 {
     public static System.Threading.Tasks.Task<int> RenderAsync(string directory, System.Threading.CancellationToken ct);
+    public static System.Threading.Tasks.Task<int> RenderReportAsync(string directory, System.Action<string>? checkPath, System.Action<string>? checkMetadataRead, System.Threading.CancellationToken ct);
 }
 ```
 

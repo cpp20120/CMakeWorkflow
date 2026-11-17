@@ -83,7 +83,7 @@ parameters array, as with existing methods):
 | Area              | RPC methods                                                                          | Lifetime                                                                          |
 |-------------------|--------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
 | Benchmark recipe  | `benchmark/prepare`                                                                  | Commit-once manifest preparation; execute through durable `workflow/start`        |
-| Profiling         | `profile/prepare`, `profileReplay/prepare`, `profile/analyze`, `profile/replay`                               | Both prepare methods commit immutable manifests; `analyze` and `replay` are connection-scoped |
+| Profiling         | `profile/prepare`, `profileReplay/prepare`, `profile/analyze`, `profile/renderHistorical`, `profile/replay` | Both prepare methods commit immutable manifests; analysis, rendering and immediate replay are connection-scoped |
 | Native targets    | `target/prepare` (`build`, `invoke`, `run`, `sequence`)                              | Metadata-only; execute through durable `workflow/start`                           |
 | DagFlow campaigns | `dagflow/mutation/run`, `dagflow/weakMemory/run`                                     | Connection-scoped                                                                 |
 | Fuzz              | `dagflow/fuzz/seed`, `dagflow/fuzz/run`, `dagflow/fuzz/triage`, `dagflow/fuzz/merge` | Connection-scoped                                                                 |
@@ -99,6 +99,11 @@ execution.
 `target/prepare` does not support the legacy `--prepared` CLI shortcut; it constructs build/run or interleaved build/run
 DAG nodes with their normal build-verification rules. `invoke` remains explicit, including CMake utility and campaign
 targets. Target arguments are arrays, never shell strings.
+
+`profile/renderHistorical` takes `{ "runDirectory": "ABSOLUTE_HOST_PATH" }` for an existing DagFlow historical
+campaign and publishes derived HTML, SVG and sampling summaries. The versioned response contains
+`runDirectory`, `indexFile`, `samplingSummaryFile`, `framePointerSummaryFile` and `flamegraphCount`.
+Cancellation may leave some derived files published. The typed entry is `Profiles.RenderHistoricalAsync`.
 
 `profile/replay` is *not* yet a durable workflow operation: cancellation or connection loss can leave a partial replay
 directory. Fuzz, mutation and weak-memory campaigns also use request-scoped cancellation and return typed status, exit

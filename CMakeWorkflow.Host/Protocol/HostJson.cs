@@ -85,6 +85,8 @@ namespace CMakeWorkflow.Host.Protocol;
 [JsonSerializable(typeof(BenchmarkMatrixPreparation))]
 [JsonSerializable(typeof(ProfileAnalyzeRequest))]
 [JsonSerializable(typeof(ProfileAnalysis))]
+[JsonSerializable(typeof(HistoricalProfileRenderRequest))]
+[JsonSerializable(typeof(HistoricalProfileRenderResponse))]
 [JsonSerializable(typeof(TargetPrepareRequest))]
 [JsonSerializable(typeof(TargetPreparation))]
 [JsonSerializable(typeof(ProfileReplayPrepareRequest))]

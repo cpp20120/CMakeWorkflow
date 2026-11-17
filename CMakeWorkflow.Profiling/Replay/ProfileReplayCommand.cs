@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Profiling.Analysis;
@@ -74,6 +75,17 @@ public static class ProfileReplayCommand
 
         string[] args = [.. node.GetProperty("arguments").EnumerateArray().Select(x => x.GetString()!)];
         string cwd = node.GetProperty("workingDirectory").GetString()!;
+        string? cpuSet = null;
+        if (node.TryGetProperty("executionConditions", out JsonElement conditions)
+            && conditions.ValueKind == JsonValueKind.Object
+            && conditions.TryGetProperty("cpuSetRequested", out JsonElement requested))
+        {
+            cpuSet = requested.ValueKind == JsonValueKind.String ? requested.GetString() : null;
+            if (cpuSet is null || !WorkflowExecutionAdmission.ValidCpuSet(cpuSet))
+            {
+                throw new InvalidDataException("Recorded replay CPU affinity is invalid.");
+            }
+        }
         pathGuard?.Invoke(executable);
         pathGuard?.Invoke(cwd);
         if (!Directory.Exists(cwd))
@@ -91,7 +103,7 @@ public static class ProfileReplayCommand
         return !string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase)
             ? throw new InvalidOperationException(
                 "Benchmark executable changed since its original run; preserve an immutable build to profile the baseline.")
-            : new Input(directory, nodeId, executable, actual, cwd, args, null, null);
+            : new Input(directory, nodeId, executable, actual, cwd, args, cpuSet, null);
     }
 
     // The source harness writes a versioned replayCases descriptor containing
@@ -427,21 +439,19 @@ public static class ProfileReplayCommand
                 }
 
                 string name = $"{(mode == "counters" ? "counters" : mode == "scheduler" ? "scheduler" : "capture")}_{label}";
-                // For native harness cases, preserve explicit taskset affinity.
-                // perf runs taskset as a child; taskset execs the verified binary.
-                string profiledExecutable = item.CpuSet is not null ? "taskset" : item.Executable;
-                IReadOnlyList<string> profiledArgs = item.CpuSet is not null
-                    ? ["-c", item.CpuSet, item.Executable, .. item.Arguments]
-                    : item.Arguments;
+                Dictionary<string, string> affinity = WorkflowExecutionAdmission.Require(item.CpuSet is null
+                    ? null
+                    : new WorkflowExecutionConstraints { CpuSet = item.CpuSet });
                 WorkflowOperationResult result = await executor.ExecuteAsync(new WorkflowOperationRequest(
-                    "profile", profiledExecutable, profiledArgs, item.WorkingDirectory,
+                    "profile", item.Executable, item.Arguments, item.WorkingDirectory,
                     new Dictionary<string, string>(), new Dictionary<string, string>
                     {
                         ["backend"] = backend,
                         ["mode"] = mode,
                         ["captureTimeoutSeconds"] = duration.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     },
-                    output, name), ct);
+                    output, name, CpuSet: item.CpuSet,
+                    CpuAffinityLauncher: affinity.GetValueOrDefault("cpuAffinityLauncher")), ct);
                 if (result.ExitCode != 0)
                 {
                     throw new InvalidOperationException($"Profile replay {name} failed with exit code {result.ExitCode}.");

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CMakeWorkflow.Core;
+using CMakeWorkflow.Profiling.Analysis;
 
 namespace CMakeWorkflow.Profiling.Historical;
 
@@ -12,15 +13,45 @@ public static class DagFlowHistoricalReport
     public static async Task<int> RenderAsync(string directory, CancellationToken ct)
     {
         directory = Path.GetFullPath(directory);
-        JsonObject manifest = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(directory, "manifest.json"), ct))
-            ?.AsObject() ?? throw new InvalidDataException("Historical profile manifest is missing.");
+        int count = await RenderReportAsync(directory, null, null, ct);
+        Console.WriteLine("Rendered " + count + " flamegraphs: " + Path.Combine(directory, "index.html"));
+        return 0;
+    }
+
+    /// <summary>Renders an existing campaign without capturing profiles or launching a profiler.</summary>
+    /// <remarks>Guards run before reads and publications. Each derived file is replaced atomically.</remarks>
+    public static async Task<int> RenderReportAsync(string directory, Action<string>? checkPath,
+        Action<string>? checkMetadataRead, CancellationToken ct)
+    {
+        directory = Path.GetFullPath(directory);
+        async Task<JsonNode> ReadJsonAsync(string path, int maxDepth = 0)
+        {
+            checkPath?.Invoke(path);
+            checkMetadataRead?.Invoke(path);
+            return JsonNode.Parse(await File.ReadAllTextAsync(path, ct),
+                       documentOptions: new JsonDocumentOptions { MaxDepth = maxDepth })
+                   ?? throw new InvalidDataException("Missing historical profile data: " + path);
+        }
+
+        Task WriteAsync(string path, string content)
+        {
+            checkPath?.Invoke(path);
+            return ProfileArtifactWriter.WriteTextAsync(path, content, ct);
+        }
+
+        JsonObject manifest = (await ReadJsonAsync(Path.Combine(directory, "manifest.json"))).AsObject();
         string snapshot = Path.Combine(directory, "source");
         foreach ((string? path, JsonNode? hashNode) in manifest["source_sha256"]?.AsObject()
                                          ?? throw new InvalidDataException("Source snapshot identity is missing."))
         {
             string source = Path.GetFullPath(Path.Combine(snapshot, path));
-            if (!source.StartsWith(snapshot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                || await CommandExecution.Sha256Async(source, ct) != hashNode!.GetValue<string>())
+            if (!source.StartsWith(snapshot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Source snapshot path escapes the campaign: " + path);
+            }
+
+            checkPath?.Invoke(source);
+            if (await CommandExecution.Sha256Async(source, ct) != hashNode!.GetValue<string>())
             {
                 throw new InvalidDataException("Source snapshot changed: " + path);
             }
@@ -30,7 +61,9 @@ public static class DagFlowHistoricalReport
                                      ?? throw new InvalidDataException("Binary identity is missing."))
         {
             JsonObject binary = node?.AsObject() ?? throw new InvalidDataException("Invalid binary: " + name);
-            if (await CommandExecution.Sha256Async(binary["path"]!.GetValue<string>(), ct)
+            string binaryPath = binary["path"]!.GetValue<string>();
+            checkPath?.Invoke(binaryPath);
+            if (await CommandExecution.Sha256Async(binaryPath, ct)
                 != binary["sha256"]!.GetValue<string>())
             {
                 throw new InvalidDataException("Measured binary changed: " + name);
@@ -44,7 +77,9 @@ public static class DagFlowHistoricalReport
                                              "Missing diagnostic frame-pointer binary identities."))
             {
                 JsonObject binary = node?.AsObject() ?? throw new InvalidDataException("Invalid FP binary: " + name);
-                if (await CommandExecution.Sha256Async(binary["path"]!.GetValue<string>(), ct)
+                string binaryPath = binary["path"]!.GetValue<string>();
+                checkPath?.Invoke(binaryPath);
+                if (await CommandExecution.Sha256Async(binaryPath, ct)
                     != binary["sha256"]!.GetValue<string>())
                 {
                     throw new InvalidDataException("Diagnostic frame-pointer binary changed: " + name);
@@ -52,8 +87,7 @@ public static class DagFlowHistoricalReport
             }
         }
 
-        JsonArray rows = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(directory, "summary.json"), ct))
-            ?.AsArray() ?? throw new InvalidDataException("Historical profile summary is missing.");
+        JsonArray rows = (await ReadJsonAsync(Path.Combine(directory, "summary.json"))).AsArray();
         // Two variants x two worker counts x six scenarios; never produce a
         // seemingly complete HTML report from a truncated campaign.
         if (rows.Count != 24)
@@ -94,26 +128,23 @@ public static class DagFlowHistoricalReport
             }
 
             string path = Path.Combine(directory, "profiles", label);
-            JsonObject tree = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(path, "flamegraph.json"), ct),
-                    documentOptions: new JsonDocumentOptions { MaxDepth = 4096 })
-                ?.AsObject() ?? throw new InvalidDataException("Missing flamegraph: " + label);
-            await File.WriteAllTextAsync(Path.Combine(path, "flamegraph.svg"),
-                DagFlowHistoricalFlamegraph.Svg(tree, label), ct);
+            JsonObject tree = (await ReadJsonAsync(Path.Combine(path, "flamegraph.json"), 4096)).AsObject();
+            await WriteAsync(Path.Combine(path, "flamegraph.svg"), DagFlowHistoricalFlamegraph.Svg(tree, label));
             release[label] = Stats(tree);
             string fpPath = Path.Combine(directory, "profiles-fp", label);
-            if (manifest["diagnostic_frame_pointers"] is not null
-                && !File.Exists(Path.Combine(fpPath, "flamegraph.json")))
+            string fpTreePath = Path.Combine(fpPath, "flamegraph.json");
+            checkPath?.Invoke(fpTreePath);
+            bool hasFpTree = File.Exists(fpTreePath);
+            if (manifest["diagnostic_frame_pointers"] is not null && !hasFpTree)
             {
                 throw new InvalidDataException("Missing declared FP flamegraph: " + label);
             }
 
-            if (File.Exists(Path.Combine(fpPath, "flamegraph.json")))
+            if (hasFpTree)
             {
-                JsonObject fpTree = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(fpPath, "flamegraph.json"), ct),
-                        documentOptions: new JsonDocumentOptions { MaxDepth = 4096 })
-                    ?.AsObject() ?? throw new InvalidDataException("Invalid FP flamegraph: " + label);
-                await File.WriteAllTextAsync(Path.Combine(fpPath, "flamegraph.svg"),
-                    DagFlowHistoricalFlamegraph.Svg(fpTree, label + " (diagnostic frame pointers)"), ct);
+                JsonObject fpTree = (await ReadJsonAsync(fpTreePath, 4096)).AsObject();
+                await WriteAsync(Path.Combine(fpPath, "flamegraph.svg"),
+                    DagFlowHistoricalFlamegraph.Svg(fpTree, label + " (diagnostic frame pointers)"));
                 framePointers[label] = Stats(fpTree);
             }
 
@@ -147,15 +178,14 @@ public static class DagFlowHistoricalReport
 
         _ = body.Append(
             "</tbody></table><p>Raw perf data and weighted flamegraph JSON remain next to each SVG.</p></html>\n");
-        await File.WriteAllTextAsync(Path.Combine(directory, "sampling-summary.json"),
-            release.ToJsonString() + "\n", ct);
-        await File.WriteAllTextAsync(Path.Combine(directory, "sampling-summary-fp.json"),
-            framePointers.ToJsonString() + "\n", ct);
-        await File.WriteAllTextAsync(Path.Combine(directory, "index.html"), body.ToString(), ct);
+        await WriteAsync(Path.Combine(directory, "sampling-summary.json"), release.ToJsonString() + "\n");
+        await WriteAsync(Path.Combine(directory, "sampling-summary-fp.json"), framePointers.ToJsonString() + "\n");
+        await WriteAsync(Path.Combine(directory, "index.html"), body.ToString());
         string readme = Path.Combine(directory, "README.md");
+        checkPath?.Invoke(readme);
         if (!File.Exists(readme))
         {
-            await File.WriteAllTextAsync(readme, """
+            await WriteAsync(readme, """
                                                  # DagFlow O3 versus Full LTO
 
                                                  Open [index.html](index.html) for time, counters and sampled stacks.
@@ -165,12 +195,10 @@ public static class DagFlowHistoricalReport
                                                  Timings and counters come from distinct processes; frame-pointer captures
                                                  are diagnostic and do not contribute to the timing or counter summary.
                                                  CPU frequency, co-running system load and off-CPU time are not attested.
-                                                 """, ct);
+                                                 """);
         }
 
-        Console.WriteLine("Rendered " + (release.Count + framePointers.Count) + " flamegraphs: "
-                          + Path.Combine(directory, "index.html"));
-        return 0;
+        return release.Count + framePointers.Count;
     }
 
     private static string Number(JsonObject row, string key, string format, double divisor)

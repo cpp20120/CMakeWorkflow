@@ -112,6 +112,10 @@ public partial interface IHostRpc
     [JsonRpcMethod("profile/analyze")]
     Task<ProfileAnalysis> ProfileAnalyzeAsync(ProfileAnalyzeRequest request, CancellationToken cancellationToken);
 
+    [JsonRpcMethod("profile/renderHistorical")]
+    Task<HistoricalProfileRenderResponse> HistoricalProfileRenderAsync(HistoricalProfileRenderRequest request,
+        CancellationToken cancellationToken);
+
     [JsonRpcMethod("target/prepare")]
     Task<TargetPreparation> TargetPrepareAsync(TargetPrepareRequest request, CancellationToken cancellationToken);
 
