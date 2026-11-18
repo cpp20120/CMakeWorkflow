@@ -48,7 +48,7 @@ internal static class SourceBindingRecoveryTests
             await File.WriteAllBytesAsync(manifest, manifestBytes);
             string hash = Convert.ToHexString(SHA256.HashData(manifestBytes));
             LoreSnapshotStore lore = new(storePath);
-            string sourceId = lore.Capture(source, ["CMakeLists.txt", "a.cmake", "b.cmake"]);
+            string sourceId = await lore.CaptureAsync(source, ["CMakeLists.txt", "a.cmake", "b.cmake"]);
             WorkflowStartRequest request = new("source-resume", manifest, hash, 1, output)
             {
                 SourceSnapshotId = sourceId

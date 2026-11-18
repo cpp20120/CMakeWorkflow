@@ -162,11 +162,11 @@ internal static class ProcessRecoveryTests
         return f;
     }
 
-    private static void Admit(Fixture f)
+    private static async Task AdmitAsync(Fixture f)
     {
         using DurableAcceptanceStore store = f.Store();
         _ = store.Reconcile(f.Id, 0, "needs_attention", "Verified quiescence; continue only never-admitted nodes");
-        ProcessWorkflowRecovery.Prepare(store, f.Id, new(f.Root));
+        await ProcessWorkflowRecovery.PrepareAsync(store, f.Id, new(f.Root), CancellationToken.None);
         _ = store.AdmitResume(f.Id, 1);
     }
 
@@ -183,7 +183,7 @@ internal static class ProcessRecoveryTests
             await Crash(f, false, point);
             using DurableAcceptanceStore store = f.Store();
             _ = store.Reconcile(f.Id, 0, "needs_attention", "Stopped before initial dispatch");
-            await Reject(() => Task.Run(() => ProcessWorkflowRecovery.Prepare(store, f.Id, new(f.Root))), point);
+            await Reject(() => ProcessWorkflowRecovery.PrepareAsync(store, f.Id, new(f.Root), CancellationToken.None), point);
             Check(!File.Exists(f.Effects), "Unconfirmed initial dispatch produced an effect.");
         }
 
@@ -192,7 +192,7 @@ internal static class ProcessRecoveryTests
         foreach (string? point in new[] { "process-before-resume-claim", "process-after-resume-claim" })
         {
             Fixture f = await Partial(parent);
-            Admit(f);
+            await AdmitAsync(f);
             byte[] originalLog = await File.ReadAllBytesAsync(Path.Combine(f.Output, f.Read().Nodes[0].Stdout!), CancellationToken.None);
             await Crash(f, true, point);
             if (point == "process-before-resume-claim")
@@ -218,7 +218,7 @@ internal static class ProcessRecoveryTests
                      "process-child-completed", "child-started" })
         {
             Fixture f = await Partial(parent, point == "child-started");
-            Admit(f);
+            await AdmitAsync(f);
             await Crash(f, true, point, point == "process-child-completed" ? "b" : null,
                 effect: point == "child-started");
             string[] before = await File.ReadAllLinesAsync(f.Effects, CancellationToken.None);
@@ -236,18 +236,18 @@ internal static class ProcessRecoveryTests
         using (DurableAcceptanceStore store = unknown.Store())
         {
             _ = store.Reconcile(unknown.Id, 0, "needs_attention", "Quiescent, but result remains unknown");
-            await Reject(() => Task.Run(() => ProcessWorkflowRecovery.Prepare(store, unknown.Id, new(unknown.Root))),
+            await Reject(() => ProcessWorkflowRecovery.PrepareAsync(store, unknown.Id, new(unknown.Root), CancellationToken.None),
                 "running node with operation-level reconciliation");
             ProcessOperationReport report = unknown.Read();
             report.Nodes[0].Status = "outcome_unknown";
             unknown.Write(report);
-            await Reject(() => Task.Run(() => ProcessWorkflowRecovery.Prepare(store, unknown.Id, new(unknown.Root))),
+            await Reject(() => ProcessWorkflowRecovery.PrepareAsync(store, unknown.Id, new(unknown.Root), CancellationToken.None),
                 "unresolved outcome_unknown");
             report.Nodes[0].Status = "pending";
             report.Nodes[0].StartedAt = null;
             report.Nodes[0].Stdout = report.Nodes[0].Stderr = null;
             unknown.Write(report);
-            await Reject(() => Task.Run(() => ProcessWorkflowRecovery.Prepare(store, unknown.Id, new(unknown.Root))),
+            await Reject(() => ProcessWorkflowRecovery.PrepareAsync(store, unknown.Id, new(unknown.Root), CancellationToken.None),
                 "formerly running node reset to pending");
         }
 
@@ -255,7 +255,7 @@ internal static class ProcessRecoveryTests
         // workflow checkpoint was never written. Finalize without repeating it.
         Fixture completed = Create(parent);
         await Crash(completed, false, "process-before-terminal-checkpoint");
-        Admit(completed);
+        await AdmitAsync(completed);
         Check(await DurableProcessWorkflowExecutor.ExecuteResumedAsync(completed.Root, completed.Id, default) == 0,
             "All-completed recovery failed.");
         Check((await File.ReadAllLinesAsync(completed.Effects, CancellationToken.None)).SequenceEqual(["a", "b"]), "All-completed recovery repeated effects.");
@@ -267,7 +267,7 @@ internal static class ProcessRecoveryTests
     private static async Task CodecAndLeases(string parent)
     {
         Fixture f = await Partial(parent);
-        Admit(f);
+        await AdmitAsync(f);
         byte[] original = await File.ReadAllBytesAsync(f.Report, CancellationToken.None);
         foreach (string? mode in new[] { "domain", "schemaVersion", "missing-domain", "duplicate-id", "status",
                      "unknown", "running", "metadata", "recoveryPhase", "resumeCount" })
@@ -311,7 +311,7 @@ internal static class ProcessRecoveryTests
         foreach (string? mode in new[] { "snapshot", "identity", "dependencies", "audit", "binding", "path", "legacy" })
         {
             Fixture f = await Partial(parent);
-            Admit(f);
+            await AdmitAsync(f);
             ProcessOperationReport report = f.Read();
             if (mode == "snapshot")
             {
@@ -359,7 +359,7 @@ internal static class ProcessRecoveryTests
                 // missing evidence before preparation rather than after it.
                 await File.WriteAllBytesAsync(f.Report, report.Recovery!.PreviousCheckpoint, CancellationToken.None);
                 using DurableAcceptanceStore store = f.Store();
-                await Reject(() => Task.Run(() => ProcessWorkflowRecovery.Prepare(store, f.Id, new(f.Root))), mode);
+                await Reject(() => ProcessWorkflowRecovery.PrepareAsync(store, f.Id, new(f.Root), CancellationToken.None), mode);
                 continue;
             }
             else

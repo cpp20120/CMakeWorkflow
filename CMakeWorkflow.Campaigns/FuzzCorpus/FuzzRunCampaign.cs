@@ -48,7 +48,7 @@ public static class FuzzRunCampaign
             observed, targetName);
         _ = CMakeInspection.RequireTarget(observed, target, executableOnly: true);
         using BuildTreeOwnership ownership = await BuildTreeOwnership.AcquireAsync([buildDirectory], ct);
-        CMakeBuildCommand build = CMakeBuildCommand.Create(target);
+        CMakeBuildCommand build = await CMakeBuildCommand.CreateAsync(target, ct);
         CommandResult buildResult = await CommandExecution.RunAsync(observed.CMakeExecutable ?? "cmake",
             build.Arguments, build.WorkingDirectory, TimeSpan.FromMinutes(20), null, ct);
         RequireSuccess(buildResult, "CMake build");

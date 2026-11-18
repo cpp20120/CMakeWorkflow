@@ -25,10 +25,12 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
     private static readonly byte[] Context = "CMWF-SOURCE-0001"u8.ToArray(); // 16 bytes
     private readonly string _storeRoot = Path.GetFullPath(storeRoot ?? throw new ArgumentNullException(nameof(storeRoot)));
 
-    public string Capture(string sourceRoot, IReadOnlyCollection<string> relativeFiles)
+    public async Task<string> CaptureAsync(string sourceRoot, IReadOnlyCollection<string> relativeFiles,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sourceRoot);
         ArgumentNullException.ThrowIfNull(relativeFiles);
+        ct.ThrowIfCancellationRequested();
         if (relativeFiles.Count == 0)
         {
             throw new ArgumentException("An explicit, non-empty file selection is required.", nameof(relativeFiles));
@@ -62,19 +64,20 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         LorePointer[] pointers;
         // Closing the Lore handle before manifest publication is intentional:
         // the manifest must never become visible before its blobs have been flushed.
-        using (StorageSession lore = new(Path.Combine(_storeRoot, "lore"), initialize: true))
+        await using (StorageSession lore = await StorageSession.OpenAsync(Path.Combine(_storeRoot, "lore"), initialize: true))
         {
             List<SnapshotFile> list = new(selected.Count);
             List<LorePointer> locations = new(selected.Count);
             foreach (string relative in selected)
             {
+                ct.ThrowIfCancellationRequested();
                 string full = ResolveSourceFile(source, relative);
                 FileInfo before = new(full);
                 if (before.Length > MaxFileBytes)
                 {
                     throw new InvalidDataException($"File exceeds current Lore adapter limit ({MaxFileBytes} bytes): {relative}");
                 }
-                byte[] bytes = File.ReadAllBytes(full);
+                byte[] bytes = await File.ReadAllBytesAsync(full, ct);
                 FileInfo after = new(full);
                 if (before.Length != after.Length || before.LastWriteTimeUtc != after.LastWriteTimeUtc || bytes.Length != after.Length)
                 {
@@ -82,7 +85,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                 }
 
                 string sha256 = Sha256(bytes);
-                LoreAddress address = lore.Put(bytes);
+                LoreAddress address = await lore.PutAsync(bytes);
                 list.Add(new SnapshotFile(relative, sha256, bytes.LongLength));
                 locations.Add(new LorePointer(relative,
                     Convert.ToHexString(address.Hash.Data),
@@ -92,6 +95,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             pointers = [.. locations];
         }
 
+        ct.ThrowIfCancellationRequested();
         byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(
             new SnapshotManifest(SchemaVersion, entries), SourceSnapshotJson.Default.SnapshotManifest);
         string snapshotId = Sha256(manifestBytes);
@@ -101,17 +105,17 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         _ = Directory.CreateDirectory(manifests);
         // Publish physical locators first, then the immutable logical manifest.
         // A crash between writes leaves an unused binding, never a visible incomplete snapshot.
-        PublishImmutable(Path.Combine(manifests, snapshotId + ".lore.json"), bindingBytes);
-        PublishImmutable(Path.Combine(manifests, snapshotId + ".json"), manifestBytes);
+        await PublishImmutableAsync(Path.Combine(manifests, snapshotId + ".lore.json"), bindingBytes);
+        await PublishImmutableAsync(Path.Combine(manifests, snapshotId + ".json"), manifestBytes);
         return snapshotId;
     }
 
-    public SnapshotManifest Inspect(string snapshotId)
+    public async Task<SnapshotManifest> InspectAsync(string snapshotId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(snapshotId);
         ValidateHash(snapshotId, 64);
         string path = Path.Combine(_storeRoot, "manifests", snapshotId + ".json");
-        byte[] data = File.ReadAllBytes(path);
+        byte[] data = await File.ReadAllBytesAsync(path, ct);
         if (!Sha256(data).Equals(snapshotId, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Manifest hash does not match snapshot ID.");
@@ -148,26 +152,29 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
 
     // Recovery must prove that physical CAS blobs remain available even when
     // operation-owned materialization was retained across a Host restart.
-    public SnapshotManifest Verify(string snapshotId, CancellationToken cancellationToken)
+    public async Task<SnapshotManifest> VerifyAsync(string snapshotId, CancellationToken ct)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        SnapshotManifest manifest = Inspect(snapshotId);
-        LoreBindings bindings = ReadBindings(snapshotId, manifest);
-        using StorageSession lore = new(Path.Combine(_storeRoot, "lore"), initialize: false);
-        for (int i = 0; i < manifest.Files.Count; i++)
+        ct.ThrowIfCancellationRequested();
+        SnapshotManifest manifest = await InspectAsync(snapshotId, ct);
+        LoreBindings bindings = await ReadBindingsAsync(snapshotId, manifest, ct);
+        await using (StorageSession lore = await StorageSession.OpenAsync(Path.Combine(_storeRoot, "lore"), initialize: false))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            _ = ReadVerifiedBlob(lore, manifest.Files[i], bindings.Files[i]);
+            for (int i = 0; i < manifest.Files.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                _ = await ReadVerifiedBlobAsync(lore, manifest.Files[i], bindings.Files[i]);
+            }
         }
+        ct.ThrowIfCancellationRequested();
         return manifest;
     }
 
-    public void Materialize(string snapshotId, string destination)
+    public async Task MaterializeAsync(string snapshotId, string destination, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(snapshotId);
         ArgumentNullException.ThrowIfNull(destination);
-        SnapshotManifest manifest = Inspect(snapshotId);
-        LoreBindings bindings = ReadBindings(snapshotId, manifest);
+        SnapshotManifest manifest = await InspectAsync(snapshotId, ct);
+        LoreBindings bindings = await ReadBindingsAsync(snapshotId, manifest, ct);
         string final = Path.GetFullPath(destination);
         if (Directory.Exists(final) || File.Exists(final))
         {
@@ -179,17 +186,19 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         _ = Directory.CreateDirectory(stage);
         try
         {
-            using (StorageSession lore = new(Path.Combine(_storeRoot, "lore"), initialize: false))
+            await using (StorageSession lore = await StorageSession.OpenAsync(Path.Combine(_storeRoot, "lore"), initialize: false))
             {
                 for (int i = 0; i < manifest.Files.Count; i++)
                 {
+                    ct.ThrowIfCancellationRequested();
                     SnapshotFile entry = manifest.Files[i];
-                    byte[] bytes = ReadVerifiedBlob(lore, entry, bindings.Files[i]);
+                    byte[] bytes = await ReadVerifiedBlobAsync(lore, entry, bindings.Files[i]);
                     string path = Path.Combine(stage, entry.Path.Replace('/', Path.DirectorySeparatorChar));
                     _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                    File.WriteAllBytes(path, bytes);
+                    await File.WriteAllBytesAsync(path, bytes, ct);
                 }
             }
+            ct.ThrowIfCancellationRequested();
             Directory.Move(stage, final); // same-filesystem publication of complete tree
         }
         finally
@@ -201,9 +210,9 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         }
     }
 
-    private static byte[] ReadVerifiedBlob(StorageSession lore, SnapshotFile entry, LorePointer pointer)
+    private static async Task<byte[]> ReadVerifiedBlobAsync(StorageSession lore, SnapshotFile entry, LorePointer pointer)
     {
-        byte[] bytes = lore.Get(new LoreAddress
+        byte[] bytes = await lore.GetAsync(new LoreAddress
         {
             Hash = new LoreHash(Convert.FromHexString(pointer.LoreHash)),
             Context = new LoreContext(Convert.FromHexString(pointer.LoreContext))
@@ -216,9 +225,9 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         return bytes;
     }
 
-    private LoreBindings ReadBindings(string snapshotId, SnapshotManifest manifest)
+    private async Task<LoreBindings> ReadBindingsAsync(string snapshotId, SnapshotManifest manifest, CancellationToken ct)
     {
-        byte[] raw = File.ReadAllBytes(Path.Combine(_storeRoot, "manifests", snapshotId + ".lore.json"));
+        byte[] raw = await File.ReadAllBytesAsync(Path.Combine(_storeRoot, "manifests", snapshotId + ".lore.json"), ct);
         LoreBindings binding = JsonSerializer.Deserialize(raw, SourceSnapshotJson.Default.LoreBindings)
             ?? throw new InvalidDataException("Invalid Lore bindings.");
         if (binding.SchemaVersion != SchemaVersion || binding.SnapshotId != snapshotId ||
@@ -244,11 +253,11 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         return binding;
     }
 
-    private static void PublishImmutable(string target, byte[] bytes)
+    private static async Task PublishImmutableAsync(string target, byte[] bytes)
     {
         if (File.Exists(target))
         {
-            if (!File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes))
+            if (!(await File.ReadAllBytesAsync(target)).AsSpan().SequenceEqual(bytes))
             {
                 throw new InvalidDataException("Immutable snapshot metadata changed.");
             }
@@ -257,14 +266,14 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         string temp = Path.Combine(Path.GetDirectoryName(target)!, "." + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            File.WriteAllBytes(temp, bytes);
+            await File.WriteAllBytesAsync(temp, bytes);
             try
             {
                 File.Move(temp, target);
             }
             catch (IOException) when (File.Exists(target))
             {
-                if (!File.ReadAllBytes(target).AsSpan().SequenceEqual(bytes))
+                if (!(await File.ReadAllBytesAsync(target)).AsSpan().SequenceEqual(bytes))
                 {
                     throw new InvalidDataException("Conflicting snapshot metadata.");
                 }
@@ -313,15 +322,23 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
 
     private static string Sha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 
-    private sealed class StorageSession : IDisposable
+    // Keep native arguments alive until Lore has delivered END. Observe
+    // cancellation between native calls so the handle can always be closed.
+    private sealed class StorageSession : IAsyncDisposable
     {
         private readonly LoreGlobalArgs _global;
         private readonly ulong _handle;
         private bool _closed;
 
-        public StorageSession(string root, bool initialize)
+        private StorageSession(LoreGlobalArgs global, ulong handle)
         {
-            _global = new LoreGlobalArgs { Offline = true, RepositoryPath = root };
+            _global = global;
+            _handle = handle;
+        }
+
+        internal static async Task<StorageSession> OpenAsync(string root, bool initialize)
+        {
+            LoreGlobalArgs global = new() { Offline = true, RepositoryPath = root };
             string dotLore = Path.Combine(root, ".lore");
             if (initialize && !Directory.Exists(dotLore))
             {
@@ -337,7 +354,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                 }
                 _ = Directory.CreateDirectory(root);
                 using LoreRepositoryCreateArgs create = new() { RepositoryUrl = "cmwf-snapshots" };
-                _ = Lore.RepositoryCreate(_global, create).Wait();
+                _ = await Lore.RepositoryCreate(global, create).WaitAsync();
             }
             if (!Directory.Exists(dotLore))
             {
@@ -345,7 +362,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             }
             using LoreStorageOpenArgs args = new() { RepositoryPath = root, InMemory = false };
             ulong handle = 0;
-            _ = Lore.StorageOpen(_global, args)
+            _ = await Lore.StorageOpen(global, args)
                 .Callback((evt, _) =>
                 {
                     if (evt.Tag == LoreEventTag.STORAGE_OPENED)
@@ -353,15 +370,15 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                         handle = evt.GetData<LoreStorageOpenedEventDataFFI>().HandleId;
                     }
                 })
-                .Wait();
+                .WaitAsync();
             if (handle == 0)
             {
                 throw new IOException("Lore did not return a storage handle.");
             }
-            _handle = handle;
+            return new StorageSession(global, handle);
         }
 
-        public LoreAddress Put(byte[] bytes)
+        internal async Task<LoreAddress> PutAsync(byte[] bytes)
         {
             using LoreStoragePutArgs args = new()
             {
@@ -375,8 +392,8 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                     RemoteWrite = false
                 }]
             };
-            LoreStoragePutItemCompleteEventData[] events = [.. Lore.StoragePut(_global, args)
-                .FilterByType([LoreEventTag.STORAGE_PUT_ITEM_COMPLETE]).Collect()
+            LoreStoragePutItemCompleteEventData[] events = [.. (await Lore.StoragePut(_global, args)
+                .FilterByType([LoreEventTag.STORAGE_PUT_ITEM_COMPLETE]).CollectAsync())
                 .OfType<LoreStoragePutItemCompleteEventData>()];
             if (events.Length != 1 || events[0].ErrorCode != (int)LoreErrorCode.NONE)
             {
@@ -385,7 +402,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             return events[0].Address;
         }
 
-        public byte[] Get(LoreAddress address)
+        internal async Task<byte[]> GetAsync(LoreAddress address)
         {
             using LoreStorageGetArgs args = new()
             {
@@ -398,9 +415,9 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                     Streaming = false
                 }]
             };
-            List<LoreEvent> events = [.. Lore.StorageGet(_global, args)
+            List<LoreEvent> events = [.. await Lore.StorageGet(_global, args)
                 .FilterByType([LoreEventTag.STORAGE_GET_DATA, LoreEventTag.STORAGE_GET_ITEM_COMPLETE])
-                .Collect()];
+                .CollectAsync()];
             LoreStorageGetItemCompleteEventData[] completed = [.. events.OfType<LoreStorageGetItemCompleteEventData>()];
             if (completed.Length != 1 || completed[0].ErrorCode != (int)LoreErrorCode.NONE)
             {
@@ -418,14 +435,14 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             return buffer.ToArray();
         }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (_closed)
             {
                 return;
             }
             using LoreStorageCloseArgs args = new() { Handle = new LoreStore(_handle) };
-            _ = Lore.StorageClose(_global, args).Wait();
+            _ = await Lore.StorageClose(_global, args).WaitAsync();
             _closed = true;
         }
     }

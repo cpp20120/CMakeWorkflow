@@ -16,7 +16,7 @@ internal static class ArtifactPathBoundaryTests
         }
     }
 
-    internal static void Run()
+    internal static async Task RunAsync()
     {
         string root = Path.Combine(Path.GetTempPath(), "cmwf-artifact-path-" + Guid.NewGuid().ToString("N"));
         string directory = Path.Combine(root, "results", "logs");
@@ -25,15 +25,16 @@ internal static class ArtifactPathBoundaryTests
         _ = Directory.CreateDirectory(outside);
         string expected = Path.Combine(directory, "effect.stdout");
         string privateFile = Path.Combine(outside, "private.txt");
-        File.WriteAllText(expected, "authorized-result", Encoding.UTF8);
-        File.WriteAllText(privateFile, "never-read-this", Encoding.UTF8);
-        File.WriteAllText(Path.Combine(outside, "effect.stdout"), "private-parent-redirect", Encoding.UTF8);
+        await File.WriteAllTextAsync(expected, "authorized-result", Encoding.UTF8);
+        await File.WriteAllTextAsync(privateFile, "never-read-this", Encoding.UTF8);
+        await File.WriteAllTextAsync(Path.Combine(outside, "effect.stdout"), "private-parent-redirect", Encoding.UTF8);
         try
         {
-            using (FileStream stream = OperationArtifactFile.OpenRead(root, expected))
+            await using (FileStream stream = OperationArtifactFile.OpenRead(root, expected))
             using (StreamReader reader = new(stream, Encoding.UTF8))
             {
-                Check(reader.ReadToEnd() == "authorized-result", "Ordinary artifact read failed.");
+                Check(!OperatingSystem.IsWindows() || stream.IsAsync, "Windows artifact handle lacks overlapped I/O.");
+                Check(await reader.ReadToEndAsync() == "authorized-result", "Ordinary artifact read failed.");
             }
 
             // A path outside the anchored workspace is rejected before opening.

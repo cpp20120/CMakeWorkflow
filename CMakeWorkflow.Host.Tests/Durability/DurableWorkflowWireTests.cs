@@ -353,8 +353,8 @@ internal static class DurableWorkflowWireTests
         {
             try
             {
-                _ = history.ImportFinalizedWorkflow(atomic.ResultsDirectory,
-                    Convert.ToHexString(SHA256.HashData(finalReport)), paths.Read);
+                _ = await history.ImportFinalizedWorkflowAsync(atomic.ResultsDirectory,
+                    Convert.ToHexString(SHA256.HashData(finalReport)), paths.Read, ct);
                 throw new UnreachableException("The history parser accepted a replaced report.");
             }
             catch (InvalidDataException error) when (error.Message == "Workflow report differs from durable finalization.") { }

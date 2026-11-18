@@ -103,7 +103,7 @@ internal static class ProcessWorkflowRunner
             new ExecutionNode<ProcessWorkflowNode>(n.Id, n.Dependencies ?? [], n.Exclusive, n)).ToList());
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = paths.Require(Path.Combine(output, "events.jsonl"));
-        using ProcessEventJournal journal = new(output, resume);
+        await using ProcessEventJournal journal = await ProcessEventJournal.OpenAsync(output, resume);
 
         async Task Persist()
         {
@@ -113,7 +113,7 @@ internal static class ProcessWorkflowRunner
             string checkpoint = paths.Require(Path.Combine(output, "run.json"));
             _ = paths.Require(checkpoint + ".tmp");
             await DurableByteWriter.WriteAsync(checkpoint, bytes, CancellationToken.None);
-            journal.Publish(report);
+            await journal.PublishAsync(report);
         }
         await Persist();
         try

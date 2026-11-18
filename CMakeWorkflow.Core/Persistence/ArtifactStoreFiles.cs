@@ -81,7 +81,7 @@ internal sealed class ArtifactStoreFiles(string directory)
 
     internal static async Task VerifyAsync(string path, string digest, long size, CancellationToken ct)
     {
-        await using FileStream file = File.OpenRead(path);
+        await using FileStream file = OpenSequentialRead(path);
         if (file.Length != size || Convert.ToHexStringLower(await SHA256.HashDataAsync(file, ct)) != digest)
         {
             throw new InvalidDataException($"CAS integrity verification failed for SHA-256 {digest}.");
@@ -114,12 +114,16 @@ internal sealed class ArtifactStoreFiles(string directory)
 
     internal static async Task CopyAsync(string source, string destination, CancellationToken ct)
     {
-        await using FileStream input = File.OpenRead(source);
-        await using FileStream result = new(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await using FileStream input = OpenSequentialRead(source);
+        await using FileStream result = new(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+            64 * 1024, FileOptions.Asynchronous);
         await input.CopyToAsync(result, ct);
         await result.FlushAsync(ct);
         RandomAccess.FlushToDisk(result.SafeFileHandle);
     }
+
+    private static FileStream OpenSequentialRead(string path) => new(path, FileMode.Open, FileAccess.Read,
+        FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
     internal static string NormalizeDigest(string? value) =>
         value is { Length: 64 } && value.All(Uri.IsHexDigit)

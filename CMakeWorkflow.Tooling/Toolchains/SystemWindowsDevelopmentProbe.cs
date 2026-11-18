@@ -1,11 +1,11 @@
-using System.Diagnostics;
+using CMakeWorkflow.Tooling.Tools;
 using Microsoft.Win32;
 
 namespace CMakeWorkflow.Tooling.Toolchains;
 
 public sealed class SystemWindowsDevelopmentProbe : IWindowsDevelopmentProbe
 {
-    public string? MsvcToolset()
+    public async Task<string?> MsvcToolsetAsync(CancellationToken ct)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -27,35 +27,15 @@ public sealed class SystemWindowsDevelopmentProbe : IWindowsDevelopmentProbe
 
             try
             {
-                using Process? process = Process.Start(new ProcessStartInfo(tool)
-                {
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    ArgumentList =
-                    {
-                        "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                        "-property", "installationPath"
-                    }
-                });
-                if (process is null)
+                ToolCommandResult result = await new SystemToolingRuntime().RunAsync(tool,
+                    ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                        "-property", "installationPath"], TimeSpan.FromSeconds(5), ct);
+                if (result.ExitCode != 0)
                 {
                     continue;
                 }
 
-                string output = process.StandardOutput.ReadToEnd();
-                if (!process.WaitForExit(5000))
-                {
-                    process.Kill();
-                    continue;
-                }
-
-                if (process.ExitCode != 0)
-                {
-                    continue;
-                }
-
-                string installation = output.Trim();
+                string installation = result.Output.Trim();
                 if (installation.Length == 0)
                 {
                     continue;
@@ -78,7 +58,7 @@ public sealed class SystemWindowsDevelopmentProbe : IWindowsDevelopmentProbe
                 }
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException
-                                          or System.ComponentModel.Win32Exception or InvalidOperationException)
+                                          or System.ComponentModel.Win32Exception or InvalidOperationException or TimeoutException)
             {
             }
         }

@@ -6,12 +6,12 @@ namespace CMakeWorkflow.CMake.Recovery;
 
 /// <summary>Best-effort event projection owned by one CMake runner under its run lease.</summary>
 /// <remarks>
-/// Not thread-safe; Publish is called on the serial report persistence path. Resume recovers the maximum
+/// Not thread-safe; PublishAsync is called on the serial report persistence path. Resume recovers the maximum
 /// parseable sequence and suppresses already successful node events; malformed JSON lines are ignored during
-/// that scan. It does not validate recovery authority or prove event completeness. AutoFlush is not durable sync.
+/// that scan. It does not validate recovery authority or prove event completeness. Flushing the event stream does not make it a durable checkpoint.
 /// Handled journal/stdout I/O failures disable those outputs; unexpected errors may still propagate.
 /// </remarks>
-internal sealed class WorkflowEventJournal : IDisposable
+internal sealed class WorkflowEventJournal : IAsyncDisposable
 {
     private StreamWriter? journal;
     private bool stdout;
@@ -22,56 +22,53 @@ internal sealed class WorkflowEventJournal : IDisposable
     private bool resumedEventEmitted;
     private long sequence;
 
-    public WorkflowEventJournal(string directory, bool stdout, WorkflowReport? resumed = null)
+    private WorkflowEventJournal(string directory, bool stdout)
     {
         this.directory = directory;
         this.stdout = stdout;
+    }
+
+    internal static async Task<WorkflowEventJournal> OpenAsync(string directory, bool stdout, WorkflowReport? resumed)
+    {
+        WorkflowEventJournal events = new(directory, stdout);
         if (resumed is not null)
         {
-            // Replay only journal metadata, not previously completed node events.
-            // The report is the checkpoint; the event file is a best-effort audit trail.
-            foreach (NodeResult? node in resumed.Nodes.Where(n => n.Status == "succeeded"))
+            foreach (NodeResult node in resumed.Nodes.Where(n => n.Status == "succeeded"))
             {
-                previous[node.Id] = node.Status;
+                events.previous[node.Id] = node.Status;
             }
 
-            string file = Path.Combine(directory, "events.jsonl");
-            if (File.Exists(file))
-            {
-                foreach (string line in File.ReadLines(file))
-                {
-                    try
-                    {
-                        using JsonDocument doc = JsonDocument.Parse(line);
-                        JsonElement value = doc.RootElement;
-                        if (value.TryGetProperty("sequence", out JsonElement number) && number.TryGetInt64(out long n))
-                        {
-                            sequence = Math.Max(sequence, n);
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        /* Truncated final event is not a checkpoint. */
-                    }
-                }
-            }
-
-            started = true;
+            events.started = true;
         }
 
         try
         {
-            journal = new StreamWriter(new FileStream(Path.Combine(directory, "events.jsonl"),
-                FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
-            { AutoFlush = true };
+            events.journal = await EventJournalFile.OpenAsync(Path.Combine(directory, "events.jsonl"),
+                resumed is null ? null : events.RestoreSequence);
         }
-        catch (IOException error)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Event journal unavailable: {error.Message}");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Event journal unavailable: {error.Message}");
         }
-        catch (UnauthorizedAccessException error)
+        return events;
+    }
+
+    private void RestoreSequence(string line)
+    {
+        try
         {
-            Console.Error.WriteLine($"[CMakeWorkflow] Event journal unavailable: {error.Message}");
+            using JsonDocument doc = JsonDocument.Parse(line);
+            JsonElement value = doc.RootElement;
+            if (value.ValueKind == JsonValueKind.Object &&
+                value.TryGetProperty("sequence", out JsonElement number) &&
+                number.ValueKind == JsonValueKind.Number && number.TryGetInt64(out long n))
+            {
+                sequence = Math.Max(sequence, n);
+            }
+        }
+        catch (JsonException)
+        {
+            /* Truncated final event is not a checkpoint. */
         }
     }
 
@@ -80,18 +77,18 @@ internal sealed class WorkflowEventJournal : IDisposable
     /// Does not mutate the report or retry execution. A workflow_finished event can describe a suspended
     /// needs_attention outcome and must not be used as proof of ledger terminal finalization.
     /// </remarks>
-    public void Publish(WorkflowReport report)
+    internal async Task PublishAsync(WorkflowReport report)
     {
         if (started && report.RecoveryPhase == "resuming" && !resumedEventEmitted)
         {
             resumedEventEmitted = true;
-            Emit("workflow_resumed", null, "running", null, null, []);
+            await EmitAsync("workflow_resumed", null, "running", null, null, []);
         }
 
         if (!started)
         {
             started = true;
-            Emit("workflow_started", null, "running", null, null,
+            await EmitAsync("workflow_started", null, "running", null, null,
             [
                 new("report", Path.Combine(directory, "run.json"), null),
                 new("event-journal", Path.Combine(directory, "events.jsonl"), null)
@@ -112,14 +109,14 @@ internal sealed class WorkflowEventJournal : IDisposable
                 continue;
             }
 
-            Emit(node.Status == "running" ? "node_started" : "node_finished", node,
+            await EmitAsync(node.Status == "running" ? "node_started" : "node_finished", node,
                 node.Status, node.ExitCode, node.Error, Artifacts(node));
         }
 
         if (!finished && report.Status != "running")
         {
             finished = true;
-            Emit("workflow_finished", null, report.Status, null, report.Error,
+            await EmitAsync("workflow_finished", null, report.Status, null, report.Error,
                 [new("report", Path.Combine(directory, "run.json"), null)]);
         }
     }
@@ -175,7 +172,7 @@ internal sealed class WorkflowEventJournal : IDisposable
         return artifacts;
     }
 
-    private void Emit(string type, NodeResult? node, string? status, int? exitCode,
+    private async Task EmitAsync(string type, NodeResult? node, string? status, int? exitCode,
         string? error, List<WorkflowArtifactView> artifacts)
     {
         WorkflowEvent item = new(1, ++sequence, DateTimeOffset.UtcNow, type, directory,
@@ -188,11 +185,11 @@ internal sealed class WorkflowEventJournal : IDisposable
 
         try
         {
-            journal.WriteLine(line);
+            await EventJournalFile.AppendAsync(journal, line);
         }
-        catch (IOException)
+        catch (Exception failure) when (failure is IOException or ObjectDisposedException)
         {
-            journal.Dispose();
+            await EventJournalFile.CloseAsync(journal);
             journal = null;
             return;
         }
@@ -201,7 +198,7 @@ internal sealed class WorkflowEventJournal : IDisposable
         {
             try
             {
-                Console.Out.WriteLine(line);
+                await Console.Out.WriteLineAsync(line);
             }
             catch (IOException)
             {
@@ -214,5 +211,5 @@ internal sealed class WorkflowEventJournal : IDisposable
         }
     }
 
-    public void Dispose() => journal?.Dispose();
+    public ValueTask DisposeAsync() => EventJournalFile.CloseAsync(journal);
 }

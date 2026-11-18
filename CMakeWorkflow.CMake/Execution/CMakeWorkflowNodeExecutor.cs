@@ -167,7 +167,7 @@ internal static class CMakeWorkflowNodeExecutor
                             _ = CMakeInspection.RequireTarget(result.ObservedContext, target);
                         }
 
-                        CMakeBuildCommand command = CMakeBuildCommand.Create(target);
+                        CMakeBuildCommand command = await CMakeBuildCommand.CreateAsync(target, deadline.Token);
                         result.Executable = toolchain?.CMake ?? result.ObservedContext.CMakeExecutable ?? "cmake";
                         result.Arguments = [.. command.Arguments];
                         break;
@@ -280,7 +280,7 @@ internal static class CMakeWorkflowNodeExecutor
                     CompilerCacheMeasurement? cacheMeasurement = null;
                     if (compilerCache is not null && definition.Kind is "build" or "invoke")
                     {
-                        compilerCache.RequireConfigured(result.ObservedContext);
+                        await compilerCache.RequireConfiguredAsync(result.ObservedContext, deadline.Token);
                         cacheMeasurement = new(compilerCache, output, logStem, result.WorkingDirectory, environment);
                         await cacheMeasurement.StartAsync(deadline.Token);
                         environment = cacheMeasurement.Environment;
@@ -334,7 +334,10 @@ internal static class CMakeWorkflowNodeExecutor
                     {
                         result.ObservationAfter =
                             await CMakeInspection.InspectAsync(target.BuildDirectory, deadline.Token);
-                        compilerCache?.RequireConfigured(result.ObservationAfter);
+                        if (compilerCache is not null)
+                        {
+                            await compilerCache.RequireConfiguredAsync(result.ObservationAfter, deadline.Token);
+                        }
                         result.BuildVerification = result.BuildVerification with
                         {
                             ObservationIndex = result.ObservationAfter.IndexFile,
@@ -631,7 +634,10 @@ internal static class CMakeWorkflowNodeExecutor
                 // Verify requested selection against the new observation; never silently
                 // replace a requested Debug/Release configuration with the generated one.
                 CMakeInspection.ValidateIdentity(request, result.ObservationAfter);
-                compilerCache?.RequireConfigured(result.ObservationAfter);
+                if (compilerCache is not null)
+                {
+                    await compilerCache.RequireConfiguredAsync(result.ObservationAfter, ct);
+                }
                 if (request.Configuration is not null || result.ObservationAfter.MultiConfig == false)
                 {
                     result.Configuration = CMakeInspection.Resolve(request, result.ObservationAfter).Configuration;

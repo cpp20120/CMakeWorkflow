@@ -8,12 +8,12 @@ namespace CMakeWorkflow.Host.Execution;
 // durable checkpoint or license a retry of any external effect.
 /// <summary>Best-effort audit projection owned by one process runner under its run lease.</summary>
 /// <remarks>
-/// Not thread-safe; Publish calls belong to the serial checkpoint path. Constructor/append I/O failures can
-/// disable the writer without changing execution authority. AutoFlush is not the durable checkpoint protocol.
+/// Not thread-safe; PublishAsync calls belong to the serial checkpoint path. Open/append I/O failures can
+/// disable the writer without changing execution authority. The event flush is not the durable checkpoint protocol.
 /// On resume, sequence numbers continue above parsed historical events and an interrupted final line is separated;
 /// node events can be projected again by the new journal instance and must not be interpreted as new dispatches.
 /// </remarks>
-internal sealed class ProcessEventJournal : IDisposable
+internal sealed class ProcessEventJournal : IAsyncDisposable
 {
     private StreamWriter? writer;
     private readonly string directory;
@@ -22,45 +22,34 @@ internal sealed class ProcessEventJournal : IDisposable
     private bool started;
     private bool finished;
 
-    internal ProcessEventJournal(string directory, bool resume = false)
+    private ProcessEventJournal(string directory)
     {
         this.directory = directory;
+    }
+
+    internal static async Task<ProcessEventJournal> OpenAsync(string directory, bool resume)
+    {
+        ProcessEventJournal journal = new(directory);
         try
         {
-            bool needsSeparator = false;
-            if (resume && File.Exists(Path.Combine(directory, "events.jsonl")))
+            journal.writer = await EventJournalFile.OpenAsync(Path.Combine(directory, "events.jsonl"),
+                resume ? journal.RestoreSequence : null);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        return journal;
+    }
+
+    private void RestoreSequence(string line)
+    {
+        try
+        {
+            WorkflowEvent? evt = JsonSerializer.Deserialize(line, WorkflowProtocolJson.Default.WorkflowEvent);
+            if (evt is not null)
             {
-                foreach (string line in File.ReadLines(Path.Combine(directory, "events.jsonl")))
-                {
-                    try
-                    {
-                        WorkflowEvent? evt = JsonSerializer.Deserialize(line, WorkflowProtocolJson.Default.WorkflowEvent);
-                        if (evt is not null)
-                        {
-                            sequence = Math.Max(sequence, evt.Sequence);
-                        }
-                    }
-                    catch (JsonException) { }
-                }
-                using FileStream tail = File.OpenRead(Path.Combine(directory, "events.jsonl"));
-                if (tail.Length > 0)
-                {
-                    _ = tail.Seek(-1, SeekOrigin.End);
-                    needsSeparator = tail.ReadByte() != '\n';
-                }
-            }
-            writer = new StreamWriter(new FileStream(Path.Combine(directory, "events.jsonl"),
-                FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
-            { AutoFlush = true };
-            // Preserve an interrupted final line without merging the first new
-            // event into it. Replay skips that incomplete historical record.
-            if (needsSeparator)
-            {
-                writer.WriteLine();
+                sequence = Math.Max(sequence, evt.Sequence);
             }
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (JsonException) { }
     }
 
     /// <summary>Appends observed state transitions without changing the report or licensing retry.</summary>
@@ -68,12 +57,12 @@ internal sealed class ProcessEventJournal : IDisposable
     /// Caller invokes after durable checkpoint persistence. A journal failure cannot reverse that checkpoint;
     /// use report/ledger evidence, not event completeness, to decide finalization or safe recovery.
     /// </remarks>
-    internal void Publish(ProcessOperationReport report)
+    internal async Task PublishAsync(ProcessOperationReport report)
     {
         if (!started)
         {
             started = true;
-            Emit("workflow_started", null, "running", null, null);
+            await EmitAsync("workflow_started", null, "running", null, null);
         }
         foreach (ProcessNodeReport node in report.Nodes)
         {
@@ -83,17 +72,17 @@ internal sealed class ProcessEventJournal : IDisposable
             }
 
             last[node.Id] = node.Status;
-            Emit(node.Status == "running" ? "node_started" : "node_finished", node.Id,
+            await EmitAsync(node.Status == "running" ? "node_started" : "node_finished", node.Id,
                 node.Status, node.ExitCode, node.Error);
         }
         if (!finished && report.Status != "running")
         {
             finished = true;
-            Emit("workflow_finished", null, report.Status, null, report.Error);
+            await EmitAsync("workflow_finished", null, report.Status, null, report.Error);
         }
     }
 
-    private void Emit(string type, string? id, string status, int? exitCode, string? error)
+    private async Task EmitAsync(string type, string? id, string status, int? exitCode, string? error)
     {
         if (writer is null)
         {
@@ -104,11 +93,14 @@ internal sealed class ProcessEventJournal : IDisposable
             directory, id, id is null ? null : "process", status, exitCode, error, []);
         try
         {
-            writer.WriteLine(JsonSerializer.Serialize(evt, WorkflowProtocolJson.Default.WorkflowEvent));
+            await EventJournalFile.AppendAsync(writer, JsonSerializer.Serialize(evt, WorkflowProtocolJson.Default.WorkflowEvent));
         }
-        catch (IOException) { writer.Dispose(); writer = null; }
-        catch (ObjectDisposedException) { writer = null; }
+        catch (Exception failure) when (failure is IOException or ObjectDisposedException)
+        {
+            await EventJournalFile.CloseAsync(writer);
+            writer = null;
+        }
     }
 
-    public void Dispose() => writer?.Dispose();
+    public ValueTask DisposeAsync() => EventJournalFile.CloseAsync(writer);
 }

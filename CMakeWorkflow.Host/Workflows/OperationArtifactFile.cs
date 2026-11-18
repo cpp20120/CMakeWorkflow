@@ -55,7 +55,7 @@ internal static class OperationArtifactFile
                 throw new ApplicationRefusal("path_not_allowed", "Artifact is not a regular, unlinked file.");
             }
             // The descriptor is the authority for all subsequent reads and metadata.
-            FileStream stream = new(handle, FileAccess.Read, 64 * 1024, isAsync: false);
+            FileStream stream = new(handle, FileAccess.Read, 64 * 1024, isAsync: handle.IsAsync);
             if (!stream.CanSeek)
             {
                 stream.Dispose();
@@ -209,8 +209,11 @@ internal static class OperationArtifactFile
                 ObjectName = name,
                 Attributes = objectCaseInsensitive | objectDontReparse
             };
+            // Directory handles are used for relative lookup and metadata. File handles
+            // omit FILE_SYNCHRONOUS_IO_NONALERT so payload reads can use overlapped I/O.
+            uint options = openReparsePoint | (directory ? synchronous : 0u);
             int status = NtCreateFile(out SafeFileHandle? handle, access, ref attrs, out _, IntPtr.Zero,
-                0, shareAll, openExisting, synchronous | openReparsePoint, IntPtr.Zero, 0);
+                0, shareAll, openExisting, options, IntPtr.Zero, 0);
             if (status < 0)
             {
                 handle?.Dispose();

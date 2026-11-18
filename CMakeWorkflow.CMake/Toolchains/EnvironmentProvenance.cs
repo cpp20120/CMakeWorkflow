@@ -2,13 +2,14 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.Core;
 
 namespace CMakeWorkflow.CMake.Toolchains;
 
 /// <summary>Captures reproducibility metadata without reserving an immutable execution environment.</summary>
 /// <remarks>
 /// Fingerprints identify the fields observed here, not continuous host stability or cross-machine equivalence.
-/// Collection is synchronous and not cancelable. Optional fields may be unavailable; filesystem failures
+/// Optional fields may be unavailable; filesystem failures
 /// not handled by the individual probes propagate rather than producing fabricated evidence.
 /// </remarks>
 internal static class EnvironmentProvenance
@@ -28,20 +29,20 @@ internal static class EnvironmentProvenance
     /// directory/file outside the run directory; handled I/O/access failures there yield null. Other host metadata
     /// reads may still fail. The fingerprint is a point-in-time observation, not an uninterrupted measurement guarantee.
     /// </remarks>
-    internal static HostEnvironment CaptureHost()
+    internal static async Task<HostEnvironment> CaptureHostAsync(CancellationToken ct)
     {
         bool linux = OperatingSystem.IsLinux();
         bool mac = OperatingSystem.IsMacOS();
-        string[] cpuInfo = linux && File.Exists("/proc/cpuinfo") ? File.ReadAllLines("/proc/cpuinfo") : [];
+        string[] cpuInfo = linux && File.Exists("/proc/cpuinfo") ? await File.ReadAllLinesAsync("/proc/cpuinfo", ct) : [];
         string? cpuModel = linux
             ? Field(cpuInfo, "model name")
             : mac
-                ? Sysctl("machdep.cpu.brand_string")
+                ? await SysctlAsync("machdep.cpu.brand_string", ct)
                 : Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
         int logical = linux
             ? cpuInfo.Count(x => x.StartsWith("processor", StringComparison.Ordinal)
                                  && x.Contains(':', StringComparison.Ordinal))
-            : mac && int.TryParse(Sysctl("hw.logicalcpu"), out int macLogical)
+            : mac && int.TryParse(await SysctlAsync("hw.logicalcpu", ct), out int macLogical)
                 ? macLogical
                 : Environment.ProcessorCount;
         if (logical == 0)
@@ -75,21 +76,21 @@ internal static class EnvironmentProvenance
         }
 
         string kernel = linux && File.Exists("/proc/sys/kernel/osrelease")
-            ? File.ReadAllText("/proc/sys/kernel/osrelease").Trim()
+            ? (await File.ReadAllTextAsync("/proc/sys/kernel/osrelease", ct)).Trim()
             : mac
-                ? Sysctl("kern.osrelease") ?? Environment.OSVersion.VersionString
+                ? await SysctlAsync("kern.osrelease", ct) ?? Environment.OSVersion.VersionString
                 : Environment.OSVersion.VersionString;
         string? affinity = linux
-            ? Field(File.ReadAllLines("/proc/self/status"), "Cpus_allowed_list")
+            ? Field(await File.ReadAllLinesAsync("/proc/self/status", ct), "Cpus_allowed_list")
             : ProcessAffinity();
         string governorPath = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
-        string? governor = linux && File.Exists(governorPath) ? File.ReadAllText(governorPath).Trim() : null;
+        string? governor = linux && File.Exists(governorPath) ? (await File.ReadAllTextAsync(governorPath, ct)).Trim() : null;
         string os = RuntimeInformation.OSDescription;
         string architecture = RuntimeInformation.OSArchitecture.ToString();
         int? packageCount = linux ? packages.Count == 0 ? null : packages.Count
-            : mac && int.TryParse(Sysctl("hw.packages"), out int macPackages) ? macPackages : null;
+            : mac && int.TryParse(await SysctlAsync("hw.packages", ct), out int macPackages) ? macPackages : null;
         int? coreCount = linux ? pairs.Count == 0 ? null : pairs.Count
-            : mac && int.TryParse(Sysctl("hw.physicalcpu"), out int macCores) ? macCores : null;
+            : mac && int.TryParse(await SysctlAsync("hw.physicalcpu", ct), out int macCores) ? macCores : null;
         string fingerprint = Hash(string.Join("\n", cpuModel, architecture, logical,
             Environment.ProcessorCount, packageCount, coreCount, os, kernel, affinity, governor));
         return new(HostId(), cpuModel, architecture, logical, Environment.ProcessorCount,
@@ -118,34 +119,15 @@ internal static class EnvironmentProvenance
         }
     }
 
-    private static string? Sysctl(string name)
+    private static async Task<string?> SysctlAsync(string name, CancellationToken ct)
     {
         try
         {
-            using Process? process = Process.Start(new ProcessStartInfo("/usr/sbin/sysctl")
-            {
-                ArgumentList = { "-n", name },
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            });
-            if (process is null || !process.WaitForExit(2000) || process.ExitCode != 0)
-            {
-                if (process is { HasExited: false })
-                {
-                    process.Kill();
-                }
-
-                return null;
-            }
-
-            return process.StandardOutput.ReadToEnd().Trim();
+            CommandResult result = await CommandExecution.RunAsync("/usr/sbin/sysctl", ["-n", name],
+                "", TimeSpan.FromSeconds(2), null, ct);
+            return !result.TimedOut && result.ExitCode == 0 ? result.Stdout?.Trim() : null;
         }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            return null;
-        }
-        catch (IOException)
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException)
         {
             return null;
         }
@@ -157,7 +139,7 @@ internal static class EnvironmentProvenance
     /// build-tree mutation if consistent evidence is required: this method acquires no lease and does not
     /// reconstruct effective compiler flags, preset semantics or the full native dependency graph.
     /// </remarks>
-    internal static BuildEnvironment? CaptureBuild(string directory, string? configuration)
+    internal static async Task<BuildEnvironment?> CaptureBuildAsync(string directory, string? configuration, CancellationToken ct)
     {
         string cache = Path.Combine(directory, "CMakeCache.txt");
         if (!File.Exists(cache))
@@ -166,7 +148,7 @@ internal static class EnvironmentProvenance
         }
 
         Dictionary<string, string> values = new(StringComparer.Ordinal);
-        foreach (string line in File.ReadLines(cache))
+        await foreach (string line in File.ReadLinesAsync(cache, ct))
         {
             if (line.StartsWith("//", StringComparison.Ordinal) || line.StartsWith('#'))
             {
@@ -193,7 +175,7 @@ internal static class EnvironmentProvenance
             foreach (string? file in Directory
                          .EnumerateFiles(cmakeFiles, "CMakeCXXCompiler.cmake", SearchOption.AllDirectories).Take(1))
             {
-                foreach (string line in File.ReadLines(file))
+                await foreach (string line in File.ReadLinesAsync(file, ct))
                 {
                     if (line.StartsWith("set(CMAKE_CXX_COMPILER_ID ", StringComparison.Ordinal))
                     {

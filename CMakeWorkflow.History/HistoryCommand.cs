@@ -65,8 +65,8 @@ public static class HistoryCommand
                 case "import" when positional.Count == 1:
                     {
                         HistoryImportResult? result = null;
-                        string summary = db.Import(positional[0], flags.Contains("--recursive"),
-                        value => result = value);
+                        string summary = await db.ImportAsync(positional[0], flags.Contains("--recursive"),
+                        value => result = value, ct: ct);
                         Console.WriteLine(json
                             ? JsonSerializer.Serialize(result!, HistoryJson.Default.HistoryImportResult)
                             : summary);

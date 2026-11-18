@@ -20,19 +20,15 @@ public static partial class PerfSchedulerAnalyzer
         .Select(match => match.Groups["key"].Value == key ? match.Groups["pid"].Value : null)
         .FirstOrDefault(value => value is not null);
 
-    public static int Parse(TextReader reader, TextWriter writer, CancellationToken ct)
+    public static async Task<int> ParseAsync(TextReader reader, TextWriter writer, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(writer);
-        int lines = 0;
         int emitted = 0;
         string? line;
-        while ((line = reader.ReadLine()) is not null)
+        while ((line = await reader.ReadLineAsync(ct)) is not null)
         {
-            if ((++lines & 8191) == 0)
-            {
-                ct.ThrowIfCancellationRequested();
-            }
+            ct.ThrowIfCancellationRequested();
 
             Match match = Header().Match(line);
             if (!match.Success)
@@ -51,7 +47,7 @@ public static partial class PerfSchedulerAnalyzer
             int cpu = int.Parse(match.Groups["cpu"].Value, CultureInfo.InvariantCulture);
             string data = match.Groups["data"].Value;
 
-            void Event(string? pid, string state)
+            async Task EventAsync(string? pid, string state)
             {
                 if (pid is null || emitted >= 10000)
                 {
@@ -63,7 +59,7 @@ public static partial class PerfSchedulerAnalyzer
                     return;
                 }
 
-                writer.WriteLine(new JsonObject
+                await writer.WriteLineAsync(new JsonObject
                 {
                     ["timestamp"] = time,
                     ["threadId"] = threadId,
@@ -71,18 +67,18 @@ public static partial class PerfSchedulerAnalyzer
                     ["state"] = state,
                     ["clock"] = "perf-relative",
                     ["attribution"] = "recorded tracepoint only"
-                }.ToJsonString());
+                }.ToJsonString().AsMemory(), ct);
                 emitted++;
             }
 
             if (match.Groups["kind"].Value == "switch")
             {
-                Event(Field(data, "prev_pid"), "offcpu");
-                Event(Field(data, "next_pid"), "running");
+                await EventAsync(Field(data, "prev_pid"), "offcpu");
+                await EventAsync(Field(data, "next_pid"), "running");
             }
             else
             {
-                Event(Field(data, "pid"), "ready");
+                await EventAsync(Field(data, "pid"), "ready");
             }
         }
 
@@ -107,50 +103,14 @@ public static partial class PerfSchedulerAnalyzer
             start.ArgumentList.Add(argument);
         }
 
-        using Process process = Process.Start(start) ?? throw new IOException("Could not start perf script.");
-        using CancellationTokenRegistration registration = ct.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-        });
-        Task<string> stderr = Task.Run(async () =>
-        {
-            char[] buffer = new char[4096];
-            StringBuilder saved = new();
-            int read;
-            while ((read = await process.StandardError.ReadAsync(buffer, ct)) > 0)
-            {
-                if (saved.Length < 16384)
-                {
-                    _ = saved.Append(buffer, 0, Math.Min(read, 16384 - saved.Length));
-                }
-            }
-
-            return saved.ToString();
-        }, ct);
         try
         {
-            _ = await Task.Run(() =>
+            await using (FileStream stream = new(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                             64 * 1024, FileOptions.Asynchronous))
+            await using (StreamWriter writer = new(stream, new UTF8Encoding(false), leaveOpen: true))
             {
-                using StreamWriter writer = new(temp, false, new UTF8Encoding(false));
-                return Parse(process.StandardOutput, writer, ct);
-            }, ct);
-            await process.WaitForExitAsync(ct);
-            string errors = await stderr;
-            if (process.ExitCode != 0)
-            {
-                throw new IOException(
-                    $"perf script scheduler decode failed: {errors[..Math.Min(errors.Length, 4096)]}");
+                _ = await PerfScript.RunAsync(start, (reader, token) => ParseAsync(reader, writer, token), ct);
             }
-
             ct.ThrowIfCancellationRequested();
             File.Move(temp, file, overwrite: true);
             return file;

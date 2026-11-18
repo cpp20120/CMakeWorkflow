@@ -30,13 +30,13 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         ProfileEnvironment.RequireSuccess(conversion, "tracerpt");
         return !File.Exists(dump)
             ? throw new IOException("tracerpt succeeded without an XML event dump.")
-            : ParseXml(dump, outputDirectory, captureId, executable,
+            : await ParseXmlAsync(dump, outputDirectory, captureId, executable,
             targetProcessId, targetStartedAt, targetFinishedAt, ct);
     }
 
     // This parser also accepts saved tracerpt XML for deterministic tests on
     // non-Windows hosts. Event records are streamed, not loaded as one DOM.
-    public static EtwAnalysisResult ParseXml(string dump, string outputDirectory,
+    public static async Task<EtwAnalysisResult> ParseXmlAsync(string dump, string outputDirectory,
         string captureId, string executable, int? targetProcessId,
         DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct)
     {
@@ -60,17 +60,20 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         int readyEvents = 0;
         int rawStacks = 0;
         string? imageName = null;
-        using (StreamWriter sampleWriter = new(samplesPath, false, new UTF8Encoding(false)))
-        using (StreamWriter timelineWriter = new(timelinePath, false, new UTF8Encoding(false)))
-        using (XmlReader reader = XmlReader.Create(dump, new XmlReaderSettings
+        await using (FileStream input = new(dump, FileMode.Open, FileAccess.Read, FileShare.Read,
+                         64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        await using (StreamWriter sampleWriter = OpenOutput(samplesPath))
+        await using (StreamWriter timelineWriter = OpenOutput(timelinePath))
+        using (XmlReader reader = XmlReader.Create(input, new XmlReaderSettings
         {
+            Async = true,
             DtdProcessing = DtdProcessing.Prohibit,
             XmlResolver = null,
             IgnoreComments = true,
             IgnoreWhitespace = true
         }))
         {
-            void Timeline(DateTimeOffset? time, int tid, string state, int? processor)
+            async Task TimelineAsync(DateTimeOffset? time, int tid, string state, int? processor)
             {
                 if (time is null)
                 {
@@ -84,20 +87,21 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 }
 
                 timelineCount++;
-                timelineWriter.WriteLine(new JsonObject
+                await timelineWriter.WriteLineAsync(new JsonObject
                 {
                     ["timestamp"] = time.Value.ToString("O"),
                     ["threadId"] = tid,
                     ["state"] = state,
                     ["cpu"] = processor
-                }.ToJsonString());
+                }.ToJsonString().AsMemory(), ct);
             }
 
             while (!reader.EOF)
             {
+                ct.ThrowIfCancellationRequested();
                 if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "Event")
                 {
-                    if (!reader.Read())
+                    if (!await reader.ReadAsync())
                     {
                         break;
                     }
@@ -105,8 +109,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     continue;
                 }
 
-                ct.ThrowIfCancellationRequested();
-                XElement record = (XElement)XNode.ReadFrom(reader);
+                XElement record = (XElement)await XNode.ReadFromAsync(reader, ct);
                 totalEvents++;
                 XElement? system = Child(record, "System");
                 XElement? execution = Child(system, "Execution");
@@ -221,7 +224,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                         ["instructionPointer"] = data.GetValueOrDefault("InstructionPointer"),
                         ["rawStack"] = stack
                     };
-                    sampleWriter.WriteLine(sample.ToJsonString());
+                    await sampleWriter.WriteLineAsync(sample.ToJsonString().AsMemory(), ct);
                 }
                 else if (normalizedName is "cswitch" or "contextswitch")
                 {
@@ -240,7 +243,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                             }
 
                             runningAt[nextTid] = switchTime;
-                            Timeline(timestamp, nextTid, "running", cpu);
+                            await TimelineAsync(timestamp, nextTid, "running", cpu);
                         }
                     }
 
@@ -249,7 +252,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                         switchesOut++;
                         ThreadCounts counts = Counts(threads, previousTid);
                         counts.SwitchesOut++;
-                        Timeline(timestamp, previousTid, "offcpu", cpu);
+                        await TimelineAsync(timestamp, previousTid, "offcpu", cpu);
                         if (timestamp is { } switchTime
                             && runningAt.Remove(previousTid, out DateTimeOffset runningTime)
                             && switchTime >= runningTime)
@@ -265,7 +268,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     {
                         readyEvents++;
                         Counts(threads, readyTid).ReadyEvents++;
-                        Timeline(timestamp, readyTid, "ready", cpu);
+                        await TimelineAsync(timestamp, readyTid, "ready", cpu);
                         if (timestamp is { } readyTime)
                         {
                             _ = readyAt.TryAdd(readyTid, readyTime);
@@ -332,10 +335,10 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         summary["timelineEventsDropped"] = timelineDropped;
         summary["timelineSemantics"] =
             "Ready/running/offcpu transitions for known target threads; offcpu is not necessarily sleeping. Truncated timelines omit later events.";
-        File.WriteAllText(stackPath, stacks.ToJson("etw", captureId).ToJsonString() + "\n");
-        File.WriteAllText(summaryPath,
+        await File.WriteAllTextAsync(stackPath, stacks.ToJson("etw", captureId).ToJsonString() + "\n", ct);
+        await File.WriteAllTextAsync(summaryPath,
             summary.ToJsonString(new JsonSerializerOptions
-            { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n");
+            { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
         return new EtwAnalysisResult(dump, summaryPath, samplesPath,
             cpuSamples, switchesIn, readyEvents);
     }
@@ -358,6 +361,10 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             ReadyLatencyMaxMilliseconds = Math.Max(ReadyLatencyMaxMilliseconds, milliseconds);
         }
     }
+
+    private static StreamWriter OpenOutput(string path) =>
+        new(new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read,
+            64 * 1024, FileOptions.Asynchronous), new UTF8Encoding(false));
 
     private static ThreadCounts Counts(Dictionary<int, ThreadCounts> counts, int tid)
     {

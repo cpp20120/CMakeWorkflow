@@ -138,7 +138,7 @@ if (args.Length > 0 && args[0] == "--operation-query-tests")
     {
         OperationListTests.Run(queryRoot);
         HistoryWireModelParityTests.Run();
-        HistoryRunsPageTests.Run(queryRoot);
+        await HistoryRunsPageTests.RunAsync(queryRoot);
         return;
     }
     finally
@@ -278,7 +278,7 @@ if (args.Length > 0 && args[0] == "--ssh-download-tests")
 
 if (args.Length > 0 && args[0] == "--artifact-path-tests")
 {
-    ArtifactPathBoundaryTests.Run();
+    await ArtifactPathBoundaryTests.RunAsync();
     return;
 }
 

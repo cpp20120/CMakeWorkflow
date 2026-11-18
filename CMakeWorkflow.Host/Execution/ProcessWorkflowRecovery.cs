@@ -63,8 +63,10 @@ internal static class ProcessWorkflowRecovery
     /// This method acquires the run lease, verifies original graph/logs/checkpoint binding and writes durable recovery evidence.
     /// It does not itself admit or claim resume; those remain separate ledger transitions.
     /// </remarks>
-    internal static void Prepare(DurableAcceptanceStore store, string operationId, WorkspaceReadPaths paths)
+    internal static async Task PrepareAsync(DurableAcceptanceStore store, string operationId, WorkspaceReadPaths paths,
+        CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         DurableAcceptanceStore.RecoveryInspection inspection = store.InspectRecovery(operationId);
         if (inspection.Decision != "needs_attention" || inspection.Revision is not (1 or 2) ||
             inspection.TerminalState is not null || inspection.CancellationRequested)
@@ -79,11 +81,12 @@ internal static class ProcessWorkflowRecovery
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         string file = paths.Require(Path.Combine(output, "run.json"));
         paths.Read(file);
-        byte[] bytes = File.ReadAllBytes(file);
+        byte[] bytes = await File.ReadAllBytesAsync(file, ct);
         ProcessOperationReport report = ProcessCheckpointEvidenceCodec.Parse(bytes);
         AcceptedWorkflow accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
         ProcessWorkflowManifest manifest = ProcessWorkflowDomain.ReadPlan(store.GetSnapshot(operationId), paths);
         ValidatePlan(report, manifest, accepted.ManifestSha256, paths, output);
+        ct.ThrowIfCancellationRequested();
         if (report.Recovery is null)
         {
             byte[] dispatchBytes = store.GetProcessDispatchCheckpointBytes(operationId);
@@ -96,7 +99,8 @@ internal static class ProcessWorkflowRecovery
             bytes = JsonSerializer.SerializeToUtf8Bytes(report, ProcessWorkflowJson.Default.ProcessOperationReport);
             _ = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
             _ = paths.Require(file + ".tmp");
-            DurableByteWriter.WriteAsync(file, bytes, CancellationToken.None).GetAwaiter().GetResult();
+            // Let the durable annotation finish once its publication starts.
+            await DurableByteWriter.WriteAsync(file, bytes, CancellationToken.None);
         }
         OperationCheckpointEvidence evidence = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
         if (report.Recovery!.Note != inspection.Note ||

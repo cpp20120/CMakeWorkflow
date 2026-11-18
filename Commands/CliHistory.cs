@@ -66,7 +66,7 @@ internal static class CliHistory
                     {
                         string path = policy?.DatabasePath ?? HistoryStore.DefaultDatabasePath;
                         using HistoryStore store = new(path);
-                        string summary = store.Import(directory, recursive: false);
+                        string summary = await store.ImportAsync(directory, recursive: false);
                         await Console.Error.WriteLineAsync($"[CMakeWorkflow] History: {summary} Database: {Path.GetFullPath(path)}");
                     }
                 }

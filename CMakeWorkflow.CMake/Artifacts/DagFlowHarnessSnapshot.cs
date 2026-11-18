@@ -70,8 +70,9 @@ internal static class DagFlowHarnessSnapshot
             long length = before.Length;
             DateTime modified = before.LastWriteTimeUtc;
             string copy = Path.Combine(destination, name);
-            await using (FileStream input = new(original, FileMode.Open, FileAccess.Read, FileShare.Read))
-            await using (FileStream saved = new(copy, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            await using (FileStream input = WorkflowArtifacts.OpenSequentialRead(original))
+            await using (FileStream saved = new(copy, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    64 * 1024, FileOptions.Asynchronous))
             {
                 await input.CopyToAsync(saved, ct);
             }
@@ -122,8 +123,9 @@ internal static class DagFlowHarnessSnapshot
                 }
 
                 string saved = Path.Combine(destination, "replay-binary" + (OperatingSystem.IsWindows() ? ".exe" : ""));
-                await using (FileStream input = new(original, FileMode.Open, FileAccess.Read, FileShare.Read))
-                await using (FileStream output = new(saved, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                await using (FileStream input = WorkflowArtifacts.OpenSequentialRead(original))
+                await using (FileStream output = new(saved, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    64 * 1024, FileOptions.Asynchronous))
                 {
                     // Bound disk usage for a single replayable executable.
                     if (input.Length > 512L * 1024 * 1024)
@@ -139,7 +141,7 @@ internal static class DagFlowHarnessSnapshot
                     File.SetUnixFileMode(saved, File.GetUnixFileMode(original));
                 }
 
-                await using (FileStream copy = File.OpenRead(saved))
+                await using (FileStream copy = WorkflowArtifacts.OpenSequentialRead(saved))
                 {
                     string hash = Convert.ToHexString(await SHA256.HashDataAsync(copy, ct));
                     if (!hash.Equals(expected, StringComparison.OrdinalIgnoreCase))

@@ -57,8 +57,8 @@ internal static class TargetCommand
         using BuildTreeOwnership? ownership = !prepared && command != "resolve"
             ? await BuildTreeOwnership.AcquireAsync([buildDir], ct)
             : null;
-        CMakeTargetRef target = CMakeConfiguration.Resolve(
-            new CMakeTargetRef(buildDir, targetName, config));
+        CMakeTargetRef target = await CMakeConfiguration.ResolveAsync(
+            new CMakeTargetRef(buildDir, targetName, config), ct);
         if (command == "invoke" || (command == "build" && !prepared))
         {
             ObservedBuildContext observed = await CMakeInspection.InspectAsync(buildDir, ct);
@@ -67,7 +67,7 @@ internal static class TargetCommand
                 _ = CMakeInspection.RequireTarget(observed, target);
             }
 
-            CMakeBuildCommand invocation = CMakeBuildCommand.Create(target);
+            CMakeBuildCommand invocation = await CMakeBuildCommand.CreateAsync(target, ct);
             await Console.Error.WriteLineAsync(command == "invoke"
                 ? "[CMakeWorkflow] Explicit target invocation; arbitrary native commands may execute."
                 : "[CMakeWorkflow] Native build request; incremental verification belongs to CMake/backend.");

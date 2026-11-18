@@ -32,7 +32,7 @@ internal static class WorkflowArtifacts
         if (File.Exists(path))
         {
             RejectLink(path);
-            await using FileStream stream = File.OpenRead(path);
+            await using FileStream stream = OpenSequentialRead(path);
 
             return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct));
 
@@ -74,8 +74,8 @@ internal static class WorkflowArtifacts
         {
             RejectLink(source);
             _ = Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            await using FileStream input = File.OpenRead(source);
-            await using FileStream output = File.Create(destination);
+            await using FileStream input = OpenSequentialRead(source);
+            await using FileStream output = OpenSnapshotWrite(destination);
             await input.CopyToAsync(output, ct);
             return;
         }
@@ -91,11 +91,17 @@ internal static class WorkflowArtifacts
             ct.ThrowIfCancellationRequested();
             string copy = Path.Combine(destination, Path.GetRelativePath(source, file));
             _ = Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
-            await using FileStream input = File.OpenRead(file);
-            await using FileStream output = File.Create(copy);
+            await using FileStream input = OpenSequentialRead(file);
+            await using FileStream output = OpenSnapshotWrite(copy);
             await input.CopyToAsync(output, ct);
         }
     }
+
+    internal static FileStream OpenSequentialRead(string path) => new(path, FileMode.Open, FileAccess.Read,
+        FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    private static FileStream OpenSnapshotWrite(string path) => new(path, FileMode.CreateNew, FileAccess.Write,
+        FileShare.None, 64 * 1024, FileOptions.Asynchronous);
 
     private static List<string> Files(string root)
     {

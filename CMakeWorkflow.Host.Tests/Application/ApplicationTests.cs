@@ -88,8 +88,8 @@ internal static class ApplicationTests
         string ownId, otherId;
         using (HistoryStore db = new(database))
         {
-            _ = db.Import(run, false);
-            _ = db.Import(otherRun, false);
+            _ = await db.ImportAsync(run, false, ct: ct);
+            _ = await db.ImportAsync(otherRun, false, ct: ct);
             List<HistoryRun> runs = db.Runs(10, null, null, null, null, null, ct: ct);
             ownId = runs.Single(r => r.Directory == run).Id;
             otherId = runs.Single(r => r.Directory == otherRun).Id;

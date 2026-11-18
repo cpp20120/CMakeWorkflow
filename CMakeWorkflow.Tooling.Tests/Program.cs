@@ -134,12 +134,12 @@ try
     FakeWindowsDevelopmentProbe fakeWindowsTools = new() { Msvc = @"C:\vs\cl.exe", Sdk = @"C:\kits\10", Wpr = @"C:\wpr.exe" };
     HostRequirements windowsToolRequirements = new(1, ["native"], RequireWindowsMsvc: true,
         RequireWindowsSdk: true, RequireWindowsWpr: true);
-    IReadOnlyList<HostFinding> windowsToolFindings = WindowsDevelopmentDoctor.Inspect(windowsToolRequirements, fakeWindowsTools);
+    IReadOnlyList<HostFinding> windowsToolFindings = await WindowsDevelopmentDoctor.InspectAsync(windowsToolRequirements, fakeWindowsTools, CancellationToken.None);
     Check(windowsToolFindings.Count == 4 && windowsToolFindings.Count(x => x.Status == "ready") == 3 &&
           windowsToolFindings.Single(x => x.Id == "windows_etw_permissions").Status == "unverified",
         "WPR discovery must not assert ETW permissions");
     fakeWindowsTools.Sdk = null;
-    Check(WindowsDevelopmentDoctor.Inspect(windowsToolRequirements, fakeWindowsTools)
+    Check((await WindowsDevelopmentDoctor.InspectAsync(windowsToolRequirements, fakeWindowsTools, CancellationToken.None))
         .Single(x => x.Id == "windows_sdk").Status == "missing", "missing Windows SDK not reported");
     fakeWindowsTools.Sdk = @"C:\kits\10";
     // Fake Windows-only capability assessment is valid on Linux too.

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace CMakeWorkflow.Profiling.Analysis;
@@ -19,7 +18,7 @@ public static partial class PerfStackAnalyzer
         @"^(?<comm>.+?)\s+(?<pid>\d+)(?:/(?<tid>\d+))?\s+(?:\[\s*\d+\]\s+)?(?<time>\d+(?:\.\d+)?):\s*(?:\d+\s+)?(?<event>[A-Za-z][A-Za-z0-9_.:/-]*):(?:\s+(?<inline>.*))?$")]
     private static partial Regex SampleHeader();
 
-    public static StackEvidence Parse(TextReader reader, CancellationToken ct)
+    public static async Task<StackEvidence> ParseAsync(TextReader reader, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(reader);
         StackEvidence result = new();
@@ -28,7 +27,6 @@ public static partial class PerfStackAnalyzer
         int rejected = 0;
         int truncated = 0;
         bool nonempty = false;
-        int lines = 0;
         string? line;
 
         void AppendFrame(Match frame)
@@ -61,12 +59,9 @@ public static partial class PerfStackAnalyzer
             inSample = false;
         }
 
-        while ((line = reader.ReadLine()) is not null)
+        while ((line = await reader.ReadLineAsync(ct)) is not null)
         {
-            if ((++lines & 8191) == 0)
-            {
-                ct.ThrowIfCancellationRequested();
-            }
+            ct.ThrowIfCancellationRequested();
 
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -140,42 +135,7 @@ public static partial class PerfStackAnalyzer
             start.ArgumentList.Add(arg);
         }
 
-        using Process process = Process.Start(start) ?? throw new IOException("Could not start perf script.");
-        using CancellationTokenRegistration registration = ct.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-        });
-        Task<string> stderr = Task.Run(async () =>
-        {
-            char[] buffer = new char[4096];
-            StringBuilder saved = new();
-            int read;
-            while ((read = await process.StandardError.ReadAsync(buffer, ct)) > 0)
-            {
-                if (saved.Length < 16384)
-                {
-                    _ = saved.Append(buffer, 0, Math.Min(read, 16384 - saved.Length));
-                }
-            }
-
-            return saved.ToString();
-        }, ct);
-        StackEvidence evidence = await Task.Run(() => Parse(process.StandardOutput, ct), ct);
-        await process.WaitForExitAsync(ct);
-        string errors = await stderr;
-        if (process.ExitCode != 0)
-        {
-            throw new IOException($"perf script failed ({process.ExitCode}): {errors}");
-        }
+        StackEvidence evidence = await PerfScript.RunAsync(start, ParseAsync, ct);
 
         if (evidence.AnalysisStatus == "unsupported_format")
         {

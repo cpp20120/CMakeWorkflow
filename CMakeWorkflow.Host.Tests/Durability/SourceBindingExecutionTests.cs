@@ -47,7 +47,7 @@ internal static class SourceBindingExecutionTests
                 "stale cache must never be adopted\n");
             string hash = Convert.ToHexString(SHA256.HashData(manifestBytes));
             LoreSnapshotStore lore = new(storePath);
-            string id = lore.Capture(source, ["CMakeLists.txt", "main.cpp"]);
+            string id = await lore.CaptureAsync(source, ["CMakeLists.txt", "main.cpp"]);
             WorkflowStartRequest request = new("source-bound", manifest, hash, 1, output)
             {
                 SourceSnapshotId = id
@@ -120,7 +120,7 @@ internal static class SourceBindingExecutionTests
             }
             using (CMakeWorkflow.History.Storage.HistoryStore history = new(Path.Combine(workspace, "history-test.sqlite")))
             {
-                _ = history.Import(output, recursive: false);
+                _ = await history.ImportAsync(output, recursive: false);
                 if (history.Runs(10, null, null, null, null, null).Single().SourceSnapshotId != id)
                 {
                     throw new UnreachableException("History index lost immutable Lore identity.");

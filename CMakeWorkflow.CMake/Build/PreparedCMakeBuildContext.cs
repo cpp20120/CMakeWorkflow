@@ -7,7 +7,7 @@ public sealed class PreparedCMakeBuildContext : ICMakeBuildContext
 
     public async Task<BuiltArtifact> EnsureBuiltAsync(CMakeTargetRef target, CancellationToken cancellationToken)
     {
-        target = CMakeConfiguration.Resolve(target);
+        target = await CMakeConfiguration.ResolveAsync(target, cancellationToken);
         BuiltArtifact artifact = await CMakeFileApi.ResolveExecutableAsync(target, cancellationToken);
         return !File.Exists(artifact.ExecutablePath)
             ? throw new FileNotFoundException(

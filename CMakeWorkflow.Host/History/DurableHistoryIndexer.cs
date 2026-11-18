@@ -115,11 +115,11 @@ internal static class DurableHistoryIndexer
 
             ct.ThrowIfCancellationRequested();
             using HistoryStore history = new(database);
-            _ = history.ImportFinalizedWorkflow(run, finalization.ReportSha256, file =>
+            _ = await history.ImportFinalizedWorkflowAsync(run, finalization.ReportSha256, file =>
             {
                 ct.ThrowIfCancellationRequested();
                 _ = paths.Require(file);
-            });
+            }, ct);
         }
         catch (Exception error) when (error is ApplicationRefusal or IOException or UnauthorizedAccessException
                                           or SqliteException or JsonException or ArgumentException

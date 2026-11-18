@@ -210,7 +210,7 @@ public static class WorkflowRunner
 
         try
         {
-            report.Environment = EnvironmentProvenance.CaptureHost();
+            report.Environment = await EnvironmentProvenance.CaptureHostAsync(CancellationToken.None);
         }
         catch (IOException error)
         {
@@ -251,7 +251,8 @@ public static class WorkflowRunner
 
         BuildTreeOwnership? ownership = null;
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        using WorkflowEventJournal events = new(output, eventsToStdout, resume ? report : null);
+        await using WorkflowEventJournal events = await WorkflowEventJournal.OpenAsync(
+            output, eventsToStdout, resume ? report : null);
         await SaveAsync(report, output, events);
         try
         {
@@ -397,12 +398,19 @@ public static class WorkflowRunner
             : report.Error is null && report.Nodes.All(n => n.Status == "succeeded") ? "succeeded" : "failed";
         try
         {
-            report.EnvironmentAtEnd = EnvironmentProvenance.CaptureHost();
-            report.BuildEnvironments = [.. report.Nodes.Where(n => n.Kind != "profile_snapshot")
-                .Select(n => (n.BuildDirectory, n.Configuration))
-                .Where(x => !string.IsNullOrWhiteSpace(x.BuildDirectory)).Distinct()
-                .Select(x => EnvironmentProvenance.CaptureBuild(x.BuildDirectory, x.Configuration))
-                .OfType<BuildEnvironment>()];
+            report.EnvironmentAtEnd = await EnvironmentProvenance.CaptureHostAsync(CancellationToken.None);
+            List<BuildEnvironment> environments = [];
+            foreach ((string directory, string? configuration) in report.Nodes.Where(n => n.Kind != "profile_snapshot")
+                         .Select(n => (n.BuildDirectory, n.Configuration))
+                         .Where(x => !string.IsNullOrWhiteSpace(x.BuildDirectory)).Distinct())
+            {
+                if (await EnvironmentProvenance.CaptureBuildAsync(directory, configuration, CancellationToken.None)
+                    is { } environment)
+                {
+                    environments.Add(environment);
+                }
+            }
+            report.BuildEnvironments = environments;
         }
         catch (IOException error)
         {
@@ -436,6 +444,6 @@ public static class WorkflowRunner
     private static async Task SaveAsync(WorkflowReport report, string output, WorkflowEventJournal events)
     {
         await WorkflowCheckpoint.SaveAsync(report, output, CancellationToken.None);
-        events.Publish(report);
+        await events.PublishAsync(report);
     }
 }

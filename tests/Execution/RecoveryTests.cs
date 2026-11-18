@@ -223,7 +223,26 @@ internal static class RecoveryTests
             _ = RunCli(1, [.. args]);
             Check(File.ReadAllBytes(journal).SequenceEqual(committed), "Duplicate/stale decision was not rejected");
             File.WriteAllText(gate, "release");
+            string eventPath = Path.Combine(directory, "events.jsonl");
+            const string partialEvent = "{\"sequence\":";
+            long previousSequence = 0;
+            if (point == "before-dispatch")
+            {
+                previousSequence = J(File.ReadLines(eventPath).Last())["sequence"]!.GetValue<long>();
+                File.AppendAllText(eventPath, partialEvent);
+            }
+
             _ = RunCli("workflow", "resume", directory);
+            if (point == "before-dispatch")
+            {
+                string[] lines = File.ReadAllLines(eventPath);
+                int partial = Array.IndexOf(lines, partialEvent);
+                Check(partial >= 0 && partial + 1 < lines.Length, "Resumed event merged with the interrupted line");
+                JsonObject resumed = J(lines[partial + 1]);
+                Check(S(resumed["type"]) == "workflow_resumed" &&
+                    resumed["sequence"]!.GetValue<long>() == previousSequence + 1,
+                    "Resume did not continue the journal sequence after a truncated event");
+            }
             JsonObject completed = J(File.ReadAllText(journal));
             AllSucceeded(completed);
             Check(completed["reconciliations"]!.AsArray().Count == 1, "Resume lost reconciliation audit");

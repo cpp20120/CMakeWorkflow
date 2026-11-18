@@ -24,7 +24,7 @@ internal static class HistoryRunsPageTests
         throw new System.Diagnostics.UnreachableException("History page: foreign cursor or invalid query was accepted");
     }
 
-    internal static void Run(string parent)
+    internal static async Task RunAsync(string parent)
     {
         string workspace = Directory.CreateDirectory(Path.Combine(parent, "history-page")).FullName;
         string database = Path.Combine(workspace, "history.sqlite");
@@ -49,7 +49,7 @@ internal static class HistoryRunsPageTests
             {
                 string dir = Path.Combine(workspace, "run-" + i);
                 Save(dir, started); // Equal timestamps exercise the stable ID tie-breaker.
-                _ = writer.Import(dir, false);
+                _ = await writer.ImportAsync(dir, false);
             }
         }
         List<string> expected;
@@ -73,9 +73,9 @@ internal static class HistoryRunsPageTests
         {
             string dir = Path.Combine(workspace, "latest");
             Save(dir, started.AddYears(1));
-            _ = writer.Import(dir, false);
+            _ = await writer.ImportAsync(dir, false);
         }
-        byte[] before = SHA256.HashData(File.ReadAllBytes(database));
+        byte[] before = SHA256.HashData(await File.ReadAllBytesAsync(database));
         using (HistoryStore reader = new(database, readOnly: true))
         {
             HistoryRunPage last = reader.RunsPage(database, 2, null, null, null, null, null, continuation, _ => true);
@@ -89,7 +89,7 @@ internal static class HistoryRunsPageTests
             Check(authorized.Items.Count == 1 && authorized.NextCursor is null,
                 "workspace path filtering must precede page limit");
         }
-        Check(SHA256.HashData(File.ReadAllBytes(database)).SequenceEqual(before),
+        Check(SHA256.HashData(await File.ReadAllBytesAsync(database)).SequenceEqual(before),
             "read-only paging mutated history database");
         Console.WriteLine("History page checks passed: keyset, tie-break, concurrent import, cursor binding and read-only isolation.");
     }

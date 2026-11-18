@@ -183,7 +183,7 @@ public sealed partial class DoctorSession
     /// Requires an inactive operation and matching recovery revision. Process recovery preparation validates and durably
     /// annotates checkpoint evidence without resetting node outcomes. Cancellation/lost reply may follow committed admission.
     /// </remarks>
-    public Task<RecoveryInspectionView> WorkflowResumeAsync(WorkflowResumeRequest request,
+    public async Task<RecoveryInspectionView> WorkflowResumeAsync(WorkflowResumeRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -234,10 +234,10 @@ public sealed partial class DoctorSession
 
         if (store.GetDomainKind(request.OperationId) == "process")
         {
-            ProcessWorkflowRecovery.Prepare(store, request.OperationId, paths);
+            await ProcessWorkflowRecovery.PrepareAsync(store, request.OperationId, paths, cancellationToken);
         }
 
-        return Task.FromResult(RecoveryView(store.AdmitResume(request.OperationId, request.ExpectedRevision)));
+        return RecoveryView(store.AdmitResume(request.OperationId, request.ExpectedRevision));
     }
 
     // Execute an already admitted resume. Unlike workflow/resume, this is a mutation
@@ -452,7 +452,7 @@ public sealed partial class DoctorSession
 
     public Task<HistoryImportResult> HistoryImportAsync(HistoryImportRequest request,
         CancellationToken cancellationToken) =>
-        ApplicationCallAsync(request, (paths, ct) =>
+        ApplicationCallAsync(request, async (paths, ct) =>
         {
             string database = DurableHistoryIndexer.AuthorizeDatabase(paths, request.DatabasePath);
 
@@ -460,7 +460,7 @@ public sealed partial class DoctorSession
             ct.ThrowIfCancellationRequested();
             using HistoryStore store = new(database);
             HistoryImportResult? result = null;
-            _ = store.Import(directory, request.Recursive, value => result = value,
+            _ = await store.ImportAsync(directory, request.Recursive, value => result = value,
                 candidate =>
                 {
                     ct.ThrowIfCancellationRequested();
@@ -474,8 +474,8 @@ public sealed partial class DoctorSession
                     {
                         _ = paths.Require(file);
                     }
-                });
-            return Task.FromResult(result ?? throw new InvalidDataException("Import produced no summary."));
+                }, ct);
+            return result ?? throw new InvalidDataException("Import produced no summary.");
         }, cancellationToken);
 
     public Task<HistoryRunPage> HistoryRunsPageAsync(

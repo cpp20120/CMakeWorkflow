@@ -117,7 +117,7 @@ internal sealed record CompilerCacheProfile(string Name, string Provider, string
         return result;
     }
 
-    internal void RequireConfigured(ObservedBuildContext observed)
+    internal async Task RequireConfiguredAsync(ObservedBuildContext observed, CancellationToken ct)
     {
         if (observed.Generator is not ("Ninja" or "Ninja Multi-Config")
             && observed.Generator?.EndsWith("Makefiles", StringComparison.Ordinal) != true)
@@ -125,7 +125,7 @@ internal sealed record CompilerCacheProfile(string Name, string Provider, string
             throw new InvalidOperationException($"Compiler cache profile '{Name}' requires a CMake Ninja or Makefiles generator.");
         }
 
-        Dictionary<string, string> cache = CMakeInspection.ReadObservedCache(observed.BuildDirectory, null);
+        Dictionary<string, string> cache = await CMakeInspection.ReadObservedCacheAsync(observed.BuildDirectory, null, ct);
         bool found = false;
         foreach (string language in new[] { "C", "CXX" })
         {

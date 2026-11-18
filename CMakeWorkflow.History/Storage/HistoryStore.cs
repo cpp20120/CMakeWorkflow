@@ -175,9 +175,12 @@ public sealed class HistoryStore : IDisposable
     private static string? S(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
     private static double? D(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetDouble(i);
 
-    public string Import(string directory, bool recursive, Action<HistoryImportResult>? onComplete = null,
-        Action<string>? pathGuard = null)
+    /// <summary>Reads a batch of reports and commits the parsed runs in one transaction.</summary>
+    /// <remarks>Cancellation is observed through parsing and before the SQLite transaction begins.</remarks>
+    public async Task<string> ImportAsync(string directory, bool recursive, Action<HistoryImportResult>? onComplete = null,
+        Action<string>? pathGuard = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         directory = Path.GetFullPath(directory);
         if (File.Exists(directory))
         {
@@ -201,8 +204,9 @@ public sealed class HistoryStore : IDisposable
         List<ParsedRun> parsedRuns = [];
         foreach (string path in dirs)
         {
+            ct.ThrowIfCancellationRequested();
             pathGuard?.Invoke(path);
-            ParsedRun? parsed = HistoryReports.Parse(path);
+            ParsedRun? parsed = await HistoryReports.ParseAsync(path, ct);
             if (parsed is null)
             {
                 skipped++;
@@ -212,19 +216,23 @@ public sealed class HistoryStore : IDisposable
             parsedRuns.Add(parsed);
         }
 
+        ct.ThrowIfCancellationRequested();
         (int imported, int unchanged) = WriteRuns(parsedRuns);
         onComplete?.Invoke(new(1, imported, unchanged, skipped));
         return $"Imported {imported}; unchanged {unchanged}; skipped {skipped}.";
     }
 
     /// <summary>Indexes a verified workflow finalization through the ordinary history writer.</summary>
-    public HistoryImportResult ImportFinalizedWorkflow(string directory, string reportSha256, Action<string> pathGuard)
+    public async Task<HistoryImportResult> ImportFinalizedWorkflowAsync(string directory, string reportSha256,
+        Action<string> pathGuard, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(pathGuard);
+        ct.ThrowIfCancellationRequested();
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
         pathGuard(root);
-        ParsedRun parsed = HistoryReports.ParseWorkflow(root, Path.Combine(root, "run.json"), reportSha256, pathGuard)
+        ParsedRun parsed = await HistoryReports.ParseWorkflowAsync(root, Path.Combine(root, "run.json"), reportSha256, pathGuard, ct)
             ?? throw new InvalidDataException("Finalized workflow is not importable.");
+        ct.ThrowIfCancellationRequested();
         (int imported, int unchanged) = WriteRuns([parsed]);
         return new(1, imported, unchanged, 0);
     }

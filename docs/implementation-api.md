@@ -185,7 +185,7 @@ Source: [CMakeWorkflow.CMake/Build/CMakeBuildCommand.cs](../CMakeWorkflow.CMake/
 ```csharp
 public sealed record CMakeBuildCommand(System.Collections.Generic.IReadOnlyList<string> Arguments, string WorkingDirectory)
 {
-    public static CMakeWorkflow.CMake.Build.CMakeBuildCommand Create(CMakeWorkflow.CMake.Build.CMakeTargetRef target);
+    public static System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.CMakeBuildCommand> CreateAsync(CMakeWorkflow.CMake.Build.CMakeTargetRef target, System.Threading.CancellationToken ct);
 }
 ```
 
@@ -196,7 +196,7 @@ Source: [CMakeWorkflow.CMake/Build/CMakeConfiguration.cs](../CMakeWorkflow.CMake
 ```csharp
 public static class CMakeConfiguration
 {
-    public static CMakeWorkflow.CMake.Build.CMakeTargetRef Resolve(CMakeWorkflow.CMake.Build.CMakeTargetRef target);
+    public static System.Threading.Tasks.Task<CMakeWorkflow.CMake.Build.CMakeTargetRef> ResolveAsync(CMakeWorkflow.CMake.Build.CMakeTargetRef target, System.Threading.CancellationToken ct);
 }
 ```
 
@@ -1969,7 +1969,7 @@ Source: [CMakeWorkflow.Profiling/Analysis/EtwTraceAnalyzer.cs](../CMakeWorkflow.
 public sealed class EtwTraceAnalyzer(CMakeWorkflow.Profiling.Capture.IProfileProcess? process = null)
 {
     public System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Analysis.EtwAnalysisResult> AnalyzeAsync(string trace, string outputDirectory, string captureId, string executable, int? targetProcessId, System.DateTimeOffset? targetStartedAt, System.DateTimeOffset? targetFinishedAt, System.Threading.CancellationToken ct);
-    public static CMakeWorkflow.Profiling.Analysis.EtwAnalysisResult ParseXml(string dump, string outputDirectory, string captureId, string executable, int? targetProcessId, System.DateTimeOffset? targetStartedAt, System.DateTimeOffset? targetFinishedAt, System.Threading.CancellationToken ct);
+    public static System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Analysis.EtwAnalysisResult> ParseXmlAsync(string dump, string outputDirectory, string captureId, string executable, int? targetProcessId, System.DateTimeOffset? targetStartedAt, System.DateTimeOffset? targetFinishedAt, System.Threading.CancellationToken ct);
 }
 ```
 
@@ -1980,7 +1980,7 @@ Source: [CMakeWorkflow.Profiling/Analysis/PerfSchedulerAnalyzer.cs](../CMakeWork
 ```csharp
 public static class PerfSchedulerAnalyzer
 {
-    public static int Parse(System.IO.TextReader reader, System.IO.TextWriter writer, System.Threading.CancellationToken ct);
+    public static System.Threading.Tasks.Task<int> ParseAsync(System.IO.TextReader reader, System.IO.TextWriter writer, System.Threading.CancellationToken ct);
     public static System.Threading.Tasks.Task<string> AnalyzeAsync(string raw, string directory, string captureId, System.Threading.CancellationToken ct);
 }
 ```
@@ -1992,7 +1992,7 @@ Source: [CMakeWorkflow.Profiling/Analysis/PerfStackAnalyzer.cs](../CMakeWorkflow
 ```csharp
 public static class PerfStackAnalyzer
 {
-    public static CMakeWorkflow.Profiling.Analysis.StackEvidence Parse(System.IO.TextReader reader, System.Threading.CancellationToken ct);
+    public static System.Threading.Tasks.Task<CMakeWorkflow.Profiling.Analysis.StackEvidence> ParseAsync(System.IO.TextReader reader, System.Threading.CancellationToken ct);
     public static System.Threading.Tasks.Task<string> AnalyzeAsync(string trace, string directory, string captureId, System.Threading.CancellationToken ct);
 }
 ```
@@ -2451,8 +2451,8 @@ public sealed class HistoryStore : System.IDisposable
 {
     public static string DefaultDatabasePath { get; }
     public HistoryStore(string path, bool readOnly = false);
-    public string Import(string directory, bool recursive, System.Action<CMakeWorkflow.History.Models.HistoryImportResult>? onComplete = null, System.Action<string>? pathGuard = null);
-    public CMakeWorkflow.History.Models.HistoryImportResult ImportFinalizedWorkflow(string directory, string reportSha256, System.Action<string> pathGuard);
+    public System.Threading.Tasks.Task<string> ImportAsync(string directory, bool recursive, System.Action<CMakeWorkflow.History.Models.HistoryImportResult>? onComplete = null, System.Action<string>? pathGuard = null, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<CMakeWorkflow.History.Models.HistoryImportResult> ImportFinalizedWorkflowAsync(string directory, string reportSha256, System.Action<string> pathGuard, System.Threading.CancellationToken ct);
     public System.Collections.Generic.List<CMakeWorkflow.History.Models.HistoryRun> Runs(int limit, string? status, string? since, string? until, string? workflow, string? variant, System.Func<string, bool>? includeDirectory = null, System.Threading.CancellationToken ct = default);
     public CMakeWorkflow.History.HistoryRunPage RunsPage(string databaseIdentity, int limit, string? status, string? since, string? until, string? workflow, string? variant, string? cursor, System.Func<string, bool>? includeDirectory = null, System.Threading.CancellationToken ct = default);
     public CMakeWorkflow.History.Models.HistoryDetail Show(string id, System.Action<string>? validateDirectory = null, int maxMeasurements = 2147483647, System.Func<string, bool>? artifactAllowed = null, System.Threading.CancellationToken ct = default);
@@ -2670,7 +2670,7 @@ Source: [CMakeWorkflow.Tooling/Toolchains/IWindowsDevelopmentProbe.cs](../CMakeW
 ```csharp
 public interface IWindowsDevelopmentProbe
 {
-    string? MsvcToolset();
+    System.Threading.Tasks.Task<string?> MsvcToolsetAsync(System.Threading.CancellationToken ct);
     string? WindowsSdk();
     string? WindowsPerformanceRecorder();
 }
@@ -2683,7 +2683,7 @@ Source: [CMakeWorkflow.Tooling/Toolchains/SystemWindowsDevelopmentProbe.cs](../C
 ```csharp
 public sealed class SystemWindowsDevelopmentProbe : CMakeWorkflow.Tooling.Toolchains.IWindowsDevelopmentProbe
 {
-    public string? MsvcToolset();
+    public System.Threading.Tasks.Task<string?> MsvcToolsetAsync(System.Threading.CancellationToken ct);
     public string? WindowsSdk();
     public string? WindowsPerformanceRecorder();
 }
@@ -2736,7 +2736,7 @@ Source: [CMakeWorkflow.Tooling/Toolchains/WindowsDevelopmentDoctor.cs](../CMakeW
 ```csharp
 public static class WindowsDevelopmentDoctor
 {
-    public static System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Tooling.Environment.HostFinding> Inspect(CMakeWorkflow.Tooling.Environment.HostRequirements requirements, CMakeWorkflow.Tooling.Toolchains.IWindowsDevelopmentProbe probe);
+    public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Tooling.Environment.HostFinding>> InspectAsync(CMakeWorkflow.Tooling.Environment.HostRequirements requirements, CMakeWorkflow.Tooling.Toolchains.IWindowsDevelopmentProbe probe, System.Threading.CancellationToken ct);
 }
 ```
 
@@ -3143,6 +3143,30 @@ public sealed record WeakMemoryOptions(string SourceDirectory, string Protocol, 
 
 ### Namespace `CMakeWorkflow.Sources`
 
+#### `GitSourceSelector`
+
+Source: [CMakeWorkflow.Sources/GitSourceSelector.cs](../CMakeWorkflow.Sources/GitSourceSelector.cs#L14)
+
+```csharp
+public sealed class GitSourceSelector(string gitExecutable = "git")
+{
+    public System.Threading.Tasks.Task<GitSourceSelection> SelectAsync(string sourceRoot, bool includeUntracked = false, System.Threading.CancellationToken ct = default);
+}
+```
+
+#### `ISourceSnapshotStore`
+
+Source: [CMakeWorkflow.Sources/SnapshotModels.cs](../CMakeWorkflow.Sources/SnapshotModels.cs#L9)
+
+```csharp
+public interface ISourceSnapshotStore
+{
+    System.Threading.Tasks.Task<string> CaptureAsync(string sourceRoot, System.Collections.Generic.IReadOnlyCollection<string> relativeFiles, System.Threading.CancellationToken ct = default);
+    System.Threading.Tasks.Task<SnapshotManifest> InspectAsync(string snapshotId, System.Threading.CancellationToken ct = default);
+    System.Threading.Tasks.Task MaterializeAsync(string snapshotId, string destination, System.Threading.CancellationToken ct = default);
+}
+```
+
 #### `LoreSnapshotStore`
 
 Source: [CMakeWorkflow.Sources/LoreSnapshotStore.cs](../CMakeWorkflow.Sources/LoreSnapshotStore.cs#L20)
@@ -3150,10 +3174,21 @@ Source: [CMakeWorkflow.Sources/LoreSnapshotStore.cs](../CMakeWorkflow.Sources/Lo
 ```csharp
 public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
 {
-    public string Capture(string sourceRoot, System.Collections.Generic.IReadOnlyCollection<string> relativeFiles);
-    public SnapshotManifest Inspect(string snapshotId);
-    public SnapshotManifest Verify(string snapshotId, System.Threading.CancellationToken cancellationToken);
-    public void Materialize(string snapshotId, string destination);
+    public System.Threading.Tasks.Task<string> CaptureAsync(string sourceRoot, System.Collections.Generic.IReadOnlyCollection<string> relativeFiles, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<SnapshotManifest> InspectAsync(string snapshotId, System.Threading.CancellationToken ct = default);
+    public System.Threading.Tasks.Task<SnapshotManifest> VerifyAsync(string snapshotId, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task MaterializeAsync(string snapshotId, string destination, System.Threading.CancellationToken ct = default);
+}
+```
+
+#### `SourceCaptureService`
+
+Source: [CMakeWorkflow.Sources/SourceCaptureService.cs](../CMakeWorkflow.Sources/SourceCaptureService.cs#L6)
+
+```csharp
+public sealed class SourceCaptureService(ISourceSnapshotStore store, GitSourceSelector selector)
+{
+    public System.Threading.Tasks.Task<GitSourceCapture> CaptureGitAsync(string sourceRoot, bool includeUntracked = false, System.Threading.CancellationToken ct = default);
 }
 ```
 

@@ -4,14 +4,16 @@ namespace CMakeWorkflow.Tooling.Toolchains;
 
 public static class WindowsDevelopmentDoctor
 {
-    public static IReadOnlyList<HostFinding> Inspect(HostRequirements requirements, IWindowsDevelopmentProbe probe)
+    public static async Task<IReadOnlyList<HostFinding>> InspectAsync(HostRequirements requirements,
+        IWindowsDevelopmentProbe probe, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(requirements);
+        ct.ThrowIfCancellationRequested();
         List<HostFinding> findings = [];
         if (requirements.RequireWindowsMsvc)
         {
-            string? path = probe.MsvcToolset();
+            string? path = await probe.MsvcToolsetAsync(ct);
             findings.Add(new("windows_msvc", path is null ? "missing" : "ready", path,
                 "Visual Studio C++ x64 toolset",
                 "Install the Desktop development with C++ workload (MSVC component)."));

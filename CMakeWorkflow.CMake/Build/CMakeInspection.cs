@@ -47,7 +47,7 @@ public static class CMakeInspection
         ObservedBuildContext result = new() { BuildDirectory = directory };
         result.Diagnostics.Add(
             "Configuration freshness and native output freshness are Unverified; inspection does not run CMake.");
-        Dictionary<string, string> cache = ReadObservedCache(directory, readGuard);
+        Dictionary<string, string> cache = await ReadObservedCacheAsync(directory, readGuard, ct);
         string reply = Path.Combine(directory, ".cmake", "api", "v1", "reply");
         readGuard?.Invoke(reply);
         string? indexPath = Directory.Exists(reply)
@@ -389,7 +389,8 @@ public static class CMakeInspection
         File.Move(temporary, path, true);
     }
 
-    internal static Dictionary<string, string> ReadObservedCache(string directory, Action<string>? readGuard)
+    internal static async Task<Dictionary<string, string>> ReadObservedCacheAsync(string directory,
+        Action<string>? readGuard, CancellationToken ct)
     {
         Dictionary<string, string> values = new(StringComparer.Ordinal);
         string path = Path.Combine(directory, "CMakeCache.txt");
@@ -399,7 +400,7 @@ public static class CMakeInspection
             return values;
         }
 
-        foreach (string line in File.ReadLines(path))
+        await foreach (string line in File.ReadLinesAsync(path, ct))
         {
             int colon = line.IndexOf(':', StringComparison.Ordinal);
             int equals = line.IndexOf('=', StringComparison.Ordinal);

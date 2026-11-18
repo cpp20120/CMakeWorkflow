@@ -7,7 +7,11 @@ internal sealed class FakeWindowsDevelopmentProbe : IWindowsDevelopmentProbe
 {
     public string? Msvc, Sdk, Wpr;
 
-    public string? MsvcToolset() => Msvc;
+    public Task<string?> MsvcToolsetAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(Msvc);
+    }
     public string? WindowsSdk() => Sdk;
     public string? WindowsPerformanceRecorder() => Wpr;
 }

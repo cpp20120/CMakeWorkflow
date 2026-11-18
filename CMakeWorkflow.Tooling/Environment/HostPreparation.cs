@@ -42,8 +42,8 @@ public static class HostPreparation
                 throw new PlatformNotSupportedException("Windows development requirements require Windows.");
             }
 
-            findings.AddRange(WindowsDevelopmentDoctor.Inspect(requirements,
-                windowsProbe ?? new SystemWindowsDevelopmentProbe()));
+            findings.AddRange(await WindowsDevelopmentDoctor.InspectAsync(requirements,
+                windowsProbe ?? new SystemWindowsDevelopmentProbe(), ct));
         }
 
         if (requirements.WindowsPowerScheme is not null && !OperatingSystem.IsWindows() && backend is null)

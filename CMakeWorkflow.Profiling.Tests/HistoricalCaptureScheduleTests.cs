@@ -27,7 +27,7 @@ internal static class HistoricalCaptureScheduleTests
               Array.FindLastIndex(labels, x => x.StartsWith("time-", StringComparison.Ordinal) || x.StartsWith("stat-", StringComparison.Ordinal)),
             "Diagnostic capture started before measurement prerequisites completed.");
         using HistoryStore history = new(Path.Combine(root, "scheduled-history.sqlite"));
-        _ = history.Import(completed, false);
+        _ = await history.ImportAsync(completed, false);
         HistoryRun imported = history.Runs(50, null, null, null, null, null).Single();
         List<HistoryMeasurement> metrics = history.Metrics(imported.Id, null, null, null);
         Check(imported.Format == "dagflow-historical" && metrics.Count > 0 &&
@@ -50,7 +50,7 @@ internal static class HistoricalCaptureScheduleTests
                   JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(children[i], "commands.json")))!.AsArray().Count == counts[i],
                 "Restart regenerated order or repeated successful effects.");
         }
-        _ = history.Import(batch, true);
+        _ = await history.ImportAsync(batch, true);
         List<HistoryRun> runs = history.Runs(50, null, null, null, null, null);
         Check(runs.Count == 3 && runs.All(x => x.Format == "dagflow-historical"), "Seeds were pooled or imported twice.");
         foreach (HistoryRun run in runs.Where(x => x.Directory != completed))
@@ -63,12 +63,24 @@ internal static class HistoricalCaptureScheduleTests
         await File.AppendAllTextAsync(Path.Combine(children[0], "schedule.json"), " ");
         try
         {
-            _ = history.Import(batch, true);
+            _ = await history.ImportAsync(batch, true);
             throw new UnreachableException("History accepted tampered saved schedule.");
         }
         catch (InvalidDataException) { }
         Check(history.Runs(50, null, null, null, null, null).Count == 3, "Rejected import partially changed history.");
         await File.WriteAllBytesAsync(Path.Combine(children[0], "schedule.json"), schedules[0]);
+
+        string timings = Path.Combine(children[0], "timings.jsonl");
+        byte[] originalTimings = await File.ReadAllBytesAsync(timings);
+        await File.AppendAllTextAsync(timings, "{");
+        try
+        {
+            _ = await history.ImportAsync(batch, true);
+            throw new UnreachableException("History accepted tampered timing rows.");
+        }
+        catch (InvalidDataException error) when (error.Message == "Historical evidence changed after completion: timings.jsonl") { }
+        Check(history.Runs(50, null, null, null, null, null).Count == 3, "Tampered timing rows changed history.");
+        await File.WriteAllBytesAsync(timings, originalTimings);
 
         string canceledOutput = Path.Combine(root, "historical-canceled");
         string marker = Path.Combine(root, "historical-cancel-effect");

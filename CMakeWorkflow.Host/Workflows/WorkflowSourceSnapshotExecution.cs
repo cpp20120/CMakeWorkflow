@@ -107,15 +107,15 @@ internal static class WorkflowSourceSnapshotExecution
         LoreSnapshotStore lore = new(SourceStorePaths.ForWorkspace(paths.WorkspaceDirectory));
         bool hasMaterialization = Directory.Exists(materialized);
         SnapshotManifest sourceManifest = resume && hasMaterialization
-            ? lore.Verify(sourceSnapshotId, ct)
-            : lore.Inspect(sourceSnapshotId);
+            ? await lore.VerifyAsync(sourceSnapshotId, ct)
+            : await lore.InspectAsync(sourceSnapshotId, ct);
         if (!sourceManifest.Files.Any(file => file.Path == "CMakeLists.txt"))
         {
             throw new InvalidDataException("Source snapshot does not contain CMakeLists.txt at its root.");
         }
         if (!hasMaterialization)
         {
-            lore.Materialize(sourceSnapshotId, materialized);
+            await lore.MaterializeAsync(sourceSnapshotId, materialized, ct);
         }
         else
         {

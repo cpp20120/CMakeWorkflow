@@ -41,11 +41,12 @@ internal static class HistoryReports
     private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
 
-    private static string HashFile(string path)
+    private static async Task<string> HashFileAsync(string path, CancellationToken ct)
     {
-        using FileStream stream = File.OpenRead(path);
+        await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
+        return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct));
 
     }
 
@@ -78,7 +79,8 @@ internal static class HistoryReports
         }
     }
 
-    private static JsonDocument Read(string path) => JsonDocument.Parse(File.ReadAllBytes(path));
+    private static async Task<JsonDocument> ReadAsync(string path, CancellationToken ct) =>
+        JsonDocument.Parse(await File.ReadAllBytesAsync(path, ct));
 
     private static void Version(JsonElement root, string path, int expected, bool required = true)
     {
@@ -105,8 +107,9 @@ internal static class HistoryReports
     /// format. Unsupported/corrupt evidence can throw. No filesystem lease or stable multi-file snapshot is acquired.
     /// </remarks>
     /// <param name="directory">Directory normalized by full path and trailing-separator trimming; not symlink canonicalization.</param>
+    /// <param name="ct">Cancellation for reading and parsing the result.</param>
     /// <returns>Detached import evidence, or null when there is no importable completed result.</returns>
-    public static ParsedRun? Parse(string directory)
+    internal static async Task<ParsedRun?> ParseAsync(string directory, CancellationToken ct)
     {
         directory = Canonical(directory);
         string workflow = Path.Combine(directory, "run.json");
@@ -114,26 +117,26 @@ internal static class HistoryReports
         string completion = Path.Combine(directory, "campaign-completion.json");
         if (File.Exists(workflow))
         {
-            return ParseWorkflow(directory, workflow);
+            return await ParseWorkflowAsync(directory, workflow, null, null, ct);
         }
 
         if (File.Exists(completion))
         {
-            return ParseCampaign(directory, completion);
+            return await ParseCampaignAsync(directory, completion, ct);
         }
 
         if (File.Exists(fuzz))
         {
-            return ParseFuzz(directory, fuzz);
+            return await ParseFuzzAsync(directory, fuzz, ct);
         }
 
         if (File.Exists(Path.Combine(directory, "historical-completion.json")))
         {
-            return HistoricalHistoryReports.Parse(directory);
+            return await HistoricalHistoryReports.ParseAsync(directory, ct);
         }
 
         string[] captures = Directory.GetFiles(directory, "*.results.json", SearchOption.TopDirectoryOnly);
-        return captures.Length > 0 ? ParseCaptures(directory, captures) : null;
+        return captures.Length > 0 ? await ParseCapturesAsync(directory, captures, ct) : null;
     }
 
     /// <summary>Imports terminal CMake workflow evidence and preserves measurement comparability metadata.</summary>
@@ -142,11 +145,11 @@ internal static class HistoryReports
     /// hashed. If start/end Host identity or fingerprint disagrees, the comparison fingerprint is left null
     /// rather than asserting that measurements shared one environment. This does not verify a durable ledger row.
     /// </remarks>
-    internal static ParsedRun? ParseWorkflow(string directory, string path, string? reportSha256 = null,
-        Action<string>? pathGuard = null)
+    internal static async Task<ParsedRun?> ParseWorkflowAsync(string directory, string path, string? reportSha256,
+        Action<string>? pathGuard, CancellationToken ct)
     {
         pathGuard?.Invoke(path);
-        byte[] bytes = File.ReadAllBytes(path);
+        byte[] bytes = await File.ReadAllBytesAsync(path, ct);
         string sourceHash = Hash(bytes);
         if (reportSha256 is not null && !string.Equals(sourceHash, reportSha256, StringComparison.OrdinalIgnoreCase))
         {
@@ -234,6 +237,7 @@ internal static class HistoryReports
 
         foreach (JsonElement node in nodes.EnumerateArray())
         {
+            ct.ThrowIfCancellationRequested();
             if (node.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(Str(node, "id"))
                                                        || string.IsNullOrWhiteSpace(Str(node, "status")))
             {
@@ -265,7 +269,7 @@ internal static class HistoryReports
             }
 
             ImportBuildMeasurements(run, node, id);
-            ImportDagFlowHarness(directory, run, node, id, pathGuard);
+            await ImportDagFlowHarnessAsync(directory, run, node, id, pathGuard, ct);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
             AddArtifact(run, id, "stderr", Str(node, "stderr"));
             JsonElement? artifact = Obj(node, "artifact");
@@ -281,7 +285,7 @@ internal static class HistoryReports
             }
         }
 
-        ImportProfile(directory, run, pathGuard);
+        await ImportProfileAsync(directory, run, pathGuard, ct);
         long observedBytes = 0;
         bool observedFiles = false;
         StringComparer paths = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -394,7 +398,7 @@ internal static class HistoryReports
 
     // Only import snapshots explicitly recorded in run.json. No directory search,
     // and no reading mutable artifacts from the native build tree.
-    private static void ImportDagFlowHarness(string directory, ParsedRun run, JsonElement node, string id, Action<string>? pathGuard)
+    private static async Task ImportDagFlowHarnessAsync(string directory, ParsedRun run, JsonElement node, string id, Action<string>? pathGuard, CancellationToken ct)
     {
         if (Obj(node, "outputs") is not { } outputs)
         {
@@ -403,17 +407,17 @@ internal static class HistoryReports
 
         if (outputs.TryGetProperty("dagflow-summary.json", out _))
         {
-            ImportDagFlowHarnessEntry(directory, run, outputs, id, "dagflow-", null, pathGuard);
+            await ImportDagFlowHarnessEntryAsync(directory, run, outputs, id, "dagflow-", null, pathGuard, ct);
         }
         // Multiple harness results can originate from one native invoke.
         for (int index = 0; outputs.TryGetProperty($"dagflow-{index}-summary.json", out _); index++)
         {
-            ImportDagFlowHarnessEntry(directory, run, outputs, id, $"dagflow-{index}-", $"harness-{index}", pathGuard);
+            await ImportDagFlowHarnessEntryAsync(directory, run, outputs, id, $"dagflow-{index}-", $"harness-{index}", pathGuard, ct);
         }
     }
 
-    private static void ImportDagFlowHarnessEntry(string directory, ParsedRun run,
-        JsonElement outputs, string id, string prefix, string? variant, Action<string>? pathGuard)
+    private static async Task ImportDagFlowHarnessEntryAsync(string directory, ParsedRun run,
+        JsonElement outputs, string id, string prefix, string? variant, Action<string>? pathGuard, CancellationToken ct)
     {
         string Saved(string name)
         {
@@ -442,7 +446,7 @@ internal static class HistoryReports
                  })
         {
             pathGuard?.Invoke(path);
-            AddArtifact(run, id, type, path, HashFile(path));
+            AddArtifact(run, id, type, path, await HashFileAsync(path, ct));
         }
 
         if (Str(outputs, prefix + "replay-binary") is { } executable)
@@ -456,10 +460,10 @@ internal static class HistoryReports
             }
 
             pathGuard?.Invoke(original);
-            AddArtifact(run, id, "dagflow-replay-binary", original, HashFile(original));
+            AddArtifact(run, id, "dagflow-replay-binary", original, await HashFileAsync(original, ct));
         }
 
-        using JsonDocument summary = Read(summaryPath);
+        using JsonDocument summary = await ReadAsync(summaryPath, ct);
         JsonElement root = summary.RootElement;
         if (Str(root, "status") != "passed" || Obj(root, "cases") is not { } cases)
         {
@@ -467,14 +471,15 @@ internal static class HistoryReports
         }
         // Older DagFlow generic harnesses omit manifest_sha256; the explicit
         // per-run copy is still immutable and independently hashed for history.
+        byte[] manifestBytes = await File.ReadAllBytesAsync(manifestPath, ct);
         string? hash = Str(root, "manifest_sha256");
         if (hash is not null &&
-            !string.Equals(hash, Hash(File.ReadAllBytes(manifestPath)), StringComparison.OrdinalIgnoreCase))
+            !string.Equals(hash, Hash(manifestBytes), StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException($"{summaryPath}: manifest SHA-256 does not match the snapshot.");
         }
 
-        using JsonDocument manifest = Read(manifestPath);
+        using JsonDocument manifest = JsonDocument.Parse(manifestBytes);
         JsonElement? manifestCases = Obj(manifest.RootElement, "cases");
         Dictionary<(string Case, string Metric), (double Scale, int Count)> expected = [];
         foreach (JsonProperty item in cases.EnumerateObject())
@@ -498,7 +503,7 @@ internal static class HistoryReports
         }
 
         Dictionary<(string Case, string Metric), int> counts = [];
-        foreach (string line in File.ReadLines(runsPath))
+        await foreach (string line in File.ReadLinesAsync(runsPath, ct))
         {
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -596,9 +601,9 @@ internal static class HistoryReports
         return null;
     }
 
-    private static ParsedRun? ParseFuzz(string directory, string path)
+    private static async Task<ParsedRun?> ParseFuzzAsync(string directory, string path, CancellationToken ct)
     {
-        byte[] bytes = File.ReadAllBytes(path);
+        byte[] bytes = await File.ReadAllBytesAsync(path, ct);
         using JsonDocument doc = JsonDocument.Parse(bytes);
         JsonElement root = doc.RootElement;
         if (!root.TryGetProperty("layer", out _))
@@ -642,9 +647,9 @@ internal static class HistoryReports
     /// a missing finish timestamp or nonterminal marker is skipped. Source identity combines marker and report
     /// hashes so changed completion evidence refreshes history rather than licensing campaign replay.
     /// </remarks>
-    private static ParsedRun? ParseCampaign(string directory, string marker)
+    private static async Task<ParsedRun?> ParseCampaignAsync(string directory, string marker, CancellationToken ct)
     {
-        byte[] bytes = File.ReadAllBytes(marker);
+        byte[] bytes = await File.ReadAllBytesAsync(marker, ct);
         using JsonDocument doc = JsonDocument.Parse(bytes);
         JsonElement root = doc.RootElement;
         Version(root, marker, 1);
@@ -660,7 +665,7 @@ internal static class HistoryReports
             throw new FileNotFoundException($"Campaign report referenced by {marker} is missing.", reportPath);
         }
 
-        string reportHash = Hash(File.ReadAllBytes(reportPath));
+        string reportHash = await HashFileAsync(reportPath, ct);
         if (reportHash != Str(root, "reportSha256"))
         {
             throw new InvalidDataException($"{marker}: report hash changed after completion; rerun the campaign.");
@@ -691,16 +696,18 @@ internal static class HistoryReports
     /// unsupported statuses fail. Any failed/canceled capture makes the aggregate run failed. Raw trace hashes
     /// are recorded from capture metadata here, not independently verified as durable operation completion.
     /// </remarks>
-    private static ParsedRun? ParseCaptures(string directory, string[] paths)
+    private static async Task<ParsedRun?> ParseCapturesAsync(string directory, string[] paths, CancellationToken ct)
     {
         ParsedRun run = new()
         {
             Run = new(Id(directory), directory, "profile-captures", null,
                 null, null, null, "succeeded", null, "")
         };
+        List<string> captureDigests = [];
         foreach (string? path in paths.Order(StringComparer.Ordinal))
         {
-            using JsonDocument doc = Read(path);
+            byte[] bytes = await File.ReadAllBytesAsync(path, ct);
+            using JsonDocument doc = JsonDocument.Parse(bytes);
             JsonElement root = doc.RootElement;
             if (Str(root, "captureId") is null || Time(root, "finishedAt") is null
                                                || Str(root, "status") is null)
@@ -716,15 +723,18 @@ internal static class HistoryReports
 
             string id = Str(root, "captureId")!;
             run.Nodes.Add(new(run.Run.Id, id, "profile", status, null, null, null, null, null));
-            AddArtifact(run, id, "capture-result", path, Hash(File.ReadAllBytes(path)));
+            string digest = Hash(bytes);
+            captureDigests.Add(digest);
+            AddArtifact(run, id, "capture-result", path, digest);
             AddArtifact(run, id, "trace", Str(root, "rawTrace"), Str(root, "rawTraceSha256"),
                 Json(root, "eventSource"));
             string manifest = Path.Combine(directory, id + ".manifest.json");
             if (File.Exists(manifest))
             {
-                using JsonDocument md = Read(manifest);
+                byte[] manifestBytes = await File.ReadAllBytesAsync(manifest, ct);
+                using JsonDocument md = JsonDocument.Parse(manifestBytes);
                 Version(md.RootElement, manifest, 1);
-                AddArtifact(run, id, "capture-manifest", manifest, Hash(File.ReadAllBytes(manifest)));
+                AddArtifact(run, id, "capture-manifest", manifest, Hash(manifestBytes));
             }
 
             if (status != "complete")
@@ -741,10 +751,9 @@ internal static class HistoryReports
 
         run.Run = run.Run with
         {
-            SourceHash = Hash(Encoding.UTF8.GetBytes(string.Join("|",
-                paths.Order(StringComparer.Ordinal).Select(p => Hash(File.ReadAllBytes(p))))))
+            SourceHash = Hash(Encoding.UTF8.GetBytes(string.Join("|", captureDigests)))
         };
-        ImportProfile(directory, run);
+        await ImportProfileAsync(directory, run, null, ct);
         FinalizeHash(run);
         return run;
     }
@@ -774,18 +783,19 @@ internal static class HistoryReports
     /// metadata reads may fail; database mutation is deferred until the caller has parsed the entire batch.
     /// Raw trace references/hashes are metadata; merely importing them does not attest current trace contents.
     /// </remarks>
-    private static void ImportProfile(string directory, ParsedRun run, Action<string>? pathGuard = null)
+    private static async Task ImportProfileAsync(string directory, ParsedRun run, Action<string>? pathGuard, CancellationToken ct)
     {
-        string GuardedHash(string file)
+        Task<string> GuardedHashAsync(string file)
         {
             pathGuard?.Invoke(file);
-            return HashFile(file);
+            return HashFileAsync(file, ct);
         }
 
         foreach (string? path in Directory.GetFiles(directory, "*.results.json").Order(StringComparer.Ordinal))
         {
             pathGuard?.Invoke(path);
-            using JsonDocument doc = Read(path);
+            byte[] bytes = await File.ReadAllBytesAsync(path, ct);
+            using JsonDocument doc = JsonDocument.Parse(bytes);
             JsonElement root = doc.RootElement;
             string? id = Str(root, "captureId");
             if (id is null)
@@ -793,16 +803,17 @@ internal static class HistoryReports
                 continue;
             }
 
-            AddArtifact(run, id, "capture-result", path, Hash(File.ReadAllBytes(path)));
+            AddArtifact(run, id, "capture-result", path, Hash(bytes));
             AddArtifact(run, id, "trace", Str(root, "rawTrace"), Str(root, "rawTraceSha256"),
                 Json(root, "eventSource"));
             string manifest = Path.Combine(directory, id + ".manifest.json");
             if (File.Exists(manifest))
             {
                 pathGuard?.Invoke(manifest);
-                using JsonDocument md = Read(manifest);
+                byte[] manifestBytes = await File.ReadAllBytesAsync(manifest, ct);
+                using JsonDocument md = JsonDocument.Parse(manifestBytes);
                 Version(md.RootElement, manifest, 1);
-                AddArtifact(run, id, "capture-manifest", manifest, Hash(File.ReadAllBytes(manifest)));
+                AddArtifact(run, id, "capture-manifest", manifest, Hash(manifestBytes));
             }
         }
 
@@ -815,12 +826,12 @@ internal static class HistoryReports
                 if (name == "comparison.json")
                 {
                     pathGuard?.Invoke(path);
-                    using JsonDocument doc = Read(path);
+                    using JsonDocument doc = await ReadAsync(path, ct);
                     Version(doc.RootElement, path, 1);
                 }
 
                 pathGuard?.Invoke(path);
-                AddArtifact(run, null, name, path, Hash(File.ReadAllBytes(path)));
+                AddArtifact(run, null, name, path, await HashFileAsync(path, ct));
             }
         }
 
@@ -828,7 +839,7 @@ internal static class HistoryReports
         if (File.Exists(counterPath))
         {
             pathGuard?.Invoke(counterPath);
-            using JsonDocument doc = Read(counterPath);
+            using JsonDocument doc = await ReadAsync(counterPath, ct);
             JsonElement root = doc.RootElement;
             if (Num(root, "schemaVersion") is not (1 or 2))
             {
@@ -871,7 +882,7 @@ internal static class HistoryReports
         if (File.Exists(analysisPath))
         {
             pathGuard?.Invoke(analysisPath);
-            using JsonDocument doc = Read(analysisPath);
+            using JsonDocument doc = await ReadAsync(analysisPath, ct);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
                 throw new InvalidDataException($"{analysisPath}: expected an array of profile captures.");
@@ -938,21 +949,21 @@ internal static class HistoryReports
                 }
 
                 pathGuard?.Invoke(file);
-                using JsonDocument parsed = Read(file);
+                using JsonDocument parsed = await ReadAsync(file, ct);
                 if (Num(parsed.RootElement, "schemaVersion") is not (1 or 2))
                 {
                     throw new InvalidDataException(
                         $"{file}: unsupported normalized stack schemaVersion; expected 1 or 2.");
                 }
 
-                AddArtifact(run, captureId, "cpu-stacks", file, HashFile(file),
+                AddArtifact(run, captureId, "cpu-stacks", file, await HashFileAsync(file, ct),
                     Str(parsed.RootElement, "analysisStatus"));
             }
 
             foreach (string file in Directory.GetFiles(normalized, "*.timeline.jsonl"))
             {
                 AddArtifact(run, Path.GetFileName(file)[..^".timeline.jsonl".Length],
-                    "scheduler-timeline", file, GuardedHash(file));
+                    "scheduler-timeline", file, await GuardedHashAsync(file));
             }
         }
 
@@ -961,7 +972,7 @@ internal static class HistoryReports
             foreach (string? path in Directory.GetFiles(normalized, "*.etw.json").Order(StringComparer.Ordinal))
             {
                 pathGuard?.Invoke(path);
-                using JsonDocument doc = Read(path);
+                using JsonDocument doc = await ReadAsync(path, ct);
                 JsonElement root = doc.RootElement;
                 Version(root, path, 1);
                 if (Str(root, "backend") != "etw")
@@ -977,7 +988,7 @@ internal static class HistoryReports
                     : capture.StartsWith("capture_", StringComparison.Ordinal)
                         ? capture["capture_".Length..] + ".cpu"
                         : capture;
-                AddArtifact(run, capture, "etw-summary", path, Hash(File.ReadAllBytes(path)));
+                AddArtifact(run, capture, "etw-summary", path, await HashFileAsync(path, ct));
                 foreach ((string? field, string? unit) in new[]
                          {
                              ("targetCpuSamples", "samples"), ("targetContextSwitchesIn", "events"),

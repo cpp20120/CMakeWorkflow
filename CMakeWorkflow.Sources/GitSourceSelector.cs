@@ -22,9 +22,11 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
     /// when opted in. Requires sourceRoot to be the Git toplevel. Never stages or writes to Git.
     /// Fails closed on index conflicts, symlinks, gitlinks and unsafe names.
     /// </summary>
-    public GitSourceSelection Select(string sourceRoot, bool includeUntracked = false)
+    public async Task<GitSourceSelection> SelectAsync(string sourceRoot, bool includeUntracked = false,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+        ct.ThrowIfCancellationRequested();
         string root = Path.GetFullPath(sourceRoot);
         if (!Directory.Exists(root))
         {
@@ -33,23 +35,23 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
         // Git computes the prefix relative to the worktree root. This survives
         // filesystem aliases such as macOS /var -> /private/var, unlike comparing
         // two absolute path strings.
-        string prefix = StrictUtf8.GetString(Run(root, true,
-            "rev-parse", "--show-prefix").Output).TrimEnd('\r', '\n');
+        string prefix = StrictUtf8.GetString((await RunAsync(root, true, ["rev-parse", "--show-prefix"], ct)).Output).TrimEnd('\r', '\n');
         if (prefix.Length != 0)
         {
             throw new InvalidDataException("The source root must be the Git worktree root, not a subdirectory.");
         }
 
-        GitOutput head = Run(root, false, "rev-parse", "--verify", "HEAD");
+        GitOutput head = await RunAsync(root, false, ["rev-parse", "--verify", "HEAD"], ct);
         string? commit = head.ExitCode == 0
             ? StrictUtf8.GetString(head.Output).TrimEnd('\r', '\n') : null;
 
         SortedSet<string> selected = new(StringComparer.Ordinal);
         HashSet<string> portableNames = new(StringComparer.OrdinalIgnoreCase);
         int deleted = 0;
-        foreach (string row in ReadZeroTerminated(Run(root, true,
-            "ls-files", "--stage", "--full-name", "-z").Output))
+        foreach (string row in ReadZeroTerminated((await RunAsync(root, true,
+            ["ls-files", "--stage", "--full-name", "-z"], ct)).Output))
         {
+            ct.ThrowIfCancellationRequested();
             int tab = row.IndexOf('\t', StringComparison.Ordinal);
             if (tab < 0)
             {
@@ -78,9 +80,10 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
         }
 
         int excludedUntracked = 0;
-        foreach (string path in ReadZeroTerminated(Run(root, true,
-            "ls-files", "--others", "--exclude-standard", "--full-name", "-z").Output))
+        foreach (string path in ReadZeroTerminated((await RunAsync(root, true,
+            ["ls-files", "--others", "--exclude-standard", "--full-name", "-z"], ct)).Output))
         {
+            ct.ThrowIfCancellationRequested();
             if (!includeUntracked)
             {
                 excludedUntracked++;
@@ -118,8 +121,9 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
         }
     }
 
-    private GitOutput Run(string root, bool mustSucceed, params string[] arguments)
+    private async Task<GitOutput> RunAsync(string root, bool mustSucceed, string[] arguments, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         ProcessStartInfo start = new(_gitExecutable)
         {
             WorkingDirectory = root,
@@ -135,14 +139,35 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
         }
         using Process process = Process.Start(start)
             ?? throw new IOException("Failed to start Git executable.");
-        Task<string> errorReader = process.StandardError.ReadToEndAsync();
-        using MemoryStream bytes = new();
-        process.StandardOutput.BaseStream.CopyTo(bytes);
-        process.WaitForExit();
-        string error = errorReader.GetAwaiter().GetResult();
-        return mustSucceed && process.ExitCode != 0
-            ? throw new IOException($"git {arguments[0]} failed ({process.ExitCode}): {error.Trim()}")
-            : new GitOutput(process.ExitCode, bytes.ToArray());
+        using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        Task<string> stderr = process.StandardError.ReadToEndAsync(stop.Token);
+        try
+        {
+            using MemoryStream bytes = new();
+            await process.StandardOutput.BaseStream.CopyToAsync(bytes, ct);
+            await process.WaitForExitAsync(ct);
+            string error = await stderr;
+            return mustSucceed && process.ExitCode != 0
+                ? throw new IOException($"git {arguments[0]} failed ({process.ExitCode}): {error.Trim()}")
+                : new GitOutput(process.ExitCode, bytes.ToArray());
+        }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (InvalidOperationException) when (process.HasExited) { }
+
+            await stop.CancelAsync();
+            await process.WaitForExitAsync(CancellationToken.None);
+            try { _ = await stderr; }
+            catch (Exception error) when (error is IOException or OperationCanceledException) { }
+            throw;
+        }
     }
 
     private sealed record GitOutput(int ExitCode, byte[] Output);

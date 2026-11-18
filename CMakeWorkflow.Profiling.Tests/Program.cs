@@ -310,7 +310,7 @@ try
                                                   7ff1 Pool::worker (dagflow-runtime-bench)
                                      """))
     {
-        JsonObject stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
+        JsonObject stacks = (await PerfStackAnalyzer.ParseAsync(script, CancellationToken.None)).ToJson("perf", "capture");
         Check(stacks["samples"]!.GetValue<int>() == 2
               && stacks["symbolizedSamples"]!.GetValue<int>() == 2
               && stacks["stacks"]!.AsArray()[0]!["count"]!.GetValue<int>() == 2,
@@ -332,7 +332,7 @@ try
                                      nonsense unsupported header
                                      """))
     {
-        StackEvidence parsed = PerfStackAnalyzer.Parse(script, CancellationToken.None);
+        StackEvidence parsed = await PerfStackAnalyzer.ParseAsync(script, CancellationToken.None);
         JsonObject stacks = parsed.ToJson("perf", "capture");
         Check(stacks["samples"]!.GetValue<int>() == 3
               && stacks["analysisStatus"]!.GetValue<string>() == "partial"
@@ -358,7 +358,7 @@ try
 
                                      """))
     {
-        JsonObject stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
+        JsonObject stacks = (await PerfStackAnalyzer.ParseAsync(script, CancellationToken.None)).ToJson("perf", "capture");
         Check(stacks["samples"]!.GetValue<int>() == 2
               && stacks["parsedSamples"]!.GetValue<int>() == 2
               && stacks["analysisStatus"]!.GetValue<string>() == "complete"
@@ -381,7 +381,7 @@ try
                                                  7f123 dagflow::Pool::worker_loop() (/tmp/libdagflow.so)
                                      """))
     {
-        JsonObject stacks = PerfStackAnalyzer.Parse(script, CancellationToken.None).ToJson("perf", "capture");
+        JsonObject stacks = (await PerfStackAnalyzer.ParseAsync(script, CancellationToken.None)).ToJson("perf", "capture");
         Check(stacks["analysisStatus"]!.GetValue<string>() == "partial"
               && stacks["samples"]!.GetValue<int>() == 2
               && stacks["parsedSamples"]!.GetValue<int>() == 1,
@@ -390,13 +390,13 @@ try
 
     using (StringReader script = new(""))
     {
-        Check(PerfStackAnalyzer.Parse(script, CancellationToken.None).AnalysisStatus == "no_samples",
+        Check((await PerfStackAnalyzer.ParseAsync(script, CancellationToken.None)).AnalysisStatus == "no_samples",
             "Empty trace status changed.");
     }
 
     using (StringReader script = new("unsupported header\n"))
     {
-        Check(PerfStackAnalyzer.Parse(script, CancellationToken.None).AnalysisStatus == "unsupported_format",
+        Check((await PerfStackAnalyzer.ParseAsync(script, CancellationToken.None)).AnalysisStatus == "unsupported_format",
             "Unsupported nonempty trace was interpreted as empty.");
     }
 
@@ -406,7 +406,7 @@ try
                                      """))
     using (StringWriter output = new())
     {
-        Check(PerfSchedulerAnalyzer.Parse(script, output, CancellationToken.None) == 3
+        Check(await PerfSchedulerAnalyzer.ParseAsync(script, output, CancellationToken.None) == 3
               && output.ToString().Contains("\"ready\"", StringComparison.Ordinal)
               && output.ToString().Contains("\"offcpu\"", StringComparison.Ordinal)
               && output.ToString().Contains("\"running\"", StringComparison.Ordinal)
@@ -647,7 +647,7 @@ try
                                            <Event><System><TimeCreated SystemTime="2026-10-26T10:00:06Z"/><Execution ProcessID="42" ThreadID="100"/></System><RenderingInfo><EventName>SampleProfile</EventName></RenderingInfo></Event>
                                          </Events>
                                          """);
-    EtwAnalysisResult etw = EtwTraceAnalyzer.ParseXml(etwXml, root, "etw", executable, 42,
+    EtwAnalysisResult etw = await EtwTraceAnalyzer.ParseXmlAsync(etwXml, root, "etw", executable, 42,
         DateTimeOffset.Parse("2026-10-26T10:00:00Z", CultureInfo.CurrentCulture),
         DateTimeOffset.Parse("2026-10-26T10:00:05Z", CultureInfo.CurrentCulture), CancellationToken.None);
     Check(etw.CpuSamples == 1 && etw.ContextSwitchesIn == 1 && etw.ReadyEvents == 1,

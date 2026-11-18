@@ -79,7 +79,7 @@ public static class ProfileAnalyzer
                 item["report"] = Path.GetRelativePath(directory, raw);
                 JsonObject counters = [];
                 List<string> counterWarnings = [];
-                Dictionary<string, Counter> rawCounters = ReadPerfCounters(raw, counterWarnings);
+                Dictionary<string, Counter> rawCounters = await ReadPerfCountersAsync(raw, counterWarnings, ct);
                 foreach ((string? eventName, Counter? counter) in rawCounters)
                 {
                     counters[eventName] = new JsonObject
@@ -296,7 +296,7 @@ public static class ProfileAnalyzer
         // A failed or interrupted capture has a manifest and a runs.jsonl
         // record, but intentionally has no *.results.json. Iterating only
         // successful captures would falsely describe such a run as complete.
-        Dictionary<string, (string? Status, string? Error)> captureJournal = ReadCaptureJournal(directory);
+        Dictionary<string, (string? Status, string? Error)> captureJournal = await ReadCaptureJournalAsync(directory, ct);
         foreach (string? manifestPath in Directory.GetFiles(directory, "*.manifest.json")
                      .Order(StringComparer.Ordinal))
         {
@@ -360,7 +360,8 @@ public static class ProfileAnalyzer
         return analysisFailed ? 1 : 0;
     }
 
-    private static Dictionary<string, (string? Status, string? Error)> ReadCaptureJournal(string directory)
+    private static async Task<Dictionary<string, (string? Status, string? Error)>> ReadCaptureJournalAsync(
+        string directory, CancellationToken ct)
     {
         Dictionary<string, (string? Status, string? Error)> journal = new(StringComparer.Ordinal);
         string path = Path.Combine(directory, "runs.jsonl");
@@ -369,7 +370,7 @@ public static class ProfileAnalyzer
             return journal;
         }
 
-        foreach (string line in File.ReadLines(path))
+        await foreach (string line in File.ReadLinesAsync(path, ct))
         {
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -503,12 +504,12 @@ public static class ProfileAnalyzer
                 ? "other"
                 : "unspecified";
 
-    private static Dictionary<string, Counter> ReadPerfCounters(string path,
-        List<string>? warnings = null)
+    private static async Task<Dictionary<string, Counter>> ReadPerfCountersAsync(string path,
+        List<string>? warnings, CancellationToken ct)
     {
         Dictionary<string, Counter> counters = new(StringComparer.Ordinal);
         int lineNumber = 0;
-        foreach (string line in File.ReadLines(path))
+        await foreach (string line in File.ReadLinesAsync(path, ct))
         {
             lineNumber++;
             if (line.StartsWith('#') || string.IsNullOrWhiteSpace(line))
@@ -626,7 +627,7 @@ public static class ProfileAnalyzer
 
             string name = id["counters_".Length..];
             string raw = Path.Combine(directory, item["rawTrace"]!.GetValue<string>());
-            variants[name] = ReadPerfCounters(raw);
+            variants[name] = await ReadPerfCountersAsync(raw, null, ct);
         }
 
         if (variants.Count == 0)
@@ -634,7 +635,7 @@ public static class ProfileAnalyzer
             return;
         }
 
-        List<string> orderedNames = ReadBuildVariantOrder(directory);
+        List<string> orderedNames = await ReadBuildVariantOrderAsync(directory, ct);
         string baselineName = orderedNames.FirstOrDefault(variants.ContainsKey)
                            ?? (variants.ContainsKey("before")
                                ? "before"
@@ -713,7 +714,7 @@ public static class ProfileAnalyzer
             { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
     }
 
-    private static List<string> ReadBuildVariantOrder(string directory)
+    private static async Task<List<string>> ReadBuildVariantOrderAsync(string directory, CancellationToken ct)
     {
         string path = Path.Combine(directory, "run.json");
         if (!File.Exists(path))
@@ -721,7 +722,7 @@ public static class ProfileAnalyzer
             return [];
         }
 
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        using JsonDocument document = JsonDocument.Parse(await File.ReadAllTextAsync(path, ct));
         return [.. document.RootElement.GetProperty("nodes").EnumerateArray()
             .Where(x => x.GetProperty("kind").GetString() == "build")
             .Select(x => x.GetProperty("id").GetString()!)

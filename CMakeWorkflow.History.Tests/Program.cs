@@ -41,7 +41,7 @@ try
         """);
     using (HistoryStore cacheStore = new(Path.Combine(root, "cache-history.sqlite")))
     {
-        Check(cacheStore.Import(cached, false).Contains("Imported 1", StringComparison.Ordinal), "cache import");
+        Check((await cacheStore.ImportAsync(cached, false)).Contains("Imported 1", StringComparison.Ordinal), "cache import");
         HistoryRun cachedRun = cacheStore.Runs(1, null, null, null, null, null).Single();
         List<HistoryMeasurement> cacheMetrics = cacheStore.Metrics(cachedRun.Id, null, null, null);
         HistoryMeasurement hits = cacheMetrics.Single(x => x.Metric == "compiler_cache_hits");
@@ -52,7 +52,7 @@ try
         Check(cacheMetrics.Single(x => x.Metric == "build_wall_time").Value == 4
               && cacheMetrics.Single(x => x.Metric == "process_wall_time").NodeId == "run",
             "build and benchmark measurements share the same run");
-        Check(cacheStore.Import(cached, false).Contains("unchanged 1", StringComparison.Ordinal), "cache reimport");
+        Check((await cacheStore.ImportAsync(cached, false)).Contains("unchanged 1", StringComparison.Ordinal), "cache reimport");
     }
 
     static string Workflow(string status, double first, double second, string workers = "1") => $$"""
@@ -72,15 +72,15 @@ try
     using (HistoryStore store = new(dbPath))
     {
         Check(store.Runs(50, null, null, null, null, null).Count == 0, "fresh DB");
-        Check(store.Import(resultRoot, true).Contains("Imported 2", StringComparison.Ordinal), "completed and failed import");
+        Check((await store.ImportAsync(resultRoot, true)).Contains("Imported 2", StringComparison.Ordinal), "completed and failed import");
         Check(store.Runs(50, "failed", null, null, null, null).Count == 1, "status filter");
         Check(store.Runs(50, null, "2026-01-02T00:00:00Z", null, null, null).Count == 0,
             "time filter");
         Check(store.Runs(50, null, null, null, "bench", "main").Count == 2,
             "workflow and variant filters");
         Check(store.Runs(50, null, null, null, null, null).Count == 2, "active skipped");
-        Check(store.Import(resultRoot, true).Contains("unchanged 2", StringComparison.Ordinal), "idempotent import");
-        Check(store.Import(Path.Combine(success, "run.json"), false).Contains("unchanged 1", StringComparison.Ordinal),
+        Check((await store.ImportAsync(resultRoot, true)).Contains("unchanged 2", StringComparison.Ordinal), "idempotent import");
+        Check((await store.ImportAsync(Path.Combine(success, "run.json"), false)).Contains("unchanged 1", StringComparison.Ordinal),
             "report file path");
         using StringWriter importOutput = new();
         TextWriter originalOutput = Console.Out;
@@ -123,7 +123,7 @@ try
         }
 
         Write(success, "run.json", Workflow("succeeded", 3, 5));
-        Check(store.Import(success, false).Contains("Imported 1", StringComparison.Ordinal), "changed report refresh");
+        Check((await store.ImportAsync(success, false)).Contains("Imported 1", StringComparison.Ordinal), "changed report refresh");
         Check(store.Metrics(row.Id, null, null, null).Count == 2
               && store.Metrics(row.Id, null, null, null)[0].Value == 3, "no duplicate samples");
         Write(success, "run.json", /*lang=json,strict*/ """
@@ -134,7 +134,7 @@ try
                                        "arguments":["--scenario","idle","--workers","1"],
                                        "processDurationSeconds":7}]}
                                    """);
-        Check(store.Import(success, false).Contains("Imported 1", StringComparison.Ordinal), "sample removal refresh");
+        Check((await store.ImportAsync(success, false)).Contains("Imported 1", StringComparison.Ordinal), "sample removal refresh");
         List<HistoryMeasurement> refreshed = store.Metrics(row.Id, null, null, null);
         Check(refreshed.Count == 1 && refreshed.Single().Value == 7,
             "removed source sample survived re-import");
@@ -188,7 +188,7 @@ try
     {
         try
         {
-            _ = store.Import(bad, false);
+            _ = await store.ImportAsync(bad, false);
             throw new System.Diagnostics.UnreachableException("unsupported accepted");
         }
         catch (InvalidDataException e)
@@ -199,7 +199,7 @@ try
         Write(bad, "run.json", "{");
         try
         {
-            _ = store.Import(bad, false);
+            _ = await store.ImportAsync(bad, false);
             throw new System.Diagnostics.UnreachableException("malformed accepted");
         }
         catch (JsonException)
@@ -216,7 +216,7 @@ try
         int before = store.Runs(50, null, null, null, null, null).Count;
         try
         {
-            _ = store.Import(batch, true);
+            _ = await store.ImportAsync(batch, true);
             throw new System.Diagnostics.UnreachableException("partial batch accepted");
         }
         catch (JsonException)
@@ -224,6 +224,25 @@ try
         }
 
         Check(store.Runs(50, null, null, null, null, null).Count == before, "atomic batch");
+
+        Write(corrupt, "run.json", Workflow("succeeded", 2, 2));
+        using CancellationTokenSource cancellation = new();
+        try
+        {
+            _ = await store.ImportAsync(batch, recursive: true, pathGuard: candidate =>
+            {
+                if (candidate == corrupt)
+                {
+                    cancellation.Cancel();
+                }
+            }, ct: cancellation.Token);
+            throw new System.Diagnostics.UnreachableException("canceled batch accepted");
+        }
+        catch (OperationCanceledException error) when (error.CancellationToken == cancellation.Token)
+        {
+        }
+
+        Check(store.Runs(50, null, null, null, null, null).Count == before, "atomic canceled batch");
     }
 
     string captureOnly = Path.Combine(root, "capture-only");
@@ -241,7 +260,7 @@ try
                                                                              """);
     using (HistoryStore store = new(dbPath))
     {
-        Check(store.Import(captureOnly, false).Contains("Imported 1", StringComparison.Ordinal), "standalone capture");
+        Check((await store.ImportAsync(captureOnly, false)).Contains("Imported 1", StringComparison.Ordinal), "standalone capture");
         HistoryRun capture = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == captureOnly);
         Check(capture.Status == "succeeded"
               && store.Metrics(capture.Id, "targetCpuSamples", null, null).Single().Value == 5
@@ -261,7 +280,7 @@ try
                                   """);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(commandRun, false);
+        _ = await store.ImportAsync(commandRun, false);
         string id = store.Runs(50, null, null, null, null, null)
             .Single(x => x.Directory == commandRun).Id;
         Check(store.Show(id).Artifacts.All(x => x.Type != "executable"),
@@ -278,7 +297,7 @@ try
                                """);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(fuzz, false);
+        _ = await store.ImportAsync(fuzz, false);
         HistoryRun row = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == fuzz);
         Check(row.Format == "fuzz" && row.Status == "failed"
                                    && store.Show(row.Id).Measurements.Count == 0
@@ -291,7 +310,7 @@ try
     Write(campaign, "report.json", /*lang=json,strict*/ """{"checks":{"parking":{"status":"PASS"}}}""");
     using (HistoryStore store = new(dbPath))
     {
-        Check(store.Import(campaign, false).Contains("skipped 1", StringComparison.Ordinal), "incomplete campaign skipped");
+        Check((await store.ImportAsync(campaign, false)).Contains("skipped 1", StringComparison.Ordinal), "incomplete campaign skipped");
     }
 
 
@@ -305,14 +324,14 @@ try
                                                   """);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(campaign, false);
+        _ = await store.ImportAsync(campaign, false);
         HistoryRun row = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == campaign);
         Check(row.Format == "campaign" && row.Workflow == "weak-memory"
                                        && store.Show(row.Id).Artifacts.Count == 2, "completed generic campaign");
         Write(campaign, "report.json", /*lang=json,strict*/ """{"checks":{}}""");
         try
         {
-            _ = store.Import(campaign, false);
+            _ = await store.ImportAsync(campaign, false);
             throw new System.Diagnostics.UnreachableException("campaign hash drift accepted");
         }
         catch (InvalidDataException)
@@ -337,8 +356,8 @@ try
                                                """);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(profile, false);
-        _ = store.Import(profile2, false);
+        _ = await store.ImportAsync(profile, false);
+        _ = await store.ImportAsync(profile2, false);
         HistoryRun first = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == profile);
         HistoryRun second = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == profile2);
         Check(store.Metrics(first.Id, "cycles", null, null).Single().Value == 100, "counter import");
@@ -365,7 +384,7 @@ try
                                                   {"schemaVersion":1,"backend":"ETW","variants":[
                                                   {"name":"main","events":{"cycles":{"value":100,"unit":"ms"}}}]}
                                                   """);
-        Check(store.Import(profile, false).Contains("Imported 1", StringComparison.Ordinal), "small metadata refresh");
+        Check((await store.ImportAsync(profile, false)).Contains("Imported 1", StringComparison.Ordinal), "small metadata refresh");
         _ = output.GetStringBuilder().Clear();
         Console.SetOut(output);
         try
@@ -395,7 +414,7 @@ try
                                           """);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(singleProfile, false);
+        _ = await store.ImportAsync(singleProfile, false);
         string id = store.Runs(50, null, null, null, null, null)
             .Single(x => x.Directory == singleProfile).Id;
         Check(store.Metrics(id, "cycles:u", "main", null).Single().Value == 1234,
@@ -423,8 +442,8 @@ try
         """);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(userProfile, false);
-        _ = store.Import(kernelProfile, false);
+        _ = await store.ImportAsync(userProfile, false);
+        _ = await store.ImportAsync(kernelProfile, false);
         HistoryRun user = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == userProfile);
         HistoryRun kernel = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == kernelProfile);
         Check(store.Metrics(user.Id, "ipc", null, null).Single().Method == "perf stat derived user"
@@ -459,8 +478,8 @@ try
         .Replace("bench.json", "/tmp/profile-b.json", StringComparison.Ordinal));
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(generatedA, false);
-        _ = store.Import(generatedB, false);
+        _ = await store.ImportAsync(generatedA, false);
+        _ = await store.ImportAsync(generatedB, false);
         HistoryRun a = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == generatedA);
         HistoryRun b = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == generatedB);
         using StringWriter output = new();
@@ -519,8 +538,8 @@ try
     Write(workers16, "analysis.json", analysisCounters);
     using (HistoryStore store = new(dbPath))
     {
-        _ = store.Import(workers1, false);
-        _ = store.Import(workers16, false);
+        _ = await store.ImportAsync(workers1, false);
+        _ = await store.ImportAsync(workers16, false);
         HistoryRun a = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == workers1);
         HistoryRun b = store.Runs(50, null, null, null, null, null).Single(x => x.Directory == workers16);
         Check(store.Metrics(a.Id, "cycles:u", "main", "idle-burst").Single().Workload
@@ -587,7 +606,7 @@ try
                      changedOverrides, drifted
                  })
         {
-            _ = store.Import(dir, false);
+            _ = await store.ImportAsync(dir, false);
         }
 
         List<HistoryRun> runs = store.Runs(50, null, null, null, null, null);
@@ -738,7 +757,7 @@ try
                      statisticalWorkers, statisticalShort, statisticalLarge
                  })
         {
-            _ = store.Import(dir, false);
+            _ = await store.ImportAsync(dir, false);
         }
 
         string IdOf(string dir) => store.Runs(50, null, null, null, null, null)
@@ -840,7 +859,7 @@ try
 
     using (HistoryStore rebuilt = new(Path.Combine(root, "history-rebuilt.sqlite")))
     {
-        _ = rebuilt.Import(resultRoot, true);
+        _ = await rebuilt.ImportAsync(resultRoot, true);
         List<HistoryRun> rebuiltRows = rebuilt.Runs(50, null, null, null, null, null);
         Check(rebuiltRows.Count == 2, "reconstruction count " + rebuiltRows.Count);
     }
@@ -848,7 +867,7 @@ try
     string oldPath = Path.Combine(root, "history-v1.sqlite");
     using (HistoryStore initial = new(oldPath))
     {
-        _ = initial.Import(success, false);
+        _ = await initial.ImportAsync(success, false);
     }
 
     using (SqliteConnection old = new(new SqliteConnectionStringBuilder
@@ -872,8 +891,8 @@ try
 
     using (HistoryStore upgraded = new(oldPath))
     {
-        Check(upgraded.Import(success, false).Contains("Imported 1", StringComparison.Ordinal), "v1 migration");
-        Check(upgraded.Import(success, false).Contains("unchanged 1", StringComparison.Ordinal), "current indexer version");
+        Check((await upgraded.ImportAsync(success, false)).Contains("Imported 1", StringComparison.Ordinal), "v1 migration");
+        Check((await upgraded.ImportAsync(success, false)).Contains("unchanged 1", StringComparison.Ordinal), "current indexer version");
         Check(upgraded.Runs(50, null, null, null, null, null).Count == 1,
             "v1 migration preserved stable run identity");
     }
@@ -881,7 +900,7 @@ try
     string v2Path = Path.Combine(root, "history-v2.sqlite");
     using (HistoryStore initial = new(v2Path))
     {
-        _ = initial.Import(success, false);
+        _ = await initial.ImportAsync(success, false);
     }
 
     using (SqliteConnection old = new(new SqliteConnectionStringBuilder
@@ -903,7 +922,7 @@ try
 
     using (HistoryStore upgraded = new(v2Path))
     {
-        Check(upgraded.Import(success, false).Contains("Imported 1", StringComparison.Ordinal), "v2 migration");
+        Check((await upgraded.ImportAsync(success, false)).Contains("Imported 1", StringComparison.Ordinal), "v2 migration");
         Check(upgraded.Runs(50, null, null, null, null, null).Count == 1,
             "v2 migration preserved run");
     }
@@ -935,7 +954,7 @@ try
                                   """);
     using (HistoryStore store = new(dbPath))
     {
-        Check(store.Import(harnessRun, false).Contains("Imported 1", StringComparison.Ordinal), "harness import");
+        Check((await store.ImportAsync(harnessRun, false)).Contains("Imported 1", StringComparison.Ordinal), "harness import");
         string runId = store.Runs(50, null, null, null, "dagflow", null).Single().Id;
         List<HistoryMeasurement> samples = store.Metrics(runId, "run_p50_us", null, "chain-w2");
         Check(samples.Count == 2 && samples.Select(x => x.Value).SequenceEqual([1, 2])
@@ -943,18 +962,18 @@ try
             "harness samples indexed and attributed");
         Check(store.Show(runId).Artifacts.Count(x => x.Type.StartsWith("dagflow-", StringComparison.CurrentCulture)) == 3,
             "harness snapshot artifacts");
-        Check(store.Import(harnessRun, false).Contains("unchanged 1", StringComparison.Ordinal), "harness idempotence");
+        Check((await store.ImportAsync(harnessRun, false)).Contains("unchanged 1", StringComparison.Ordinal), "harness idempotence");
         // Legacy generic harness summaries omit manifest_sha256 entirely.
         string summaryFile = Path.Combine(harnessArtifacts, "summary.json");
         await File.WriteAllTextAsync(summaryFile, (await File.ReadAllTextAsync(summaryFile, CancellationToken.None)).Replace(
             "\"manifest_sha256\":\"" + harnessHash + "\",", "", StringComparison.Ordinal), CancellationToken.None);
-        Check(store.Import(harnessRun, false).Contains("Imported 1", StringComparison.Ordinal), "legacy harness summary import");
+        Check((await store.ImportAsync(harnessRun, false)).Contains("Imported 1", StringComparison.Ordinal), "legacy harness summary import");
         Check(store.Metrics(runId, "run_p50_us", null, "chain-w2").Count == 2,
             "legacy harness samples survived reindex");
         Write(harnessArtifacts, "runs.jsonl", "{}\n");
         try
         {
-            _ = store.Import(harnessRun, false);
+            _ = await store.ImportAsync(harnessRun, false);
             throw new System.Diagnostics.UnreachableException("corrupt harness accepted");
         }
         catch (InvalidDataException)

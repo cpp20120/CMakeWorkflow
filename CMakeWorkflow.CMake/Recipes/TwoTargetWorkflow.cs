@@ -55,8 +55,8 @@ public static class TwoTargetWorkflow
         BuildTreeOwnership.RejectController(workerDir, controllerBuildDir);
         using BuildTreeOwnership ownership = await BuildTreeOwnership.AcquireAsync([workerDir], ct);
         ExternalCMakeBuildContext builder = new();
-        CMakeTargetRef firstTarget = CMakeConfiguration.Resolve(new CMakeTargetRef(workerDir, first, config));
-        CMakeTargetRef secondTarget = CMakeConfiguration.Resolve(new CMakeTargetRef(workerDir, second, config));
+        CMakeTargetRef firstTarget = await CMakeConfiguration.ResolveAsync(new CMakeTargetRef(workerDir, first, config), ct);
+        CMakeTargetRef secondTarget = await CMakeConfiguration.ResolveAsync(new CMakeTargetRef(workerDir, second, config), ct);
 
         await Console.Error.WriteLineAsync($"[CMakeWorkflow] sequence 1/4: build {firstTarget.Target}");
         BuiltArtifact firstArtifact = await builder.EnsureBuiltAsync(firstTarget, ct);
