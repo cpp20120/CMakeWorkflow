@@ -244,9 +244,14 @@ internal static class BoundaryTests
         JsonArray indexed = JsonNode.Parse(RunCli("history", "runs", "--db", catalog, "--json"))!.AsArray();
         Check(indexed.Count == 1, "Harness history import did not create one workflow run");
         JsonObject detail = J(RunCli("history", "show", S(indexed[0]!["id"]), "--db", catalog, "--json"));
-        Check(detail["measurements"]!.AsArray().Count == 20
-              && detail["artifacts"]!.AsArray().Count(a => S(a?["type"]) == "dagflow-runs") == 2,
-            "Harness samples or snapshot artifacts missing from History");
+        JsonArray measurements = detail["measurements"]!.AsArray();
+        Check(measurements.Count(m => S(m?["source"]) == "dagflow-runs.jsonl") == 20,
+            "Expected 20 harness samples in History");
+        Check(detail["artifacts"]!.AsArray().Count(a => S(a?["type"]) == "dagflow-runs") == 2,
+            "Expected two harness run snapshots in History");
+        JsonNode?[] artifactMeasurements = [.. measurements.Where(m => S(m?["metric"]) == "artifact_result_bytes")];
+        Check(artifactMeasurements.Length == 1 && artifactMeasurements[0]?["value"]?.GetValue<double>() is > 0,
+            "Expected a single positive artifact size measurement in History");
         Pass("automatic multi-harness snapshot and History measurement ingestion");
     }
 }
