@@ -97,7 +97,8 @@ internal static class WorkflowProcessBackendTests
             throw new UnreachableException("Immediate empty child did not complete both redirected pumps cleanly.");
         }
 
-        ProcessStartInfo resourceStart = new(Environment.ProcessPath!)
+        ProcessStartInfo resourceStart = new(Environment.ProcessPath
+            ?? throw new InvalidOperationException("The .NET host path is unavailable."))
         {
             UseShellExecute = false,
             WorkingDirectory = outputDirectory,
