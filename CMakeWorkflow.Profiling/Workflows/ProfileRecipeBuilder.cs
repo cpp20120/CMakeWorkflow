@@ -81,6 +81,6 @@ public static class ProfileRecipeBuilder
         return ProfileWorkflowBuilder.Build(recipe.Variants, recipe.Target,
             recipe.SourceDirectory, recipe.Configuration, recipe.ConfigurePreset,
             recipe.Repeats, recipe.TimeoutSeconds, recipe.Arguments, backend,
-            recipe.Mode, recipe.Platform);
+            recipe.Mode, recipe.Platform, recipe.PmcEvents, recipe.PmcInterval, recipe.MemoryStallEvent);
     }
 }

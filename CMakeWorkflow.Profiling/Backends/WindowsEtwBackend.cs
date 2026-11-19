@@ -6,10 +6,14 @@ namespace CMakeWorkflow.Profiling.Backends;
 public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBackend
 {
     public ProfileCapabilities Capabilities { get; } = new(
-        "etw", ["cpu", "scheduler"], "ETW CPU sampled and context-switch events",
+        "etw", ["cpu", "scheduler", "counters"], "ETW CPU sampled and context-switch events",
         "recorder-starts-before-target", "WPR start completes before target launch",
         "system-wide recording; select target process and its threads during analysis",
         [".etl"]);
+
+    internal ProfileCapabilities ForMode(string mode) => mode == "counters"
+        ? Capabilities with { EventSource = "ETW PMC overflow samples", Attribution = "target PID, thread lifetime and launch time window; direct process only" }
+        : Capabilities;
 
     public async Task<ProfileResult> CaptureAsync(ProfileRequest request, CancellationToken cancellationToken)
     {
@@ -17,6 +21,12 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
         if (!Capabilities.Modes.Contains(request.Mode))
         {
             throw new ArgumentException($"WPR does not support profile mode '{request.Mode}'.");
+        }
+
+        if (request.Mode != "counters" && (request.PmcEvents is not null
+            || request.MemoryStallEvent is not null || request.PmcInterval != 65536))
+        {
+            throw new ArgumentException("PMC options require ETW counters mode.");
         }
 
         string raw = Path.Combine(request.OutputDirectory, "traces", "raw", request.CaptureId);
@@ -54,7 +64,12 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
                 throw new InvalidOperationException($"WPR session name is already active: {session}");
             }
 
+            string? configuration = null;
             string profile = request.Mode == "cpu" ? "CPU.light" : "CPU";
+            if (request.Mode == "counters")
+            {
+                (profile, configuration) = await WindowsPmcConfiguration.PrepareAsync(process, request, raw, cancellationToken);
+            }
             // A canceled start can leave a live WPR session even if the child
             // process has not returned. Cancel only our unique instance.
             started = true;
@@ -76,8 +91,8 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
                 ? throw new IOException("WPR returned success without an ETL artifact.")
                 : new ProfileResult("etw", request.Mode, target.ExitCode, trace,
                 began, DateTimeOffset.UtcNow, target.TimedOut ? "targetTimedOut" : "complete",
-                Capabilities, target.Output + stop.Output,
-                target.ProcessId, targetStartedAt, targetFinishedAt);
+                ForMode(request.Mode), target.Output + stop.Output,
+                target.ProcessId, targetStartedAt, targetFinishedAt, configuration);
         }
         finally
         {

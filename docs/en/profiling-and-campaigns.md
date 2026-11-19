@@ -30,7 +30,7 @@ alternates variants, reducing—but not eliminating—order bias. The special `-
 | OS      | Backend       | Backend-supported capture modes   |
 |---------|---------------|-----------------------------------|
 | Linux   | `perf`        | `cpu`, `scheduler`, `counters`    |
-| Windows | `etw`         | `cpu`, `scheduler`                |
+| Windows | `etw`         | `cpu`, `scheduler`, `counters`    |
 | macOS   | `instruments` | `cpu`, `scheduler`, `allocations` |
 
 `--backend auto` selects a host-specific backend. **High-level `profile run` modes are not identical to backend
@@ -43,6 +43,50 @@ An installed `perf`, WPR or `xctrace` is not proof that the OS grants necessary 
 collected, or that a capture can be analyzed. In particular, successful `perf stat` does not establish working
 `perf record` or scheduler events. A failed capture stays failed even if some partial output could be imported into
 History. Cross-backend measurements must not be treated as equivalent without an explicit comparable method.
+
+## Windows PMC overflow counters
+
+Run from an elevated PowerShell with Windows Performance Toolkit (`wpr`, `tracerpt`) installed:
+
+```powershell
+wpr -pmcsources
+$cli = 'bin/Release/net10.0/CMakeWorkflow.dll'
+dotnet $cli profile run --build-dir out/hello-release --target workflow_demo --config Release `
+  --backend etw --mode counters --repeats 1 --pmc-events TotalCycles,InstructionRetired `
+  --pmc-interval 65536 --results-dir out/etw-pmc --history-db out/etw-pmc.sqlite -- --hold
+```
+
+`--pmc-events` selects 1–4 distinct sources from **this host's** `wpr -pmcsources` output.
+The default is `TotalCycles,InstructionRetired`; `--pmc-interval` defaults to 65536 and must satisfy each source's
+published range. Unsupported sources, intervals and WPR registration failures fail the capture before target launch.
+The backend writes a unique strict WPR `SampledCounters` profile, discovery output and a hashed source/interval
+configuration alongside the ETL. Cleanup cancels only the capture's own WPR instance.
+
+For a published vendor-specific memory-stall source, add `--memory-stall-event SOURCE_NAME` using its exact WPR name.
+This adds that source to the selected counters and marks its role for `history host-summary`. Windows HAL often
+publishes only a subset of CPU events; absence is an unsupported metric. Raw vendor event registration and registry
+changes are not performed. Select the event using the CPU vendor's definition; Linux event aliases are not translated.
+
+The normalized `traces/normalized/CAPTURE.etw-pmc.json` keeps observed sample counts, source IDs and intervals.
+An estimate `samples × interval` is emitted only with observed interval activation and target thread-lifetime/PID/time
+attribution. Missing samples or interval evidence remain unavailable, and interval changes or unordered events suppress
+estimates. Overflow sampling is approximate, affected by sample skid, trace loss and process boundaries; it is not an
+exact count. Child processes are excluded. Estimates use `estimated events`, separately from Linux `perf stat` counts;
+History refuses mixed event/method/interval totals. CPU and scheduler ETW modes keep their existing WPR profiles.
+
+Generate a reviewable Windows recipe on any host with:
+
+```sh
+CMakeWorkflow workflow generate profile --recipe examples/hello/workflows/profile-windows-pmc.recipe.json --output out/windows-pmc.json
+```
+
+The same configuration is available in `profile` node `options` (`pmcEvents`, `pmcInterval`, `memoryStallEvent`),
+`ProfileRecipeV1`, and SDK `PrepareProfileOptions`. Recipe JSON uses an integer `pmcInterval`; node options use strings.
+Reanalysis uses saved ETL/configuration evidence and requires Windows; it does not launch the target again.
+
+The WPR profile follows Microsoft's [PMU recording documentation](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/recording-pmu-events).
+Automated XML fixtures cover decoding and attribution; a successful fixture test does not establish hardware PMC
+availability or real ETL decoding on a given Windows machine.
 
 ## Analyze saved outputs
 

@@ -1033,7 +1033,7 @@ public sealed record ProfilePreparation(int SchemaVersion, string Manifest, stri
 Source: [CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs](../CMakeWorkflow.Host/Profiling/ProfilePrepareRequest.cs#L6)
 
 ```csharp
-public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Host.Profiling.ProfileVariantRequest> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
+public sealed record ProfilePrepareRequest(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Host.Profiling.ProfileVariantRequest> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null, string? PmcEvents = null, int? PmcInterval = null, string? MemoryStallEvent = null);
 ```
 
 #### `ProfileReplayPrepareRequest`
@@ -2122,7 +2122,7 @@ public sealed class ProfileProcess : CMakeWorkflow.Profiling.Capture.IProfilePro
 Source: [CMakeWorkflow.Profiling/Capture/ProfileRequest.cs](../CMakeWorkflow.Profiling/Capture/ProfileRequest.cs#L5)
 
 ```csharp
-public sealed record ProfileRequest(string Executable, System.Collections.Generic.IReadOnlyList<string> Arguments, string WorkingDirectory, System.Collections.Generic.IReadOnlyDictionary<string, string> Environment, string OutputDirectory, string CaptureId, string Mode, System.TimeSpan Timeout, string? CpuSet = null, string? CpuAffinityLauncher = null, string? MemoryStallEvent = null);
+public sealed record ProfileRequest(string Executable, System.Collections.Generic.IReadOnlyList<string> Arguments, string WorkingDirectory, System.Collections.Generic.IReadOnlyDictionary<string, string> Environment, string OutputDirectory, string CaptureId, string Mode, System.TimeSpan Timeout, string? CpuSet = null, string? CpuAffinityLauncher = null, string? MemoryStallEvent = null, string? PmcEvents = null, int PmcInterval = 65536);
 ```
 
 #### `ProfileResult`
@@ -2130,7 +2130,7 @@ public sealed record ProfileRequest(string Executable, System.Collections.Generi
 Source: [CMakeWorkflow.Profiling/Capture/ProfileResult.cs](../CMakeWorkflow.Profiling/Capture/ProfileResult.cs#L5)
 
 ```csharp
-public sealed record ProfileResult(string Backend, string Mode, int ExitCode, string RawTrace, System.DateTimeOffset StartedAt, System.DateTimeOffset FinishedAt, string CaptureStatus, CMakeWorkflow.Profiling.Capture.ProfileCapabilities Capabilities, string Output, int? TargetProcessId = null, System.DateTimeOffset? TargetStartedAt = null, System.DateTimeOffset? TargetFinishedAt = null);
+public sealed record ProfileResult(string Backend, string Mode, int ExitCode, string RawTrace, System.DateTimeOffset StartedAt, System.DateTimeOffset FinishedAt, string CaptureStatus, CMakeWorkflow.Profiling.Capture.ProfileCapabilities Capabilities, string Output, int? TargetProcessId = null, System.DateTimeOffset? TargetStartedAt = null, System.DateTimeOffset? TargetFinishedAt = null, string? CounterConfiguration = null);
 ```
 
 #### `ProfileSession`
@@ -2275,7 +2275,7 @@ Source: [CMakeWorkflow.Profiling/Workflows/ProfileWorkflowBuilder.cs](../CMakeWo
 ```csharp
 public static class ProfileWorkflowBuilder
 {
-    public static CMakeWorkflow.Contracts.Workflows.WorkflowDocument Build(System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Recipes.ProfileVariant> variants, string target, string? sourceDirectory, string? configuration, string? configurePreset, int repeats, double timeoutSeconds, System.Collections.Generic.IReadOnlyList<string> arguments, string backend = "auto", string mode = "cpu", string? capturePlatform = null);
+    public static CMakeWorkflow.Contracts.Workflows.WorkflowDocument Build(System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Recipes.ProfileVariant> variants, string target, string? sourceDirectory, string? configuration, string? configurePreset, int repeats, double timeoutSeconds, System.Collections.Generic.IReadOnlyList<string> arguments, string backend = "auto", string mode = "cpu", string? capturePlatform = null, string? pmcEvents = null, int? pmcInterval = null, string? memoryStallEvent = null);
 }
 ```
 

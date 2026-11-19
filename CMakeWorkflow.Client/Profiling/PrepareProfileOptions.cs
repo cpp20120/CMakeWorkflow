@@ -19,4 +19,7 @@ List<ProfileVariantOptions> Variants,
 #pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
 string[]? Arguments = null
 #pragma warning restore CA1819
-);
+,
+    string? PmcEvents = null,
+    int? PmcInterval = null,
+    string? MemoryStallEvent = null);

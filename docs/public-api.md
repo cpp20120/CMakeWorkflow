@@ -452,7 +452,7 @@ public sealed record AnalyzedProfile(int SchemaVersion, string RunDirectory, str
 Source: [CMakeWorkflow.Client/Profiling/PrepareProfileOptions.cs](../CMakeWorkflow.Client/Profiling/PrepareProfileOptions.cs#L4)
 
 ```csharp
-public sealed record PrepareProfileOptions(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Client.Profiling.ProfileVariantOptions> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null);
+public sealed record PrepareProfileOptions(string RequestId, string ResultsDirectory, string Target, System.Collections.Generic.List<CMakeWorkflow.Client.Profiling.ProfileVariantOptions> Variants, int Repeats = 3, double TimeoutSeconds = 300, string Backend = "auto", string Mode = "cpu", string? Configuration = null, string? SourceDirectory = null, string? ConfigurePreset = null, string[]? Arguments = null, string? PmcEvents = null, int? PmcInterval = null, string? MemoryStallEvent = null);
 ```
 
 #### `PrepareReplayProfileOptions`
@@ -1569,7 +1569,7 @@ The DTO itself performs no I/O or validation; recipe builders enforce these requ
 Source: [CMakeWorkflow.Contracts/Recipes/ProfileRecipeV1.cs](../CMakeWorkflow.Contracts/Recipes/ProfileRecipeV1.cs#L26)
 
 ```csharp
-public sealed record ProfileRecipeV1(string Kind, int SchemaVersion, CMakeWorkflow.Contracts.Recipes.ProfileVariant[] Variants, string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments, string Backend, string Mode, string Platform, string? SourceDirectory = null, string? ConfigurePreset = null);
+public sealed record ProfileRecipeV1(string Kind, int SchemaVersion, CMakeWorkflow.Contracts.Recipes.ProfileVariant[] Variants, string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments, string Backend, string Mode, string Platform, string? SourceDirectory = null, string? ConfigurePreset = null, string? PmcEvents = null, int? PmcInterval = null, string? MemoryStallEvent = null);
 ```
 
 #### `ProfileVariant`

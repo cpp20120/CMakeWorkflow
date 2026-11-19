@@ -89,7 +89,8 @@ internal static class WorkflowRecipeGenerateCommand
                 "profile" =>
                 [
                     "--build-dir", "--variant", "--target", "--config", "--repeats",
-                    "--timeout-seconds", "--backend", "--mode", "--platform", "--source-dir", "--preset", "--output"
+                    "--timeout-seconds", "--backend", "--mode", "--platform", "--source-dir", "--preset", "--output",
+                    "--pmc-events", "--pmc-interval", "--memory-stall-event"
                 ],
                 "test-matrix" =>
                 [
@@ -209,7 +210,9 @@ internal static class WorkflowRecipeGenerateCommand
             required("--target"), single("--config"), Integer(single("--repeats") ?? "3", "--repeats"),
             Number(single("--timeout-seconds") ?? "300", "--timeout-seconds"), arguments,
             single("--backend") ?? "auto", single("--mode") ?? "cpu", required("--platform"),
-            single("--source-dir") is { } source ? Path.GetFullPath(source) : null, single("--preset")));
+            single("--source-dir") is { } source ? Path.GetFullPath(source) : null, single("--preset"),
+            single("--pmc-events"), single("--pmc-interval") is { } interval ? Integer(interval, "--pmc-interval") : null,
+            single("--memory-stall-event")));
     }
 
     private static WorkflowDocument DirectTests(Func<string, string> required,

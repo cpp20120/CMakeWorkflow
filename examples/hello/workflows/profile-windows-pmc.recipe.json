@@ -1,0 +1,15 @@
+{
+  "kind": "profile",
+  "schemaVersion": 1,
+  "variants": [{ "name": "main", "buildDirectory": "../../../out/hello-release" }],
+  "target": "workflow_demo",
+  "configuration": "Release",
+  "repeats": 1,
+  "timeoutSeconds": 30,
+  "arguments": ["--hold"],
+  "backend": "etw",
+  "mode": "counters",
+  "platform": "windows",
+  "pmcEvents": "TotalCycles,InstructionRetired",
+  "pmcInterval": 65536
+}

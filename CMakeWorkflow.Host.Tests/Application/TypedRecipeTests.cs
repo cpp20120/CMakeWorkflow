@@ -66,6 +66,22 @@ internal static class TypedRecipeTests
         Check(remoteGraph.Nodes.Where(n => n.Kind == "profile").All(n =>
                 n.Options["backend"] == (otherPlatform == "linux" ? "perf" : "etw")),
             "Profile auto backend depended on generator host OS");
+        ProfileRecipeV1 pmc = profile with
+        {
+            Platform = "windows",
+            Backend = "etw",
+            Mode = "counters",
+            PmcEvents = "TotalCycles,InstructionRetired",
+            PmcInterval = 65536
+        };
+        RoundTrip(new ProfileRecipePrepareRequest(Guid.NewGuid().ToString("N"), Path.Combine(root, "pmc.json"), pmc),
+            HostJson.Default.ProfileRecipePrepareRequest);
+        Check(ProfileRecipeBuilder.Build(pmc).Nodes.Where(n => n.Kind == "profile")
+            .All(n => n.Options["pmcInterval"] == "65536" && n.Options["pmcEvents"] == pmc.PmcEvents), "PMC recipe option fidelity");
+        Reject(() => ProfileRecipeBuilder.Build(pmc with { Platform = "linux", Backend = "perf" }));
+        Reject(() => ProfileRecipeBuilder.Build(pmc with { PmcInterval = 0 }));
+        Reject(() => ProfileRecipeBuilder.Build(pmc with { PmcEvents = "TotalCycles,TotalCycles" }));
+
         Reject(() => ProfileRecipeBuilder.Build(profile with { Platform = "other" }));
         Reject(() => ProfileRecipeBuilder.Build(profile with { Backend = platform == "linux" ? "etw" : "perf" }));
         Reject(() => ProfileRecipeBuilder.Build(profile with { Variants = [new("a", a), new("a", b)] }));

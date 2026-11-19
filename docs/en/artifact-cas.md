@@ -108,3 +108,6 @@ A Linux profile node can select the AMD event through the existing options objec
 
 Event definitions are documented by [Intel](https://perfmon-events.intel.com/platforms/icelakex/core-events/core/)
 and the [Linux perf AMD Zen 4 event table](https://github.com/torvalds/linux/blob/v6.12/tools/perf/pmu-events/arch/x86/amdzen4/core.json).
+
+Windows ETW also supports explicit PMC overflow capture. See [Windows PMC counters](profiling-and-campaigns.md#windows-pmc-overflow-counters).
+ETW memory-stall summaries carry `estimated events` and their method/interval; they are never pooled with perf cycles.

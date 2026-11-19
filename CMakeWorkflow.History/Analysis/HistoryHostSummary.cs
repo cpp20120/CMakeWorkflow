@@ -4,7 +4,8 @@ namespace CMakeWorkflow.History.Analysis;
 
 internal sealed record HistoryHostRow(string RunId, string? HostId, double? BuildSeconds,
     double? CacheHitRate, string? CacheCounterScope, double? PeakRssBytes, double? CpuSeconds,
-    double? MemoryStalls, double? ArtifactBytes, string? ResourceMethod, string? MemoryStallEvent)
+    double? MemoryStalls, double? ArtifactBytes, string? ResourceMethod, string? MemoryStallEvent,
+    string? MemoryStallUnit, string? MemoryStallMethod)
 {
     internal static HistoryHostRow From(HistoryDetail detail)
     {
@@ -28,11 +29,13 @@ internal sealed record HistoryHostRow(string RunId, string? HostId, double? Buil
         string[] resourceMethods = [.. resources.Select(m => m.Method).Distinct(StringComparer.Ordinal)];
         double[] peaks = [.. resources.Where(m => m.Metric == "peak_rss_bytes").Select(m => m.Value)];
         HistoryMeasurement[] stalls = [.. detail.Measurements.Where(m =>
-            m.Method == "perf stat" && m.Metric is "cycle_activity.stalls_mem_any"
+            (m.Method == "perf stat" && m.Metric is "cycle_activity.stalls_mem_any"
                 or "cycle_activity.stalls_mem_any:u" or "cycle_activity.stalls_mem_any:k"
                 or "ex_no_retire.load_not_complete" or "ex_no_retire.load_not_complete:u"
-                or "ex_no_retire.load_not_complete:k")];
-        bool comparableStalls = stalls.Select(m => (m.Metric, m.Unit, m.Variant, m.Workload, m.Environment))
+                or "ex_no_retire.load_not_complete:k")
+            || (m.Method?.StartsWith("etw-pmc-overflow;", StringComparison.Ordinal) == true
+                && m.Metric.StartsWith("memory_stalls:", StringComparison.Ordinal)))];
+        bool comparableStalls = stalls.Select(m => (m.Metric, m.Unit, m.Method, m.Variant, m.Workload, m.Environment))
             .Distinct().Count() == 1;
         string? resourceMethod = resourceMethods.Length == 1 ? resourceMethods[0]
             : resourceMethods.Length == 0 ? null : "mixed";
@@ -42,6 +45,7 @@ internal sealed record HistoryHostRow(string RunId, string? HostId, double? Buil
             resourceMethods.Length == 1 && peaks.Length > 0 ? peaks.Max() : null,
             resourceMethods.Length == 1 ? Sum("cpu_time") : null,
             comparableStalls ? stalls.Sum(m => m.Value) : null, Sum("artifact_result_bytes"),
-            resourceMethod, stallEvent);
+            resourceMethod, stallEvent, comparableStalls ? stalls[0].Method == "perf stat" ? "cycles" : stalls[0].Unit : null,
+            comparableStalls ? stalls[0].Method : null);
     }
 }

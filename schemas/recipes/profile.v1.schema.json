@@ -108,6 +108,30 @@
         "null"
       ],
       "pattern": "^[A-Za-z0-9_.+\\-]+$"
+    },
+    "pmcEvents": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Comma-separated published WPR source names; ETW counters mode only.",
+      "pattern": "^[A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+){0,3}$"
+    },
+    "pmcInterval": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 4096,
+      "maximum": 2147483647,
+      "description": "ETW overflow interval; default 65536. Also checked against each published source range."
+    },
+    "memoryStallEvent": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Explicit backend-specific memory-stall source; published WPR name for ETW, supported perf alias for Linux."
     }
   },
   "$comment": "Build/source paths are resolved by the CLI or must be absolute in Host requests. Backend/platform compatibility is checked by ProfileRecipeBuilder."

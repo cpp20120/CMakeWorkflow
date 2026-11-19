@@ -12,4 +12,5 @@ public sealed record ProfileResult(
     string Output,
     int? TargetProcessId = null,
     DateTimeOffset? TargetStartedAt = null,
-    DateTimeOffset? TargetFinishedAt = null);
+    DateTimeOffset? TargetFinishedAt = null,
+    string? CounterConfiguration = null);

@@ -529,15 +529,34 @@ public static class WorkflowPlanner
             throw new ArgumentException($"{n.Id}: options are only valid for profile.");
         }
 
+        string profileBackend = n.Options.GetValueOrDefault("backend", "auto");
+        bool etwCounters = profileBackend == "etw" || (profileBackend == "auto" && OperatingSystem.IsWindows());
+        bool counterMode = n.Options.GetValueOrDefault("mode", "cpu") == "counters";
+        static bool PmcName(string name) => name.Length is > 0 and <= 128
+            && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.');
         if (n.Options.TryGetValue("memoryStallEvent", out string? memoryEvent)
-            && (n.Kind is not ("profile" or "profile_snapshot")
-                || n.Options.GetValueOrDefault("mode", "cpu") != "counters"
-                || n.Options.GetValueOrDefault("backend", "auto") is not ("perf" or "auto")
-                || memoryEvent is not ("cycle_activity.stalls_mem_any"
-                    or "cycle_activity.stalls_mem_any:u" or "cycle_activity.stalls_mem_any:k" or "ex_no_retire.load_not_complete"
-                    or "ex_no_retire.load_not_complete:u" or "ex_no_retire.load_not_complete:k")))
+            && (!counterMode || (etwCounters ? !PmcName(memoryEvent)
+                : profileBackend is not ("perf" or "auto") || memoryEvent is not (
+                    "cycle_activity.stalls_mem_any" or "cycle_activity.stalls_mem_any:u"
+                    or "cycle_activity.stalls_mem_any:k" or "ex_no_retire.load_not_complete"
+                    or "ex_no_retire.load_not_complete:u" or "ex_no_retire.load_not_complete:k"))))
         {
-            throw new ArgumentException($"{n.Id}: memoryStallEvent requires perf counters mode and a supported event.");
+            throw new ArgumentException($"{n.Id}: memoryStallEvent requires counters mode and a supported backend event.");
+        }
+        if (n.Options.TryGetValue("pmcEvents", out string? pmcEvents))
+        {
+            string[] pmcNames = pmcEvents.Split(',', StringSplitOptions.TrimEntries);
+            if (!etwCounters || !counterMode || pmcNames.Length is < 1 or > 4 || pmcNames.Any(n => !PmcName(n))
+                || pmcNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != pmcNames.Length)
+            {
+                throw new ArgumentException($"{n.Id}: pmcEvents requires ETW counters mode and 1–4 distinct source names.");
+            }
+        }
+        if (n.Options.TryGetValue("pmcInterval", out string? pmcInterval)
+            && (!etwCounters || !counterMode || !int.TryParse(pmcInterval,
+                System.Globalization.CultureInfo.InvariantCulture, out int parsedInterval) || parsedInterval < 4096))
+        {
+            throw new ArgumentException($"{n.Id}: pmcInterval requires ETW counters mode and an integer >= 4096.");
         }
 
         if (n.Kind == "ctest" && (n.Target is not null || n.From is not null || n.Arguments.Count > 0))

@@ -11,4 +11,6 @@ public sealed record ProfileRequest(
     TimeSpan Timeout,
     string? CpuSet = null,
     string? CpuAffinityLauncher = null,
-    string? MemoryStallEvent = null);
+    string? MemoryStallEvent = null,
+    string? PmcEvents = null,
+    int PmcInterval = 65536);

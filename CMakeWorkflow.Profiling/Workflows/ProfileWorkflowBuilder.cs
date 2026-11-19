@@ -25,7 +25,8 @@ public static class ProfileWorkflowBuilder
     public static WorkflowDocument Build(IReadOnlyList<ProfileVariant> variants, string target,
         string? sourceDirectory, string? configuration, string? configurePreset,
         int repeats, double timeoutSeconds, IReadOnlyList<string> arguments,
-        string backend = "auto", string mode = "cpu", string? capturePlatform = null)
+        string backend = "auto", string mode = "cpu", string? capturePlatform = null,
+        string? pmcEvents = null, int? pmcInterval = null, string? memoryStallEvent = null)
     {
         ArgumentNullException.ThrowIfNull(variants);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -171,6 +172,35 @@ public static class ProfileWorkflowBuilder
                     timeoutSeconds, timeout, backend, "scheduler"));
                 previous = schedulerId;
             }
+        }
+
+        foreach (WorkflowNode node in nodes.Where(n => n.Kind == "profile" && n.Options["mode"] == "counters"))
+        {
+            if (pmcEvents is not null) { node.Options["pmcEvents"] = pmcEvents; }
+            if (pmcInterval is { } interval) { node.Options["pmcInterval"] = interval.ToString(CultureInfo.InvariantCulture); }
+            if (memoryStallEvent is not null) { node.Options["memoryStallEvent"] = memoryStallEvent; }
+        }
+        if (pmcEvents is not null || pmcInterval is not null || memoryStallEvent is not null)
+        {
+            if (!nodes.Any(n => n.Kind == "profile" && n.Options["mode"] == "counters"))
+            {
+                throw new ArgumentException("Counter options require a counters capture.");
+            }
+            if ((pmcEvents is not null || pmcInterval is not null)
+                && (!windows || backend is not ("auto" or "etw")))
+            {
+                throw new ArgumentException("PMC options require ETW counters mode on Windows.");
+            }
+            if (pmcEvents is not null)
+            {
+                string[] names = pmcEvents.Split(',', StringSplitOptions.TrimEntries);
+                if (names.Length is < 1 or > 4 || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length
+                    || names.Any(n => n.Length is < 1 or > 128 || n.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-' or '.'))))
+                {
+                    throw new ArgumentException("PMC events require 1–4 distinct published source names.");
+                }
+            }
+            if (pmcInterval is < 4096) { throw new ArgumentException("PMC interval must be >= 4096."); }
         }
 
         return new WorkflowDocument { SchemaVersion = 2, Contexts = contexts, Nodes = nodes };

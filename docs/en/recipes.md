@@ -229,3 +229,6 @@ namespace change for consumers using the old `CMakeWorkflow.Client.*RecipeV1`
 models: add `using CMakeWorkflow;` and `using CMakeWorkflow.Profiling;`. For selected native toolchains use
 `WorkflowToolchainBinding` instead of
 `PrepareToolchainSelection`. The JSON-RPC method names and JSON fields do not change.
+
+Windows profile recipes may set `pmcEvents`, `pmcInterval` and `memoryStallEvent` for `mode: "counters"`.
+See [PMC capture semantics](profiling-and-campaigns.md#windows-pmc-overflow-counters).

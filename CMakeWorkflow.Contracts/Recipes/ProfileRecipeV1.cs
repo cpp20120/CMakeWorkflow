@@ -21,6 +21,9 @@ namespace CMakeWorkflow.Contracts.Recipes;
 /// <param name="Platform">Capture host platform: linux, windows or macos.</param>
 /// <param name="SourceDirectory">Absolute source-tree path, or null when no explicit source is supplied.</param>
 /// <param name="ConfigurePreset">Configure preset, or null to adopt existing trees.</param>
+/// <param name="PmcEvents">Comma-separated published WPR sources; ETW counters only.</param>
+/// <param name="PmcInterval">Overflow sampling interval; null uses 65536, ETW counters only.</param>
+/// <param name="MemoryStallEvent">Explicit backend-specific memory-stall source; no cross-platform equivalence.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ProfileRecipeV1(
     [property: JsonRequired] string Kind,
@@ -43,4 +46,7 @@ public sealed record ProfileRecipeV1(
     [property: JsonRequired] string Mode,
     [property: JsonRequired] string Platform,
     string? SourceDirectory = null,
-    string? ConfigurePreset = null);
+    string? ConfigurePreset = null,
+    string? PmcEvents = null,
+    int? PmcInterval = null,
+    string? MemoryStallEvent = null);

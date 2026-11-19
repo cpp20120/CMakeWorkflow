@@ -241,6 +241,29 @@ public static class ProfileAnalyzer
                 ProfileEnvironment.RequireSuccess(result, "xctrace export");
                 item["report"] = Path.GetRelativePath(directory, report);
             }
+            else if (backend == "etw" && mode == "counters" && OperatingSystem.IsWindows())
+            {
+                string captureId = item["captureId"]!.GetValue<string>();
+                string configuration = Path.GetFullPath(Path.Combine(directory,
+                    root.GetProperty("counterConfiguration").GetString()!));
+                string prefix = directory + Path.DirectorySeparatorChar;
+                if (!configuration.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || await ProfileArtifactHash.Sha256Async(configuration, ct)
+                        != root.GetProperty("counterConfigurationSha256").GetString())
+                {
+                    throw new InvalidDataException("PMC configuration is outside the capture or its digest changed.");
+                }
+                string report = await EtwPmcAnalyzer.AnalyzeAsync(raw, directory, captureId, configuration,
+                    root.GetProperty("targetProcessId").GetInt32(),
+                    root.GetProperty("targetStartedAt").GetDateTimeOffset(),
+                    root.GetProperty("targetFinishedAt").GetDateTimeOffset(), ct);
+                item["report"] = Path.GetRelativePath(directory, report);
+                using JsonDocument pmc = JsonDocument.Parse(await File.ReadAllTextAsync(report, ct));
+                bool complete = pmc.RootElement.GetProperty("counters").EnumerateArray()
+                    .All(c => c.GetProperty("status").GetString() == "complete");
+                item["analysisStatus"] = complete ? "complete" : "partial";
+                item["method"] = "etw-pmc-overflow";
+            }
             else if (backend == "etw" && OperatingSystem.IsWindows())
             {
                 string captureId = item["captureId"]!.GetValue<string>();

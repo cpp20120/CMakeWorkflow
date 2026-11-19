@@ -24,6 +24,8 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
             ["backend"] = capabilities.Backend,
             ["mode"] = request.Mode,
             ["memoryStallEvent"] = request.MemoryStallEvent,
+            ["pmcEvents"] = request.PmcEvents,
+            ["pmcInterval"] = request.PmcInterval,
             ["eventSource"] = capabilities.EventSource,
             ["launchModel"] = capabilities.LaunchModel,
             ["startGuarantee"] = capabilities.StartGuarantee,
@@ -56,6 +58,10 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
             ["finishedAt"] = result.FinishedAt.ToString("O"),
             ["rawTrace"] = rawRelative,
             ["rawTraceSha256"] = rawHash,
+            ["counterConfiguration"] = result.CounterConfiguration is { } configuration
+                ? Path.GetRelativePath(outputDirectory, configuration) : null,
+            ["counterConfigurationSha256"] = result.CounterConfiguration is { } configurationPath
+                ? await ProfileArtifactHash.Sha256Async(configurationPath, ct) : null,
             ["targetProcessId"] = result.TargetProcessId,
             ["targetStartedAt"] = result.TargetStartedAt?.ToString("O"),
             ["targetFinishedAt"] = result.TargetFinishedAt?.ToString("O"),

@@ -1011,6 +1011,80 @@ internal static class HistoryReports
 
         if (Directory.Exists(normalized))
         {
+            foreach (string path in Directory.GetFiles(normalized, "*.etw-pmc.json").Order(StringComparer.Ordinal))
+            {
+                pathGuard?.Invoke(path);
+                using JsonDocument doc = await ReadAsync(path, ct);
+                JsonElement summary = doc.RootElement;
+                Version(summary, path, 1);
+                if (Str(summary, "backend") != "etw" || Str(summary, "method") != "etw-pmc-overflow")
+                {
+                    throw new InvalidDataException("Invalid ETW PMC summary method.");
+                }
+                string capture = Path.GetFileName(path)[..^".etw-pmc.json".Length];
+                if (failedAnalyses.Contains(capture)) { continue; }
+                string recordPath = Path.Combine(directory, capture + ".results.json");
+                pathGuard?.Invoke(recordPath);
+                using JsonDocument record = await ReadAsync(recordPath, ct);
+                JsonElement captured = record.RootElement;
+                if (Str(captured, "backend") != "etw" || Str(captured, "mode") != "counters"
+                    || Str(captured, "status") != "complete") { continue; }
+                string configuration = Path.GetFullPath(Path.Combine(directory,
+                    Str(captured, "counterConfiguration") ?? throw new InvalidDataException("Missing PMC configuration.")));
+                if (!configuration.StartsWith(Path.GetFullPath(directory) + Path.DirectorySeparatorChar,
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException("PMC configuration is outside its capture directory.");
+                }
+                if (Num(summary, "targetProcessId") != Num(captured, "targetProcessId")
+                    || Time(summary, "targetStartedAt") != Time(captured, "targetStartedAt")
+                    || Time(summary, "targetFinishedAt") != Time(captured, "targetFinishedAt"))
+                {
+                    throw new InvalidDataException("PMC target attribution does not match the capture.");
+                }
+                string hash = await GuardedHashAsync(configuration);
+                if (hash != Str(captured, "counterConfigurationSha256") || hash != Str(summary, "configurationSha256"))
+                {
+                    throw new InvalidDataException("PMC configuration digest mismatch.");
+                }
+                using JsonDocument config = await ReadAsync(configuration, ct);
+                AddArtifact(run, capture, "pmc-configuration", configuration, hash);
+                AddArtifact(run, capture, "etw-pmc-summary", path, await GuardedHashAsync(path));
+                foreach (JsonElement counter in summary.GetProperty("counters").EnumerateArray())
+                {
+                    string name = Str(counter, "name") ?? throw new InvalidDataException("Missing PMC source name.");
+                    JsonElement[] sources = [.. config.RootElement.GetProperty("sources").EnumerateArray().Where(c =>
+                        Str(c, "name") == name && Num(c, "sourceId") == Num(counter, "sourceId")
+                        && Num(c, "interval") == Num(counter, "interval") && Str(c, "role") == Str(counter, "role"))];
+                    if (sources.Length != 1) { throw new InvalidDataException("PMC summary source does not match capture configuration."); }
+                    string method = "etw-pmc-overflow; source=" + Num(counter, "sourceId")
+                        + "; interval=" + Num(counter, "interval");
+                    string? variant = capture.StartsWith("counters_", StringComparison.Ordinal)
+                        ? capture["counters_".Length..] : capture;
+                    void Measurement(string metric, string unit, double value) => run.Measurements.Add(new(
+                        run.Run.Id, capture, metric, unit, value, variant,
+                        run.ProfileInputs.GetValueOrDefault(capture).Scenario,
+                        "traces/normalized/" + Path.GetFileName(path), method, 0,
+                        run.ProfileInputs.GetValueOrDefault(capture).Workload, null));
+                    double samples = Num(counter, "samples") ?? throw new InvalidDataException("Missing PMC sample count.");
+                    double interval = Num(counter, "interval") ?? throw new InvalidDataException("Missing PMC interval.");
+                    if (samples < 0 || samples != Math.Truncate(samples) || interval < 4096)
+                    {
+                        throw new InvalidDataException("Invalid PMC sample count or interval.");
+                    }
+                    Measurement("pmc_samples:" + name, "samples", samples);
+                    if (Num(counter, "estimatedEvents") is { } estimate)
+                    {
+                        if (Str(counter, "status") != "complete" || estimate <= 0 || estimate != samples * interval)
+                        {
+                            throw new InvalidDataException("PMC estimate does not match its samples and interval.");
+                        }
+                        Measurement(Str(counter, "role") == "memory-stalls" ? "memory_stalls:" + name
+                            : "pmc_estimated_events:" + name, "estimated events", estimate);
+                    }
+                }
+            }
+
             foreach (string? path in Directory.GetFiles(normalized, "*.etw.json").Order(StringComparer.Ordinal))
             {
                 pathGuard?.Invoke(path);

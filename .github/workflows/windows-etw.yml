@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - '.github/workflows/windows-etw.yml'
+      - 'CMakeWorkflow.Profiling/**'
+      - 'CMakeWorkflow.Profiling.Tests/**'
+      - 'CMakeWorkflow.History/**'
+      - 'CMakeWorkflow.Contracts/**'
       - 'CMakeWorkflow.Tooling/**'
       - 'CMakeWorkflow.Tooling.Tests/**'
       - 'CMakeWorkflow.Host/**'
@@ -14,6 +18,10 @@ on:
   pull_request:
     paths:
       - '.github/workflows/windows-etw.yml'
+      - 'CMakeWorkflow.Profiling/**'
+      - 'CMakeWorkflow.Profiling.Tests/**'
+      - 'CMakeWorkflow.History/**'
+      - 'CMakeWorkflow.Contracts/**'
       - 'CMakeWorkflow.Tooling/**'
       - 'CMakeWorkflow.Tooling.Tests/**'
       - 'CMakeWorkflow.Host/**'
@@ -47,6 +55,9 @@ jobs:
 
       - name: Host contract and Named Pipe tests
         run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll
+
+      - name: Profiling and PMC attribution fixtures
+        run: dotnet CMakeWorkflow.Profiling.Tests/bin/Release/net10.0/CMakeWorkflow.Profiling.Tests.dll
 
       - name: Native ETW user-mode session (required)
         shell: pwsh

@@ -94,7 +94,7 @@ public static class ProfileCommand
             if (args[i] is not ("--build-dir" or "--target" or "--backend" or "--mode"
                 or "--results-dir" or "--source-dir" or "--preset" or "--config" or "--timeout-seconds"
                 or "--variant" or "--repeats" or "--campaign" or "--o3-build-dir"
-                or "--lto-build-dir" or "--output" or "--memory-stall-event"))
+                or "--lto-build-dir" or "--output" or "--memory-stall-event" or "--pmc-events" or "--pmc-interval"))
             {
                 throw new ArgumentException($"Unknown profile option: {args[i]}");
             }
@@ -192,17 +192,22 @@ public static class ProfileCommand
             target, source, options.GetValueOrDefault("--config"), preset, repeats,
             seconds, targetArgs, options.GetValueOrDefault("--backend", "auto"),
             options.GetValueOrDefault("--mode", "cpu"));
-        if (options.GetValueOrDefault("--memory-stall-event") is { } memoryEvent)
+        foreach ((string flag, string key) in new[] { ("--memory-stall-event", "memoryStallEvent"),
+                     ("--pmc-events", "pmcEvents"), ("--pmc-interval", "pmcInterval") })
         {
+            if (!options.TryGetValue(flag, out string? value))
+            {
+                continue;
+            }
             WorkflowNode[] counterNodes = [.. document.Nodes.Where(n => n.Kind == "profile"
                 && n.Options.GetValueOrDefault("mode") == "counters")];
             if (counterNodes.Length == 0)
             {
-                throw new ArgumentException("--memory-stall-event requires a Linux perf counters capture.");
+                throw new ArgumentException($"{flag} requires a counters capture.");
             }
             foreach (WorkflowNode node in counterNodes)
             {
-                node.Options["memoryStallEvent"] = memoryEvent;
+                node.Options[key] = value;
             }
         }
         string manifest = Path.Combine(output, "profile-workflow-" + Guid.NewGuid().ToString("N") + ".json");

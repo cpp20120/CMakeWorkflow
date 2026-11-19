@@ -10,7 +10,7 @@ namespace CMakeWorkflow.History.Storage;
 
 public sealed class HistoryStore : IDisposable
 {
-    private const int CurrentIndexerVersion = 12;
+    private const int CurrentIndexerVersion = 13;
 
     public static string DefaultDatabasePath =>
         Environment.GetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB") is { Length: > 0 } value

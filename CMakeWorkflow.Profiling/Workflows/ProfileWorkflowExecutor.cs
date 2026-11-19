@@ -32,10 +32,11 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : I
                 $"Backend {backend.Capabilities.Backend} does not support mode {mode}.");
         }
 
+        ProfileCapabilities capabilities = backend is WindowsEtwBackend etw ? etw.ForMode(mode) : backend.Capabilities;
         if (request.RequiredProfiler is { } required
             && (required.Backend != backend.Capabilities.Backend || required.Mode != mode
                                                                  || (required.EventSource is { } eventSource &&
-                                                                 eventSource != backend.Capabilities.EventSource)))
+                                                                 eventSource != capabilities.EventSource)))
         {
             throw new InvalidOperationException("Required profiler capabilities are unavailable on this host.");
         }
@@ -50,13 +51,22 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : I
         ProfileRequest captureRequest = new(request.Executable, request.Arguments,
             request.WorkingDirectory, request.Environment, request.OutputDirectory,
             request.NodeId, mode, timeout, request.CpuSet, request.CpuAffinityLauncher,
-            request.Options.GetValueOrDefault("memoryStallEvent"));
-        if (captureRequest.MemoryStallEvent is not null && (backend.Capabilities.Backend != "perf" || mode != "counters"))
+            request.Options.GetValueOrDefault("memoryStallEvent"),
+            request.Options.GetValueOrDefault("pmcEvents"),
+            request.Options.TryGetValue("pmcInterval", out string? interval)
+                ? int.Parse(interval, System.Globalization.CultureInfo.InvariantCulture) : 65536);
+        if (captureRequest.MemoryStallEvent is not null && (backend.Capabilities.Backend is not ("perf" or "etw") || mode != "counters"))
         {
-            throw new ArgumentException("memoryStallEvent requires perf counters mode.");
+            throw new ArgumentException("memoryStallEvent requires perf or ETW counters mode.");
         }
+        if ((captureRequest.PmcEvents is not null || request.Options.ContainsKey("pmcInterval"))
+            && (backend.Capabilities.Backend != "etw" || mode != "counters"))
+        {
+            throw new ArgumentException("PMC options require ETW counters mode.");
+        }
+
         ProfileSession session = new(request.OutputDirectory, request.NodeId);
-        await session.StartAsync(backend.Capabilities, captureRequest, cancellationToken);
+        await session.StartAsync(capabilities, captureRequest, cancellationToken);
         try
         {
             ProfileResult result = await backend.CaptureAsync(captureRequest, cancellationToken);
