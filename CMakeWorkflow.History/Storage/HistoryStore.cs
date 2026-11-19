@@ -11,6 +11,7 @@ namespace CMakeWorkflow.History.Storage;
 public sealed class HistoryStore : IDisposable
 {
     private const int CurrentIndexerVersion = 13;
+    private const int CurrentSchemaVersion = 6;
 
     public static string DefaultDatabasePath =>
         Environment.GetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB") is { Length: > 0 } value
@@ -51,18 +52,18 @@ public sealed class HistoryStore : IDisposable
             int current = Convert.ToInt32(version.ExecuteScalar(), CultureInfo.CurrentCulture);
             if (readOnly)
             {
-                if (current != 5)
+                if (current != CurrentSchemaVersion)
                 {
                     throw new InvalidDataException(
-                        $"History schema {current} requires an explicit CLI migration; read-only API supports schema 5.");
+                        $"History schema {current} requires an explicit CLI migration; read-only API supports schema {CurrentSchemaVersion}.");
                 }
 
                 return;
             }
 
-            if (current > 5)
+            if (current > CurrentSchemaVersion)
             {
-                throw new InvalidDataException($"History database schema {current} is newer than supported version 5.");
+                throw new InvalidDataException($"History database schema {current} is newer than supported version {CurrentSchemaVersion}.");
             }
 
             if (current == 0)
@@ -92,6 +93,13 @@ public sealed class HistoryStore : IDisposable
             if (current == 4)
             {
                 Migrate4To5(migration!);
+                current = 5;
+            }
+
+            if (current == 5)
+            {
+                Execute(static command => command.CommandText =
+                    "ALTER TABLE measurements ADD COLUMN direction TEXT; PRAGMA user_version=6;", migration);
             }
 
             migration!.Commit();
@@ -284,9 +292,9 @@ public sealed class HistoryStore : IDisposable
 
             foreach (HistoryMeasurement m in parsed.Measurements)
             {
-                Execute(static command => command.CommandText = "INSERT INTO measurements VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11)", tx,
+                Execute(static command => command.CommandText = "INSERT INTO measurements VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8,$p9,$p10,$p11,$p12)", tx,
                     m.RunId, m.NodeId, m.Metric, m.Unit, m.Value, m.Variant, m.Scenario,
-                    m.Source, m.Method, m.SampleIndex, m.Workload, m.Environment);
+                    m.Source, m.Method, m.SampleIndex, m.Workload, m.Environment, m.Direction);
             }
 
             foreach (HistoryArtifact? a in parsed.Artifacts.Distinct())
@@ -573,7 +581,7 @@ public sealed class HistoryStore : IDisposable
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
-                          SELECT run_id,node_id,metric,unit,value,variant,scenario,source,method,sample_index,workload,environment,
+                          SELECT run_id,node_id,metric,unit,value,variant,scenario,source,method,sample_index,workload,environment,direction,
                             (SELECT directory FROM runs WHERE id=measurements.run_id)
                           FROM measurements WHERE ($p0 IS NULL OR run_id=$p0) AND ($p1 IS NULL OR metric=$p1)
                             AND ($p2 IS NULL OR variant=$p2) AND ($p3 IS NULL OR scenario=$p3)
@@ -590,7 +598,7 @@ public sealed class HistoryStore : IDisposable
         while (r.Read())
         {
             ct.ThrowIfCancellationRequested();
-            if (includeDirectory is not null && !includeDirectory(r.GetString(12)))
+            if (includeDirectory is not null && !includeDirectory(r.GetString(13)))
             {
                 continue;
             }
@@ -602,7 +610,10 @@ public sealed class HistoryStore : IDisposable
 
             list.Add(new(r.GetString(0), S(r, 1), r.GetString(2), r.GetString(3),
                 r.GetDouble(4), S(r, 5), S(r, 6), r.GetString(7), r.GetString(8), r.GetInt32(9),
-                S(r, 10), S(r, 11)));
+                S(r, 10), S(r, 11))
+            {
+                Direction = S(r, 12)
+            });
         }
 
         return list;

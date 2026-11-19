@@ -269,6 +269,7 @@ internal static class HistoryReports
             }
 
             ImportProcessResources(run, node, id);
+            ImportBenchmarkMeasurements(run, node, id);
             ImportBuildMeasurements(run, node, id);
             await ImportDagFlowHarnessAsync(directory, run, node, id, pathGuard, ct);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
@@ -350,6 +351,62 @@ internal static class HistoryReports
             };
         }
         return run;
+    }
+
+    private static void ImportBenchmarkMeasurements(ParsedRun run, JsonElement node, string id)
+    {
+        if (Str(node, "kind") != "run" || Str(node, "status") != "succeeded"
+            || !node.TryGetProperty("metrics", out JsonElement metrics) || metrics.ValueKind == JsonValueKind.Null)
+        {
+            return;
+        }
+
+        if (metrics.ValueKind != JsonValueKind.Array || metrics.GetArrayLength() is < 1 or > 32)
+        {
+            throw new InvalidDataException($"run.json: {id} has an invalid benchmark metrics array.");
+        }
+
+        string? variant = TimingVariant(id);
+        string? scenario = Scenario(node);
+        if (variant is not null)
+        {
+            // Matrix IDs append the Cartesian combination to the variant before
+            // the repetition. Keep distinct workloads in separate History series.
+            int separator = variant.LastIndexOf('_');
+            if (separator > 0 && variant.Length - separator == 5
+                && int.TryParse(variant.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out _))
+            {
+                string combination = variant[(separator + 1)..];
+                scenario = scenario is null ? "case_" + combination : $"{scenario} [{combination}]";
+                variant = variant[..separator];
+            }
+        }
+
+        int sampleIndex = id.StartsWith("timing_", StringComparison.Ordinal)
+                          && int.TryParse(id.AsSpan(id.LastIndexOf('_') + 1), NumberStyles.None,
+                              CultureInfo.InvariantCulture, out int repeat) && repeat > 0
+            ? repeat - 1
+            : 0;
+        string? workload = Json(node, "arguments");
+        HashSet<string> names = new(StringComparer.Ordinal);
+        foreach (JsonElement sample in metrics.EnumerateArray())
+        {
+            if (sample.ValueKind != JsonValueKind.Object
+                || Str(sample, "name") is not { Length: > 0 } name || !names.Add(name)
+                || Str(sample, "unit") is not { Length: > 0 } unit
+                || Str(sample, "path") is not { Length: > 0 } field
+                || Str(sample, "direction") is not ("lower-is-better" or "higher-is-better")
+                || Num(sample, "value") is not { } value)
+            {
+                throw new InvalidDataException($"run.json: {id} has an invalid benchmark metric sample.");
+            }
+
+            run.Measurements.Add(new(run.Run.Id, id, name, unit, value, variant, scenario,
+                "run.json", "benchmark stdout JSON: " + field, sampleIndex, workload, null)
+            {
+                Direction = Str(sample, "direction")
+            });
+        }
     }
 
     private static void ImportProcessResources(ParsedRun run, JsonElement node, string id, string source = "run.json")

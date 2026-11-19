@@ -19,6 +19,8 @@ public sealed class NodeResult
     public double? DurationSeconds { get; set; }
     public double? ProcessDurationSeconds { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<BenchmarkMetricSample>? Metrics { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProcessResourceUsage? ProcessResources { get; set; }
     public int? ExitCode { get; set; }
     public string? Executable { get; set; }

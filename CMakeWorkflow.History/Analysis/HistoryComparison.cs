@@ -51,12 +51,13 @@ public static class HistoryComparison
                 status = "missing";
                 reason = left is null ? "Baseline has no measurements." : "Candidate has no measurements.";
             }
-            else if (left.Select(x => (x.Unit, x.Method, x.Workload, x.Environment)).Distinct().Count() != 1
-                     || right.Select(x => (x.Unit, x.Method, x.Workload, x.Environment)).Distinct().Count() != 1
-                     || left[0].Unit != right[0].Unit || left[0].Method != right[0].Method)
+            else if (left.Select(x => (x.Unit, x.Method, x.Workload, x.Environment, x.Direction)).Distinct().Count() != 1
+                     || right.Select(x => (x.Unit, x.Method, x.Workload, x.Environment, x.Direction)).Distinct().Count() != 1
+                     || left[0].Unit != right[0].Unit || left[0].Method != right[0].Method
+                     || left[0].Direction != right[0].Direction)
             {
                 status = "incompatible";
-                reason = "Units or measurement methods differ.";
+                reason = "Units, measurement methods or declared directions differ.";
             }
             else if (left[0].Workload != right[0].Workload)
             {

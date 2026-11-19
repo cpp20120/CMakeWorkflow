@@ -603,6 +603,14 @@ public sealed record WorkflowReconciliation(string Id, System.DateTimeOffset Tim
 
 ### Namespace `CMakeWorkflow.CMake.Reporting`
 
+#### `BenchmarkMetricSample`
+
+Source: [CMakeWorkflow.CMake/Reporting/BenchmarkMetricSample.cs](../CMakeWorkflow.CMake/Reporting/BenchmarkMetricSample.cs)
+
+```csharp
+public sealed record BenchmarkMetricSample(string Name, string Unit, string Direction, string Path, double Value);
+```
+
 #### `CompilerCacheStatistics`
 
 Source: [CMakeWorkflow.CMake/Reporting/CompilerCacheStatistics.cs](../CMakeWorkflow.CMake/Reporting/CompilerCacheStatistics.cs#L5)
@@ -632,6 +640,7 @@ public sealed class NodeResult
     public System.DateTimeOffset? FinishedAt { get; set; }
     public double? DurationSeconds { get; set; }
     public double? ProcessDurationSeconds { get; set; }
+    public System.Collections.Generic.IReadOnlyList<CMakeWorkflow.CMake.Reporting.BenchmarkMetricSample>? Metrics { get; set; }
     public CMakeWorkflow.Contracts.Workflows.ProcessResourceUsage? ProcessResources { get; set; }
     public int? ExitCode { get; set; }
     public string? Executable { get; set; }
@@ -2419,7 +2428,10 @@ public sealed record HistoryImportResult(int SchemaVersion, int Imported, int Un
 Source: [CMakeWorkflow.History/Models/HistoryMeasurement.cs](../CMakeWorkflow.History/Models/HistoryMeasurement.cs#L5)
 
 ```csharp
-public sealed record HistoryMeasurement(string RunId, string? NodeId, string Metric, string Unit, double Value, string? Variant, string? Scenario, string Source, string Method, int SampleIndex, string? Workload, string? Environment);
+public sealed record HistoryMeasurement(string RunId, string? NodeId, string Metric, string Unit, double Value, string? Variant, string? Scenario, string Source, string Method, int SampleIndex, string? Workload, string? Environment)
+{
+    public string? Direction { get; init; }
+}
 ```
 
 #### `HistoryNode`

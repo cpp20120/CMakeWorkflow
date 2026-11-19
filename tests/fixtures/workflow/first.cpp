@@ -14,6 +14,12 @@
 int main(int argc, char** argv)
 {
     std::string mode = argc > 1 ? argv[1] : "args";
+    if (mode == "metrics")
+    {
+        std::cerr << "benchmark diagnostic\n";
+        std::cout << R"({"run_p50_us":12.5,"stats":{"rate":800}})" << '\n';
+        return 0;
+    }
     if (mode == "fail")
     {
         std::cerr << "EXPECTED_FAILURE\n";
@@ -46,6 +52,11 @@ int main(int argc, char** argv)
             std::ofstream("ready.pid") << getpid();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(std::stoi(argv[2])));
+        if (argc > 3 && std::string(argv[3]) == "--json")
+        {
+            std::cout << R"({"run_p50_us":12.5})" << '\n';
+            return 0;
+        }
     }
     if (mode == "effect")
     {

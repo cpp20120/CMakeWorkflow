@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.CMake.Toolchains;
 using CMakeWorkflow.Contracts.Workflows;
@@ -427,6 +428,12 @@ internal static class CMakeWorkflowNodeExecutor
                     {
                         await actionCache.PublishAsync(sha, deadline.Token);
                     }
+                }
+
+                if (definition.Metrics is { } metrics)
+                {
+                    result.Metrics = await BenchmarkMetricExtractor.ReadAsync(
+                        metrics, Path.Combine(output, result.Stdout!), deadline.Token);
                 }
             }
         }

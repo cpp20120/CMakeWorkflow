@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.Contracts.Recipes;
 
@@ -32,6 +33,10 @@ public sealed record BenchmarkRecipeV1(
 #pragma warning restore CA1819
 )
 {
+    /// <summary>Optional numeric metrics from each timing run's JSON standard output.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BenchmarkMetrics? Metrics { get; init; }
+
     /// <summary>Optional compiler cache profile resolved on the execution host.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CompilerCacheProfile { get; init; }

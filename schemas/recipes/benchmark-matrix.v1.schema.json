@@ -57,6 +57,7 @@
         "$ref": "#/$defs/axis"
       }
     },
+    "metrics": { "anyOf": [{ "$ref": "benchmark-metrics.schema.json" }, { "type": "null" }] },
     "executionOrder": {
       "enum": [
         "sequential",

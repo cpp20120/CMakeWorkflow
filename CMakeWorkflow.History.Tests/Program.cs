@@ -963,6 +963,7 @@ try
                               ALTER TABLE runs DROP COLUMN environment_json;
                               ALTER TABLE runs DROP COLUMN source_snapshot_id;
                               ALTER TABLE runs DROP COLUMN indexer_version;
+                              ALTER TABLE measurements DROP COLUMN direction;
                               PRAGMA user_version=1;
                               """;
         _ = await command.ExecuteNonQueryAsync();
@@ -996,6 +997,7 @@ try
                               ALTER TABLE runs DROP COLUMN environment_json;
                               ALTER TABLE runs DROP COLUMN source_snapshot_id;
                               UPDATE runs SET indexer_version=2;
+                              ALTER TABLE measurements DROP COLUMN direction;
                               PRAGMA user_version=2;
                               """;
         _ = await command.ExecuteNonQueryAsync();

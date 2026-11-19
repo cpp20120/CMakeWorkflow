@@ -2,6 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
+using CMakeWorkflow.CMake.Recipes;
 using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Planning;
@@ -63,6 +64,15 @@ public static class WorkflowPlanner
             if (node.ActionCache && document.SchemaVersion != 2)
             {
                 throw new ArgumentException($"{node.Id}: actionCache requires schemaVersion 2.");
+            }
+            if (node.Metrics is not null)
+            {
+                if (document.SchemaVersion != 2 || node.Kind != "run" || node.ActionCache)
+                {
+                    throw new ArgumentException($"{node.Id}: metrics requires an uncached schema-v2 run.");
+                }
+
+                BenchmarkMetricExtractor.Validate(node.Metrics);
             }
         }
 

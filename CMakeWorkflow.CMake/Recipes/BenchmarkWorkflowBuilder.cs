@@ -61,6 +61,7 @@ public static class BenchmarkWorkflowBuilder
         }
 
         RecipeRules.ValidateCompilerCacheProfile(recipe.CompilerCacheProfile);
+        BenchmarkMetricExtractor.Validate(recipe.Metrics);
         bool managed = recipe.SourceDirectory is not null || recipe.ConfigurePreset is not null;
         if (managed && (string.IsNullOrWhiteSpace(recipe.SourceDirectory)
                         || !Path.IsPathFullyQualified(recipe.SourceDirectory)
@@ -95,6 +96,7 @@ public static class BenchmarkWorkflowBuilder
                 From = "build",
                 DependsOn = [repeat == 1 ? "build" : $"timing_{repeat - 1:D3}"],
                 Arguments = [.. recipe.Arguments],
+                Metrics = recipe.Metrics,
                 TimeoutSeconds = recipe.TimeoutSeconds,
                 Resources = ["measurement-host"]
             });

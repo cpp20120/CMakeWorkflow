@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.Contracts.Recipes;
 
@@ -39,4 +40,9 @@ public sealed record BenchmarkMatrixRecipeV1(
 [property: JsonRequired] BenchmarkAxisV1[] Axes
 #pragma warning restore CA1819
 ,
-    [property: JsonRequired] string ExecutionOrder);
+    [property: JsonRequired] string ExecutionOrder)
+{
+    /// <summary>Optional numeric metrics from each timing run's JSON standard output.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BenchmarkMetrics? Metrics { get; init; }
+}

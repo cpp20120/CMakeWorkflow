@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CMakeWorkflow.History.Models;
 
 public sealed record HistoryMeasurement(
@@ -12,4 +14,8 @@ public sealed record HistoryMeasurement(
     string Method,
     int SampleIndex,
     string? Workload,
-    string? Environment);
+    string? Environment)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Direction { get; init; }
+}

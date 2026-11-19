@@ -37,6 +37,9 @@ public sealed class WorkflowNode
     [SuppressMessage("Design", "CA1002", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Arguments exposes List<string>; retain its concrete CLR property type for workflow builders and direct DTO construction.")]
     [SuppressMessage("Usage", "CA2227", Justification = "Contracts SDK authoring member CMakeWorkflow.Contracts.Workflows.WorkflowNode.Arguments supports whole-collection assignment in WorkflowDocument/WorkflowNode object initializers; retain its public setter.")]
     public List<string> Arguments { get; set; } = [];
+    /// <summary>Optional JSON stdout metric extraction for an uncached schema-v2 run node.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BenchmarkMetrics? Metrics { get; init; }
     /// <summary>Optional execution directory; null uses the executor default. Relative paths use the manifest base.</summary>
     public string? WorkingDirectory { get; set; }
     /// <summary>Environment overrides for execution; keys cannot contain equals or NUL, and values cannot contain NUL.</summary>

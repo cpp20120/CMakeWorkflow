@@ -14,7 +14,8 @@ internal static class TypedRecipeIntegrationTests
     private static readonly string[] MatrixArguments =
     [
     "sleep",
-    "40"
+    "40",
+    "--json"
 ];
     private static readonly string[] MatrixCaseValues =
     [
@@ -155,6 +156,10 @@ internal static class TypedRecipeIntegrationTests
             timeoutSeconds = 30,
             fixedArguments = MatrixArguments,
             axes = new[] { new { name = "case", flag = "--case", values = MatrixCaseValues } },
+            metrics = J("""
+                {"source":"stdout","format":"json","fields":[
+                  {"path":"run_p50_us","name":"runtime_p50","unit":"us","direction":"lower-is-better"}]}
+                """),
             executionOrder = "round-robin"
         }));
         string matrixManifest = Path.Combine(temp.Path, "benchmark-matrix.json");
@@ -166,8 +171,9 @@ internal static class TypedRecipeIntegrationTests
             "Benchmark Matrix recipe-relative paths or expansion changed");
         Check(RunCli("workflow", "plan", matrixManifest, "--json").Contains("timing_two_0002_002",
             StringComparison.Ordinal), "Benchmark Matrix manifest rejected by planner");
+        string matrixDatabase = Path.Combine(temp.Path, "matrix-history.sqlite");
         (JsonObject? matrix, string _) = Workflow(temp.Path, matrixDocument, name: "benchmark-matrix",
-            options: ["--jobs", "8"]);
+            options: ["--jobs", "8", "--history-db", matrixDatabase]);
         AllSucceeded(matrix);
         JsonNode?[] timings = [.. matrix["nodes"]!.AsArray().Where(n => S(n?["kind"]) == "run")];
         Check(timings.Length == 8 && File.ReadAllLines(Path.Combine(firstBuild, "sleep-invocations.txt")).Length == 4
@@ -179,6 +185,14 @@ internal static class TypedRecipeIntegrationTests
                   <= DateTimeOffset.Parse(S(timings[i]?["startedAt"]), System.Globalization.CultureInfo.CurrentCulture),
                 "Benchmark Matrix timing executions overlapped with --jobs 8");
         }
+
+        JsonArray series = JsonNode.Parse(RunCli("history", "query", "--metric", "runtime_p50",
+            "--db", matrixDatabase, "--json"))!.AsArray();
+        Check(series.Count == 8 && series.Select(row => S(row?["variant"])).Distinct().Count() == 2
+              && series.Select(row => S(row?["scenario"])).Distinct().Count() == 2
+              && series.GroupBy(row => (S(row?["variant"]), S(row?["scenario"]))).All(group =>
+                  group.Select(row => row?["sampleIndex"]?.GetValue<int>()).SequenceEqual([0, 1])),
+            "Benchmark Matrix History combined separate variants, cases or repetitions");
 
         string invalid = Path.Combine(temp.Path, "oversized.json");
         File.WriteAllText(invalid, JsonSerializer.Serialize(new

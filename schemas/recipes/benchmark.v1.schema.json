@@ -62,7 +62,8 @@
       "items": {
         "type": "string"
       }
-    }
+    },
+    "metrics": { "anyOf": [{ "$ref": "benchmark-metrics.schema.json" }, { "type": "null" }] }
   },
   "$comment": "Absolute buildDirectory and configuration semantics are checked by BenchmarkWorkflowBuilder on the execution host."
 }

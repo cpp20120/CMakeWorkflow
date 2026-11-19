@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 // SDK wire projections of CMakeWorkflow.History records. Keep properties/constructors in sync with Host DTOs.
 // Do NOT reference CMakeWorkflow.History from the SDK: that assembly also contains SQLite storage.
 namespace CMakeWorkflow.Client.History;
@@ -58,7 +59,12 @@ public sealed record HistoryMeasurement(
     string Method,
     int SampleIndex,
     string? Workload,
-    string? Environment);
+    string? Environment)
+{
+    /// <summary>Declared improvement direction for a benchmark metric, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Direction { get; init; }
+}
 
 public sealed record HistoryNode(
     string RunId,

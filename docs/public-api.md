@@ -314,7 +314,10 @@ public sealed record HistoryHostEnvironment(string? HostId, string? CpuModel, st
 Source: [CMakeWorkflow.Client/History/HistoryReadModels.cs](../CMakeWorkflow.Client/History/HistoryReadModels.cs#L49)
 
 ```csharp
-public sealed record HistoryMeasurement(string RunId, string? NodeId, string Metric, string Unit, double Value, string? Variant, string? Scenario, string Source, string Method, int SampleIndex, string? Workload, string? Environment);
+public sealed record HistoryMeasurement(string RunId, string? NodeId, string Metric, string Unit, double Value, string? Variant, string? Scenario, string Source, string Method, int SampleIndex, string? Workload, string? Environment)
+{
+    public string? Direction { get; init; }
+}
 ```
 
 #### `HistoryMetricsQuery`
@@ -1508,7 +1511,10 @@ itself performs no I/O or validation; recipe builders enforce these requirements
 Source: [CMakeWorkflow.Contracts/Recipes/BenchmarkMatrixRecipeV1.cs](../CMakeWorkflow.Contracts/Recipes/BenchmarkMatrixRecipeV1.cs#L22)
 
 ```csharp
-public sealed record BenchmarkMatrixRecipeV1(string Kind, int SchemaVersion, CMakeWorkflow.Contracts.Recipes.BuildVariantV1[] Variants, string Target, int Repeats, double TimeoutSeconds, string[] FixedArguments, CMakeWorkflow.Contracts.Recipes.BenchmarkAxisV1[] Axes, string ExecutionOrder);
+public sealed record BenchmarkMatrixRecipeV1(string Kind, int SchemaVersion, CMakeWorkflow.Contracts.Recipes.BuildVariantV1[] Variants, string Target, int Repeats, double TimeoutSeconds, string[] FixedArguments, CMakeWorkflow.Contracts.Recipes.BenchmarkAxisV1[] Axes, string ExecutionOrder)
+{
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkMetrics? Metrics { get; init; }
+}
 ```
 
 #### `BenchmarkRecipeV1`
@@ -1523,6 +1529,7 @@ Source: [CMakeWorkflow.Contracts/Recipes/BenchmarkRecipeV1.cs](../CMakeWorkflow.
 ```csharp
 public sealed record BenchmarkRecipeV1(string Kind, int SchemaVersion, string BuildDirectory, string Target, string? Configuration, int Repeats, double TimeoutSeconds, string[] Arguments)
 {
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkMetrics? Metrics { get; init; }
     public string? CompilerCacheProfile { get; init; }
     public string? SourceDirectory { get; init; }
     public string? ConfigurePreset { get; init; }
@@ -1612,6 +1619,17 @@ public sealed record TestMatrixRecipeV1(string Kind, int SchemaVersion, string B
 ```
 
 ### Namespace `CMakeWorkflow.Contracts.Workflows`
+
+#### `BenchmarkMetricField` and `BenchmarkMetrics`
+
+Optional declarations for extracting numeric fields from a benchmark run's JSON stdout.
+
+Source: [CMakeWorkflow.Contracts/Workflows/BenchmarkMetrics.cs](../CMakeWorkflow.Contracts/Workflows/BenchmarkMetrics.cs)
+
+```csharp
+public sealed record BenchmarkMetricField(string Path, string Name, string Unit, string Direction);
+public sealed record BenchmarkMetrics(string Source, string Format, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Workflows.BenchmarkMetricField> Fields);
+```
 
 #### `ProcessResourceUsage`
 
@@ -1746,6 +1764,7 @@ public sealed class WorkflowNode
     public string? SnapshotSha256 { get; set; }
     public System.Collections.Generic.List<string> DependsOn { get; set; }
     public System.Collections.Generic.List<string> Arguments { get; set; }
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkMetrics? Metrics { get; init; }
     public string? WorkingDirectory { get; set; }
     public System.Collections.Generic.Dictionary<string, string> Environment { get; set; }
     public System.Collections.Generic.Dictionary<string, string> Options { get; set; }

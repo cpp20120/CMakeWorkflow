@@ -36,9 +36,9 @@ The builder emits one adopted context (`allowUnverified`), one build node and
 `timing_001` through `timing_N`. Each timing node depends on its predecessor and has the `measurement-host` resource, so
 `--jobs 8` does not overlap them. All timing nodes use `from: "build"`; the existing runner still asks CMake to
 verify/build the target and checks its executable identity. The adopted tree must already be configured; known
-provenance conflicts still fail in the planner. The run journal records **uninstrumented process wall time**, not the
-benchmark's internal metrics or a profiler trace. Ten repeats alone do not establish statistical significance; History
-compare and detect are separate operations with their own compatibility checks.
+provenance conflicts still fail in the planner. The run journal records uninstrumented process wall time.
+A JSON recipe can also collect [metrics from stdout](#metrics-from-stdout). History compare and detect
+apply their own compatibility checks.
 
 Set `sourceDirectory` and `configurePreset` (or `--source-dir` and `--preset`) to add an explicit configure node
 before the benchmark build. The optional `compilerCacheProfile` (`--compiler-cache-profile`) selects a profile on
@@ -155,8 +155,41 @@ from it.
 visits repetition → combination → variant, reversing variant order on even repetitions. All timing nodes form one
 dependency chain and hold
 `measurement-host`, so even `--jobs 8` cannot overlap measurements. The builder validates the Cartesian product before
-allocation and rejects more than 4096 total nodes. Timing nodes record process duration, not internal benchmark metrics
-or statistical confidence. CMake owns all native builds.
+allocation and rejects more than 4096 total nodes. Timing nodes record process duration by default. CMake owns all
+native builds.
+
+### Metrics from stdout
+
+JSON recipes for `benchmark` and `benchmark-matrix` accept an optional
+[`metrics`](../../schemas/recipes/benchmark-metrics.schema.json) declaration:
+
+```json
+{
+  "metrics": {
+    "source": "stdout",
+    "format": "json",
+    "fields": [
+      {"path": "run_p50_us", "name": "runtime_p50", "unit": "us", "direction": "lower-is-better"}
+    ]
+  }
+}
+```
+
+Each successful process must emit one JSON object of at most 4 MiB on stdout. Send diagnostics to stderr.
+A dotted path such as `stats.rate` selects a nested property. Each declared property must contain a finite number.
+Invalid JSON or a missing or invalid value fails the timing node and discards its samples.
+Accepted directions are `lower-is-better` and `higher-is-better`.
+
+The runner checkpoints the samples in `run.json`. History imports them automatically when enabled, and
+`history import` can rebuild them from that report. For matrices, History uses the variant name and a combination
+identifier such as `case_0001` or `deep_dag [0001]` when the arguments include `--scenario deep_dag`.
+History also retains the exact arguments for comparison.
+
+```sh
+CMakeWorkflow workflow generate benchmark-matrix --recipe recipes/benchmark-matrix.json --output workflows/matrix.json
+CMakeWorkflow workflow run workflows/matrix.json --history-db out/history.sqlite
+CMakeWorkflow history query --db out/history.sqlite --metric runtime_p50 --json
+```
 
 ## Host preparation for new recipes
 

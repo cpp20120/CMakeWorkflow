@@ -26,6 +26,7 @@ public static class BenchmarkMatrixWorkflowBuilder
         RecipeRules.Name(recipe.Target, "target");
         RecipeRules.Timeout(recipe.TimeoutSeconds);
         RecipeRules.Arguments(recipe.FixedArguments, "fixedArguments");
+        BenchmarkMetricExtractor.Validate(recipe.Metrics);
         if (recipe.Repeats is < 1 or > 1000)
         {
             throw new ArgumentException("Benchmark matrix repeats must be between 1 and 1000.");
@@ -151,6 +152,7 @@ public static class BenchmarkMatrixWorkflowBuilder
                 From = "build_" + variant.Name,
                 DependsOn = previous is null ? [.. builds] : [previous],
                 Arguments = [.. recipe.FixedArguments, .. argumentSets[combo]],
+                Metrics = recipe.Metrics,
                 TimeoutSeconds = recipe.TimeoutSeconds,
                 Resources = ["measurement-host"]
             });
