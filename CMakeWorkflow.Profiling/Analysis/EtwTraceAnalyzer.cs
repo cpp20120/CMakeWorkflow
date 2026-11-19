@@ -132,6 +132,12 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 string opcode = Child(rendering, "Opcode")?.Value.Trim()
                              ?? Child(system, "Opcode")?.Value.Trim() ?? "";
                 string normalizedName = new([.. eventName.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant)]);
+                string? systemOpcode = Child(system, "Opcode")?.Value.Trim();
+
+                bool isCpuSample = normalizedName is "sampledprofile" or "sampleprofile" || (normalizedName == "perfinfo" && (systemOpcode == "46" || opcode.Equals("SampleProf", StringComparison.OrdinalIgnoreCase)));
+                bool isReadyThread = normalizedName is "readythread" or "threadready" || (normalizedName == "thread" && (systemOpcode == "50" || opcode.Equals("ReadyThread", StringComparison.OrdinalIgnoreCase)));
+
+
                 int? payloadPid = Value(data, "ProcessId", "ProcessID", "PID");
                 int? payloadTid = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
                 int? targetPid = targetProcessId;
