@@ -97,6 +97,31 @@ internal static class WorkflowProcessBackendTests
             throw new UnreachableException("Immediate empty child did not complete both redirected pumps cleanly.");
         }
 
+        ProcessStartInfo resourceStart = new(Environment.ProcessPath!)
+        {
+            UseShellExecute = false,
+            WorkingDirectory = outputDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        resourceStart.ArgumentList.Add(typeof(WorkflowProcessBackendTests).Assembly.Location);
+        resourceStart.ArgumentList.Add("--workflow-process-worker");
+        resourceStart.ArgumentList.Add(OperatingSystem.IsLinux() ? "resource-parent" : "resource-burn");
+        await using MemoryStream resourceOut = new();
+        await using MemoryStream resourceErr = new();
+        WorkflowProcessBackend.Outcome resourceOutcome = await WorkflowProcessBackend.RunAsync(
+            new(resourceStart, resourceOut, resourceErr), null, _ => { }, CancellationToken.None);
+        if (resourceOutcome.ExitCode != 0 || resourceOutcome.Resources is not
+            { SchemaVersion: 1, Samples: > 1, PeakRssBytes: > 32 * 1024 * 1024, CpuSeconds: > 0 })
+        {
+            throw new UnreachableException("Resource sampler missed the allocated memory or child CPU work.");
+        }
+        if (OperatingSystem.IsLinux() && resourceOutcome.Resources.Scope != "visible-process-tree")
+        {
+            throw new UnreachableException("Linux resource observations lost descendant attribution.");
+        }
+
         Console.WriteLine("Neutral workflow process backend direct checks passed.");
     }
 

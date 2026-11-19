@@ -13,6 +13,7 @@ namespace CMakeWorkflow.CMake.Serialization;
 [JsonSerializable(typeof(WorkflowToolchainIdentity))]
 [JsonSerializable(typeof(WorkflowToolchainBinding))]
 [JsonSerializable(typeof(NodeResult))]
+[JsonSerializable(typeof(CMakeWorkflow.Contracts.Workflows.ProcessResourceUsage))]
 [JsonSerializable(typeof(ObservedBuildContext))]
 [JsonSerializable(typeof(ConfigureProvenance))]
 [JsonSerializable(typeof(List<string>))]

@@ -268,6 +268,7 @@ internal static class HistoryReports
                                                 && m.Variant == variant), Json(node, "arguments"), null));
             }
 
+            ImportProcessResources(run, node, id);
             ImportBuildMeasurements(run, node, id);
             await ImportDagFlowHarnessAsync(directory, run, node, id, pathGuard, ct);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
@@ -349,6 +350,30 @@ internal static class HistoryReports
             };
         }
         return run;
+    }
+
+    private static void ImportProcessResources(ParsedRun run, JsonElement node, string id, string source = "run.json")
+    {
+        if (Obj(node, "processResources") is not { } resources
+            || Num(resources, "schemaVersion") != 1 || Num(resources, "samples") is not > 0
+            || Num(resources, "sampleIntervalMilliseconds") is not > 0
+            || Str(resources, "scope") is not ("visible-process-tree" or "direct-process")
+            || Str(resources, "method") is not { Length: > 0 } collector)
+        {
+            return;
+        }
+
+        string method = collector + "; scope=" + Str(resources, "scope")
+            + "; interval-ms=" + Num(resources, "sampleIntervalMilliseconds")!.Value.ToString(CultureInfo.InvariantCulture);
+        foreach ((string property, string metric, string unit) in new[]
+                 { ("peakRssBytes", "peak_rss_bytes", "B"), ("cpuSeconds", "cpu_time", "s") })
+        {
+            if (Num(resources, property) is { } value && double.IsFinite(value) && value >= 0)
+            {
+                run.Measurements.Add(new(run.Run.Id, id, metric, unit, value, TimingVariant(id),
+                    Scenario(node), source, method, 0, Json(node, "arguments"), null));
+            }
+        }
     }
 
     private static void ImportBuildMeasurements(ParsedRun run, JsonElement node, string id)
@@ -785,6 +810,23 @@ internal static class HistoryReports
     /// </remarks>
     private static async Task ImportProfileAsync(string directory, ParsedRun run, Action<string>? pathGuard, CancellationToken ct)
     {
+        string commandsPath = Path.Combine(directory, "commands.json");
+        if (File.Exists(commandsPath))
+        {
+            pathGuard?.Invoke(commandsPath);
+            using JsonDocument commands = await ReadAsync(commandsPath, ct);
+            if (commands.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement command in commands.RootElement.EnumerateArray())
+                {
+                    if (Num(command, "returncode") is not null && Str(command, "label") is { } label)
+                    {
+                        ImportProcessResources(run, command, "command:" + label, "commands.json");
+                    }
+                }
+            }
+        }
+
         Task<string> GuardedHashAsync(string file)
         {
             pathGuard?.Invoke(file);
@@ -817,7 +859,7 @@ internal static class HistoryReports
             }
         }
 
-        string[] comparisons = ["comparison.json", "counter-comparison.json", "analysis.json", "runs.jsonl"];
+        string[] comparisons = ["comparison.json", "counter-comparison.json", "analysis.json", "runs.jsonl", "commands.json"];
         foreach (string? name in comparisons)
         {
             string path = Path.Combine(directory, name);

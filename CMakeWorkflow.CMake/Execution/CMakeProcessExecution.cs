@@ -65,7 +65,8 @@ internal static class CMakeProcessExecution
         await using FileStream stderr = File.Create(Path.Combine(output, result.Stderr!));
         ct.ThrowIfCancellationRequested();
 
-        WorkflowProcessBackend.Outcome outcome = await WorkflowProcessBackend.RunAsync(new(info, stdout, stderr), heartbeat, elapsed => result.ProcessDurationSeconds = elapsed.TotalSeconds, ct: ct);
+        WorkflowProcessBackend.Outcome outcome = await WorkflowProcessBackend.RunAsync(new(info, stdout, stderr, resources => result.ProcessResources = resources), heartbeat, elapsed => result.ProcessDurationSeconds = elapsed.TotalSeconds, ct: ct);
+        result.ProcessResources = outcome.Resources;
         return outcome.StartError is Win32Exception { NativeErrorCode: 2 or 3 } error
             ? throw new MissingWorkflowToolException(result.Executable!, error)
             : outcome.StartError is IOException ioError

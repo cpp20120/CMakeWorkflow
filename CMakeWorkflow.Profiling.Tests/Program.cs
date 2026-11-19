@@ -438,6 +438,28 @@ try
     Check(perf.Calls[2].Args.TakeLast(6).SequenceEqual(
             ["/usr/bin/taskset", "-c", "2", executable, "--workers", "1"]),
         "Required affinity was not inserted between profiler and target exec.");
+    foreach (string memoryEvent in new[] { "cycle_activity.stalls_mem_any:u", "ex_no_retire.load_not_complete" })
+    {
+        _ = await pinned.CaptureAsync(request with
+        {
+            CaptureId = "memory",
+            Mode = "counters",
+            MemoryStallEvent = memoryEvent
+        }, CancellationToken.None);
+        string[] memoryArgs = perf.Calls[^1].Args;
+        Check(memoryArgs[Array.IndexOf(memoryArgs, "-e") + 1].EndsWith("," + memoryEvent, StringComparison.Ordinal),
+            "The requested memory-stall event was omitted from perf stat.");
+    }
+    int callsBeforeInvalidEvent = perf.Calls.Count;
+    try
+    {
+        _ = await pinned.CaptureAsync(request with { Mode = "counters", MemoryStallEvent = "cache-misses" },
+            CancellationToken.None);
+        throw new InvalidOperationException("A cache-miss counter was accepted as memory stalls.");
+    }
+    catch (ArgumentException) { }
+    Check(perf.Calls.Count == callsBeforeInvalidEvent, "An invalid memory counter dispatched perf.");
+
     try
     {
         // Select the native backend on each supported host. The test is for
@@ -455,7 +477,7 @@ try
     {
     }
 
-    Check(perf.Calls.Count == 3 && !File.Exists(Path.Combine(root, "mismatched-capability.manifest.json")),
+    Check(perf.Calls.Count == callsBeforeInvalidEvent && !File.Exists(Path.Combine(root, "mismatched-capability.manifest.json")),
         "Profiler was started before required capabilities were checked.");
 
     // No profiler tool is invoked by replay when a stored executable is

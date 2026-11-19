@@ -49,7 +49,12 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : I
 
         ProfileRequest captureRequest = new(request.Executable, request.Arguments,
             request.WorkingDirectory, request.Environment, request.OutputDirectory,
-            request.NodeId, mode, timeout, request.CpuSet, request.CpuAffinityLauncher);
+            request.NodeId, mode, timeout, request.CpuSet, request.CpuAffinityLauncher,
+            request.Options.GetValueOrDefault("memoryStallEvent"));
+        if (captureRequest.MemoryStallEvent is not null && (backend.Capabilities.Backend != "perf" || mode != "counters"))
+        {
+            throw new ArgumentException("memoryStallEvent requires perf counters mode.");
+        }
         ProfileSession session = new(request.OutputDirectory, request.NodeId);
         await session.StartAsync(backend.Capabilities, captureRequest, cancellationToken);
         try

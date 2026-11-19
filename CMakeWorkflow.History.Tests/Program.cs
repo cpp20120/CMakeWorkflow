@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CMakeWorkflow.History;
 using CMakeWorkflow.History.Models;
 using CMakeWorkflow.History.Storage;
@@ -53,6 +54,86 @@ try
               && cacheMetrics.Single(x => x.Metric == "process_wall_time").NodeId == "run",
             "build and benchmark measurements share the same run");
         Check((await cacheStore.ImportAsync(cached, false)).Contains("unchanged 1", StringComparison.Ordinal), "cache reimport");
+    }
+
+    string resourcesDirectory = Path.Combine(root, "resource-run");
+    _ = Directory.CreateDirectory(resourcesDirectory);
+    JsonObject resourceReport = JsonNode.Parse(Workflow("succeeded", 2, 4))!.AsObject();
+    const string resourceMethod = "procfs sampled RSS and cumulative CPU estimates";
+    foreach ((int index, long peak, double cpu) in new[] { (0, 1024L, 0.25), (1, 4096L, 0.75) })
+    {
+        resourceReport["nodes"]![index]!["processResources"] = new JsonObject
+        {
+            ["schemaVersion"] = 1,
+            ["scope"] = "visible-process-tree",
+            ["method"] = resourceMethod,
+            ["sampleIntervalMilliseconds"] = 50,
+            ["samples"] = 5,
+            ["peakRssBytes"] = peak,
+            ["cpuSeconds"] = cpu
+        };
+    }
+    Write(resourcesDirectory, "run.json", resourceReport.ToJsonString());
+    Write(resourcesDirectory, "analysis.json", """
+        [{"captureId":"counters_main","backend":"perf","mode":"counters","counters":{
+          "cycle_activity.stalls_mem_any:u":{"value":123,"unit":""},
+          "cache-misses":{"value":999,"unit":""}}}]
+        """);
+    using (HistoryStore resourceStore = new(Path.Combine(root, "resources.sqlite")))
+    {
+        _ = await resourceStore.ImportAsync(resourcesDirectory, false);
+        HistoryRun resourceRun = resourceStore.Runs(1, null, null, null, null, null).Single();
+        List<HistoryMeasurement> importedResources = resourceStore.Metrics(resourceRun.Id, null, null, null);
+        Check(importedResources.Count(m => m.Metric == "peak_rss_bytes") == 2 &&
+              importedResources.Count(m => m.Metric == "cpu_time") == 2, "resource measurement ingestion");
+        JsonObject summary = await ResourceSummaryAsync(resourceRun.Id);
+        Check(summary["peakRssBytes"]!.GetValue<double>() == 4096 &&
+              summary["cpuSeconds"]!.GetValue<double>() == 1 &&
+              summary["memoryStalls"]!.GetValue<double>() == 123 &&
+              summary["memoryStallEvent"]!.GetValue<string>() == "cycle_activity.stalls_mem_any:u",
+            "host summary peak/max, CPU/sum and dedicated memory event");
+
+        resourceReport["nodes"]![1]!["processResources"]!["scope"] = "direct-process";
+        Write(resourcesDirectory, "run.json", resourceReport.ToJsonString());
+        Write(resourcesDirectory, "analysis.json", """
+            [{"captureId":"counters_main","backend":"perf","mode":"counters","counters":{
+              "cycle_activity.stalls_mem_any:u":{"value":123,"unit":""},
+              "ex_no_retire.load_not_complete":{"value":100,"unit":""}}}]
+            """);
+        _ = await resourceStore.ImportAsync(resourcesDirectory, false);
+        summary = await ResourceSummaryAsync(resourceRun.Id);
+        Check(summary["peakRssBytes"] is null && summary["cpuSeconds"] is null &&
+              summary["resourceMethod"]!.GetValue<string>() == "mixed" &&
+              summary["memoryStalls"] is null && summary["memoryStallEvent"]!.GetValue<string>() == "mixed",
+            "host summary refuses mixed resource scopes and memory event meanings");
+
+        foreach (JsonNode? node in resourceReport["nodes"]!.AsArray())
+        {
+            _ = node!.AsObject().Remove("processResources");
+        }
+        Write(resourcesDirectory, "run.json", resourceReport.ToJsonString());
+        File.Delete(Path.Combine(resourcesDirectory, "analysis.json"));
+        _ = await resourceStore.ImportAsync(resourcesDirectory, false);
+        summary = await ResourceSummaryAsync(resourceRun.Id);
+        Check(summary["peakRssBytes"] is null && summary["cpuSeconds"] is null && summary["memoryStalls"] is null,
+            "legacy reports retain unavailable resource metrics");
+    }
+
+    async Task<JsonObject> ResourceSummaryAsync(string id)
+    {
+        using StringWriter output = new();
+        TextWriter previous = Console.Out;
+        Console.SetOut(output);
+        try
+        {
+            Check(await HistoryCommand.ExecuteAsync(["host-summary", id, "--db",
+                Path.Combine(root, "resources.sqlite"), "--json"], default) == 0, "resource summary CLI");
+            return JsonNode.Parse(output.ToString())!.AsArray()[0]!.AsObject();
+        }
+        finally
+        {
+            Console.SetOut(previous);
+        }
     }
 
     static string Workflow(string status, double first, double second, string workers = "1") => $$"""

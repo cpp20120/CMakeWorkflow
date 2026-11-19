@@ -1613,6 +1613,14 @@ public sealed record TestMatrixRecipeV1(string Kind, int SchemaVersion, string B
 
 ### Namespace `CMakeWorkflow.Contracts.Workflows`
 
+#### `ProcessResourceUsage`
+
+Source: [CMakeWorkflow.Contracts/Workflows/ProcessResourceUsage.cs](../CMakeWorkflow.Contracts/Workflows/ProcessResourceUsage.cs)
+
+```csharp
+public sealed record ProcessResourceUsage(int SchemaVersion, string Scope, string Method, int SampleIntervalMilliseconds, int Samples, long? PeakRssBytes, double? CpuSeconds);
+```
+
 #### `WorkflowArtifactInput`
 
 Input evidence from a filesystem path or a named producer output.

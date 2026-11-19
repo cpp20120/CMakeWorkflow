@@ -181,13 +181,14 @@ public static class HistoryCommand
                         {
                             static string Number(double? value) =>
                                 value?.ToString("G6", CultureInfo.InvariantCulture) ?? "-";
-                            Console.WriteLine("Run\tHost\tBuild (s)\tHit rate\tCounter scope\tPeak RSS (B)\tCPU (s)\tMemory stalls\tArtifact bytes");
+                            Console.WriteLine("Run\tHost\tBuild (s)\tHit rate\tCounter scope\tMax node sampled RSS (B)\tSampled CPU (s)\tMemory stall cycles\tArtifact bytes\tResource method\tMemory stall event");
                             foreach (HistoryHostRow row in rows)
                             {
                                 Console.WriteLine($"{row.RunId}\t{row.HostId ?? "unknown"}\t{Number(row.BuildSeconds)}\t" +
                                                   $"{Number(row.CacheHitRate)}\t{row.CacheCounterScope ?? "-"}\t" +
                                                   $"{Number(row.PeakRssBytes)}\t{Number(row.CpuSeconds)}\t" +
-                                                  $"{Number(row.MemoryStalls)}\t{Number(row.ArtifactBytes)}");
+                                                  $"{Number(row.MemoryStalls)}\t{Number(row.ArtifactBytes)}\t" +
+                                                  $"{row.ResourceMethod ?? "-"}\t{row.MemoryStallEvent ?? "-"}");
                             }
                         }
                         break;

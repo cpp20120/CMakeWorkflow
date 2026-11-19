@@ -2,6 +2,7 @@ using System.Buffers;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.Core.Processes;
 
@@ -20,9 +21,9 @@ internal static class WorkflowProcessBackend
     private const int CopyBufferSize = 81920;
 
     internal sealed record Specification(ProcessStartInfo StartInfo, Stream StandardOutput,
-        Stream StandardError);
+        Stream StandardError, Action<ProcessResourceUsage?>? ResourcesCompleted = null);
 
-    internal sealed record Outcome(int? ExitCode, Exception? StartError);
+    internal sealed record Outcome(int? ExitCode, Exception? StartError, ProcessResourceUsage? Resources = null);
 
     /// <summary>Starts, supervises and cleans up a child before publishing its outcome.</summary>
     /// <remarks>
@@ -55,6 +56,9 @@ internal static class WorkflowProcessBackend
             return new(null, new IOException("Process.Start returned null."));
         }
 
+        ProcessResourceSampler resources = new(process);
+        using CancellationTokenSource resourceStop = new();
+        Task resourceTask = Task.CompletedTask;
         WindowsProcessJob? windowsJob = null;
         CancellationTokenSource? heartbeatStop = null;
         CancellationTokenSource? operationWaitStop = null;
@@ -78,6 +82,7 @@ internal static class WorkflowProcessBackend
             windowsJob = OperatingSystem.IsWindows() ? WindowsProcessJob.Attach(process) : null;
 #pragma warning restore CA2000
 
+            resourceTask = resources.ObserveAsync(resourceStop.Token);
             process.StandardInput.Close();
 
 #pragma warning disable CA2000 // These handles transfer into the monitored cleanup path, which stops workers and aggregates disposal failures.
@@ -319,6 +324,12 @@ internal static class WorkflowProcessBackend
         }
         TryDispose(pumpStop, cleanupFailures);
         TryDispose(operationWaitStop, cleanupFailures);
+        await resourceStop.CancelAsync();
+        await resourceTask;
+        if (outcome is not null)
+        {
+            outcome = outcome with { Resources = resources.Result };
+        }
         try { process.Dispose(); }
 
 #pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
@@ -339,9 +350,10 @@ internal static class WorkflowProcessBackend
         }
         if (durationEligible)
         {
-            try { durationCompleted(elapsed); }
-
 #pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
+            try { specification.ResourcesCompleted?.Invoke(resources.Result); }
+            catch (Exception error) { observerFailures.Add(error); }
+            try { durationCompleted(elapsed); }
             catch (Exception error) { observerFailures.Add(error); }
 #pragma warning restore CA1031
 

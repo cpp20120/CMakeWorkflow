@@ -1,6 +1,7 @@
 using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using System.Text.Json.Serialization;
+using CMakeWorkflow.Contracts.Workflows;
 namespace CMakeWorkflow.CMake.Reporting;
 
 public sealed class NodeResult
@@ -17,6 +18,8 @@ public sealed class NodeResult
     public DateTimeOffset? FinishedAt { get; set; }
     public double? DurationSeconds { get; set; }
     public double? ProcessDurationSeconds { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProcessResourceUsage? ProcessResources { get; set; }
     public int? ExitCode { get; set; }
     public string? Executable { get; set; }
     public string? ExecutableSha256 { get; set; }

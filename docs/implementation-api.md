@@ -632,6 +632,7 @@ public sealed class NodeResult
     public System.DateTimeOffset? FinishedAt { get; set; }
     public double? DurationSeconds { get; set; }
     public double? ProcessDurationSeconds { get; set; }
+    public CMakeWorkflow.Contracts.Workflows.ProcessResourceUsage? ProcessResources { get; set; }
     public int? ExitCode { get; set; }
     public string? Executable { get; set; }
     public string? ExecutableSha256 { get; set; }
@@ -2121,7 +2122,7 @@ public sealed class ProfileProcess : CMakeWorkflow.Profiling.Capture.IProfilePro
 Source: [CMakeWorkflow.Profiling/Capture/ProfileRequest.cs](../CMakeWorkflow.Profiling/Capture/ProfileRequest.cs#L5)
 
 ```csharp
-public sealed record ProfileRequest(string Executable, System.Collections.Generic.IReadOnlyList<string> Arguments, string WorkingDirectory, System.Collections.Generic.IReadOnlyDictionary<string, string> Environment, string OutputDirectory, string CaptureId, string Mode, System.TimeSpan Timeout, string? CpuSet = null, string? CpuAffinityLauncher = null);
+public sealed record ProfileRequest(string Executable, System.Collections.Generic.IReadOnlyList<string> Arguments, string WorkingDirectory, System.Collections.Generic.IReadOnlyDictionary<string, string> Environment, string OutputDirectory, string CaptureId, string Mode, System.TimeSpan Timeout, string? CpuSet = null, string? CpuAffinityLauncher = null, string? MemoryStallEvent = null);
 ```
 
 #### `ProfileResult`

@@ -62,4 +62,49 @@ This prints the observed values for each requested run. `buildSeconds` sums meas
 with parallel builds. The hit-rate column identifies the counter scope. Result bytes are the sizes of distinct referenced
 files observed at import inside the results directory, excluding `run.json`. They describe the result tree before CAS
 deduplication. Reimport existing results to populate the new measurements where the evidence is available.
-Peak RSS, CPU time and memory stalls are left empty pending dedicated measurement.
+Process executions record `processResources` in `run.json`. History imports `peak_rss_bytes` and
+`cpu_time`. The sampler requests a 50 ms interval. Linux observes the launched process and descendants
+visible through procfs, including CPU accumulated by waited-for children. Windows and macOS observe
+the direct launched process through `System.Diagnostics.Process`. Sampling may miss short processes,
+brief peaks, departed/reparented descendants, or processes outside the traversal limit of 4096 processes.
+These are sampled estimates with collection overhead.
+
+The host summary reports the largest per-node sampled RSS and the sum of per-node sampled CPU time.
+Parallel workflow nodes can overlap, so the largest node value does not establish a simultaneous workflow peak.
+`resourceMethod` includes the collector, scope and interval. Mixed scopes/methods produce unavailable aggregate
+resource values. Old reports and cache hits without execution retain null values.
+
+Memory-stall cycles require an explicit Linux perf counters capture. Use `profile run --memory-stall-event EVENT`
+or a profile node with `options.memoryStallEvent`. Supported events are `cycle_activity.stalls_mem_any`
+(Intel outstanding-load execution stalls) and `ex_no_retire.load_not_complete` (AMD cycles without retirement
+while the oldest operation waits for load data). Each accepts an optional `:u` or `:k` modifier.
+Availability and permissions depend on the host. An unsupported requested event fails the capture.
+Uncounted counters remain absent.
+
+`memoryStalls` sums one event, privilege domain, variant and workload. `memoryStallEvent` retains its exact name.
+Mixed events or workloads produce an unavailable total. Compare hosts using the same event and workload and
+review their CPU identities. Intel and AMD event meanings differ. Cache misses remain separate metrics.
+
+```sh
+CMakeWorkflow profile run --build-dir out/hello --target workflow_demo --backend perf --mode counters \
+  --memory-stall-event cycle_activity.stalls_mem_any:u --results-dir out/memory-profile
+```
+
+A Linux profile node can select the AMD event through the existing options object.
+
+```json
+{
+  "id": "memory",
+  "kind": "profile",
+  "from": "build",
+  "dependsOn": ["build"],
+  "options": {
+    "backend": "perf",
+    "mode": "counters",
+    "memoryStallEvent": "ex_no_retire.load_not_complete:u"
+  }
+}
+```
+
+Event definitions are documented by [Intel](https://perfmon-events.intel.com/platforms/icelakex/core-events/core/)
+and the [Linux perf AMD Zen 4 event table](https://github.com/torvalds/linux/blob/v6.12/tools/perf/pmu-events/arch/x86/amdzen4/core.json).

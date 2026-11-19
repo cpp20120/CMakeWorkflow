@@ -23,6 +23,7 @@ public sealed class ProfileSession(string outputDirectory, string captureId)
             ["captureId"] = captureId,
             ["backend"] = capabilities.Backend,
             ["mode"] = request.Mode,
+            ["memoryStallEvent"] = request.MemoryStallEvent,
             ["eventSource"] = capabilities.EventSource,
             ["launchModel"] = capabilities.LaunchModel,
             ["startGuarantee"] = capabilities.StartGuarantee,

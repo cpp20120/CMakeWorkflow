@@ -19,12 +19,25 @@ public sealed class LinuxPerfBackend(IProfileProcess process) : IProfilerBackend
             throw new ArgumentException($"perf does not support profile mode '{request.Mode}'.");
         }
 
+        if (request.MemoryStallEvent is not (null or "cycle_activity.stalls_mem_any"
+            or "cycle_activity.stalls_mem_any:u" or "cycle_activity.stalls_mem_any:k" or "ex_no_retire.load_not_complete"
+            or "ex_no_retire.load_not_complete:u" or "ex_no_retire.load_not_complete:k")
+            || (request.MemoryStallEvent is not null && request.Mode != "counters"))
+        {
+            throw new ArgumentException("Memory stalls require a supported explicit perf counters event.");
+        }
+
         string raw = Path.Combine(request.OutputDirectory, "traces", "raw", request.CaptureId);
         _ = Directory.CreateDirectory(raw);
         bool counters = request.Mode == "counters";
         string path = Path.Combine(raw, counters ? "run.perf-stat.csv" : "run.perf.data");
+        string events = "cycles,instructions,cache-misses,branch-misses";
+        if (request.MemoryStallEvent is { } memoryEvent)
+        {
+            events += "," + memoryEvent;
+        }
         List<string> args = counters
-            ? ["stat", "-x", ",", "-o", path, "-e", "cycles,instructions,cache-misses,branch-misses"]
+            ? ["stat", "-x", ",", "-o", path, "-e", events]
             : ["record", "-o", path];
         if (request.Mode == "cpu")
         {

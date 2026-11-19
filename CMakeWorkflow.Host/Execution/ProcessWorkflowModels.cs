@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.Workflows;
 using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.Host.Execution;
@@ -35,6 +36,8 @@ internal sealed class ProcessNodeReport
     public string Status { get; set; } = "pending";
     public string? Error { get; set; }
     public int? ExitCode { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProcessResourceUsage? ProcessResources { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Stdout { get; set; }

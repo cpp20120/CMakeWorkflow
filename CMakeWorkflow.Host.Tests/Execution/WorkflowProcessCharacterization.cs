@@ -418,6 +418,33 @@ internal static class WorkflowProcessTestWorker
 
         switch (args[0])
         {
+            case "resource-burn":
+                {
+                    byte[] resident = new byte[32 * 1024 * 1024];
+                    Stopwatch timer = Stopwatch.StartNew();
+                    while (timer.Elapsed < TimeSpan.FromMilliseconds(700))
+                    {
+                        for (int i = 0; i < resident.Length; i += 4096)
+                        {
+                            resident[i]++;
+                        }
+                    }
+                    GC.KeepAlive(resident);
+                    return 0;
+                }
+            case "resource-parent":
+                {
+                    ProcessStartInfo childInfo = new(Environment.ProcessPath
+                        ?? throw new InvalidOperationException("The .NET host path is unavailable."))
+                    { UseShellExecute = false };
+                    childInfo.ArgumentList.Add(typeof(WorkflowProcessTestWorker).Assembly.Location);
+                    childInfo.ArgumentList.Add("--workflow-process-worker");
+                    childInfo.ArgumentList.Add("resource-burn");
+                    using Process child = Process.Start(childInfo)
+                        ?? throw new UnreachableException("Cannot start resource worker.");
+                    await child.WaitForExitAsync();
+                    return child.ExitCode;
+                }
             case "inspect":
                 {
                     if (args.Length < 2)

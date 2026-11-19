@@ -529,6 +529,17 @@ public static class WorkflowPlanner
             throw new ArgumentException($"{n.Id}: options are only valid for profile.");
         }
 
+        if (n.Options.TryGetValue("memoryStallEvent", out string? memoryEvent)
+            && (n.Kind is not ("profile" or "profile_snapshot")
+                || n.Options.GetValueOrDefault("mode", "cpu") != "counters"
+                || n.Options.GetValueOrDefault("backend", "auto") is not ("perf" or "auto")
+                || memoryEvent is not ("cycle_activity.stalls_mem_any"
+                    or "cycle_activity.stalls_mem_any:u" or "cycle_activity.stalls_mem_any:k" or "ex_no_retire.load_not_complete"
+                    or "ex_no_retire.load_not_complete:u" or "ex_no_retire.load_not_complete:k")))
+        {
+            throw new ArgumentException($"{n.Id}: memoryStallEvent requires perf counters mode and a supported event.");
+        }
+
         if (n.Kind == "ctest" && (n.Target is not null || n.From is not null || n.Arguments.Count > 0))
         {
             throw new ArgumentException(

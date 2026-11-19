@@ -10,4 +10,5 @@ public sealed record ProfileRequest(
     string Mode,
     TimeSpan Timeout,
     string? CpuSet = null,
-    string? CpuAffinityLauncher = null);
+    string? CpuAffinityLauncher = null,
+    string? MemoryStallEvent = null);

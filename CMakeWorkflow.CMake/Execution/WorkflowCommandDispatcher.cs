@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
 using CMakeWorkflow.CMake.Recovery;
@@ -149,6 +150,8 @@ public sealed class WorkflowCommandDispatcher
                 entry["external_output_sha256"] = await CommandExecution.Sha256Async(declaredOutput, ct);
             }
 
+            entry["processResources"] = JsonSerializer.SerializeToNode(result.ProcessResources,
+                Serialization.WorkflowJson.Default.ProcessResourceUsage);
             entry["returncode"] = exitCode;
             entry["timed_out"] = false;
             return exitCode != 0

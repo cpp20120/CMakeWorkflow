@@ -212,6 +212,7 @@ internal static class ProcessWorkflowRunner
         state.Status = result.Status;
         state.Error = result.Error;
         state.ExitCode = result.ExitCode;
+        state.ProcessResources = result.ProcessResources;
         state.FinishedAt = result.FinishedAt;
     }
 
@@ -269,8 +270,9 @@ internal static class ProcessWorkflowRunner
             await using FileStream stdout = new(paths.Require(Path.Combine(output, state.Stdout!)), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             await using FileStream stderr = new(paths.Require(Path.Combine(output, state.Stderr!)), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             deadline.Token.ThrowIfCancellationRequested();
-            WorkflowProcessBackend.Outcome execution = await WorkflowProcessBackend.RunAsync(new(info, stdout, stderr),
+            WorkflowProcessBackend.Outcome execution = await WorkflowProcessBackend.RunAsync(new(info, stdout, stderr, resources => result.ProcessResources = resources),
 null, _ => { }, ct: deadline.Token);
+            result.ProcessResources = execution.Resources;
             result.ExitCode = execution.ExitCode;
             result.Status = execution.ExitCode == 0 && execution.StartError is null ? "succeeded" : "failed";
             if (execution.StartError is not null)
