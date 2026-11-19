@@ -650,7 +650,7 @@ try
     ProfileResult etwResult = await new WindowsEtwBackend(wpr).CaptureAsync(request, CancellationToken.None);
     Check(wpr.Calls.Select(x => x.Executable).SequenceEqual(["wpr", "wpr", executable, "wpr"]),
         "WPR must start before launching the target and stop afterward");
-    Check(wpr.Calls[1].Args.Take(3).SequenceEqual(["-start", "CPU.light", "-filemode"])
+    Check(wpr.Calls[1].Args.Take(3).SequenceEqual(["-start", "CPU", "-filemode"])
           && wpr.Calls[3].Args[0] == "-stop"
           && wpr.Calls.Where(x => x.Executable == "wpr").All(x => x.Args[^2] == "-instancename")
           && File.Exists(etwResult.RawTrace) && etwResult.TargetProcessId == 42

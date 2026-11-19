@@ -37,4 +37,9 @@
         <None Update="docs/licenses/*.txt" CopyToPublishDirectory="PreserveNewest" TargetPath="licenses/%(Filename)%(Extension)"/>
         <None Update="docs/prng-notices.md" CopyToPublishDirectory="PreserveNewest" TargetPath="prng-notices.md"/>
     </ItemGroup>
+    <!-- TraceEvent's ETL indexing uses reflection. Publish the decoder separately from the NativeAOT CLI. -->
+    <Target Name="PublishEtwStackReader" AfterTargets="Publish"
+            Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-'))">
+        <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)/CMakeWorkflow.EtwStackReader/CMakeWorkflow.EtwStackReader.csproj&quot; -c $(Configuration) -r $(RuntimeIdentifier) --self-contained -p:TreatWarningsAsErrors=true -o &quot;$(PublishDir)/etw-stack-reader&quot;"/>
+    </Target>
 </Project>

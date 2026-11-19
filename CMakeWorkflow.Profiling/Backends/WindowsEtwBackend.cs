@@ -65,7 +65,8 @@ public sealed class WindowsEtwBackend(IProfileProcess process) : IProfilerBacken
             }
 
             string? configuration = null;
-            string profile = request.Mode == "cpu" ? "CPU.light" : "CPU";
+            // CPU.light enables sampled events without their stack walks.
+            string profile = "CPU";
             if (request.Mode == "counters")
             {
                 (profile, configuration) = await WindowsPmcConfiguration.PrepareAsync(process, request, raw, cancellationToken);

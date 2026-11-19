@@ -192,6 +192,12 @@ In stack schema v2, `samples` counts recognized sample headers, while `parsedSam
 frames. The analyzer retains up to 96 frames per sample and records any truncation. `droppedDistinctStacks` is a lower
 bound if the distinct-stack limit is reached.
 
+Windows CPU profiling records WPR's `CPU` profile, which enables sampled stack walks. Windows CLI publishes include
+the `etw-stack-reader` directory. Keep it alongside the CLI so `dagflow profile analyze` can match sampled CPU events to
+stack walks in the ETL using TraceEvent. The ETW summary records `cpuSampleSource`; scheduling still comes from
+`tracerpt`. Decoded stack addresses count toward `parsedSamples` and remain unresolved. Older `CPU.light` recordings
+contain CPU samples without stack walks and require a new capture for stack analysis.
+
 The CPU normalizer also accepts `perf script` formats with an inline sampled leaf after the event header. For CPU
 captures, `analysis.json` reports `reportedSamples` from `perf report`, `sampleCountMatchesReport`, and `parsedSamples`
 in the summary. A mismatch is marked `partial`, not silently `complete`; a nonempty capture with no decoded stacks is a

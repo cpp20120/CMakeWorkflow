@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -30,15 +31,44 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             [trace, "-o", dump, "-of", "XML", "-lr", "-y"], outputDirectory,
             TimeSpan.FromMinutes(15), null, ct);
         ProfileEnvironment.RequireSuccess(conversion, "tracerpt");
-        return !File.Exists(dump)
-            ? throw new IOException("tracerpt succeeded without an XML event dump.")
-            : await ParseXmlAsync(dump, outputDirectory, captureId, executable,
-            targetProcessId, targetStartedAt, targetFinishedAt, ct);
+        if (!File.Exists(dump))
+        {
+            throw new IOException("tracerpt succeeded without an XML event dump.");
+        }
+
+        string reader = Path.Combine(AppContext.BaseDirectory, "etw-stack-reader", "CMakeWorkflow.EtwStackReader.exe");
+        if (!nativeProcess || targetProcessId is not { } pid || !File.Exists(reader))
+        {
+            return await ParseXmlAsync(dump, outputDirectory, captureId, executable,
+                targetProcessId, targetStartedAt, targetFinishedAt, ct);
+        }
+
+        DirectoryInfo staging = Directory.CreateTempSubdirectory("cmw-etw-");
+        try
+        {
+            string sampledEvents = Path.Combine(staging.FullName, "samples.xml");
+            CommandResult decoding = await process.RunAsync(reader,
+                [Path.GetFullPath(trace), sampledEvents, pid.ToString(CultureInfo.InvariantCulture)], outputDirectory,
+                TimeSpan.FromMinutes(15), null, ct);
+            ProfileEnvironment.RequireSuccess(decoding, "TraceEvent stack reader");
+            return await ParseEventsAsync(dump, sampledEvents, outputDirectory, captureId, executable,
+                targetProcessId, targetStartedAt, targetFinishedAt, ct);
+        }
+        finally
+        {
+            staging.Delete(recursive: true);
+        }
     }
 
     // This parser also accepts saved tracerpt XML for deterministic tests on
     // non-Windows hosts. Event records are streamed, not loaded as one DOM.
-    public static async Task<EtwAnalysisResult> ParseXmlAsync(string dump, string outputDirectory,
+    public static Task<EtwAnalysisResult> ParseXmlAsync(string dump, string outputDirectory,
+        string captureId, string executable, int? targetProcessId,
+        DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct) =>
+        ParseEventsAsync(dump, null, outputDirectory, captureId, executable,
+            targetProcessId, targetStartedAt, targetFinishedAt, ct);
+
+    private static async Task<EtwAnalysisResult> ParseEventsAsync(string dump, string? sampledEvents, string outputDirectory,
         string captureId, string executable, int? targetProcessId,
         DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct)
     {
@@ -62,18 +92,8 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         int readyEvents = 0;
         int rawStacks = 0;
         string? imageName = null;
-        await using (FileStream input = new(dump, FileMode.Open, FileAccess.Read, FileShare.Read,
-                         64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
         await using (StreamWriter sampleWriter = OpenOutput(samplesPath))
         await using (StreamWriter timelineWriter = OpenOutput(timelinePath))
-        using (XmlReader reader = XmlReader.Create(input, new XmlReaderSettings
-        {
-            Async = true,
-            DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null,
-            IgnoreComments = true,
-            IgnoreWhitespace = true
-        }))
         {
             async Task TimelineAsync(DateTimeOffset? time, int tid, string state, int? processor)
             {
@@ -98,21 +118,13 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 }.ToJsonString().AsMemory(), ct);
             }
 
-            while (!reader.EOF)
+            await foreach ((XElement record, bool fromTraceEvent) in ReadEventsAsync(dump, sampledEvents, ct))
             {
-                ct.ThrowIfCancellationRequested();
-                if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "Event")
+                if (!fromTraceEvent)
                 {
-                    if (!await reader.ReadAsync())
-                    {
-                        break;
-                    }
-
-                    continue;
+                    totalEvents++;
                 }
 
-                XElement record = (XElement)await XNode.ReadFromAsync(reader, ct);
-                totalEvents++;
                 XElement? system = Child(record, "System");
                 XElement? execution = Child(system, "Execution");
                 int? headerPid = ParseInt(Attr(execution, "ProcessID"));
@@ -193,7 +205,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                                           threadProcess.GetValueOrDefault(payloadThread) == targetPid);
                 if (isCpuSample)
                 {
-                    if (!belongsToTarget)
+                    if (!belongsToTarget || (!fromTraceEvent && sampledEvents is not null))
                     {
                         continue;
                     }
@@ -212,16 +224,12 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     if (!string.IsNullOrEmpty(stack))
                     {
                         rawStacks++;
-                        // tracerpt may expose only raw addresses: these are
-                        // explicitly marked unresolved, not fabricated symbols.
+                        // StackEvidence preserves distinct chains and treats raw addresses as unresolved.
                         string[] frames = [.. stack.Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries
                                                               | StringSplitOptions.TrimEntries)
                             .SelectMany(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                                 ? x.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                                : [x])
-                            .Select(x => x.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                                ? "[unknown]"
-                                : x)];
+                                : [x])];
                         stacks.Add(frames);
                     }
                     else
@@ -326,6 +334,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             ["schemaVersion"] = 1,
             ["backend"] = "etw",
             ["source"] = "tracerpt XML export",
+            ["cpuSampleSource"] = sampledEvents is null ? "tracerpt XML export" : "TraceEvent ETL",
             ["targetProcessId"] = targetProcessId,
             ["targetExecutable"] = executable,
             ["observedImageName"] = imageName,
@@ -376,6 +385,41 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
             ReadyLatencyCount++;
             ReadyLatencyMilliseconds += milliseconds;
             ReadyLatencyMaxMilliseconds = Math.Max(ReadyLatencyMaxMilliseconds, milliseconds);
+        }
+    }
+
+    private static async IAsyncEnumerable<(XElement Record, bool FromTraceEvent)> ReadEventsAsync(
+        string dump, string? sampledEvents, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach ((string? path, bool fromTraceEvent) in new[] { (dump, false), (sampledEvents, true) })
+        {
+            if (path is null)
+            {
+                continue;
+            }
+
+            await using FileStream input = new(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using XmlReader reader = XmlReader.Create(input, new XmlReaderSettings
+            {
+                Async = true,
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                IgnoreComments = true,
+                IgnoreWhitespace = true
+            });
+            while (!reader.EOF)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "Event")
+                {
+                    yield return ((XElement)await XNode.ReadFromAsync(reader, ct), fromTraceEvent);
+                }
+                else if (!await reader.ReadAsync())
+                {
+                    break;
+                }
+            }
         }
     }
 
