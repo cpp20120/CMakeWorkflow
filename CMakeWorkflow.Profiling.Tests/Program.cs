@@ -717,6 +717,32 @@ try
             "Realistic tracerpt ReadyThread/CSwitch timing regression.");
     }
 
+    // Reproduction from real Windows 11 tracerpt: classic Thread/CSwitch v5
+    // with no RenderingInfo or EventData, only binary payload and EventGuid.
+    string binaryCswitchXml = Path.Combine(root, "events-binary-cswitch.xml");
+    await File.WriteAllTextAsync(binaryCswitchXml, """
+        <Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+          <Event><System><Opcode>3</Opcode><TimeCreated SystemTime="2026-10-26T10:00:01Z"/></System><EventData><Data Name="ProcessId">42</Data><Data Name="TThreadId">120</Data></EventData><RenderingInfo><EventName>Thread</EventName><Opcode>DCStart</Opcode></RenderingInfo></Event>
+          <Event><System><Opcode>50</Opcode><TimeCreated SystemTime="2026-10-26T10:00:02Z"/></System><EventData><Data Name="TThreadId">120</Data></EventData><RenderingInfo><EventName>Thread</EventName><Opcode>ReadyThread</Opcode></RenderingInfo></Event>
+          <Event><System><Version>5</Version><Opcode>36</Opcode><TimeCreated SystemTime="2026-10-26T10:00:03Z"/></System><BinaryEventData>78000000142C00001709000017000902090000001C66010001000000</BinaryEventData><ExtendedTracingInfo><EventGuid>{3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c}</EventGuid></ExtendedTracingInfo></Event>
+          <Event><System><Version>5</Version><Opcode>36</Opcode><TimeCreated SystemTime="2026-10-26T10:00:04Z"/></System><BinaryEventData>142C0000780000001709000017000902090000001C66010001000000</BinaryEventData><ExtendedTracingInfo><EventGuid>{3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c}</EventGuid></ExtendedTracingInfo></Event>
+          <Event><System><Version>2</Version><Opcode>36</Opcode><TimeCreated SystemTime="2026-10-26T10:00:04Z"/></System><BinaryEventData>78000000142C00001709000017000902090000001C66010001000000</BinaryEventData><ExtendedTracingInfo><EventGuid>b3e675d7-2554-4f18-830b-2762732560de</EventGuid></ExtendedTracingInfo></Event>
+        </Events>
+        """);
+    EtwAnalysisResult binaryCswitch = await EtwTraceAnalyzer.ParseXmlAsync(binaryCswitchXml, root,
+        "binary-cswitch", executable, 42,
+        DateTimeOffset.Parse("2026-10-26T10:00:00Z", CultureInfo.InvariantCulture),
+        DateTimeOffset.Parse("2026-10-26T10:00:05Z", CultureInfo.InvariantCulture), CancellationToken.None);
+    using (JsonDocument binarySummary = JsonDocument.Parse(await File.ReadAllTextAsync(binaryCswitch.Summary)))
+    {
+        Check(binarySummary.RootElement.GetProperty("targetContextSwitchesIn").GetInt32() == 1
+              && binarySummary.RootElement.GetProperty("targetContextSwitchesOut").GetInt32() == 1
+              && binarySummary.RootElement.GetProperty("readyLatencySamples").GetInt32() == 1
+              && binarySummary.RootElement.GetProperty("readyLatencySumMilliseconds").GetDouble() == 1000
+              && binarySummary.RootElement.GetProperty("scheduledRunningMilliseconds").GetDouble() == 1000,
+            "Binary Windows CSwitch v5 attribution/intervals or GUID filtering regressed.");
+    }
+
     FakeTracerptProcess converter = new(etwXml);
     EtwAnalysisResult converted = await new EtwTraceAnalyzer(converter).AnalyzeAsync("fixture.etl", root,
         "converted", executable, 42,

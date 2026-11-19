@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -11,6 +12,7 @@ namespace CMakeWorkflow.Profiling.Analysis;
 
 public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 {
+    private const string ClassicThreadGuid = "3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c";
     private readonly IProfileProcess process = process ?? new ProfileProcess();
     private readonly bool nativeProcess = process is null;
 
@@ -136,8 +138,14 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 
                 bool isCpuSample = normalizedName is "sampledprofile" or "sampleprofile" || (normalizedName == "perfinfo" && (systemOpcode == "46" || opcode.Equals("SampleProf", StringComparison.OrdinalIgnoreCase)));
                 bool isReadyThread = normalizedName is "readythread" or "threadready" || (normalizedName == "thread" && (systemOpcode == "50" || opcode.Equals("ReadyThread", StringComparison.OrdinalIgnoreCase)));
+                // tracerpt can export classic kernel CSwitch v5 as BinaryEventData
+                // with neither RenderingInfo nor EventData. Opcode alone is ambiguous.
+                string? eventGuid = Child(Child(record, "ExtendedTracingInfo"), "EventGuid")?.Value.Trim().Trim('{', '}');
+                bool isClassicContextSwitch = systemOpcode == "36"
+                    && string.Equals(eventGuid, ClassicThreadGuid, StringComparison.OrdinalIgnoreCase);
                 bool isContextSwitch = normalizedName is "cswitch" or "contextswitch"
-                    || (normalizedName == "thread" && (systemOpcode == "36" || opcode.Equals("CSwitch", StringComparison.OrdinalIgnoreCase)));
+                    || (normalizedName == "thread" && (systemOpcode == "36" || opcode.Equals("CSwitch", StringComparison.OrdinalIgnoreCase)))
+                    || isClassicContextSwitch;
 
                 int? payloadPid = Value(data, "ProcessId", "ProcessID", "PID");
                 int? payloadTid = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
@@ -235,8 +243,10 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                 }
                 else if (isContextSwitch)
                 {
-                    int? next = Value(data, "NewThreadId", "NewThreadID");
-                    int? previous = Value(data, "OldThreadId", "OldThreadID");
+                    (int? binaryNext, int? binaryPrevious) = isClassicContextSwitch
+                        ? DecodeClassicCswitchV5(record) : (null, null);
+                    int? next = Value(data, "NewThreadId", "NewThreadID") ?? binaryNext;
+                    int? previous = Value(data, "OldThreadId", "OldThreadID") ?? binaryPrevious;
                     if (next is { } nextTid && threadProcess.GetValueOrDefault(nextTid) == targetPid)
                     {
                         switchesIn++;
@@ -381,6 +391,35 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         }
 
         return value;
+    }
+
+    private static (int? Next, int? Previous) DecodeClassicCswitchV5(XElement record)
+    {
+        // The observed Windows 11 v5 payload is 28 bytes. The first two
+        // little-endian UInt32 values are NewThreadId and OldThreadId.
+        // Unknown versions/layouts are deliberately not decoded.
+        if (Child(Child(record, "System"), "Version")?.Value.Trim() != "5")
+        {
+            return (null, null);
+        }
+
+        string? hex = Child(record, "BinaryEventData")?.Value.Trim();
+        if (hex is null || hex.Length != 56)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            byte[] bytes = Convert.FromHexString(hex);
+            int next = BinaryPrimitives.ReadInt32LittleEndian(bytes);
+            int previous = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4));
+            return next >= 0 && previous >= 0 ? (next, previous) : (null, null);
+        }
+        catch (FormatException)
+        {
+            return (null, null);
+        }
     }
 
     private static XElement? Child(XElement? parent, string name) =>
