@@ -691,6 +691,32 @@ try
             "ETW ready/run intervals changed.");
     }
 
+    // Real Windows tracerpt: one provider emits multiple kernel event kinds,
+    // with the actual event type encoded as the System/RenderingInfo opcode.
+    string windowsEtwXml = Path.Combine(root, "events-windows-tracerpt.xml");
+    await File.WriteAllTextAsync(windowsEtwXml, """
+        <Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+          <Event><System><Opcode>3</Opcode><TimeCreated SystemTime="2026-10-26T10:00:01Z"/></System><EventData><Data Name="ProcessId">0x2A</Data><Data Name="TThreadId">0x64</Data></EventData><RenderingInfo><EventName>Thread</EventName><Opcode>DCStart</Opcode></RenderingInfo></Event>
+          <Event><System><Opcode>46</Opcode><TimeCreated SystemTime="2026-10-26T10:00:02Z"/><Execution ProcessID="4294967295" ThreadID="4294967295"/></System><EventData><Data Name="ThreadId">100</Data><Data Name="InstructionPointer">0x1234</Data></EventData><RenderingInfo><EventName>PerfInfo</EventName><Opcode>SampleProf</Opcode></RenderingInfo></Event>
+          <Event><System><Opcode>46</Opcode><TimeCreated SystemTime="2026-10-26T10:00:02Z"/><Execution ProcessID="4294967295" ThreadID="4294967295"/></System><EventData><Data Name="ThreadId">999</Data></EventData><RenderingInfo><EventName>PerfInfo</EventName><Opcode>SampleProf</Opcode></RenderingInfo></Event>
+          <Event><System><Opcode>50</Opcode><TimeCreated SystemTime="2026-10-26T10:00:02.5Z"/></System><EventData><Data Name="TThreadId">100</Data></EventData><RenderingInfo><EventName>Thread</EventName><Opcode>ReadyThread</Opcode></RenderingInfo></Event>
+          <Event><System><Opcode>36</Opcode><TimeCreated SystemTime="2026-10-26T10:00:03Z"/></System><EventData><Data Name="NewThreadId">100</Data><Data Name="OldThreadId">999</Data></EventData><RenderingInfo><EventName>Thread</EventName><Opcode>CSwitch</Opcode></RenderingInfo></Event>
+          <Event><System><Opcode>36</Opcode><TimeCreated SystemTime="2026-10-26T10:00:04Z"/></System><EventData><Data Name="NewThreadId">999</Data><Data Name="OldThreadId">100</Data></EventData><RenderingInfo><EventName>Thread</EventName><Opcode>CSwitch</Opcode></RenderingInfo></Event>
+        </Events>
+        """);
+    EtwAnalysisResult windowsEtw = await EtwTraceAnalyzer.ParseXmlAsync(windowsEtwXml, root,
+        "windows-tracerpt", executable, 42,
+        DateTimeOffset.Parse("2026-10-26T10:00:00Z", CultureInfo.InvariantCulture),
+        DateTimeOffset.Parse("2026-10-26T10:00:05Z", CultureInfo.InvariantCulture), CancellationToken.None);
+    Check(windowsEtw.CpuSamples == 1 && windowsEtw.ReadyEvents == 1 && windowsEtw.ContextSwitchesIn == 1,
+        "Realistic tracerpt PerfInfo/Thread opcodes were not attributed to target PID/TID.");
+    using (JsonDocument windowsSummary = JsonDocument.Parse(await File.ReadAllTextAsync(windowsEtw.Summary)))
+    {
+        Check(windowsSummary.RootElement.GetProperty("readyLatencySumMilliseconds").GetDouble() == 500
+              && windowsSummary.RootElement.GetProperty("scheduledRunningMilliseconds").GetDouble() == 1000,
+            "Realistic tracerpt ReadyThread/CSwitch timing regression.");
+    }
+
     FakeTracerptProcess converter = new(etwXml);
     EtwAnalysisResult converted = await new EtwTraceAnalyzer(converter).AnalyzeAsync("fixture.etl", root,
         "converted", executable, 42,

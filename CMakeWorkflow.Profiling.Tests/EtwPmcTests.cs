@@ -108,6 +108,28 @@ internal static class EtwPmcTests
             "out-of-order thread evidence cannot produce estimates");
         _ = await ParseAsync(events);
 
+        // Real tracerpt uses the shared MSNT_SystemTrace provider GUID and
+        // exposes the specific classic event GUID in ExtendedTracingInfo.
+        XElement RealEvent(string eventGuid, int opcode, int seconds, params (string Name, int Value)[] payload) =>
+            new("Event",
+                new XElement("System",
+                    new XElement("Provider", new XAttribute("Guid", "{9e814aad-3204-11d2-9a82-006008a86939}")),
+                    new XElement("Opcode", opcode),
+                    new XElement("TimeCreated", new XAttribute("SystemTime", epoch.AddSeconds(seconds).ToString("O")))),
+                new XElement("EventData", payload.Select(d => new XElement("Data", new XAttribute("Name", d.Name), d.Value))),
+                new XElement("ExtendedTracingInfo", new XElement("EventGuid", "{" + eventGuid + "}")));
+        JsonObject realTrace = await ParseAsync([
+            RealEvent(perf, 73, 0, ("SampleSource", 19), ("NewInterval", 65536)),
+            RealEvent(thread, 3, 1, ("ProcessId", 42), ("TThreadId", 101)),
+            RealEvent(perf, 47, 2, ("ProfileSource", 19), ("ThreadId", 101))
+        ]);
+        JsonObject realCycles = realTrace["counters"]!.AsArray()
+            .Single(n => n!["name"]!.GetValue<string>() == "TotalCycles")!.AsObject();
+        Check(realCycles["samples"]!.GetValue<long>() == 1
+              && realCycles["estimatedEvents"]!.GetValue<double>() == 65536,
+            "Real tracerpt ExtendedTracingInfo.EventGuid PMC attribution failed.");
+        _ = await ParseAsync(events);
+
         await new ProfileSession(directory, request.CaptureId).CompleteAsync(result with
         {
             TargetStartedAt = epoch.AddSeconds(1),

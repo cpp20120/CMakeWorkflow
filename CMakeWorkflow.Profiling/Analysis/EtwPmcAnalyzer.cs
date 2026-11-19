@@ -70,7 +70,11 @@ internal static class EtwPmcAnalyzer
             }
             XElement record = (XElement)await XNode.ReadFromAsync(reader, ct);
             XElement? system = Child(record, "System");
-            string? provider = Child(system, "Provider")?.Attribute("Guid")?.Value.Trim('{', '}');
+            // Real tracerpt exports use MSNT_SystemTrace for System.Provider.Guid,
+            // while ExtendedTracingInfo.EventGuid identifies classic kernel events.
+            // Keep the Provider fallback for traces/fixtures without ExtendedTracingInfo.
+            string? provider = Child(Child(record, "ExtendedTracingInfo"), "EventGuid")?.Value.Trim().Trim('{', '}')
+                ?? Child(system, "Provider")?.Attribute("Guid")?.Value.Trim('{', '}');
             string? opcode = Child(system, "Opcode")?.Value;
             string? stamp = Child(system, "TimeCreated")?.Attribute("SystemTime")?.Value;
             if (!DateTimeOffset.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset time))

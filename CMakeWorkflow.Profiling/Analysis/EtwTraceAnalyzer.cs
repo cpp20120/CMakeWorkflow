@@ -136,7 +136,8 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
 
                 bool isCpuSample = normalizedName is "sampledprofile" or "sampleprofile" || (normalizedName == "perfinfo" && (systemOpcode == "46" || opcode.Equals("SampleProf", StringComparison.OrdinalIgnoreCase)));
                 bool isReadyThread = normalizedName is "readythread" or "threadready" || (normalizedName == "thread" && (systemOpcode == "50" || opcode.Equals("ReadyThread", StringComparison.OrdinalIgnoreCase)));
-
+                bool isContextSwitch = normalizedName is "cswitch" or "contextswitch"
+                    || (normalizedName == "thread" && (systemOpcode == "36" || opcode.Equals("CSwitch", StringComparison.OrdinalIgnoreCase)));
 
                 int? payloadPid = Value(data, "ProcessId", "ProcessID", "PID");
                 int? payloadTid = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
@@ -148,7 +149,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     imageName = data.GetValueOrDefault("ImageFileName");
                 }
 
-                if (normalizedName == "thread")
+                if (normalizedName == "thread" && !isReadyThread && !isContextSwitch)
                 {
                     if (payloadTid is { } tid && payloadPid is { } pid)
                     {
@@ -182,7 +183,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                                           threadProcess.GetValueOrDefault(knownTid) == targetPid)
                                       || (payloadTid is { } payloadThread &&
                                           threadProcess.GetValueOrDefault(payloadThread) == targetPid);
-                if (normalizedName is "sampledprofile" or "sampleprofile")
+                if (isCpuSample)
                 {
                     if (!belongsToTarget)
                     {
@@ -232,7 +233,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                     };
                     await sampleWriter.WriteLineAsync(sample.ToJsonString().AsMemory(), ct);
                 }
-                else if (normalizedName is "cswitch" or "contextswitch")
+                else if (isContextSwitch)
                 {
                     int? next = Value(data, "NewThreadId", "NewThreadID");
                     int? previous = Value(data, "OldThreadId", "OldThreadID");
@@ -267,7 +268,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
                         }
                     }
                 }
-                else if (normalizedName is "readythread" or "threadready")
+                else if (isReadyThread)
                 {
                     int? ready = Value(data, "TThreadId", "ThreadId", "ThreadID", "TID");
                     if (ready is { } readyTid && threadProcess.GetValueOrDefault(readyTid) == targetPid)
