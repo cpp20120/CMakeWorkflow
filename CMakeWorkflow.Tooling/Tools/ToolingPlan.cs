@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.Tooling.Tools;
 
@@ -15,4 +16,8 @@ string[] Profiles
 
 List<ToolStatus> Tools,
 
-List<ToolingStep> Steps);
+List<ToolingStep> Steps)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ToolResolutionPolicy? ResolutionPolicy { get; init; }
+}

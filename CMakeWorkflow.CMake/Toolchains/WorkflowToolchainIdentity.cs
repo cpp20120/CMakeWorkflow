@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CMakeWorkflow.CMake.Toolchains;
 
 public sealed record WorkflowToolchainIdentity(
@@ -8,4 +10,8 @@ public sealed record WorkflowToolchainIdentity(
     string? Sdk,
     string? EnvironmentProfileId,
     string Generator,
-    string Fingerprint);
+    string Fingerprint)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LinuxToolchainIdentity? Linux { get; init; }
+}

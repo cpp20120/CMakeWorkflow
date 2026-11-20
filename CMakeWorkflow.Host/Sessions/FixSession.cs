@@ -23,7 +23,9 @@ public sealed partial class DoctorSession
         RequireWorkspace();
         if (request.VisualStudio is not null)
         {
-            return await PlanVisualStudioFixAsync(request, cancellationToken);
+            return request.ResolutionPolicy is null
+                ? await PlanVisualStudioFixAsync(request, cancellationToken)
+                : throw new ArgumentException("Linux managed tooling cannot be combined with Visual Studio setup.");
         }
 
         ValidateProfiles(request.Profiles, request.InstallDirectory);
@@ -42,7 +44,7 @@ public sealed partial class DoctorSession
         {
             pendingFix = null;
             ToolingPlan plan = await createTooling(workspace!).PlanAsync(request.Profiles, request.PackageManager,
-                request.AllowFallback, request.InstallDirectory, lifetime.Token);
+                request.AllowFallback, request.InstallDirectory, lifetime.Token, resolutionPolicy: request.ResolutionPolicy);
             DateTimeOffset expires = (timeProvider ?? TimeProvider.System).GetUtcNow().AddMinutes(10);
             string id = Guid.NewGuid().ToString("N");
             pendingFix = new(id, expires, request with { Profiles = [.. request.Profiles] }, Snapshot(plan),
@@ -135,7 +137,8 @@ public sealed partial class DoctorSession
                     {
                         ToolingService service = createTooling(workspace!);
                         ToolingPlan current = await service.PlanAsync(saved.Request.Profiles, saved.Request.PackageManager,
-                            saved.Request.AllowFallback, saved.Request.InstallDirectory, lifetime.Token);
+                            saved.Request.AllowFallback, saved.Request.InstallDirectory, lifetime.Token,
+                            resolutionPolicy: saved.Request.ResolutionPolicy);
                         if (Snapshot(current) != saved.Snapshot)
                         {
                             result = new(1, "plan_changed", null, current,
@@ -173,14 +176,15 @@ public sealed partial class DoctorSession
                             {
                                 verification = await service.PlanAsync(saved.Request.Profiles,
                                     saved.Request.PackageManager,
-                                    saved.Request.AllowFallback, saved.Request.InstallDirectory, verifyTimeout.Token);
+                                    saved.Request.AllowFallback, saved.Request.InstallDirectory, verifyTimeout.Token,
+                                    resolutionPolicy: saved.Request.ResolutionPolicy);
                             }
                             catch (Exception error) when (error is not OutOfMemoryException)
                             {
                                 diagnostics.Add("Post-install verification unavailable: " + error.Message);
                             }
 
-                            if (verification is { Ready: true })
+                            if (verification is { Ready: true, ResolutionPolicy: null })
                             {
                                 diagnostics.Add("Tools are available to Doctor. Use installation directory '" +
                                                 verification.InstallDirectory

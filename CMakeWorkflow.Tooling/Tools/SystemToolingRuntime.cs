@@ -17,6 +17,7 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
 
     public string? Resolve(string command, string installDirectory)
     {
+        ArgumentNullException.ThrowIfNull(installDirectory);
         string[] suffixes = Platform == ToolPlatform.Windows
             ? ["", ".exe", ".cmd", ".bat"]
             : [""];
@@ -24,6 +25,11 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
         foreach (string? directory in directories)
         {
+            if (installDirectory.Length == 0 && !Path.IsPathFullyQualified(directory))
+            {
+                continue;
+            }
+
             foreach (string? suffix in suffixes)
             {
                 try
@@ -44,7 +50,11 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
     }
 
     public async Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
-        TimeSpan timeout, CancellationToken ct)
+        TimeSpan timeout, CancellationToken ct) =>
+        await RunAsync(executable, arguments, timeout, null, ct);
+
+    internal async Task<ToolCommandResult> RunAsync(string executable, IReadOnlyList<string> arguments,
+        TimeSpan timeout, IReadOnlyDictionary<string, string>? isolatedEnvironment, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         ProcessStartInfo start = new(executable)
@@ -54,6 +64,15 @@ public sealed class SystemToolingRuntime(string? workingDirectory = null) : IToo
             RedirectStandardError = true,
             WorkingDirectory = workingDirectory ?? ""
         };
+        if (isolatedEnvironment is not null)
+        {
+            start.Environment.Clear();
+            foreach ((string key, string value) in isolatedEnvironment)
+            {
+                start.Environment[key] = value;
+            }
+        }
+
         foreach (string argument in arguments)
         {
             start.ArgumentList.Add(argument);

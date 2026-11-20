@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CMakeWorkflow.Tooling.Tools;
 using CMakeWorkflow.Tooling.VisualStudio;
 
@@ -13,4 +14,8 @@ string[] Profiles
     PackageManagerKind PackageManager = PackageManagerKind.Auto,
     bool AllowFallback = true,
     string? RunDirectory = null,
-    VisualStudioSetupRequest? VisualStudio = null);
+    VisualStudioSetupRequest? VisualStudio = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ToolResolutionPolicy? ResolutionPolicy { get; init; }
+}

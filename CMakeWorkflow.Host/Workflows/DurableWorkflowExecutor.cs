@@ -70,7 +70,7 @@ public static class DurableWorkflowExecutor
         }
 
         IReadOnlyDictionary<string, WorkflowToolchainRuntime> toolchains = await WorkflowToolchainAdmission.ResolveAsync(plan,
-            new WindowsWorkflowToolchainProvider(), cancellationToken);
+            new WorkflowToolchainProvider(), cancellationToken);
         foreach ((string? tree, WorkflowToolchainRuntime? selected) in toolchains)
         {
             WorkflowToolchainAdmission.ValidateBuildTree(tree, selected);
@@ -173,7 +173,7 @@ public static class DurableWorkflowExecutor
         }
 
         IReadOnlyDictionary<string, WorkflowToolchainRuntime> toolchains = await WorkflowToolchainAdmission.ResolveAsync(plan,
-            new WindowsWorkflowToolchainProvider(), cancellationToken);
+            new WorkflowToolchainProvider(), cancellationToken);
         foreach ((string? tree, WorkflowToolchainRuntime? selected) in toolchains)
         {
             WorkflowToolchainAdmission.ValidateBuildTree(tree, selected);

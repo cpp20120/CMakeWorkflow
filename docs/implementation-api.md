@@ -26,14 +26,14 @@ Release assembly metadata.
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
 | [CMakeWorkflow.Core](#cmakeworkflowcore) | 5 | 4 |
-| [CMakeWorkflow.CMake](#cmakeworkflowcmake) | 58 | 133 |
-| [CMakeWorkflow.Host](#cmakeworkflowhost) | 100 | 168 |
+| [CMakeWorkflow.CMake](#cmakeworkflowcmake) | 60 | 138 |
+| [CMakeWorkflow.Host](#cmakeworkflowhost) | 101 | 171 |
 | [CMakeWorkflow.Profiling](#cmakeworkflowprofiling) | 28 | 39 |
 | [CMakeWorkflow.History](#cmakeworkflowhistory) | 17 | 12 |
-| [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 47 | 61 |
+| [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 50 | 72 |
 | [CMakeWorkflow.Campaigns](#cmakeworkflowcampaigns) | 14 | 45 |
 | [CMakeWorkflow](#cmakeworkflow) | 0 | 0 |
-| **Total** | **269** | **462** |
+| **Total** | **275** | **481** |
 
 ## CMakeWorkflow.Core
 
@@ -803,6 +803,22 @@ public sealed class MissingWorkflowToolException(string executable, System.Excep
 }
 ```
 
+#### `LinuxToolchainIdentity`
+
+Source: [CMakeWorkflow.CMake/Toolchains/LinuxToolchainIdentity.cs](../CMakeWorkflow.CMake/Toolchains/LinuxToolchainIdentity.cs)
+
+```csharp
+public sealed record LinuxToolchainIdentity(CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection CMake, CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection CTest, CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection Ninja, string CCompiler, string CCompilerSha256, string CxxCompilerSha256, string TargetTriple);
+```
+
+#### `WorkflowToolSelection`
+
+Source: [CMakeWorkflow.CMake/Toolchains/WorkflowToolSelection.cs](../CMakeWorkflow.CMake/Toolchains/WorkflowToolSelection.cs)
+
+```csharp
+public sealed record WorkflowToolSelection(string Origin, string? Version, string? ArtifactSha256, string BinarySha256);
+```
+
 #### `WorkflowToolchainAdmission`
 
 Source: [CMakeWorkflow.CMake/Toolchains/WorkflowToolchainAdmission.cs](../CMakeWorkflow.CMake/Toolchains/WorkflowToolchainAdmission.cs#L9)
@@ -813,7 +829,7 @@ public static class WorkflowToolchainAdmission
     public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime>> ResolveAsync(CMakeWorkflow.CMake.Planning.WorkflowPlan plan, CMakeWorkflow.CMake.Toolchains.IWorkflowToolchainProvider? provider, System.Threading.CancellationToken ct);
     public static System.Collections.Generic.List<CMakeWorkflow.CMake.Toolchains.WorkflowToolchainIdentity> Identities(System.Collections.Generic.IReadOnlyDictionary<string, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime> selected);
     public static void RequireSameIdentity(System.Collections.Generic.IReadOnlyList<CMakeWorkflow.CMake.Toolchains.WorkflowToolchainIdentity> recorded, System.Collections.Generic.IReadOnlyDictionary<string, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime> selected);
-    public static void ValidateBuildTree(string buildDirectory, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime selected);
+    public static void ValidateBuildTree(string buildDirectory, CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime? selected);
 }
 ```
 
@@ -822,7 +838,10 @@ public static class WorkflowToolchainAdmission
 Source: [CMakeWorkflow.CMake/Toolchains/WorkflowToolchainIdentity.cs](../CMakeWorkflow.CMake/Toolchains/WorkflowToolchainIdentity.cs#L5)
 
 ```csharp
-public sealed record WorkflowToolchainIdentity(string BuildDirectory, string CMake, string? Ninja, string Compiler, string? Sdk, string? EnvironmentProfileId, string Generator, string Fingerprint);
+public sealed record WorkflowToolchainIdentity(string BuildDirectory, string CMake, string? Ninja, string Compiler, string? Sdk, string? EnvironmentProfileId, string Generator, string Fingerprint)
+{
+    public CMakeWorkflow.CMake.Toolchains.LinuxToolchainIdentity? Linux { get; init; }
+}
 ```
 
 #### `WorkflowToolchainRuntime`
@@ -830,7 +849,13 @@ public sealed record WorkflowToolchainIdentity(string BuildDirectory, string CMa
 Source: [CMakeWorkflow.CMake/Toolchains/WorkflowToolchainRuntime.cs](../CMakeWorkflow.CMake/Toolchains/WorkflowToolchainRuntime.cs#L6)
 
 ```csharp
-public sealed record WorkflowToolchainRuntime(string CMake, string? Ninja, string Compiler, string? Sdk, string? EnvironmentProfileId, string Generator, string Fingerprint, System.Collections.Generic.IReadOnlyDictionary<string, string> Variables);
+public sealed record WorkflowToolchainRuntime(string CMake, string? Ninja, string Compiler, string? Sdk, string? EnvironmentProfileId, string Generator, string Fingerprint, System.Collections.Generic.IReadOnlyDictionary<string, string> Variables)
+{
+    public CMakeWorkflow.CMake.Toolchains.LinuxToolchainIdentity? Linux { get; init; }
+    public string? CCompiler { get; init; }
+    public string? CTest { get; init; }
+    public bool RequireConfiguredFingerprint { get; init; }
+}
 ```
 
 ### Namespace `CMakeWorkflow.CMake`
@@ -1216,7 +1241,10 @@ public sealed record DoctorProgress(string OperationId, int Sequence, string Sta
 Source: [CMakeWorkflow.Host/Provisioning/DoctorRequest.cs](../CMakeWorkflow.Host/Provisioning/DoctorRequest.cs#L5)
 
 ```csharp
-public sealed record DoctorRequest(string OperationId, string[] Profiles, string? InstallDirectory);
+public sealed record DoctorRequest(string OperationId, string[] Profiles, string? InstallDirectory)
+{
+    public CMakeWorkflow.Tooling.Tools.ToolResolutionPolicy? ResolutionPolicy { get; init; }
+}
 ```
 
 #### `EnvironmentApplyRequest`
@@ -1276,7 +1304,10 @@ public sealed record FixResult(int SchemaVersion, string Status, CMakeWorkflow.T
 Source: [CMakeWorkflow.Host/Provisioning/PlanFixRequest.cs](../CMakeWorkflow.Host/Provisioning/PlanFixRequest.cs#L7)
 
 ```csharp
-public sealed record PlanFixRequest(string[] Profiles, string? InstallDirectory, CMakeWorkflow.Tooling.Tools.PackageManagerKind PackageManager = Auto, bool AllowFallback = true, string? RunDirectory = null);
+public sealed record PlanFixRequest(string[] Profiles, string? InstallDirectory, CMakeWorkflow.Tooling.Tools.PackageManagerKind PackageManager = Auto, bool AllowFallback = true, string? RunDirectory = null, CMakeWorkflow.Tooling.VisualStudio.VisualStudioSetupRequest? VisualStudio = null)
+{
+    public CMakeWorkflow.Tooling.Tools.ToolResolutionPolicy? ResolutionPolicy { get; init; }
+}
 ```
 
 ### Namespace `CMakeWorkflow.Host.Recipes`
@@ -1455,6 +1486,17 @@ Source: [CMakeWorkflow.Host/Toolchains/ToolchainResolveRequest.cs](../CMakeWorkf
 
 ```csharp
 public sealed record ToolchainResolveRequest(CMakeWorkflow.Tooling.Toolchains.ToolchainSelection Selection);
+```
+
+#### `WorkflowToolchainProvider`
+
+Source: [CMakeWorkflow.Host/Toolchains/WorkflowToolchainProvider.cs](../CMakeWorkflow.Host/Toolchains/WorkflowToolchainProvider.cs)
+
+```csharp
+public sealed class WorkflowToolchainProvider : CMakeWorkflow.CMake.Toolchains.IWorkflowToolchainProvider
+{
+    public System.Threading.Tasks.Task<CMakeWorkflow.CMake.Toolchains.WorkflowToolchainRuntime> ResolveAsync(CMakeWorkflow.Contracts.Workflows.WorkflowToolchainBinding binding, System.Threading.CancellationToken ct);
+}
 ```
 
 #### `WindowsWorkflowToolchainProvider`
@@ -2657,6 +2699,7 @@ Source: [CMakeWorkflow.Tooling/ToolingCommand.cs](../CMakeWorkflow.Tooling/Tooli
 public static class ToolingCommand
 {
     public static System.Threading.Tasks.Task<int> ExecuteAsync(string[] args, System.Threading.CancellationToken ct);
+    public static CMakeWorkflow.Tooling.Tools.ToolResolutionPolicy ParsePolicy(string value);
 }
 ```
 
@@ -2857,6 +2900,14 @@ Source: [CMakeWorkflow.Tooling/Tools/ToolDefinition.cs](../CMakeWorkflow.Tooling
 public sealed record ToolDefinition(string Id, string DisplayName, string[] Commands, string[] ProbeArguments, System.Version? MinimumVersion, System.Collections.Generic.IReadOnlyDictionary<CMakeWorkflow.Tooling.Tools.PackageManagerKind, string[]> Packages, bool StandaloneCMake = false, string? ManualHint = null);
 ```
 
+#### `ManagedToolRelease`
+
+Source: [CMakeWorkflow.Tooling/Tools/ManagedToolRelease.cs](../CMakeWorkflow.Tooling/Tools/ManagedToolRelease.cs)
+
+```csharp
+public sealed record ManagedToolRelease(string Id, string Version, string Platform, string Source, string Sha256, string TreeSha256, string? TarRoot);
+```
+
 #### `ToolPlatform`
 
 Source: [CMakeWorkflow.Tooling/Tools/ToolPlatform.cs](../CMakeWorkflow.Tooling/Tools/ToolPlatform.cs#L5)
@@ -2878,12 +2929,31 @@ Source: [CMakeWorkflow.Tooling/Tools/ToolProfile.cs](../CMakeWorkflow.Tooling/To
 public sealed record ToolProfile(string Id, string Description, string[] Tools);
 ```
 
+#### `ToolResolutionPolicy`
+
+Source: [CMakeWorkflow.Tooling/Tools/ToolResolutionPolicy.cs](../CMakeWorkflow.Tooling/Tools/ToolResolutionPolicy.cs)
+
+```csharp
+public enum ToolResolutionPolicy
+{
+    AllowSystem = 0,
+    ManagedOnly = 1,
+}
+```
+
 #### `ToolStatus`
 
 Source: [CMakeWorkflow.Tooling/Tools/ToolStatus.cs](../CMakeWorkflow.Tooling/Tools/ToolStatus.cs#L5)
 
 ```csharp
-public sealed record ToolStatus(string Id, string DisplayName, bool Installed, string? Command, string? Version, string? MinimumVersion, string? Diagnostic);
+public sealed record ToolStatus(string Id, string DisplayName, bool Installed, string? Command, string? Version, string? MinimumVersion, string? Diagnostic)
+{
+    public string? Resolution { get; init; }
+    public string? Origin { get; init; }
+    public string? Sha256 { get; init; }
+    public string? SystemResolution { get; init; }
+    public string? SystemVersion { get; init; }
+}
 ```
 
 #### `ToolingExecutionProgress`
@@ -2909,7 +2979,21 @@ public class ToolingJson : System.Text.Json.Serialization.JsonSerializerContext
 Source: [CMakeWorkflow.Tooling/Tools/ToolingPlan.cs](../CMakeWorkflow.Tooling/Tools/ToolingPlan.cs#L6)
 
 ```csharp
-public sealed record ToolingPlan(int SchemaVersion, CMakeWorkflow.Tooling.Tools.ToolPlatform Platform, string[] Profiles, string InstallDirectory, CMakeWorkflow.Tooling.Tools.PackageManagerKind PackageManager, bool Ready, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolStatus> Tools, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolingStep> Steps);
+public sealed record ToolingPlan(int SchemaVersion, CMakeWorkflow.Tooling.Tools.ToolPlatform Platform, string[] Profiles, string InstallDirectory, CMakeWorkflow.Tooling.Tools.PackageManagerKind PackageManager, bool Ready, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolStatus> Tools, System.Collections.Generic.List<CMakeWorkflow.Tooling.Tools.ToolingStep> Steps)
+{
+    public CMakeWorkflow.Tooling.Tools.ToolResolutionPolicy? ResolutionPolicy { get; init; }
+}
+```
+
+#### `ToolingPlanApproval`
+
+Source: [CMakeWorkflow.Tooling/Tools/ToolingPlanApproval.cs](../CMakeWorkflow.Tooling/Tools/ToolingPlanApproval.cs)
+
+```csharp
+public static class ToolingPlanApproval
+{
+    public static string Compute(CMakeWorkflow.Tooling.Tools.ToolingPlan plan);
+}
 ```
 
 #### `ToolingProfileList`
@@ -2943,7 +3027,7 @@ Source: [CMakeWorkflow.Tooling/Tools/ToolingService.cs](../CMakeWorkflow.Tooling
 ```csharp
 public sealed class ToolingService(CMakeWorkflow.Tooling.Tools.IToolingRuntime runtime, CMakeWorkflow.Tooling.Tools.ICMakeInstaller installer)
 {
-    public System.Threading.Tasks.Task<CMakeWorkflow.Tooling.Tools.ToolingPlan> PlanAsync(System.Collections.Generic.IReadOnlyList<string> requestedProfiles, CMakeWorkflow.Tooling.Tools.PackageManagerKind requestedManager, bool allowFallback, string? installDirectory, System.Threading.CancellationToken ct, System.Func<CMakeWorkflow.Tooling.Tools.ToolStatus, System.Threading.Tasks.Task>? onTool = null);
+    public System.Threading.Tasks.Task<CMakeWorkflow.Tooling.Tools.ToolingPlan> PlanAsync(System.Collections.Generic.IReadOnlyList<string> requestedProfiles, CMakeWorkflow.Tooling.Tools.PackageManagerKind requestedManager, bool allowFallback, string? installDirectory, System.Threading.CancellationToken ct, System.Func<CMakeWorkflow.Tooling.Tools.ToolStatus, System.Threading.Tasks.Task>? onTool = null, CMakeWorkflow.Tooling.Tools.ToolResolutionPolicy? resolutionPolicy = null);
     public System.Threading.Tasks.Task<CMakeWorkflow.Tooling.Tools.ToolingResult> ExecuteAsync(CMakeWorkflow.Tooling.Tools.ToolingPlan plan, System.Threading.CancellationToken ct, System.Func<CMakeWorkflow.Tooling.Tools.ToolingExecutionProgress, System.Threading.Tasks.Task>? onProgress = null);
     public static System.Version? ExtractVersion(string text);
     public CMakeWorkflow.Tooling.Tools.PackageManagerKind DetectAutoManager(string directory);
@@ -2956,7 +3040,10 @@ public sealed class ToolingService(CMakeWorkflow.Tooling.Tools.IToolingRuntime r
 Source: [CMakeWorkflow.Tooling/Tools/ToolingStep.cs](../CMakeWorkflow.Tooling/Tools/ToolingStep.cs#L5)
 
 ```csharp
-public sealed record ToolingStep(string Tool, string Method, string? Executable, string[] Arguments, string? Source, string? Diagnostic);
+public sealed record ToolingStep(string Tool, string Method, string? Executable, string[] Arguments, string? Source, string? Diagnostic)
+{
+    public CMakeWorkflow.Tooling.Tools.ManagedToolRelease? Release { get; init; }
+}
 ```
 
 #### `VerifiedCMakeInstaller`

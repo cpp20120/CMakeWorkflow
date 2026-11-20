@@ -76,6 +76,32 @@ internal static class FixTests
         plan = await session.PlanFixAsync(request, default);
         clock.Now = clock.Now.AddMinutes(11);
         await Reject(() => session.ApplyFixAsync(new("expired", plan.PlanId), default));
+        if (OperatingSystem.IsLinux() &&
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64)
+        {
+            string? previous = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_TOOL_STORE");
+            Environment.SetEnvironmentVariable("CMAKEWORKFLOW_TOOL_STORE", Path.Combine(root, "managed-store"));
+            try
+            {
+                PlanFixRequest managed = new(["ninja"], null, PackageManagerKind.None)
+                {
+                    ResolutionPolicy = ToolResolutionPolicy.ManagedOnly
+                };
+                FixPlan managedPlan = await session.PlanFixAsync(managed, default);
+                Check(managedPlan.Plan?.ResolutionPolicy == ToolResolutionPolicy.ManagedOnly &&
+                      managedPlan.Plan.Steps.All(step => step.Release is { Id: "ninja", Version: "1.13.1" }),
+                    "Managed Fix approval did not contain pinned release data.");
+                clock.Now = clock.Now.AddMinutes(11);
+                await Reject(() => session.ApplyFixAsync(new("managed-expired", managedPlan.PlanId), default));
+                await Reject(() => session.PlanFixAsync(managed with { PackageManager = PackageManagerKind.Apt }, default));
+                Check(installer.Calls == 1, "Managed Fix reached the package or legacy installer path.");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("CMAKEWORKFLOW_TOOL_STORE", previous);
+            }
+        }
+
         FixPlan older = await session.PlanFixAsync(request, default);
         _ = await session.PlanFixAsync(request, default);
         await Reject(() => session.ApplyFixAsync(new("superseded", older.PlanId), default));

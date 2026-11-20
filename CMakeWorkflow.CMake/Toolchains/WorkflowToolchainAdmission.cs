@@ -6,6 +6,8 @@ namespace CMakeWorkflow.CMake.Toolchains;
 
 public static class WorkflowToolchainAdmission
 {
+    internal const string FingerprintProperty = "CMAKEWORKFLOW_TOOLCHAIN_FINGERPRINT";
+
     public static async Task<IReadOnlyDictionary<string, WorkflowToolchainRuntime>> ResolveAsync(
         WorkflowPlan plan, IWorkflowToolchainProvider? provider, CancellationToken ct)
     {
@@ -55,7 +57,10 @@ public static class WorkflowToolchainAdmission
         [.. selected.OrderBy(p => p.Key, WorkflowPlanner.PathComparer).Select(pair =>
             new WorkflowToolchainIdentity(pair.Key, pair.Value.CMake, pair.Value.Ninja,
                 pair.Value.Compiler, pair.Value.Sdk, pair.Value.EnvironmentProfileId,
-                pair.Value.Generator, pair.Value.Fingerprint))];
+                pair.Value.Generator, pair.Value.Fingerprint)
+            {
+                Linux = pair.Value.Linux
+            })];
 
     public static void RequireSameIdentity(IReadOnlyList<WorkflowToolchainIdentity> recorded,
         IReadOnlyDictionary<string, WorkflowToolchainRuntime> selected)
@@ -71,9 +76,8 @@ public static class WorkflowToolchainAdmission
 
     // An existing configured CMake tree cannot be silently rebound to a different compiler,
     // generator or Ninja executable, including when somebody edited the tree after preflight.
-    public static void ValidateBuildTree(string buildDirectory, WorkflowToolchainRuntime selected)
+    public static void ValidateBuildTree(string buildDirectory, WorkflowToolchainRuntime? selected)
     {
-        ArgumentNullException.ThrowIfNull(selected);
         string cache = Path.Combine(buildDirectory, "CMakeCache.txt");
         if (!File.Exists(cache))
         {
@@ -96,6 +100,22 @@ public static class WorkflowToolchainAdmission
             }
         }
 
+        if (properties.TryGetValue(FingerprintProperty, out string? fingerprint) || selected?.RequireConfiguredFingerprint == true)
+        {
+            if (selected?.RequireConfiguredFingerprint != true || fingerprint != selected.Fingerprint ||
+                !properties.TryGetValue("CMAKE_COMMAND", out string? cmake) ||
+                !WorkflowPlanner.PathComparer.Equals(cmake, selected.CMake))
+            {
+                throw new InvalidOperationException(
+                    "Configured CMake tree has a different toolchain identity. Use the original binding or a new build tree.");
+            }
+        }
+
+        if (selected is null)
+        {
+            return;
+        }
+
         if (properties.TryGetValue("CMAKE_GENERATOR", out string? generator) && generator != selected.Generator)
         {
             throw new InvalidOperationException("Configured generator differs from selected toolchain.");
@@ -108,6 +128,13 @@ public static class WorkflowToolchainAdmission
         {
             throw new InvalidOperationException(
                 "CMake cache compiler differs from selected toolchain; use a new build tree.");
+        }
+
+        if (selected.CCompiler is not null &&
+            properties.TryGetValue("CMAKE_C_COMPILER", out string? cc) && !EqualPath(cc, selected.CCompiler))
+        {
+            throw new InvalidOperationException(
+                "CMake cache C compiler differs from selected toolchain; use a new build tree.");
         }
 
         if (selected.Ninja is not null && properties.TryGetValue("CMAKE_MAKE_PROGRAM", out string? ninja)

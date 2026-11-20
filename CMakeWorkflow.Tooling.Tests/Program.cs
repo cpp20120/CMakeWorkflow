@@ -454,6 +454,11 @@ try
         }
     }
 
+    if (OperatingSystem.IsLinux())
+    {
+        await ManagedToolTests.RunAsync(root);
+    }
+
     Console.WriteLine("Tooling checks passed.");
 }
 finally

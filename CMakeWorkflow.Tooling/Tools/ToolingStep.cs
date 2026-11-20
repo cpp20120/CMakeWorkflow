@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 namespace CMakeWorkflow.Tooling.Tools;
 
 public sealed record ToolingStep(
@@ -10,4 +11,8 @@ string[] Arguments
 #pragma warning restore CA1819
 ,
     string? Source,
-    string? Diagnostic);
+    string? Diagnostic)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagedToolRelease? Release { get; init; }
+}

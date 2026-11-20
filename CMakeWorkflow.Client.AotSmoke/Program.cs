@@ -4,6 +4,7 @@ using System.Text.Json;
 using CMakeWorkflow.Client.AotSmoke;
 using StreamJsonRpc;
 using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Client.Provisioning;
 using CMakeWorkflow.Client.Recipes;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.Recipes;
@@ -68,6 +69,22 @@ try
         }
 
         Console.WriteLine($"PASS NativeAOT initialize: Host {hostPid}; workspace={workspace}");
+        if (client.Host.Capabilities.Contains("tooling/linuxManaged", StringComparer.Ordinal))
+        {
+            HostFixPlan reviewed = await client.Provisioning.PlanFixAsync(new(["cmake-ninja"])
+            {
+                ResolutionPolicy = HostToolResolutionPolicy.ManagedOnly
+            }, ct);
+            if (reviewed.Plan is not
+                { ResolutionPolicy: HostToolResolutionPolicy.ManagedOnly, PackageManager: HostPackageManagerKind.None } ||
+                reviewed.Plan.Steps.Any(step => step.Release is null || step.Release.Sha256.Length != 64))
+            {
+                throw new InvalidOperationException("NativeAOT managed tooling wire verification failed.");
+            }
+
+            Console.WriteLine("PASS NativeAOT managed tooling plan");
+        }
+
         if (inFlight)
         {
             await InFlightCancellationSmoke.RunAsync(client, workspace, ct);

@@ -168,6 +168,11 @@ CMakeWorkflow tooling setup --profile native --dry-run --json
 CMakeWorkflow tooling setup --profile native --yes
 ```
 
+On Linux x86-64, `--tool-policy ManagedOnly` and `--tool-policy AllowSystem` select pinned tooling
+provisioning. See store settings, plan approval and workflow activation in
+[Host preparation](../../HOST_PREPARATION.md#pinned-linux-tooling).
+
+
 Package managers: `auto`, `none`, `apt`, `pacman`, `dnf`, `brew`, `winget`. Options include `--no-fallback`,
 `--install-dir`. Install actions are explicit, never implicit within workflow execution.
 See [integrations](integrations.md#tool-provisioning).

@@ -83,7 +83,7 @@ internal static class CMakeWorkflowNodeExecutor
         WorkflowActionCache? actionCache = null;
         try
         {
-            if (toolchain is not null)
+            if (toolchain is not null || (OperatingSystem.IsLinux() && definition.Kind != "inspect"))
             {
                 WorkflowToolchainAdmission.ValidateBuildTree(node.Target.BuildDirectory, toolchain);
             }
@@ -218,7 +218,7 @@ internal static class CMakeWorkflowNodeExecutor
                         result.Arguments = [.. definition.Arguments];
                         break;
                     case "ctest":
-                        result.Executable = result.ObservedContext.CTestExecutable ?? "ctest";
+                        result.Executable = toolchain?.CTest ?? result.ObservedContext.CTestExecutable ?? "ctest";
                         result.Arguments =
                             ["--test-dir", target.BuildDirectory, "--output-on-failure", "--no-tests=error"];
                         if (!string.IsNullOrEmpty(target.Configuration))
@@ -592,6 +592,16 @@ internal static class CMakeWorkflowNodeExecutor
                 "-G", toolchain.Generator,
                 "-DCMAKE_CXX_COMPILER:FILEPATH=" + toolchain.Compiler
             ]);
+            if (toolchain.CCompiler is not null)
+            {
+                result.Arguments.Add("-DCMAKE_C_COMPILER:FILEPATH=" + toolchain.CCompiler);
+            }
+
+            if (toolchain.RequireConfiguredFingerprint)
+            {
+                result.Arguments.Add("-D" + WorkflowToolchainAdmission.FingerprintProperty + ":INTERNAL=" + toolchain.Fingerprint);
+            }
+
             if (toolchain.Ninja is not null)
             {
                 result.Arguments.Add("-DCMAKE_MAKE_PROGRAM:FILEPATH=" + toolchain.Ninja);
@@ -642,6 +652,10 @@ internal static class CMakeWorkflowNodeExecutor
                 // Verify requested selection against the new observation; never silently
                 // replace a requested Debug/Release configuration with the generated one.
                 CMakeInspection.ValidateIdentity(request, result.ObservationAfter);
+                if (toolchain?.RequireConfiguredFingerprint == true)
+                {
+                    WorkflowToolchainAdmission.ValidateBuildTree(request.BuildDirectory, toolchain);
+                }
                 if (compilerCache is not null)
                 {
                     await compilerCache.RequireConfiguredAsync(result.ObservationAfter, ct);
@@ -688,6 +702,11 @@ internal static class CMakeWorkflowNodeExecutor
             "PATH", "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "VCINSTALLDIR",
             "WindowsSdkDir", "WindowsSDKVersion", "VSCMD_ARG_HOST_ARCH", "VSCMD_ARG_TGT_ARCH"
         };
+        if (toolchain.RequireConfiguredFingerprint)
+        {
+            protectedKeys.UnionWith(toolchain.Variables.Keys);
+        }
+
         foreach (KeyValuePair<string, string> entry in overrides)
         {
             if (protectedKeys.Contains(entry.Key) && (!values.TryGetValue(entry.Key, out string? current)

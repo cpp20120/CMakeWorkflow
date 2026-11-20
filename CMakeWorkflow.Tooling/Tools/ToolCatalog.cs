@@ -5,6 +5,25 @@ public static class ToolCatalog
     private static readonly Dictionary<string, ToolDefinition> Tools = BuildTools();
     private static readonly Dictionary<string, ToolProfile> Profiles = BuildProfiles();
 
+    internal static ManagedToolRelease CMakeRelease { get; } = new("cmake", "4.1.2", ManagedToolStore.Platform,
+        "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-x86_64.tar.gz",
+        "773cc679c3a7395413bd096523f8e5d6c39f8718af4e12eb4e4195f72f35e4ab",
+        "e4cfa37816fc2e84fc9f6534beeb72149966085c84240d13c03ae67b438f13e1",
+        "cmake-4.1.2-linux-x86_64");
+
+    internal static ManagedToolRelease NinjaRelease { get; } = new("ninja", "1.13.1", ManagedToolStore.Platform,
+        "https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-linux.zip",
+        "0830252db77884957a1a4b87b05a1e2d9b5f658b8367f82999a941884cbe0238",
+        "5c8e393cce8ef69a21ae3889db04b419abf52801151d78ffd39df9a05dc454b2",
+        null);
+
+    internal static ManagedToolRelease? ManagedRelease(string tool) => tool switch
+    {
+        "cmake" or "ctest" => CMakeRelease,
+        "ninja" => NinjaRelease,
+        _ => null
+    };
+
     public static IReadOnlyList<ToolProfile> AllProfiles => Profiles.Values.OrderBy(x => x.Id,
         StringComparer.Ordinal).ToArray();
 
@@ -60,6 +79,8 @@ public static class ToolCatalog
             ["cmake", "ctest", "cxx", "ninja"]),
         new ToolProfile("cmake", "Configure, build, run and CTest native targets",
             ["cmake", "ctest", "cxx"]),
+        new ToolProfile("cmake-ninja", "CMake, CTest and Ninja without a compiler or SDK",
+            ["cmake", "ctest", "ninja"]),
         new ToolProfile("ninja", "Ninja generator support", ["ninja"]),
         new ToolProfile("profiling", "Native capture backend for this OS",
             ["cmake", "ctest", "cxx", "native-profiler"]),

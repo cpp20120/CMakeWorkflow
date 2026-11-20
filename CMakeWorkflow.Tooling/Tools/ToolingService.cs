@@ -2,16 +2,22 @@ using CMakeWorkflow.Tooling.Toolchains;
 
 namespace CMakeWorkflow.Tooling.Tools;
 
-public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller installer)
+public sealed partial class ToolingService(IToolingRuntime runtime, ICMakeInstaller installer)
 {
     private readonly IToolingRuntime runtime = runtime;
     private readonly ICMakeInstaller installer = installer;
 
     public async Task<ToolingPlan> PlanAsync(IReadOnlyList<string> requestedProfiles,
         PackageManagerKind requestedManager, bool allowFallback,
-        string? installDirectory, CancellationToken ct, Func<ToolStatus, Task>? onTool = null)
+        string? installDirectory, CancellationToken ct, Func<ToolStatus, Task>? onTool = null,
+        ToolResolutionPolicy? resolutionPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(requestedProfiles);
+        if (resolutionPolicy is { } policy)
+        {
+            return await PlanManagedAsync(requestedProfiles, requestedManager, installDirectory, policy, onTool, ct);
+        }
+
 
         string[] profiles = requestedProfiles.Count == 0
                     ? ["cmake"]
@@ -72,6 +78,16 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
         Func<ToolingExecutionProgress, Task>? onProgress = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        if (plan.ResolutionPolicy is { } policy)
+        {
+            return await ExecuteManagedAsync(plan, policy, onProgress, ct);
+        }
+
+        if (plan.Steps.Any(step => step.Release is not null || step.Method == "managed-release"))
+        {
+            throw new InvalidDataException("Managed steps require a managed resolution policy.");
+        }
+
         Task Progress(string tool, string stage, string? message = null) =>
             onProgress?.Invoke(new(tool, stage, message)) ?? Task.CompletedTask;
 
@@ -189,6 +205,8 @@ public sealed class ToolingService(IToolingRuntime runtime, ICMakeInstaller inst
                 ToolCommandResult result = await runtime.RunAsync(resolved, args, TimeSpan.FromSeconds(15), ct);
                 if (result.ExitCode != 0 && command != "cl")
                 {
+                    outdated = new(tool.Id, tool.DisplayName, false, resolved, null, tool.MinimumVersion?.ToString(),
+                        $"Version probe exited with code {result.ExitCode}.");
                     continue;
                 }
 

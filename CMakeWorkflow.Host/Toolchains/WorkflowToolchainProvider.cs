@@ -1,0 +1,158 @@
+using System.Collections.Frozen;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using CMakeWorkflow.CMake.Serialization;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
+using CMakeWorkflow.Tooling.Tools;
+
+namespace CMakeWorkflow.Host.Toolchains;
+
+public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
+{
+    public Task<WorkflowToolchainRuntime> ResolveAsync(WorkflowToolchainBinding binding, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        return binding.EnvironmentProfileId switch
+        {
+            "linux-managed-tools-system-compiler" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
+            "linux-allow-system-tools" => ResolveLinuxAsync(binding, ToolResolutionPolicy.AllowSystem, ct),
+            _ => new WindowsWorkflowToolchainProvider().ResolveAsync(binding, ct)
+        };
+    }
+
+    private static async Task<WorkflowToolchainRuntime> ResolveLinuxAsync(WorkflowToolchainBinding binding,
+        ToolResolutionPolicy policy, CancellationToken ct)
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            throw new PlatformNotSupportedException("The managed tools execution profile requires Linux x86-64.");
+        }
+
+        if (binding.HostArchitecture != "x64" || binding.TargetArchitecture != "x64" ||
+            binding.Generator is not ("Ninja" or "Ninja Multi-Config") ||
+            binding.CompilerCandidateId is not (null or "system") || binding.SdkCandidateId is not null)
+        {
+            throw new InvalidOperationException(
+                "This profile uses native x64 Ninja and the host cc, c++ and SDK. Select this profile only for projects that use that SDK.");
+        }
+
+        SystemToolingRuntime runtime = new();
+        ToolingService tooling = new(runtime, new VerifiedCMakeInstaller());
+        ToolingPlan plan = await tooling.PlanAsync(["cmake-ninja"], PackageManagerKind.None, false, null, ct,
+            resolutionPolicy: policy);
+        if (!plan.Ready)
+        {
+            throw new InvalidOperationException($"CMake, CTest and Ninja are required. Review tooling plan --tool-policy {policy} and apply it explicitly.");
+        }
+
+        ToolStatus cmake = plan.Tools.Single(t => t.Id == "cmake");
+        ToolStatus ctest = plan.Tools.Single(t => t.Id == "ctest");
+        ToolStatus ninja = plan.Tools.Single(t => t.Id == "ninja");
+        if (!MatchesCandidate(binding.CMakeCandidateId, cmake) || !MatchesCandidate(binding.NinjaCandidateId, ninja))
+        {
+            throw new InvalidOperationException("The resolved tool differs from the requested managed release digest.");
+        }
+
+        string cc = runtime.Resolve("cc", "") ?? throw new InvalidOperationException("The execution profile requires an installed cc.");
+        string cxx = runtime.Resolve("c++", "") ?? throw new InvalidOperationException("The execution profile requires an installed c++.");
+        Dictionary<string, string> environment = CreateEnvironment(cmake.Command!, ninja.Command!, cc, cxx, binding.Generator);
+        string triple = await ReadTargetAsync(cxx, environment, ct);
+        if (await ReadTargetAsync(cc, environment, ct) != triple)
+        {
+            throw new InvalidOperationException("The host C and C++ compilers report different target triples.");
+        }
+
+        LinuxToolchainIdentity linux = new(await IdentifyAsync(cmake, ct), await IdentifyAsync(ctest, ct),
+            await IdentifyAsync(ninja, ct), cc, await CommandExecution.Sha256Async(cc, ct),
+            await CommandExecution.Sha256Async(cxx, ct), triple);
+        string fingerprint = Fingerprint(linux, binding, [cmake.Command!, ctest.Command!, ninja.Command!], environment);
+        return new(cmake.Command!, ninja.Command, cxx, null, binding.EnvironmentProfileId, binding.Generator, fingerprint,
+            environment.ToFrozenDictionary(StringComparer.Ordinal))
+        {
+            Linux = linux,
+            CCompiler = cc,
+            CTest = ctest.Command,
+            RequireConfiguredFingerprint = true
+        };
+    }
+
+    private static string Fingerprint(LinuxToolchainIdentity linux, WorkflowToolchainBinding binding,
+        IEnumerable<string> executables, IReadOnlyDictionary<string, string> environment)
+    {
+        using MemoryStream identity = new();
+        using (BinaryWriter writer = new(identity, Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(binding.EnvironmentProfileId!);
+            writer.Write(binding.Generator);
+            writer.Write(JsonSerializer.Serialize(linux, WorkflowJson.Default.LinuxToolchainIdentity));
+            foreach (string path in executables)
+            {
+                writer.Write(path);
+            }
+
+            foreach ((string key, string value) in environment.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                writer.Write(key);
+                writer.Write(value);
+            }
+        }
+
+        return Convert.ToHexStringLower(SHA256.HashData(identity.GetBuffer().AsSpan(0, (int)identity.Length)));
+    }
+
+    private static bool MatchesCandidate(string? candidate, ToolStatus tool) =>
+        candidate is null || (tool.Sha256 is not null && candidate == "sha256:" + tool.Sha256);
+
+    private static async Task<WorkflowToolSelection> IdentifyAsync(ToolStatus tool, CancellationToken ct) =>
+        new(tool.Origin!, tool.Version, tool.Sha256, await CommandExecution.Sha256Async(tool.Command!, ct));
+
+    private static Dictionary<string, string> CreateEnvironment(string cmake, string ninja, string cc, string cxx,
+        string generator)
+    {
+        string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        IEnumerable<string> systemPaths = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(Path.IsPathFullyQualified);
+        string childPath = string.Join(Path.PathSeparator, new[]
+        {
+            Path.GetDirectoryName(cmake)!, Path.GetDirectoryName(ninja)!
+        }.Concat(systemPaths).Distinct(StringComparer.Ordinal));
+        Dictionary<string, string> environment = new(StringComparer.Ordinal)
+        {
+            ["PATH"] = childPath,
+            ["CC"] = cc,
+            ["CXX"] = cxx,
+            ["CMAKE_TOOLCHAIN_FILE"] = "",
+            ["CMAKE_GENERATOR"] = generator,
+            ["CMAKE_GENERATOR_PLATFORM"] = "",
+            ["CMAKE_GENERATOR_TOOLSET"] = "",
+            ["CMAKE_GENERATOR_INSTANCE"] = ""
+        };
+        foreach (string key in new[] { "CFLAGS", "CXXFLAGS", "LDFLAGS", "CMAKE_PREFIX_PATH", "CPATH",
+                     "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "LIBRARY_PATH", "COMPILER_PATH", "GCC_EXEC_PREFIX",
+                     "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT" })
+        {
+            if (Environment.GetEnvironmentVariable(key) is { } value)
+            {
+                environment.Add(key, value);
+            }
+        }
+
+        return environment;
+    }
+
+    private static async Task<string> ReadTargetAsync(string compiler, Dictionary<string, string> environment,
+        CancellationToken ct)
+    {
+        CommandResult result = await CommandExecution.RunAsync(compiler, ["-dumpmachine"], "",
+            TimeSpan.FromSeconds(15), environment.ToDictionary(pair => pair.Key, pair => (string?)pair.Value, StringComparer.Ordinal), ct);
+        string triple = result.Stdout?.Trim() ?? "";
+        return result.ExitCode == 0 && triple.StartsWith("x86_64-", StringComparison.Ordinal) &&
+               triple.Contains("-linux", StringComparison.Ordinal) && triple.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-')
+            ? triple
+            : throw new InvalidOperationException($"The host compiler does not report a native x86-64 Linux target: {compiler}.");
+    }
+}

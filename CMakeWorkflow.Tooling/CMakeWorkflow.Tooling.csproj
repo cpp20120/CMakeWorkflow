@@ -5,4 +5,7 @@
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="CMakeWorkflow.Tooling.Tests"/>
+    </ItemGroup>
 </Project>

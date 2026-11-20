@@ -8,7 +8,8 @@ namespace CMakeWorkflow.Tooling.Tools;
 
 public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeInstaller
 {
-    private readonly HttpClient client = client ?? CreateDownloadClient();
+    private static readonly HttpClient DefaultClient = CreateDownloadClient();
+    private readonly HttpClient client = client ?? DefaultClient;
 
     public async Task InstallAsync(string installDirectory, CancellationToken ct)
     {
@@ -86,40 +87,7 @@ public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeIn
         string staging = Path.Combine(baseDirectory, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            using (HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct))
-            {
-                _ = response.EnsureSuccessStatusCode();
-                await using Stream input = await response.Content.ReadAsStreamAsync(ct);
-                await using FileStream output = new(archive, FileMode.CreateNew,
-                    FileAccess.Write, FileShare.None);
-                byte[] buffer = new byte[131072];
-                long total = 0;
-                while (true)
-                {
-                    int count = await input.ReadAsync(buffer, ct);
-                    if (count == 0)
-                    {
-                        break;
-                    }
-
-                    total += count;
-                    if (total > 512L * 1024 * 1024)
-                    {
-                        throw new InvalidDataException("CMake archive exceeds the 512 MiB limit.");
-                    }
-
-                    await output.WriteAsync(buffer.AsMemory(0, count), ct);
-                }
-            }
-
-            await using (FileStream source = File.OpenRead(archive))
-            {
-                string actual = Convert.ToHexString(await SHA256.HashDataAsync(source, ct));
-                if (!actual.Equals(digest[7..], StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidDataException("CMake release SHA-256 verification failed.");
-                }
-            }
+            await DownloadVerifiedAsync(uri, digest[7..], archive, ct);
 
             _ = Directory.CreateDirectory(staging);
             await using (FileStream source = File.OpenRead(archive))
@@ -180,6 +148,52 @@ public sealed class VerifiedCMakeInstaller(HttpClient? client = null) : ICMakeIn
             {
                 Directory.Delete(staging, recursive: true);
             }
+        }
+    }
+
+    internal async Task DownloadVerifiedAsync(Uri uri, string digest, string archive, CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMinutes(10));
+        CancellationToken ct = deadline.Token;
+        try
+        {
+            using (HttpResponseMessage response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct))
+            {
+                _ = response.EnsureSuccessStatusCode();
+                await using Stream input = await response.Content.ReadAsStreamAsync(ct);
+                await using FileStream output = new(archive, FileMode.CreateNew,
+                    FileAccess.Write, FileShare.None);
+                byte[] buffer = new byte[131072];
+                long total = 0;
+                while (true)
+                {
+                    int count = await input.ReadAsync(buffer, ct);
+                    if (count == 0)
+                    {
+                        break;
+                    }
+
+                    total += count;
+                    if (total > 512L * 1024 * 1024)
+                    {
+                        throw new InvalidDataException("Managed release archive exceeds the 512 MiB limit.");
+                    }
+
+                    await output.WriteAsync(buffer.AsMemory(0, count), ct);
+                }
+            }
+
+            await using FileStream source = File.OpenRead(archive);
+            string actual = Convert.ToHexString(await SHA256.HashDataAsync(source, ct));
+            if (!actual.Equals(digest, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Release SHA-256 verification failed.");
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Timed out downloading release {uri}.");
         }
     }
 

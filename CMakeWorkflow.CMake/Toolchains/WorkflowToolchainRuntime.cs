@@ -9,4 +9,10 @@ public sealed record WorkflowToolchainRuntime(
     string? EnvironmentProfileId,
     string Generator,
     string Fingerprint,
-    IReadOnlyDictionary<string, string> Variables);
+    IReadOnlyDictionary<string, string> Variables)
+{
+    public LinuxToolchainIdentity? Linux { get; init; }
+    public string? CCompiler { get; init; }
+    public string? CTest { get; init; }
+    public bool RequireConfiguredFingerprint { get; init; }
+}

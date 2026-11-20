@@ -293,6 +293,12 @@ A per-user file lock serializes Fix across Host processes, plus an in-process ga
 authoritative. Older direct `tooling setup`
 commands do not participate in the Host lock. Busy attempts do not queue or retry; review a new plan later.
 
+Hosts that advertise `tooling/linuxManaged` accept an optional `resolutionPolicy` on `tooling/doctor` and
+`tooling/planFix`. The values are `AllowSystem` and `ManagedOnly`. The managed plan includes pinned release
+identities and uses the existing connection-bound approval. See
+[Host preparation](../../HOST_PREPARATION.md#pinned-linux-tooling).
+
+
 Linux package installation uses `sudo -n`; Host does not collect passwords or run permanently as root. If authorization
 is unavailable, diagnostics tell you to install the reviewed packages in a terminal and check again. Manual-only tools
 remain explicit failures. Automatic elevation/UAC prompting is not added here.

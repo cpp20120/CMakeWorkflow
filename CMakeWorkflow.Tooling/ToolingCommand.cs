@@ -30,6 +30,8 @@ public static class ToolingCommand
             List<string> profiles = [];
             PackageManagerKind manager = PackageManagerKind.Auto;
             bool fallback = true;
+            ToolResolutionPolicy? policy = null;
+            string? approval = null;
             bool json = false;
             bool dryRun = false;
             bool yes = false;
@@ -41,6 +43,10 @@ public static class ToolingCommand
                     case "--json": json = true; break;
                     case "--dry-run": dryRun = true; break;
                     case "--yes": yes = true; break;
+                    case "--tool-policy" when i + 1 < args.Length:
+                        policy = ParsePolicy(args[++i]); break;
+                    case "--plan-sha" when i + 1 < args.Length:
+                        approval = args[++i]; break;
                     case "--no-fallback": fallback = false; break;
                     case "--profile":
                         if (i + 1 >= args.Length || args[i + 1].StartsWith('-'))
@@ -63,6 +69,11 @@ public static class ToolingCommand
                         profiles.Add(args[i]);
                         break;
                 }
+            }
+
+            if (approval is not null && (policy is null || action != "setup"))
+            {
+                throw new ArgumentException("--plan-sha requires tooling setup with an explicit --tool-policy.");
             }
 
             if (action == "list")
@@ -91,10 +102,15 @@ public static class ToolingCommand
             }
 
             ToolingService service = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller());
-            ToolingPlan plan = await service.PlanAsync(profiles, manager, fallback, installDirectory, ct);
+            ToolingPlan plan = await service.PlanAsync(profiles, manager, fallback, installDirectory, ct, resolutionPolicy: policy);
             if (action is "doctor" or "plan" || dryRun)
             {
                 PrintPlan(plan, json);
+                if (policy is not null)
+                {
+                    await Console.Error.WriteLineAsync("Plan SHA-256: " + ToolingPlanApproval.Compute(plan));
+                }
+
                 return action == "doctor" && !plan.Ready ? 2 : 0;
             }
 
@@ -121,6 +137,12 @@ public static class ToolingCommand
                     "tooling setup changes the machine; inspect `tooling plan` and pass --yes to apply it.");
             }
 
+            if (policy is not null && !string.Equals(approval, ToolingPlanApproval.Compute(plan),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("Managed setup requires --plan-sha from the reviewed tooling plan.");
+            }
+
             ToolingResult result = await service.ExecuteAsync(plan, ct);
             if (json)
             {
@@ -143,7 +165,7 @@ public static class ToolingCommand
                     await Console.Error.WriteLineAsync(diagnostic);
                 }
 
-                if (result.Success && !PathContains(plan.InstallDirectory))
+                if (result.Success && policy is null && !PathContains(plan.InstallDirectory))
                 {
                     await Console.Error.WriteLineAsync($"Add {plan.InstallDirectory} to PATH for future sessions.");
                 }
@@ -153,7 +175,7 @@ public static class ToolingCommand
         }
         catch (Exception error) when (error is ArgumentException or IOException
                                           or UnauthorizedAccessException or InvalidDataException or HttpRequestException
-                                          or TimeoutException)
+                                          or TimeoutException or PlatformNotSupportedException or InvalidOperationException)
         {
             await Console.Error.WriteLineAsync($"[CMakeWorkflow] Tooling: {error.Message}");
             return 1;
@@ -173,8 +195,8 @@ public static class ToolingCommand
         foreach (ToolStatus tool in plan.Tools)
         {
             Console.Out.WriteLine(
-                $"{(tool.Installed ? "ready" : "missing"),-7} {tool.Id,-12} {tool.Command ?? tool.Diagnostic ?? ""} {tool.Version ?? ""}");
-            if (tool.Installed && tool.Diagnostic is not null)
+                $"{tool.Resolution ?? (tool.Installed ? "ready" : "missing"),-12} {tool.Id,-12} {tool.Command ?? tool.Diagnostic ?? ""} {tool.Version ?? ""} {tool.Origin} {tool.Sha256}");
+            if (tool.Diagnostic is not null && (tool.Installed || tool.Resolution is not null))
             {
                 Console.Out.WriteLine($"  {tool.Id}: {tool.Diagnostic}");
             }
@@ -183,7 +205,7 @@ public static class ToolingCommand
         foreach (ToolingStep step in plan.Steps)
         {
             Console.Out.WriteLine(
-                $"  {step.Tool}: {step.Method} {step.Executable} {string.Join(" ", step.Arguments)} {step.Source} {step.Diagnostic}");
+                $"  {step.Tool}: {step.Method} {step.Executable} {string.Join(" ", step.Arguments)} {step.Source} {step.Release?.Version} {step.Release?.Sha256} {step.Diagnostic}");
         }
     }
 
@@ -228,6 +250,13 @@ public static class ToolingCommand
             : throw new ArgumentException("Package manager must be auto, none, apt, pacman, dnf, brew or winget.");
 
 
+    public static ToolResolutionPolicy ParsePolicy(string value) => value?.ToUpperInvariant() switch
+    {
+        "ALLOWSYSTEM" => ToolResolutionPolicy.AllowSystem,
+        "MANAGEDONLY" => ToolResolutionPolicy.ManagedOnly,
+        _ => throw new ArgumentException("Tool policy must be AllowSystem or ManagedOnly.")
+    };
+
     private const string Usage =
-        "tooling <list|doctor|plan|setup|vs> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]";
+        "tooling <list|doctor|plan|setup|vs> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]";
 }

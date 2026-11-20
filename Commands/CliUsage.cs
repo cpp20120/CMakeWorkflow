@@ -8,10 +8,10 @@ internal static class CliUsage
         "Usage: CMakeWorkflow remote <start|find|status|inspect|events|report|artifacts|download|cancel> --destination USER@HOST --endpoint REMOTE_SOCKET --workspace REMOTE_DIR ...\n" +
         "       CMakeWorkflow remote stash --operation ID --store LOCAL_CAS (use remote help for transport options)\n" +
         "Usage: CMakeWorkflow cas STORE <show|fetch|pin|unpin|drop-action|gc> ...\n" +
-        "Usage: CMakeWorkflow host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--json]; fix: [--yes|--dry-run] [--pm NAME] [--no-fallback]\n" +
+        "Usage: CMakeWorkflow host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--tool-policy AllowSystem|ManagedOnly] [--json]; fix: [--yes|--dry-run] [--pm NAME] [--no-fallback]\n" +
         "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare|detect|host-summary> ...\n" +
         "Usage: CMakeWorkflow env <doctor|plan|setup> REQUIREMENTS.json [--json] [--yes --plan-sha SHA256] [--allow-system-changes]\n" +
-        "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--dry-run] [--yes]\n" +
+        "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz seed --layer NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz run --build-dir DIR --layer NAME [--duration SECONDS] [--corpus DIR] [--replay-only]\n" +

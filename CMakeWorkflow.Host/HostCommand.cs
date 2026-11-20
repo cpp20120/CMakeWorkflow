@@ -2,6 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Provisioning;
 using CMakeWorkflow.Host.Transport;
+using CMakeWorkflow.Tooling;
 using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 
@@ -20,7 +21,7 @@ public static class HostCommand
         if (args.Length == 0 || args[0] is not ("serve" or "doctor" or "fix"))
         {
             throw new ArgumentException(
-                "host serve (--endpoint PATH | --stdio) | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--install-dir DIR] [--json]; fix: [--pm NAME] [--no-fallback] [--yes|--dry-run]");
+                "host serve (--endpoint PATH | --stdio) | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--install-dir DIR] [--tool-policy AllowSystem|ManagedOnly] [--json]; fix: [--pm NAME] [--no-fallback] [--yes|--dry-run]");
         }
 
         string? endpoint = null, install = null;
@@ -32,6 +33,7 @@ public static class HostCommand
         bool dryRun = false;
         PackageManagerKind manager = PackageManagerKind.Auto;
         bool fallback = true;
+        ToolResolutionPolicy? policy = null;
         for (int i = 1; i < args.Length; i++)
         {
             switch (args[i])
@@ -48,6 +50,8 @@ public static class HostCommand
                 case "--json" when args[0] != "serve": json = true; break;
                 case "--yes" when args[0] == "fix": yes = true; break;
                 case "--dry-run" when args[0] == "fix": dryRun = true; break;
+                case "--tool-policy" when args[0] != "serve" && i + 1 < args.Length:
+                    policy = ToolingCommand.ParsePolicy(args[++i]); break;
                 case "--no-fallback" when args[0] == "fix": fallback = false; break;
                 case "--pm" when args[0] == "fix" && i + 1 < args.Length:
                     string name = args[++i];
@@ -97,6 +101,11 @@ public static class HostCommand
             throw new InvalidDataException("Incompatible Host protocol or capabilities.");
         }
 
+        if (policy is not null && !hello.Capabilities.Contains("tooling/linuxManaged"))
+        {
+            throw new InvalidOperationException("Managed tooling requires a Linux x86-64 Host with managed tooling support.");
+        }
+
         if (args[0] == "fix")
         {
             if (!hello.Capabilities.Contains("tooling/applyFix") || !hello.Capabilities.Contains("tooling/planFix"))
@@ -104,7 +113,7 @@ public static class HostCommand
                 throw new InvalidDataException("This Host does not support Fix. Restart it using an updated CLI.");
             }
 
-            FixPlan reviewed = await host.PlanFixAsync(new([.. profiles], install, manager, fallback), ct);
+            FixPlan reviewed = await host.PlanFixAsync(new([.. profiles], install, manager, fallback) { ResolutionPolicy = policy }, ct);
             ToolingPlan ordinaryPlan = reviewed.Plan
                 ?? throw new InvalidDataException("Host returned no ordinary tooling Fix plan.");
             if (!yes || dryRun)
@@ -119,13 +128,13 @@ public static class HostCommand
                 }
 
                 await Console.Error.WriteLineAsync(
-                    "Plan only; no installation attempted. Use host fix --yes to explicitly authorize installation. Package versions are selected by the package manager/release source.");
+                    "Plan only; no installation attempted. Use host fix --yes to authorize installation of the current plan.");
                 return dryRun || ordinaryPlan.Ready ? 0 : 2;
             }
 
             PrintPlan(ordinaryPlan, Console.Error);
             await Console.Error.WriteLineAsync(
-                $"[Host fix] Applying reviewed plan {reviewed.PlanId}; directory: {ordinaryPlan.InstallDirectory}. Cancellation can leave partial installation; no rollback is available.");
+                $"[Host fix] Applying reviewed plan {reviewed.PlanId}; directory: {ordinaryPlan.InstallDirectory}. Successfully installed releases may remain if a later step fails.");
             FixResult result = await host.ApplyFixAsync(new(Guid.NewGuid().ToString("N"), reviewed.PlanId), ct);
             if (json)
             {
@@ -148,7 +157,7 @@ public static class HostCommand
             return result.Status == "succeeded" ? 0 : result.Status == "canceled" ? 130 : 2;
         }
 
-        ToolingPlan plan = await host.DoctorAsync(new(Guid.NewGuid().ToString("N"), [.. profiles], install), ct);
+        ToolingPlan plan = await host.DoctorAsync(new(Guid.NewGuid().ToString("N"), [.. profiles], install) { ResolutionPolicy = policy }, ct);
         if (json)
         {
             await Console.Out.WriteLineAsync(JsonSerializer.Serialize(plan, HostJson.Default.ToolingPlan));
@@ -168,13 +177,13 @@ public static class HostCommand
         foreach (ToolStatus tool in plan.Tools)
         {
             writer.WriteLine(
-                $"{(tool.Installed ? "ready" : "missing"),-7} {tool.Id}: {tool.Command ?? tool.Diagnostic} {tool.Version}");
+                $"{tool.Resolution ?? (tool.Installed ? "ready" : "missing"),-12} {tool.Id}: {tool.Command ?? tool.Diagnostic} {tool.Version} {tool.Origin} {tool.Sha256}");
         }
 
         foreach (ToolingStep step in plan.Steps)
         {
             writer.WriteLine(
-                $"  {step.Tool}: {step.Method} {step.Executable} {JsonSerializer.Serialize(step.Arguments, HostJson.Default.StringArray)} {step.Source} {step.Diagnostic}");
+                $"  {step.Tool}: {step.Method} {step.Executable} {JsonSerializer.Serialize(step.Arguments, HostJson.Default.StringArray)} {step.Source} {step.Release?.Version} {step.Release?.Sha256} {step.Diagnostic}");
         }
     }
 

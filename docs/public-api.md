@@ -90,9 +90,9 @@ Release assembly metadata.
 
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
-| [CMakeWorkflow.Client](#cmakeworkflowclient) | 111 | 114 |
+| [CMakeWorkflow.Client](#cmakeworkflowclient) | 113 | 125 |
 | [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 26 | 93 |
-| **Total** | **137** | **207** |
+| **Total** | **139** | **218** |
 
 ## CMakeWorkflow.Client
 
@@ -576,7 +576,10 @@ public sealed record HostApplyFixOptions(string OperationId, string PlanId);
 Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs#L14)
 
 ```csharp
-public sealed record HostDoctorOptions(string OperationId, string[] Profiles, string? InstallDirectory = null);
+public sealed record HostDoctorOptions(string OperationId, string[] Profiles, string? InstallDirectory = null)
+{
+    public CMakeWorkflow.Client.Provisioning.HostToolResolutionPolicy? ResolutionPolicy { get; init; }
+}
 ```
 
 #### `HostFixPlan`
@@ -593,6 +596,14 @@ Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWo
 
 ```csharp
 public sealed record HostFixResult(int SchemaVersion, string Status, CMakeWorkflow.Client.Provisioning.HostToolingResult? Installation, CMakeWorkflow.Client.Provisioning.HostToolingPlan? Verification, string[] Diagnostics, bool ReadyToResume = false);
+```
+
+#### `HostManagedToolRelease`
+
+Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs)
+
+```csharp
+public sealed record HostManagedToolRelease(string Id, string Version, string Platform, string Source, string Sha256, string TreeSha256, string? TarRoot);
 ```
 
 #### `HostPackageManagerKind`
@@ -617,7 +628,10 @@ public enum HostPackageManagerKind
 Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs#L19)
 
 ```csharp
-public sealed record HostPlanFixOptions(string[] Profiles, string? InstallDirectory = null, CMakeWorkflow.Client.Provisioning.HostPackageManagerKind PackageManager = Auto, bool AllowFallback = true, string? RunDirectory = null);
+public sealed record HostPlanFixOptions(string[] Profiles, string? InstallDirectory = null, CMakeWorkflow.Client.Provisioning.HostPackageManagerKind PackageManager = Auto, bool AllowFallback = true, string? RunDirectory = null, CMakeWorkflow.Client.Provisioning.HostVisualStudioSetupOptions? VisualStudio = null)
+{
+    public CMakeWorkflow.Client.Provisioning.HostToolResolutionPolicy? ResolutionPolicy { get; init; }
+}
 ```
 
 #### `HostProvisioningService`
@@ -648,12 +662,31 @@ public enum HostToolPlatform
 }
 ```
 
+#### `HostToolResolutionPolicy`
+
+Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs)
+
+```csharp
+public enum HostToolResolutionPolicy
+{
+    AllowSystem = 0,
+    ManagedOnly = 1,
+}
+```
+
 #### `HostToolStatus`
 
 Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs#L28)
 
 ```csharp
-public sealed record HostToolStatus(string Id, string DisplayName, bool Installed, string? Command, string? Version, string? MinimumVersion, string? Diagnostic);
+public sealed record HostToolStatus(string Id, string DisplayName, bool Installed, string? Command, string? Version, string? MinimumVersion, string? Diagnostic)
+{
+    public string? Resolution { get; init; }
+    public string? Origin { get; init; }
+    public string? Sha256 { get; init; }
+    public string? SystemResolution { get; init; }
+    public string? SystemVersion { get; init; }
+}
 ```
 
 #### `HostToolingPlan`
@@ -661,7 +694,10 @@ public sealed record HostToolStatus(string Id, string DisplayName, bool Installe
 Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs#L36)
 
 ```csharp
-public sealed record HostToolingPlan(int SchemaVersion, CMakeWorkflow.Client.Provisioning.HostToolPlatform Platform, string[] Profiles, string InstallDirectory, CMakeWorkflow.Client.Provisioning.HostPackageManagerKind PackageManager, bool Ready, System.Collections.Generic.List<CMakeWorkflow.Client.Provisioning.HostToolStatus> Tools, System.Collections.Generic.List<CMakeWorkflow.Client.Provisioning.HostToolingStep> Steps);
+public sealed record HostToolingPlan(int SchemaVersion, CMakeWorkflow.Client.Provisioning.HostToolPlatform Platform, string[] Profiles, string InstallDirectory, CMakeWorkflow.Client.Provisioning.HostPackageManagerKind PackageManager, bool Ready, System.Collections.Generic.List<CMakeWorkflow.Client.Provisioning.HostToolStatus> Tools, System.Collections.Generic.List<CMakeWorkflow.Client.Provisioning.HostToolingStep> Steps)
+{
+    public CMakeWorkflow.Client.Provisioning.HostToolResolutionPolicy? ResolutionPolicy { get; init; }
+}
 ```
 
 #### `HostToolingResult`
@@ -677,7 +713,10 @@ public sealed record HostToolingResult(int SchemaVersion, bool Success, string[]
 Source: [CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs](../CMakeWorkflow.Client/Provisioning/HostProvisioningModels.cs#L30)
 
 ```csharp
-public sealed record HostToolingStep(string Tool, string Method, string? Executable, string[] Arguments, string? Source, string? Diagnostic);
+public sealed record HostToolingStep(string Tool, string Method, string? Executable, string[] Arguments, string? Source, string? Diagnostic)
+{
+    public CMakeWorkflow.Client.Provisioning.HostManagedToolRelease? Release { get; init; }
+}
 ```
 
 #### `SshNetHostProvisioner`

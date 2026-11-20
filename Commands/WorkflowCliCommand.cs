@@ -17,7 +17,7 @@ internal static class WorkflowCliCommand
         ["reconcile", .. string[] tail] => WorkflowReconcileCommand.ExecuteAsync(tail, ct),
         ["generate", .. string[] tail] => WorkflowRecipeGenerateCommand.ExecuteAsync(tail, ct),
         ["plan", .. string[] tail] => WorkflowCommand.ExecuteAsync("plan", tail, ct,
-            new ProfileWorkflowExecutor(), toolchainProvider: new WindowsWorkflowToolchainProvider()),
+            new ProfileWorkflowExecutor(), toolchainProvider: new WorkflowToolchainProvider()),
         ["run", .. string[] tail] => RunAsync(tail, ct),
         ["resume", .. string[] tail] => ResumeAsync(tail, ct),
         ["report", string directory] => WorkflowReportCommand.ExecuteAsync(directory, ct),
@@ -39,7 +39,7 @@ internal static class WorkflowCliCommand
             Path.Combine(directory, "run.json"), ct), WorkflowJson.Default.WorkflowReport)
             ?? throw new InvalidDataException("Invalid run report.");
         return await WorkflowCommand.ExecuteAsync("run", [saved.Workflow, "--resume-dir", directory], ct,
-            new ProfileWorkflowExecutor(), toolchainProvider: new WindowsWorkflowToolchainProvider());
+            new ProfileWorkflowExecutor(), toolchainProvider: new WorkflowToolchainProvider());
     }
 
     private static async Task<int> RunAsync(string[] args, CancellationToken ct)
@@ -52,7 +52,7 @@ internal static class WorkflowCliCommand
             {
                 runDirectory = directory;
                 onRun(directory);
-            }, toolchainProvider: new WindowsWorkflowToolchainProvider());
+            }, toolchainProvider: new WorkflowToolchainProvider());
 
             // Analyze captured profile passes before indexing; ordinary workflows never invoke the analyzer.
             if (code == 0 && runDirectory is not null && Directory.EnumerateFiles(runDirectory, "*.results.json").Any())

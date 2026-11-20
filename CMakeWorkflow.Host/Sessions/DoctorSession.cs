@@ -78,6 +78,12 @@ public sealed partial class DoctorSession(
             capabilities = [.. capabilities, "tooling/visualStudioFix"];
         }
 
+        if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture ==
+            System.Runtime.InteropServices.Architecture.X64)
+        {
+            capabilities = [.. capabilities, "tooling/linuxManaged"];
+        }
+
         return Task.FromResult(new HostInfo(1, Environment.ProcessId, directory,
             capabilities,
             [.. ToolCatalog.AllProfiles.Select(p => new ToolingProfileView(p.Id, p.Description, p.Tools))]));
@@ -112,7 +118,7 @@ public sealed partial class DoctorSession(
             await progress(new(request.OperationId, ++sequence, "started", null));
             ToolingPlan plan = await createTooling(workspace).PlanAsync(request.Profiles, PackageManagerKind.Auto, true,
                 request.InstallDirectory, lifetime.Token,
-                tool => progress(new(request.OperationId, ++sequence, "tool_checked", tool)));
+                tool => progress(new(request.OperationId, ++sequence, "tool_checked", tool)), request.ResolutionPolicy);
             await progress(new(request.OperationId, ++sequence, "finished", null));
             return plan;
         }
