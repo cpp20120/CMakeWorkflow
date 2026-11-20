@@ -480,7 +480,7 @@ internal static class HistoryReports
 
     // Only import snapshots explicitly recorded in run.json. No directory search,
     // and no reading mutable artifacts from the native build tree.
-    private static async Task ImportDagFlowHarnessAsync(string directory, ParsedRun run, JsonElement node, string id, Action<string>? pathGuard, CancellationToken ct)
+    internal static async Task ImportDagFlowHarnessAsync(string directory, ParsedRun run, JsonElement node, string id, Action<string>? pathGuard, CancellationToken ct)
     {
         if (Obj(node, "outputs") is not { } outputs)
         {

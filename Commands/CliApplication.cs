@@ -16,6 +16,7 @@ internal static class CliApplication
         ["remote", .. string[] tail] => RemoteCommand.ExecuteAsync(tail, ct),
         ["cas", .. string[] tail] => ArtifactCasCommand.ExecuteAsync(tail, ct),
         ["host", .. string[] tail] => HostCommand.ExecuteAsync(tail, ct),
+        ["history", .. string[] tail, "--html", string output] => HistoryHtmlAsync(tail, output, ct),
         ["history", .. string[] tail] => HistoryCommand.ExecuteAsync(tail, ct),
         ["env", .. string[] tail] => EnvironmentCommand.ExecuteAsync(tail, ct),
         ["tooling", .. string[] tail] => ToolingCommand.ExecuteAsync(tail, ct),
@@ -30,6 +31,12 @@ internal static class CliApplication
         ["target", .. string[] tail] => TargetCommand.ExecuteAsync(tail, ct),
         _ => Task.FromResult(CliUsage.Write())
     };
+
+    private static Task<int> HistoryHtmlAsync(string[] args, string output, CancellationToken ct) =>
+        string.Equals(Path.GetExtension(output), ".html", StringComparison.OrdinalIgnoreCase)
+        && !output.StartsWith("--", StringComparison.Ordinal)
+            ? HistoryCommand.ExecuteAsync(args, data => WorkflowHtmlReport.WriteAsync(output, data, ct), ct)
+            : throw new ArgumentException("history --html requires an output path ending in .html.");
 
     private static async Task<int> InspectContextAsync(string directory, CancellationToken ct)
     {

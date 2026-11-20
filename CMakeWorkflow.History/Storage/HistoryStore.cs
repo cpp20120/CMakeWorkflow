@@ -383,7 +383,12 @@ public sealed class HistoryStore : IDisposable
 
     [SuppressMessage("Design", "CA1002", Justification = "Materializes SQLite rows into an owned List for History result DTOs and Host response construction; the reader is disposed before the list escapes.")]
     public List<HistoryRun> Runs(int limit, string? status, string? since, string? until,
-        string? workflow, string? variant, Func<string, bool>? includeDirectory = null, CancellationToken ct = default)
+        string? workflow, string? variant, Func<string, bool>? includeDirectory = null, CancellationToken ct = default) =>
+        Runs(limit, status, since, until, workflow, variant, null, null, includeDirectory, ct);
+
+    internal List<HistoryRun> Runs(int limit, string? status, string? since, string? until,
+        string? workflow, string? variant, string? metric, string? scenario, Func<string, bool>? includeDirectory,
+        CancellationToken ct)
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
@@ -392,10 +397,14 @@ public sealed class HistoryStore : IDisposable
                             AND ($p1 IS NULL OR started_at >= $p1)
                             AND ($p2 IS NULL OR started_at <= $p2)
                             AND ($p3 IS NULL OR workflow LIKE '%' || $p3 || '%')
-                            AND ($p4 IS NULL OR EXISTS(SELECT 1 FROM measurements m WHERE m.run_id=runs.id AND m.variant=$p4))
+                            AND (($p4 IS NULL AND $p6 IS NULL AND $p7 IS NULL) OR EXISTS(
+                              SELECT 1 FROM measurements m WHERE m.run_id=runs.id
+                              AND ($p4 IS NULL OR m.variant=$p4)
+                              AND ($p6 IS NULL OR m.metric=$p6)
+                              AND ($p7 IS NULL OR m.scenario=$p7)))
                           ORDER BY started_at DESC, id LIMIT $p5
                           """;
-        object?[] values = [status, since, until, workflow, variant, includeDirectory is null ? limit : int.MaxValue];
+        object?[] values = [status, since, until, workflow, variant, includeDirectory is null ? limit : int.MaxValue, metric, scenario];
         for (int i = 0; i < values.Length; i++)
         {
             _ = cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);

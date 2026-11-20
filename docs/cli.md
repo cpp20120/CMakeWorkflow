@@ -57,6 +57,7 @@ CMakeWorkflow workflow plan FILE --only NODE_A --only NODE_B --json
 CMakeWorkflow workflow run FILE --only NODE_A --only NODE_B --jobs 2 --results-dir DIR --history-db CATALOG --json
 CMakeWorkflow workflow run FILE --no-history --json
 CMakeWorkflow workflow report RUN_DIRECTORY --json
+CMakeWorkflow workflow report RUN_DIRECTORY --html
 CMakeWorkflow workflow sequence --build-dir BUILD_DIR --first FIRST --second SECOND --config Release --first-arg ARG --second-arg ARG
 ```
 
@@ -84,7 +85,7 @@ manifest и создаёт внутри отдельный run. Явный от�
 | `workflow plan FILE` | `[--only NODE]...` `[--controller-build-dir DIR]` `[--json]` |
 | `workflow run FILE` | `[--only NODE]...` `[--jobs N]` `[--results-dir DIR]` `[--controller-build-dir DIR]` `[--json]` `[--history-db PATH \| --no-history]` |
 | `workflow run FILE --resume-dir RUN_DIRECTORY` | `[--jobs N]` `[--controller-build-dir DIR]` `[--json]` `[--history-db PATH \| --no-history]` |
-| `workflow report RUN_DIRECTORY` | `[--json]` после пути |
+| `workflow report RUN_DIRECTORY` | `[--json \| --html]` после пути |
 | `workflow resume RUN_DIRECTORY` | Использует манифест из сохранённого `run.json`. |
 | `workflow reconcile RUN_DIRECTORY` | `[--node ID]` `--decision succeeded\|retry` `--reason TEXT` `--expected-checkpoint SHA256` `--confirm-stopped` `[--json]` |
 | `workflow sequence` | `--build-dir DIR` `--first TARGET` `--second TARGET` `[--config CONFIG]` `[--first-arg ARG]...` `[--second-arg ARG]...` `[--controller-build-dir DIR]` |
@@ -98,6 +99,24 @@ manifest и создаёт внутри отдельный run. Явный от�
 `run.json`, `--reason` принимает до 4096 символов, `--confirm-stopped` подтверждает остановку прежних процессов.
 Без `--node` допустим только `retry` для прерванного запуска без узлов с неизвестным исходом. Условия и порядок
 восстановления описаны в [recovery](recovery.md).
+
+### HTML-отчёт
+
+`workflow report RUN_DIRECTORY --html` создаёт или обновляет `RUN_DIRECTORY/report.html` из сохранённых
+`run.json` и `analysis.json`. Для сохранённого replay достаточно `analysis.json`; новый `profile replay … --html`
+создаёт отчёт сразу. HTML открывается без сети. Для кнопок скачивания и просмотра исходных артефактов
+сохраняйте структуру каталога рядом с HTML.
+Если захват прервался, `profile replay … --html` экспортирует доступные данные и сохраняет код ошибки replay.
+
+Верхняя сводка показывает статус, количество сэмплов всего и с декодированным стеком, пропуски,
+предупреждения и до десяти функций по self samples на захват. Для пар доступны дельты времени,
+сопоставимых счётчиков и долей горячих функций, а также ссылки на оба flamegraph.
+
+Отчёт сам подбирает графики из сохранённых измерений. Варианты с одинаковыми параметрами нагрузки
+сравниваются по медианам и общим индексам повторов. Strip plot и boxplot показывают наблюдения и
+квартили. Варьирующиеся `workers` и `shards` дают тепловую карту, `arrival_rate` и задержка — кривую
+насыщения, `workers` и throughput — кривую масштабирования. Efficiency рассчитывается при наличии
+точки с одним worker в той же серии. Для каждой кривой остальные параметры нагрузки фиксированы.
 
 ### Флаги генерации манифестов
 
@@ -129,6 +148,25 @@ CMakeWorkflow history compare BASELINE_ID CANDIDATE_ID --db CATALOG --json
 CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric process_wall_time --direction higher-worse --min-percent 5 --alpha 0.05 --db CATALOG --json
 ```
 
+Добавляйте `--html OUTPUT.html` в конце команд `compare`, `detect`, `runs`, `metrics`, `query`,
+`matrix` и `sweep`. `matrix` и `sweep` принимают `--metric NAME` и фильтры `query`.
+Для HTML у `runs` также обязателен `--metric NAME`.
+
+```sh
+CMakeWorkflow history compare BASELINE_ID CANDIDATE_ID --db CATALOG --html compare.html
+CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric METRIC --direction higher-worse --min-percent 5 --db CATALOG --html detect.html
+CMakeWorkflow history matrix --metric METRIC --run RUN_ID --db CATALOG --html matrix.html
+CMakeWorkflow history sweep --metric METRIC --run RUN_ID --db CATALOG --html sweep.html
+CMakeWorkflow history runs --metric METRIC --limit 50 --db CATALOG --html runs.html
+```
+
+`compare` рисует медианы и сырые измерения. `detect` показывает эффект и описательный bootstrap-интервал
+для проверенных серий с достаточными данными. Вердикт остаётся результатом permutation test с поправкой
+Holm. `matrix` строит heatmap по `workers` и `shards` или другой паре варьирующихся числовых осей.
+`sweep` строит XY по числовым параметрам, `runs` — ряд медиан по дате
+или номеру запуска с commit SHA, компилятором, генератором и хостом, если они сохранены. При наличии
+сопоставимой серии из девяти и более точек контрольные границы вычисляются по первым восьми запускам.
+
 `runs` поддерживает также `--since`, `--until` с ISO timestamps, `--workflow`
 и `--variant`. В `metrics` обязателен `--run`, в `query` — `--metric`; они принимают фильтры `--variant` и `--scenario`.
 `detect` также позволяет сузить семейство проверок через `--variant`/`--scenario`.
@@ -144,7 +182,8 @@ catalog.
 
 ### Флаги History
 
-Все команды History принимают `--db PATH` для выбора каталога и `--json` для JSON-вывода.
+Команды History принимают `--db PATH` для выбора каталога. Для команд `matrix` и `sweep`
+доступен HTML; для остальных команд также доступен `--json`.
 
 | Команда | Остальные аргументы и флаги |
 | --- | --- |

@@ -6,6 +6,7 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
     <ItemGroup>
+        <InternalsVisibleTo Include="CMakeWorkflow"/>
         <Compile Include="*.cs"/>
         <Compile Include="Analysis/*.cs"/>
         <Compile Include="Models/*.cs"/>

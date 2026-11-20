@@ -24,7 +24,7 @@ internal static class CliUsage
         "       CMakeWorkflow dagflow profile render-historical DIRECTORY\n" +
         "       CMakeWorkflow dagflow profile run-historical --source-dir DIR --output DIR [--trials N] [--stat-trials N] [--jobs N] [--resume]\n" +
         "                  [--shuffle-algorithm ID] [--seeds 42,1337,2026] [--schedule-strategy ID] [--shuffle-scope block|global]\n" +
-        "       CMakeWorkflow profile replay BASELINE_DIR CANDIDATE_DIR --node ID [--case NAME] [--harness INDEX] [--backend auto|perf|etw] [--results-dir DIR]\n" +
+        "       CMakeWorkflow profile replay BASELINE_DIR CANDIDATE_DIR --node ID [--case NAME] [--harness INDEX] [--backend auto|perf|etw] [--results-dir DIR] [--html]\n" +
         "Usage: CMakeWorkflow context inspect BUILD_DIR [--json]\n" +
         "       CMakeWorkflow target <build|invoke|run|resolve> --build-dir DIR --target NAME [--config CONFIG] [--prepared] [--json for resolve] [-- executable-args...]\n" +
         "  build: request a known native executable/library target through CMake\n" +
@@ -39,7 +39,10 @@ internal static class CliUsage
         "       CMakeWorkflow workflow <plan|run> FILE [--only NODE]... [--jobs N] [--json] [--history-db PATH] [--no-history]\n" +
         "       CMakeWorkflow workflow generate benchmark --build-dir DIR --target TARGET --repeats N --timeout-seconds N --output FILE [--config CONFIG] [-- PROGRAM_ARG...]\n" +
         "       CMakeWorkflow workflow generate <profile|test-matrix|build-matrix|benchmark-matrix> [OPTIONS|--recipe FILE] --output FILE\n" +
-        "       CMakeWorkflow workflow report RUN_DIRECTORY [--json]\n" +
+        "       CMakeWorkflow workflow report RUN_DIRECTORY [--json|--html]\n" +
+        "       CMakeWorkflow history matrix|sweep --metric NAME [--run ID] [--db PATH] --html OUTPUT.html\n" +
+        "       CMakeWorkflow history runs --metric NAME [FILTERS] --html OUTPUT.html\n" +
+        "       CMakeWorkflow history compare|detect BASELINE_ID CANDIDATE_ID [OPTIONS] --html OUTPUT.html\n" +
         "       CMakeWorkflow workflow resume RUN_DIRECTORY\n" +
         "       CMakeWorkflow workflow reconcile RUN_DIRECTORY [--node ID] --decision succeeded|retry\n" +
         "         --reason TEXT --expected-checkpoint SHA256 --confirm-stopped [--json]\n" +

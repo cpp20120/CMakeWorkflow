@@ -26,6 +26,10 @@
         <Compile Include="Commands/RecipeJson.cs" />
         <Compile Include="Commands/WorkflowRecipeGenerateCommand.cs"/>
         <Compile Include="Commands/WorkflowReportCommand.cs"/>
+        <Compile Include="Commands/WorkflowHtmlReport.cs"/>
+        <EmbeddedResource Include="Commands/WorkflowReport.html" LogicalName="CMakeWorkflow.WorkflowReport.html"/>
+        <EmbeddedResource Include="Commands/ReportProfile.js" LogicalName="CMakeWorkflow.ReportProfile.js"/>
+        <EmbeddedResource Include="Commands/ReportCharts.js" LogicalName="CMakeWorkflow.ReportCharts.js"/>
         <ProjectReference Include="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>

@@ -42,6 +42,7 @@ CMakeWorkflow workflow plan FILE --only NODE_A --only NODE_B --json
 CMakeWorkflow workflow run FILE --only NODE_A --jobs 2 --results-dir DIR --history-db CATALOG --json
 CMakeWorkflow workflow run FILE --no-history --json
 CMakeWorkflow workflow report RUN_DIRECTORY --json
+CMakeWorkflow workflow report RUN_DIRECTORY --html
 CMakeWorkflow workflow sequence --build-dir BUILD_DIR --first FIRST --second SECOND --config Release --first-arg ARG --second-arg ARG
 ```
 
@@ -59,6 +60,23 @@ first target, then builds and executes the second; it is distinct from the journ
 `--controller-build-dir` is an internal safety constraint against recursive builds and should not be fabricated by an
 IDE.
 
+### Offline HTML report
+
+`workflow report RUN_DIRECTORY --html` writes `RUN_DIRECTORY/report.html` from saved workflow and profile
+data. A saved profile replay only needs `analysis.json`. Use `profile replay … --html` to export a new replay
+as it finishes. The HTML opens offline. Keep the original directory structure for links to raw artifacts.
+If a capture fails, `profile replay … --html` exports the evidence still available and preserves the replay error.
+
+The summary shows status, total and decoded samples, missing stacks, major warnings, and the ten highest
+self-sample counts per capture. Paired profiles show deltas for wall time, comparable counters, and hot
+frame shares, with links to both flamegraphs when available.
+
+The report selects charts from recorded data. Variants with matching workload parameters can be compared
+at the median and by matching trial indices. Strip plots and boxplots show observations and quartiles.
+Varying `workers` and `shards` produce a heatmap, `arrival_rate` and latency produce a saturation curve,
+and throughput across `workers` produces a scalability curve. Efficiency uses the one-worker point
+from the same series. Other workload parameters are held fixed within each curve.
+
 ## History
 
 ```sh
@@ -70,6 +88,24 @@ CMakeWorkflow history query --metric METRIC --run RUN_ID --db CATALOG --json
 CMakeWorkflow history compare BASELINE_ID CANDIDATE_ID --db CATALOG --json
 CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric process_wall_time --direction higher-worse --min-percent 5 --alpha 0.05 --db CATALOG --json
 ```
+
+Append `--html OUTPUT.html` to `compare`, `detect`, `runs`, `metrics`, `query`, `matrix`, or `sweep`.
+HTML for `runs`, `matrix`, and `sweep` requires `--metric NAME`. The latter two accept the query filters.
+
+```sh
+CMakeWorkflow history compare BASELINE_ID CANDIDATE_ID --db CATALOG --html compare.html
+CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric METRIC --direction higher-worse --min-percent 5 --db CATALOG --html detect.html
+CMakeWorkflow history matrix --metric METRIC --run RUN_ID --db CATALOG --html matrix.html
+CMakeWorkflow history sweep --metric METRIC --run RUN_ID --db CATALOG --html sweep.html
+CMakeWorkflow history runs --metric METRIC --limit 50 --db CATALOG --html runs.html
+```
+
+Compare uses a dumbbell plot with individual measurements. Detect shows the effect and a descriptive
+bootstrap interval when eligible, with verdicts from the History permutation test and Holm correction.
+Matrix shows a heatmap across workers and shards or another varying numeric pair. Sweep shows numeric XY
+curves. Runs shows per-run medians by date or run index
+with recorded commit, compiler, generator, and host. A comparable series with nine or more points
+can show control limits estimated from its first eight run medians.
 
 `runs` also supports `--since`, `--until` (ISO timestamps), `--workflow` and `--variant`. `metrics` requires `--run`,
 while `query` requires `--metric`; both support filtering. `detect` can narrow the family via `--variant` and

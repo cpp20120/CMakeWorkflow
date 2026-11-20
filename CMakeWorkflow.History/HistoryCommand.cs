@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Globalization;
 using CMakeWorkflow.History.Analysis;
 using CMakeWorkflow.History.Models;
@@ -8,7 +9,9 @@ namespace CMakeWorkflow.History;
 
 public static class HistoryCommand
 {
-    public static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
+    public static Task<int> ExecuteAsync(string[] args, CancellationToken ct) => ExecuteAsync(args, null, ct);
+
+    internal static async Task<int> ExecuteAsync(string[] args, Func<JsonObject, Task>? html, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(args);
         try
@@ -60,10 +63,20 @@ public static class HistoryCommand
             string dbPath = options.GetValueOrDefault("--db") ?? HistoryStore.DefaultDatabasePath;
             using HistoryStore db = new(dbPath);
             bool json = flags.Contains("--json");
+            if (json && html is not null)
+            {
+                throw new ArgumentException("Select one output format: --json or --html.");
+            }
+
             switch (command)
             {
                 case "import" when positional.Count == 1:
                     {
+                        if (html is not null)
+                        {
+                            throw new ArgumentException("history import does not support --html.");
+                        }
+
                         HistoryImportResult? result = null;
                         string summary = await db.ImportAsync(positional[0], flags.Contains("--recursive"),
                         value => result = value, ct: ct);
@@ -78,8 +91,29 @@ public static class HistoryCommand
                                 && value > 0
                         ? value
                         : throw new ArgumentException("--limit must be positive.");
-                        List<HistoryRun> runs = db.Runs(limit, options.GetValueOrDefault("--status"), DateOption(options.GetValueOrDefault("--since"), "--since"), DateOption(options.GetValueOrDefault("--until"), "--until"), options.GetValueOrDefault("--workflow"), options.GetValueOrDefault("--variant"), ct: ct);
-                        if (json)
+                        string? metric = html is null ? null : options.GetValueOrDefault("--metric")
+                            ?? throw new ArgumentException("history runs --html requires --metric NAME.");
+                        string? variant = options.GetValueOrDefault("--variant");
+                        string? scenario = html is null ? null : options.GetValueOrDefault("--scenario");
+                        List<HistoryRun> runs = db.Runs(limit, options.GetValueOrDefault("--status"),
+                            DateOption(options.GetValueOrDefault("--since"), "--since"),
+                            DateOption(options.GetValueOrDefault("--until"), "--until"),
+                            options.GetValueOrDefault("--workflow"), variant, metric, scenario, null, ct);
+                        if (html is not null)
+                        {
+                            List<HistoryMeasurement> measurements = [];
+                            foreach (HistoryRun run in runs)
+                            {
+                                measurements.AddRange(db.Metrics(run.Id, metric, variant, scenario, ct: ct));
+                            }
+
+                            await WriteHtmlAsync(new()
+                            {
+                                ["runs"] = JsonSerializer.SerializeToNode(runs, HistoryJson.Default.ListHistoryRun),
+                                ["measurements"] = JsonSerializer.SerializeToNode(measurements, HistoryJson.Default.ListHistoryMeasurement)
+                            });
+                        }
+                        else if (json)
                         {
                             Console.WriteLine(JsonSerializer.Serialize(runs, HistoryJson.Default.ListHistoryRun));
                         }
@@ -94,7 +128,7 @@ public static class HistoryCommand
 
                         break;
                     }
-                case "show" when positional.Count == 1:
+                case "show" when positional.Count == 1 && html is null:
                     {
                         HistoryDetail detail = db.Show(positional[0], ct: ct);
                         if (json)
@@ -141,6 +175,7 @@ public static class HistoryCommand
                     }
                 case "metrics" when positional.Count == 0:
                 case "query" when positional.Count == 0:
+                case "matrix" or "sweep" when positional.Count == 0 && html is not null:
                     {
                         string? run = options.GetValueOrDefault("--run");
                         string? metric = options.GetValueOrDefault("--metric");
@@ -149,13 +184,20 @@ public static class HistoryCommand
                             throw new ArgumentException("history metrics requires --run ID.");
                         }
 
-                        if (command == "query" && metric is null)
+                        if (command is "query" or "matrix" or "sweep" && metric is null)
                         {
-                            throw new ArgumentException("history query requires --metric NAME.");
+                            throw new ArgumentException($"history {command} requires --metric NAME.");
                         }
 
                         List<HistoryMeasurement> rows = db.Metrics(run, metric, options.GetValueOrDefault("--variant"), options.GetValueOrDefault("--scenario"), ct: ct);
-                        if (json)
+                        if (html is not null)
+                        {
+                            await WriteHtmlAsync(new()
+                            {
+                                ["measurements"] = JsonSerializer.SerializeToNode(rows, HistoryJson.Default.ListHistoryMeasurement)
+                            });
+                        }
+                        else if (json)
                         {
                             Console.WriteLine(JsonSerializer.Serialize(rows, HistoryJson.Default.ListHistoryMeasurement));
                         }
@@ -170,7 +212,7 @@ public static class HistoryCommand
 
                         break;
                     }
-                case "host-summary" when positional.Count is >= 1 and <= 32:
+                case "host-summary" when positional.Count is >= 1 and <= 32 && html is null:
                     {
                         HistoryHostRow[] rows = [.. positional.Select(id => HistoryHostRow.From(db.Show(id, ct: ct)))];
                         if (json)
@@ -195,8 +237,20 @@ public static class HistoryCommand
                     }
                 case "compare" when positional.Count == 2:
                     {
-                        List<HistoryDifference> rows = Compare(db.Show(positional[0], ct: ct), db.Show(positional[1], ct: ct));
-                        if (json)
+                        HistoryDetail baseline = db.Show(positional[0], ct: ct);
+                        HistoryDetail candidate = db.Show(positional[1], ct: ct);
+                        List<HistoryDifference> rows = Compare(baseline, candidate);
+                        if (html is not null)
+                        {
+                            await WriteHtmlAsync(new()
+                            {
+                                ["differences"] = JsonSerializer.SerializeToNode(rows, HistoryJson.Default.ListHistoryDifference),
+                                ["measurements"] = PairMeasurements(baseline, candidate),
+                                ["baseline"] = baseline.Run.Id,
+                                ["candidate"] = candidate.Run.Id
+                            });
+                        }
+                        else if (json)
                         {
                             Console.WriteLine(JsonSerializer.Serialize(rows, HistoryJson.Default.ListHistoryDifference));
                         }
@@ -232,10 +286,22 @@ public static class HistoryCommand
                             throw new ArgumentException("--alpha must be a number between zero and one.");
                         }
 
-                        HistoryDetectionReport report = HistoryDetector.Detect(db.Show(positional[0], ct: ct), db.Show(positional[1], ct: ct),
+                        HistoryDetail baseline = db.Show(positional[0], ct: ct);
+                        HistoryDetail candidate = db.Show(positional[1], ct: ct);
+                        HistoryDetectionReport report = HistoryDetector.Detect(baseline, candidate,
                         metric, options.GetValueOrDefault("--variant"),
                         options.GetValueOrDefault("--scenario"), direction, minimum, alpha, ct);
-                        if (json)
+                        if (html is not null)
+                        {
+                            await WriteHtmlAsync(new()
+                            {
+                                ["detection"] = JsonSerializer.SerializeToNode(report, HistoryJson.Default.HistoryDetectionReport),
+                                ["measurements"] = PairMeasurements(baseline, candidate, metric),
+                                ["baseline"] = baseline.Run.Id,
+                                ["candidate"] = candidate.Run.Id
+                            });
+                        }
+                        else if (json)
                         {
                             Console.WriteLine(JsonSerializer.Serialize(report,
                             HistoryJson.Default.HistoryDetectionReport));
@@ -261,6 +327,13 @@ public static class HistoryCommand
             }
 
             return 0;
+
+            Task WriteHtmlAsync(JsonObject data)
+            {
+                data["name"] = $"History · {command}";
+                data["historyMode"] = command;
+                return html!(data);
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException
                                       or InvalidDataException or JsonException or Microsoft.Data.Sqlite.SqliteException
@@ -280,7 +353,13 @@ public static class HistoryCommand
                                  history compare BASELINE_RUN CANDIDATE_RUN [--json]
                                  history host-summary RUN_ID [RUN_ID...] [--db PATH] [--json]
                                  history detect BASELINE_RUN CANDIDATE_RUN --metric NAME --direction higher-worse|lower-worse --min-percent N [--variant NAME] [--scenario NAME] [--alpha N] [--json]
+                                 history matrix|sweep --metric NAME [--run ID] [--variant NAME] [--scenario NAME] --html OUTPUT.html
                                  """;
+
+    private static JsonNode? PairMeasurements(HistoryDetail baseline, HistoryDetail candidate, string? metric = null) =>
+        JsonSerializer.SerializeToNode([.. baseline.Measurements.Concat(candidate.Measurements)
+                .Where(row => row.Metric != "artifact_result_bytes" && (metric is null || row.Metric == metric))],
+            HistoryJson.Default.ListHistoryMeasurement);
 
     private static string? DateOption(string? value, string option)
     {

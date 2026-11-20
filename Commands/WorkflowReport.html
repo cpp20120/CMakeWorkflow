@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>CMakeWorkflow report</title>
+<style>
+:root{color-scheme:light dark;--bg:#edf0f4;--paper:#fff;--ink:#1c2636;--quiet:#4e6074;--line:#c6d0db;--blue:#255db4;--focus:#a0440b}
+@media(prefers-color-scheme:dark){:root{--bg:#101721;--paper:#19222f;--ink:#e6edf5;--quiet:#a9b8c8;--line:#394858;--blue:#87b5ff;--focus:#ffad75}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:74rem;margin:auto;padding:2rem 1rem 4rem}header{border-bottom:2px solid var(--blue);padding-bottom:1rem}
+h1,h2,h3,p{margin:0 0 .6rem}h1{font-size:clamp(1.7rem,4vw,2.5rem);line-height:1.2;overflow-wrap:anywhere}
+h2{font-size:1.35rem}h3{font-size:1.05rem}section,.capture{margin-top:1.25rem;padding:1.15rem;background:var(--paper);border:1px solid var(--line);border-radius:.5rem}
+.capture{margin-top:.75rem}summary{cursor:pointer;font-weight:650;overflow-wrap:anywhere}.capture[open]>summary{margin-bottom:.8rem}
+small,.note{color:var(--quiet)}label{font-weight:600}select,button{font:inherit;color:inherit;background:var(--paper);border:1px solid var(--line);border-radius:.3rem;padding:.25rem .5rem}
+select{display:block;max-width:100%;margin:.3rem 0 .7rem}button{cursor:pointer}button:disabled{cursor:default;opacity:.6}:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+table{width:100%;border-collapse:collapse;margin:.45rem 0 1rem;font-variant-numeric:tabular-nums}th,td{text-align:left;vertical-align:top;padding:.4rem;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+td:nth-child(n+2){white-space:normal}.plot{display:block;width:100%;height:auto;color:var(--quiet);margin:.3rem 0 .8rem}
+.plot text{fill:currentColor;font:13px system-ui,sans-serif}.plot line{stroke:var(--line)}.plot circle{fill:var(--blue);fill-opacity:.7}
+.plot .median{stroke:var(--focus);stroke-width:2}.table-scroll,.flame-scroll{overflow:auto}
+.flame-scroll{max-height:27rem;border:1px solid var(--line);margin:.4rem 0}.flame{position:relative;min-width:40rem}
+.frame{position:absolute;border-radius:0;border:1px solid #513524;color:#21140e;text-align:left;font:12px system-ui,sans-serif;padding:0 3px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.frame:focus-visible{z-index:1}.flame-info{min-height:1.5rem;overflow-wrap:anywhere;margin:.35rem 0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto;padding:.65rem;border:1px solid var(--line)}
+nav{display:flex;gap:1rem;flex-wrap:wrap}a{color:var(--blue)}.numbers{font-variant-numeric:tabular-nums}
+.badge{display:inline-block;border-radius:1rem;padding:.1rem .55rem;font-size:.8rem;font-weight:700;color:#253449;background:#e2e8f0;white-space:nowrap}
+.badge.complete{color:#104735;background:#c5f0de}.badge.partial{color:#70321e;background:#ffe0d2}.badge.warning{color:#633a02;background:#ffebba}
+.badge.incomplete{color:#48317c;background:#e8ddff}.badge.failed{color:#781f2b;background:#ffdadf}
+.links{display:flex;flex-wrap:wrap;gap:.45rem;margin:.5rem 0 .85rem}.links a{border:1px solid var(--line);border-radius:.3rem;padding:.25rem .5rem}
+.summary-grid{display:flex;flex-wrap:wrap;gap:.75rem 2rem;margin-bottom:.8rem}
+.summary-grid strong{display:block;font-size:1.2rem}.summary-grid span{color:var(--quiet)}
+.plot .box{fill:var(--blue);fill-opacity:.17;stroke:var(--blue)}
+.plot .series{fill:none;stroke:var(--blue);stroke-width:2}.plot .bound{stroke:var(--focus);stroke-dasharray:5 4}
+.plot .baseline{fill:var(--blue)}.plot .candidate{fill:var(--focus)}.plot .interval{stroke:var(--blue);stroke-width:3}
+.plot .point{fill-opacity:1}.plot .raw{fill-opacity:.45}
+.color-baseline{color:var(--blue);font-weight:650}.color-candidate{color:var(--focus);font-weight:650}
+</style>
+</head>
+<body>
+<main>
+<header><h1>CMakeWorkflow report</h1><p id="run" class="note"></p><nav aria-label="Report sections"></nav></header>
+<div id="report"></div>
+<noscript><p>Enable JavaScript to view the charts embedded in this file.</p></noscript>
+</main>
+<script id="evidence" type="application/json">/*REPORT_DATA*/</script>
+<script>
+'use strict';
+const data = {nodes: [], captures: [], ...JSON.parse(document.getElementById('evidence').textContent)};
+const report = document.getElementById('report');
+const format = new Intl.NumberFormat('en', {maximumSignificantDigits: 6});
+const integers = new Intl.NumberFormat('en');
+const number = value => Number.isFinite(value)
+    ? (Number.isInteger(value) ? integers : format).format(value) : 'Unavailable';
+const text = (parent, type, value, className) => {
+    const element = document.createElement(type);
+    element.textContent = value ?? '';
+    if (className) element.className = className;
+    parent.append(element);
+    return element;
+};
+const section = (id, title) => {
+    const block = text(report, 'section');
+    block.id = id;
+    text(block, 'h2', title);
+    text(document.querySelector('nav'), 'a', title).href = '#' + id;
+    return block;
+};
+const table = (parent, headings, rows) => {
+    const wrapper = text(parent, 'div', '', 'table-scroll');
+    const result = text(wrapper, 'table');
+    const header = text(text(result, 'thead'), 'tr');
+    headings.forEach(label => text(header, 'th', label).scope = 'col');
+    const body = text(result, 'tbody');
+    for (const values of rows) {
+        const row = text(body, 'tr');
+        values.forEach(value => text(row, 'td', value));
+    }
+};
+const svg = (parent, tag, attrs, label) => {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    if (label !== undefined) element.textContent = label;
+    parent.append(element);
+    return element;
+};
+const median = values => {
+    const sorted = values.slice().sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : sorted[middle - 1] / 2 + sorted[middle] / 2;
+};
+document.getElementById('run').textContent = [data.name, data.status, data.nodes.length + ' workflow nodes']
+    .filter((value, index) => value && (index !== 2 || !data.historyMode)).join(' · ');
+
+/*REPORT_PROFILE*/
+/*REPORT_CHARTS*/
+
+const metrics = new Map();
+function addMetric(name, unit, method, group, label, value) {
+    if (!Number.isFinite(value)) return;
+    const key = JSON.stringify([name, unit, method]);
+    if (!metrics.has(key)) metrics.set(key, {name, unit, method, groups: new Map()});
+    const groups = metrics.get(key).groups;
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push({label, value});
+}
+for (const variant of measurementRows.some(row => row.metric === 'process_wall_time') ? [] : data.timing?.variants ?? []) {
+    (variant.seconds ?? []).forEach((value, index) => addMetric(
+        'Variant wall time', 's', 'Uninstrumented process time', variant.name, 'Trial ' + (index + 1), value));
+}
+for (const node of data.nodes) {
+    if (node.status !== 'succeeded') continue;
+    const group = [node.kind, node.target, node.configuration, node.actionCacheHit ? 'cache hit' : null].filter(Boolean).join(' · ');
+    addMetric('Node duration', 's', 'Workflow elapsed time', group, node.id, node.durationSeconds);
+    addMetric('Process wall time', 's', 'Process elapsed time', group, node.id, node.processDurationSeconds);
+    if (node.processResources) {
+        const resources = node.processResources;
+        const scope = [resources.method, resources.scope, resources.sampleIntervalMilliseconds + ' ms sampling'].join(' · ');
+        addMetric('Peak RSS', 'MiB', scope, group, node.id,
+            Number.isFinite(resources.peakRssBytes) ? resources.peakRssBytes / 1048576 : null);
+        addMetric('CPU time', 's', scope, group, node.id, resources.cpuSeconds);
+    }
+}
+for (const capture of data.captures) {
+    for (const [name, event] of Object.entries(capture.counters ?? {})) {
+        const quality = Number.isFinite(event.runningPercent)
+            ? (event.runningPercent < 100 ? 'scaled multiplexed counts' : 'reported counts')
+            : 'unknown running fraction';
+        addMetric(name, event.unit || 'events', ['perf stat', event.domain, quality].filter(Boolean).join(' · '),
+            capture.captureId, capture.mode, event.value);
+    }
+    for (const [name, event] of Object.entries(capture.derivedCounters ?? {})) {
+        addMetric(name, event.unit, ['perf stat', event.domain, event.quality].filter(Boolean).join(' · '),
+            capture.captureId, capture.mode, event.value);
+    }
+    for (const counter of capture.pmc?.counters ?? []) {
+        addMetric(counter.name, 'estimated events', 'ETW PMC overflow · interval ' + counter.interval,
+            capture.captureId, capture.mode, counter.estimatedEvents);
+    }
+}
+function drawMetric(parent, metric) {
+    const rows = [...metric.groups];
+    let min = rows.reduce((bound, [, points]) => points.reduce((a, p) => Math.min(a, p.value), bound), Infinity);
+    let max = rows.reduce((bound, [, points]) => points.reduce((a, p) => Math.max(a, p.value), bound), -Infinity);
+    if (min === max) {
+        min = Math.min(min, 0);
+        max = Math.max(max, 0);
+    }
+    const scale = Math.max(Math.abs(min), Math.abs(max)) || 1;
+    const range = max / scale - min / scale || 1;
+    const x = value => min === max ? 518 : 158 + (value / scale - min / scale) / range * 720;
+    text(parent, 'p', metric.method, 'note');
+    const displayed = rows.slice(0, 24);
+    const height = 32 + displayed.length * 32;
+    const plot = svg(parent, 'svg', {viewBox: `0 0 900 ${height}`, class: 'plot', role: 'img',
+        'aria-label': metric.name + ' distribution by group; orange ticks indicate medians'});
+    displayed.forEach(([label, points], index) => {
+        const y = 18 + index * 32;
+        svg(plot, 'text', {x: 0, y: y + 4}, label.length > 21 ? label.slice(0, 20) + '…' : label);
+        svg(plot, 'line', {x1: 158, x2: 878, y1: y, y2: y});
+        const step = Math.ceil(points.length / 500);
+        points.forEach((point, i) => {
+            if (i % step !== 0) return;
+            const mark = svg(plot, 'circle', {cx: x(point.value), cy: y + (i % 5 - 2) * 3, r: 3});
+            svg(mark, 'title', {}, `${label} · ${point.label} · ${number(point.value)} ${metric.unit}`);
+        });
+        const middle = x(median(points.map(point => point.value)));
+        box(plot, points.map(point => point.value), x, y);
+        svg(plot, 'line', {x1: middle, x2: middle, y1: y - 11, y2: y + 11, class: 'median'});
+    });
+    svg(plot, 'text', {x: 158, y: height - 3}, number(min));
+    svg(plot, 'text', {x: 878, y: height - 3, 'text-anchor': 'end'}, number(max) + ' ' + metric.unit);
+    if (rows.length > 24 || rows.some(([, points]) => points.length > 500)) {
+        text(parent, 'p', 'Plot shows up to 24 groups and a subset of dense series. Statistics use all observations.', 'note');
+    }
+    table(parent, ['Group', 'Observations', 'Median', 'Min', 'Max'], rows.map(([label, points]) => {
+        const values = points.map(point => point.value).sort((a, b) => a - b);
+        return [label, number(values.length), number(median(values)), number(values[0]), number(values.at(-1))];
+    }));
+}
+if (metrics.size) {
+    const block = section('measurements', 'Measurements');
+    const label = text(block, 'label', 'Metric');
+    label.htmlFor = 'metric';
+    const selection = text(block, 'select');
+    selection.id = 'metric';
+    for (const [key, metric] of metrics) text(selection, 'option', `${metric.name} (${metric.unit}) · ${metric.method}`).value = key;
+    const chart = text(block, 'div');
+    const update = () => {
+        chart.replaceChildren();
+        drawMetric(chart, metrics.get(selection.value));
+    };
+    selection.addEventListener('change', update);
+    update();
+}
+
+function flamegraph(parent, evidence) {
+    const root = {name: 'All retained stacks', weight: 0, children: new Map()};
+    for (const stack of evidence.stacks ?? []) {
+        if (!Number.isFinite(stack.count) || stack.count <= 0 || !stack.frames?.length) continue;
+        root.weight += stack.count;
+        let frame = root;
+        for (const name of stack.frames) {
+            if (!frame.children.has(name)) frame.children.set(name, {name, weight: 0, children: new Map()});
+            frame = frame.children.get(name);
+            frame.weight += stack.count;
+        }
+    }
+    text(parent, 'h3', 'Sampled call stacks');
+    text(parent, 'p', `${number(evidence.parsedSamples)} of ${number(evidence.samples)} samples decoded · ${number(root.weight)} samples in retained stacks · ${evidence.analysisStatus ?? 'unknown analysis status'}`, 'note');
+    if (!root.weight) return;
+    text(parent, 'p', 'Width shows captured sample count among the displayed stacks. Select a frame to zoom.', 'note');
+    const reset = text(parent, 'button', 'Reset zoom');
+    const detail = text(parent, 'p', '', 'flame-info numbers');
+    detail.setAttribute('aria-live', 'polite');
+    const window = text(parent, 'div', '', 'flame-scroll');
+    const view = text(window, 'div', '', 'flame');
+    function draw(focus) {
+        reset.disabled = focus === root;
+        view.replaceChildren();
+        detail.textContent = focus.name + ' · ' + number(focus.weight) + ' samples';
+        const pending = [{frame: focus, left: 0, width: 100, depth: 0}];
+        let depth = 0;
+        while (pending.length) {
+            const entry = pending.pop();
+            const {frame, left, width} = entry;
+            if (width < .18) continue;
+            depth = Math.max(depth, entry.depth);
+            const box = text(view, 'button', frame.name, 'frame');
+            const count = `${number(frame.weight)} samples · ${number(100 * frame.weight / root.weight)}% of retained samples`;
+            box.title = frame.name + ' · ' + count;
+            Object.assign(box.style, {left: left + '%', width: width + '%', bottom: entry.depth * 22 + 'px',
+                height: '22px', background: `hsl(${20 + entry.depth * 17 % 40} 84% ${69 + entry.depth % 3 * 5}%)`});
+            box.addEventListener('focus', () => detail.textContent = box.title);
+            box.addEventListener('click', () => {
+                draw(frame);
+                view.querySelector('button').focus();
+            });
+            let offset = left;
+            for (const child of frame.children.values()) {
+                const share = width * child.weight / frame.weight;
+                pending.push({frame: child, left: offset, width: share, depth: entry.depth + 1});
+                offset += share;
+            }
+        }
+        view.style.height = (depth + 1) * 22 + 'px';
+        window.scrollTop = window.scrollHeight;
+    }
+    reset.addEventListener('click', () => {
+        draw(root);
+        view.querySelector('button').focus();
+    });
+    draw(root);
+}
+
+function timeline(parent, events) {
+    const time = event => typeof event.timestamp === 'number' ? event.timestamp : Date.parse(event.timestamp) / 1000;
+    const points = events.filter(Boolean).map(event => ({...event, time: time(event)})).filter(event => Number.isFinite(event.time));
+    if (!points.length) return;
+    const first = points.reduce((start, event) => Math.min(start, event.time), Infinity);
+    const last = points.reduce((end, event) => Math.max(end, event.time), -Infinity);
+    const colors = new Map([['ready', '#a85804'], ['running', '#1b7b5d'], ['offcpu', '#8456b2']]);
+    const threads = [...new Set(points.map(event => event.threadId))].slice(0, 20);
+    const height = threads.length * 20 + 28;
+    text(parent, 'h3', 'Scheduler events');
+    text(parent, 'p', 'Recorded transitions by thread · ready / running / offcpu · up to 20 threads', 'note');
+    const plot = svg(parent, 'svg', {viewBox: `0 0 900 ${height}`, class: 'plot', role: 'img', 'aria-label': 'Recorded scheduler transitions'});
+    threads.forEach((thread, index) => {
+        const y = 16 + index * 20;
+        svg(plot, 'text', {x: 0, y: y + 4}, String(thread));
+        svg(plot, 'line', {x1: 100, x2: 878, y1: y, y2: y});
+    });
+    const step = Math.ceil(points.length / 3000);
+    points.forEach((event, index) => {
+        const row = threads.indexOf(event.threadId);
+        if (row < 0 || index % step !== 0) return;
+        const mark = svg(plot, 'circle', {cx: 100 + (event.time - first) / (last - first || 1) * 778,
+            cy: 16 + row * 20, r: 3, style: 'fill:' + (colors.get(event.state) ?? 'currentColor')});
+        svg(mark, 'title', {}, `Thread ${event.threadId} · ${event.state} · +${number(event.time - first)} s`);
+    });
+    svg(plot, 'text', {x: 100, y: height - 3}, '0 s');
+    svg(plot, 'text', {x: 878, y: height - 3, 'text-anchor': 'end'}, number(last - first) + ' s');
+    if (step > 1) text(parent, 'p', 'Dense event series is downsampled for display.', 'note');
+}
+
+if (data.captures.length) {
+    const block = section('profiles', 'Profiles');
+    for (const capture of data.captures) {
+        const details = text(block, 'details', '', 'capture');
+        details.id = captureAnchors.get(capture);
+        const heading = text(details, 'summary', [capture.captureId, capture.backend, capture.mode].filter(Boolean).join(' · ') + ' ');
+        badge(heading, captureStatus(capture));
+        details.addEventListener('toggle', () => {
+            if (!details.open || details.dataset.rendered) return;
+            captureLinks(details, capture);
+            if (capture.analysisError) text(details, 'p', capture.analysisError);
+            for (const warning of capture.analysisWarnings ?? []) text(details, 'p', warning, 'note');
+            const counters = [...Object.entries(capture.counters ?? {}), ...Object.entries(capture.derivedCounters ?? {})];
+            if (counters.length) {
+                text(details, 'h3', 'perf stat counters');
+                table(details, ['Event', 'Value', 'Unit', 'Domain', 'Running % / quality'],
+                    counters.map(([name, value]) => [name, number(value.value), value.unit, value.domain,
+                        value.quality ?? number(value.runningPercent)]));
+            }
+            if (capture.pmc?.counters?.length) {
+                text(details, 'h3', 'ETW overflow estimates');
+                table(details, ['Source', 'Estimated events', 'Samples', 'Interval', 'Status'],
+                    capture.pmc.counters.map(row => [row.name, number(row.estimatedEvents), number(row.samples),
+                        number(row.interval), row.status]));
+            }
+            if (capture.stacks) flamegraph(details, capture.stacks);
+            if (capture.timeline?.length) timeline(details, capture.timeline);
+            if (capture.perfReport) {
+                const raw = text(details, 'details');
+                text(raw, 'summary', capture.perfReportTruncated ? 'perf report (excerpt)' : 'perf report');
+                text(raw, 'pre', capture.perfReport);
+            }
+            details.dataset.rendered = 'true';
+        });
+    }
+}
+function openLinkedProfile() {
+    const target = document.getElementById(location.hash.slice(1));
+    if (target instanceof HTMLDetailsElement) target.open = true;
+}
+window.addEventListener('hashchange', openLinkedProfile);
+openLinkedProfile();
+if (data.nodes.length) {
+    const block = section('nodes', 'Workflow nodes');
+    table(block, ['Node', 'Kind', 'Target', 'Status', 'Elapsed (s)'], data.nodes.map(node =>
+        [node.id, node.kind, node.target, node.status, number(node.durationSeconds)]));
+}
+if (!report.children.length) text(report, 'p', 'This run contains no reportable measurements.');
+</script>
+</body>
+</html>

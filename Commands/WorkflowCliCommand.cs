@@ -22,6 +22,7 @@ internal static class WorkflowCliCommand
         ["resume", .. string[] tail] => ResumeAsync(tail, ct),
         ["report", string directory] => WorkflowReportCommand.ExecuteAsync(directory, ct),
         ["report", string directory, "--json"] => WorkflowReportCommand.ExecuteAsync(directory, ct, json: true),
+        ["report", string directory, "--html"] => WorkflowHtmlReport.ExecuteAsync(directory, ct),
         ["sequence", .. string[] tail] => TwoTargetWorkflow.ExecuteAsync(tail, ct),
         _ => Task.FromResult(CliUsage.Write())
     };
