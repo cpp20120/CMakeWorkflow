@@ -21,6 +21,16 @@ public static class ToolingCommand
                 return await VisualStudioSetupCommand.ExecuteAsync(args[1..], ct);
             }
 
+            if (args[0] == "lock")
+            {
+                return await ManagedEnvironmentCommand.LockAsync(args[1..], ct);
+            }
+
+            if (args[0] == "vcpkg")
+            {
+                return await ManagedEnvironmentCommand.VcpkgAsync(args[1..], ct);
+            }
+
             string action = args[0];
             if (action is not ("list" or "doctor" or "plan" or "setup"))
             {
@@ -175,7 +185,7 @@ public static class ToolingCommand
         }
         catch (Exception error) when (error is ArgumentException or IOException
                                           or UnauthorizedAccessException or InvalidDataException or HttpRequestException
-                                          or TimeoutException or PlatformNotSupportedException or InvalidOperationException)
+                                          or TimeoutException or PlatformNotSupportedException or InvalidOperationException or JsonException)
         {
             await Console.Error.WriteLineAsync($"[CMakeWorkflow] Tooling: {error.Message}");
             return 1;
@@ -258,5 +268,5 @@ public static class ToolingCommand
     };
 
     private const string Usage =
-        "tooling <list|doctor|plan|setup|vs> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]";
+        "tooling <list|doctor|plan|setup|lock|vcpkg|vs> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]";
 }

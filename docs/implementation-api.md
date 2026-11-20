@@ -26,14 +26,14 @@ Release assembly metadata.
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
 | [CMakeWorkflow.Core](#cmakeworkflowcore) | 5 | 4 |
-| [CMakeWorkflow.CMake](#cmakeworkflowcmake) | 60 | 138 |
+| [CMakeWorkflow.CMake](#cmakeworkflowcmake) | 62 | 148 |
 | [CMakeWorkflow.Host](#cmakeworkflowhost) | 101 | 171 |
 | [CMakeWorkflow.Profiling](#cmakeworkflowprofiling) | 28 | 39 |
 | [CMakeWorkflow.History](#cmakeworkflowhistory) | 17 | 12 |
-| [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 50 | 72 |
+| [CMakeWorkflow.Tooling](#cmakeworkflowtooling) | 54 | 78 |
 | [CMakeWorkflow.Campaigns](#cmakeworkflowcampaigns) | 14 | 45 |
 | [CMakeWorkflow](#cmakeworkflow) | 0 | 0 |
-| **Total** | **275** | **481** |
+| **Total** | **281** | **497** |
 
 ## CMakeWorkflow.Core
 
@@ -803,12 +803,38 @@ public sealed class MissingWorkflowToolException(string executable, System.Excep
 }
 ```
 
+#### `LinuxCompilerConfiguration`
+
+Source: [CMakeWorkflow.CMake/Toolchains/LinuxCompilerConfiguration.cs](../CMakeWorkflow.CMake/Toolchains/LinuxCompilerConfiguration.cs)
+
+```csharp
+public sealed record LinuxCompilerConfiguration(string Sysroot, string TargetTriple, string Linker, string Archiver, string Ranlib, string DriverFlags);
+```
+
 #### `LinuxToolchainIdentity`
 
 Source: [CMakeWorkflow.CMake/Toolchains/LinuxToolchainIdentity.cs](../CMakeWorkflow.CMake/Toolchains/LinuxToolchainIdentity.cs)
 
 ```csharp
-public sealed record LinuxToolchainIdentity(CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection CMake, CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection CTest, CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection Ninja, string CCompiler, string CCompilerSha256, string CxxCompilerSha256, string TargetTriple);
+public sealed record LinuxToolchainIdentity(CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection CMake, CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection CTest, CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection Ninja, string CCompiler, string CCompilerSha256, string CxxCompilerSha256, string TargetTriple)
+{
+    public string? CompilerVersion { get; init; }
+    public string? CompilerArtifactSha256 { get; init; }
+    public CMakeWorkflow.CMake.Toolchains.WorkflowToolSelection? Linker { get; init; }
+    public string? SdkArtifactSha256 { get; init; }
+    public string? Runtime { get; init; }
+    public string? EnvironmentLockSha256 { get; init; }
+    public string? VcpkgProjectSha256 { get; init; }
+    public string? VcpkgPackageTreeSha256 { get; init; }
+}
+```
+
+#### `WorkflowVcpkgConfiguration`
+
+Source: [CMakeWorkflow.CMake/Toolchains/WorkflowVcpkgConfiguration.cs](../CMakeWorkflow.CMake/Toolchains/WorkflowVcpkgConfiguration.cs)
+
+```csharp
+public sealed record WorkflowVcpkgConfiguration(string ManifestRoot, string InstalledDirectory, string VcpkgToolchain, string ChainloadToolchain, string Triplet);
 ```
 
 #### `WorkflowToolSelection`
@@ -851,6 +877,8 @@ Source: [CMakeWorkflow.CMake/Toolchains/WorkflowToolchainRuntime.cs](../CMakeWor
 ```csharp
 public sealed record WorkflowToolchainRuntime(string CMake, string? Ninja, string Compiler, string? Sdk, string? EnvironmentProfileId, string Generator, string Fingerprint, System.Collections.Generic.IReadOnlyDictionary<string, string> Variables)
 {
+    public CMakeWorkflow.CMake.Toolchains.WorkflowVcpkgConfiguration? Vcpkg { get; init; }
+    public CMakeWorkflow.CMake.Toolchains.LinuxCompilerConfiguration? LinuxCompiler { get; init; }
     public CMakeWorkflow.CMake.Toolchains.LinuxToolchainIdentity? Linux { get; init; }
     public string? CCompiler { get; init; }
     public string? CTest { get; init; }
@@ -2900,6 +2928,31 @@ Source: [CMakeWorkflow.Tooling/Tools/ToolDefinition.cs](../CMakeWorkflow.Tooling
 public sealed record ToolDefinition(string Id, string DisplayName, string[] Commands, string[] ProbeArguments, System.Version? MinimumVersion, System.Collections.Generic.IReadOnlyDictionary<CMakeWorkflow.Tooling.Tools.PackageManagerKind, string[]> Packages, bool StandaloneCMake = false, string? ManualHint = null);
 ```
 
+#### `ManagedEnvironmentLocks`
+
+Source: [CMakeWorkflow.Tooling/Tools/ManagedEnvironmentLocks.cs](../CMakeWorkflow.Tooling/Tools/ManagedEnvironmentLocks.cs)
+
+```csharp
+public static class ManagedEnvironmentLocks
+{
+    public static System.Threading.Tasks.Task VerifyAsync(string digest, System.Threading.CancellationToken ct);
+}
+```
+
+#### `ManagedLinuxSdk`
+
+Source: [CMakeWorkflow.Tooling/Tools/ManagedLinuxSdk.cs](../CMakeWorkflow.Tooling/Tools/ManagedLinuxSdk.cs)
+
+```csharp
+public static class ManagedLinuxSdk
+{
+    public const string TargetTriple = "x86_64-unknown-linux-gnu";
+    public const string Runtime = "glibc >= 2.31, libstdc++ (GCC 10 ABI), libgcc_s";
+    public static void RequireHostAbi();
+    public static string DriverFlags(string sysroot, string lld);
+}
+```
+
 #### `ManagedToolRelease`
 
 Source: [CMakeWorkflow.Tooling/Tools/ManagedToolRelease.cs](../CMakeWorkflow.Tooling/Tools/ManagedToolRelease.cs)
@@ -3043,6 +3096,25 @@ Source: [CMakeWorkflow.Tooling/Tools/ToolingStep.cs](../CMakeWorkflow.Tooling/To
 public sealed record ToolingStep(string Tool, string Method, string? Executable, string[] Arguments, string? Source, string? Diagnostic)
 {
     public CMakeWorkflow.Tooling.Tools.ManagedToolRelease? Release { get; init; }
+}
+```
+
+#### `ManagedVcpkgInstallation`
+
+Source: [CMakeWorkflow.Tooling/Tools/VcpkgProjects.cs](../CMakeWorkflow.Tooling/Tools/VcpkgProjects.cs)
+
+```csharp
+public sealed record ManagedVcpkgInstallation(string ManifestRoot, string InstalledDirectory, string VcpkgToolchain, string ChainloadToolchain, string Triplet, string PackageTreeSha256);
+```
+
+#### `VcpkgProjects`
+
+Source: [CMakeWorkflow.Tooling/Tools/VcpkgProjects.cs](../CMakeWorkflow.Tooling/Tools/VcpkgProjects.cs)
+
+```csharp
+public static class VcpkgProjects
+{
+    public static System.Threading.Tasks.Task<CMakeWorkflow.Tooling.Tools.ManagedVcpkgInstallation> ResolveAsync(string digest, System.Threading.CancellationToken ct);
 }
 ```
 

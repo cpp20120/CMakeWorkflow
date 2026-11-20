@@ -597,6 +597,37 @@ internal static class CMakeWorkflowNodeExecutor
                 result.Arguments.Add("-DCMAKE_C_COMPILER:FILEPATH=" + toolchain.CCompiler);
             }
 
+            if (toolchain.LinuxCompiler is { } linux)
+            {
+                result.Arguments.AddRange([
+                    "-DCMAKE_SYSROOT:PATH=" + linux.Sysroot,
+                    "-DCMAKE_C_COMPILER_TARGET:STRING=" + linux.TargetTriple,
+                    "-DCMAKE_CXX_COMPILER_TARGET:STRING=" + linux.TargetTriple,
+                    "-DCMAKE_LINKER:FILEPATH=" + linux.Linker,
+                    "-DCMAKE_AR:FILEPATH=" + linux.Archiver,
+                    "-DCMAKE_RANLIB:FILEPATH=" + linux.Ranlib,
+                    "-DCMAKE_C_FLAGS_INIT:STRING=" + linux.DriverFlags,
+                    "-DCMAKE_CXX_FLAGS_INIT:STRING=" + linux.DriverFlags,
+                    "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE:STRING=ONLY",
+                    "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY:STRING=ONLY",
+                    "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE:STRING=ONLY"
+                ]);
+            }
+
+            if (toolchain.Vcpkg is { } vcpkg)
+            {
+                result.Arguments.AddRange([
+                    "-DCMAKE_TOOLCHAIN_FILE:FILEPATH=" + vcpkg.VcpkgToolchain,
+                    "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE:FILEPATH=" + vcpkg.ChainloadToolchain,
+                    "-DVCPKG_MANIFEST_DIR:PATH=" + vcpkg.ManifestRoot,
+                    "-DVCPKG_INSTALLED_DIR:PATH=" + vcpkg.InstalledDirectory,
+                    "-DVCPKG_TARGET_TRIPLET:STRING=" + vcpkg.Triplet,
+                    "-DVCPKG_HOST_TRIPLET:STRING=" + vcpkg.Triplet,
+                    "-DVCPKG_MANIFEST_MODE:BOOL=ON",
+                    "-DVCPKG_MANIFEST_INSTALL:BOOL=OFF"
+                ]);
+            }
+
             if (toolchain.RequireConfiguredFingerprint)
             {
                 result.Arguments.Add("-D" + WorkflowToolchainAdmission.FingerprintProperty + ":INTERNAL=" + toolchain.Fingerprint);

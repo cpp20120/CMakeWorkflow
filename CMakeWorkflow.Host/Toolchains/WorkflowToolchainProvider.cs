@@ -18,6 +18,9 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         ArgumentNullException.ThrowIfNull(binding);
         return binding.EnvironmentProfileId switch
         {
+            "linux-managed-clang" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
+            _ when binding.EnvironmentLockSha256 is not null || binding.VcpkgProjectSha256 is not null =>
+                throw new InvalidOperationException("Linux environment and vcpkg digests require linux-managed-clang."),
             "linux-managed-tools-system-compiler" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
             "linux-allow-system-tools" => ResolveLinuxAsync(binding, ToolResolutionPolicy.AllowSystem, ct),
             _ => new WindowsWorkflowToolchainProvider().ResolveAsync(binding, ct)
@@ -32,21 +35,25 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             throw new PlatformNotSupportedException("The managed tools execution profile requires Linux x86-64.");
         }
 
+        bool managedCompiler = binding.EnvironmentProfileId == "linux-managed-clang";
         if (binding.HostArchitecture != "x64" || binding.TargetArchitecture != "x64" ||
             binding.Generator is not ("Ninja" or "Ninja Multi-Config") ||
-            binding.CompilerCandidateId is not (null or "system") || binding.SdkCandidateId is not null)
+            (!managedCompiler && (binding.CompilerCandidateId is not (null or "system") || binding.SdkCandidateId is not null)))
         {
             throw new InvalidOperationException(
-                "This profile uses native x64 Ninja and the host cc, c++ and SDK. Select this profile only for projects that use that SDK.");
+                "This profile requires native x64 and Ninja. Use linux-managed-clang to select a managed compiler or SDK identity.");
         }
 
         SystemToolingRuntime runtime = new();
         ToolingService tooling = new(runtime, new VerifiedCMakeInstaller());
-        ToolingPlan plan = await tooling.PlanAsync(["cmake-ninja"], PackageManagerKind.None, false, null, ct,
+        string profile = managedCompiler ? "linux-clang" : "cmake-ninja";
+        ToolingPlan plan = await tooling.PlanAsync([profile], PackageManagerKind.None, false, null, ct,
             resolutionPolicy: policy);
         if (!plan.Ready)
         {
-            throw new InvalidOperationException($"CMake, CTest and Ninja are required. Review tooling plan --tool-policy {policy} and apply it explicitly.");
+            string pending = string.Join(", ", plan.Tools.Where(tool => !tool.Installed).Select(tool => tool.DisplayName));
+            throw new InvalidOperationException(
+                $"Missing tools or SDK: {pending}. Review tooling plan --profile {profile} --tool-policy {policy} and apply it explicitly.");
         }
 
         ToolStatus cmake = plan.Tools.Single(t => t.Id == "cmake");
@@ -57,22 +64,74 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             throw new InvalidOperationException("The resolved tool differs from the requested managed release digest.");
         }
 
-        string cc = runtime.Resolve("cc", "") ?? throw new InvalidOperationException("The execution profile requires an installed cc.");
-        string cxx = runtime.Resolve("c++", "") ?? throw new InvalidOperationException("The execution profile requires an installed c++.");
+        ToolStatus? clang = managedCompiler ? plan.Tools.Single(t => t.Id == "clang++") : null;
+        ToolStatus? sdk = managedCompiler ? plan.Tools.Single(t => t.Id == "sysroot") : null;
+        ToolStatus? linker = managedCompiler ? plan.Tools.Single(t => t.Id == "ld.lld") : null;
+        if ((clang is not null && !MatchesCandidate(binding.CompilerCandidateId, clang)) ||
+            (sdk is not null && !MatchesCandidate(binding.SdkCandidateId, sdk)))
+        {
+            throw new InvalidOperationException("The selected compiler or SDK differs from the requested managed digest.");
+        }
+
+        string cc = managedCompiler ? plan.Tools.Single(t => t.Id == "clang").Command! :
+            runtime.Resolve("cc", "") ?? throw new InvalidOperationException("The execution profile requires an installed cc.");
+        string cxx = clang?.Command ?? runtime.Resolve("c++", "") ??
+            throw new InvalidOperationException("The execution profile requires an installed c++.");
         Dictionary<string, string> environment = CreateEnvironment(cmake.Command!, ninja.Command!, cc, cxx, binding.Generator);
-        string triple = await ReadTargetAsync(cxx, environment, ct);
-        if (await ReadTargetAsync(cc, environment, ct) != triple)
+        LinuxCompilerConfiguration? compiler = null;
+        string triple = managedCompiler ? ManagedLinuxSdk.TargetTriple : await ReadTargetAsync(cxx, environment, ct);
+        if (sdk?.Command is { } sysroot && linker?.Command is { } ld)
+        {
+            string bin = Path.GetDirectoryName(ld) ?? throw new InvalidDataException("Missing managed LLVM bin directory.");
+            compiler = new(sysroot, triple, ld, Path.Combine(bin, "llvm-ar"), Path.Combine(bin, "llvm-ranlib"),
+                ManagedLinuxSdk.DriverFlags(sysroot, ld));
+            ConfigureManagedEnvironment(environment, bin);
+        }
+        else if (await ReadTargetAsync(cc, environment, ct) != triple)
         {
             throw new InvalidOperationException("The host C and C++ compilers report different target triples.");
         }
 
+        if (binding.EnvironmentLockSha256 is { } environmentLock)
+        {
+            await ManagedEnvironmentLocks.VerifyAsync(environmentLock, ct);
+        }
+
+        ManagedVcpkgInstallation? packages = binding.VcpkgProjectSha256 is { } dependencyPlan
+            ? await VcpkgProjects.ResolveAsync(dependencyPlan, ct) : null;
         LinuxToolchainIdentity linux = new(await IdentifyAsync(cmake, ct), await IdentifyAsync(ctest, ct),
             await IdentifyAsync(ninja, ct), cc, await CommandExecution.Sha256Async(cc, ct),
-            await CommandExecution.Sha256Async(cxx, ct), triple);
-        string fingerprint = Fingerprint(linux, binding, [cmake.Command!, ctest.Command!, ninja.Command!], environment);
-        return new(cmake.Command!, ninja.Command, cxx, null, binding.EnvironmentProfileId, binding.Generator, fingerprint,
+            await CommandExecution.Sha256Async(cxx, ct), triple)
+        {
+            CompilerVersion = clang?.Version,
+            CompilerArtifactSha256 = clang?.Sha256,
+            SdkArtifactSha256 = sdk?.Sha256,
+            Linker = linker is null ? null : await IdentifyAsync(linker, ct),
+            Runtime = managedCompiler ? ManagedLinuxSdk.Runtime : null,
+            EnvironmentLockSha256 = binding.EnvironmentLockSha256,
+            VcpkgProjectSha256 = binding.VcpkgProjectSha256,
+            VcpkgPackageTreeSha256 = packages?.PackageTreeSha256
+        };
+        List<string> paths = [cmake.Command!, ctest.Command!, ninja.Command!];
+        if (compiler is not null)
+        {
+            paths.AddRange([compiler.Sysroot, compiler.Linker, compiler.Archiver, compiler.Ranlib, compiler.DriverFlags]);
+        }
+
+        WorkflowVcpkgConfiguration? vcpkg = null;
+        if (packages is not null)
+        {
+            vcpkg = new(packages.ManifestRoot, packages.InstalledDirectory, packages.VcpkgToolchain,
+                packages.ChainloadToolchain, packages.Triplet);
+            paths.AddRange([packages.ManifestRoot, packages.InstalledDirectory, packages.VcpkgToolchain, packages.ChainloadToolchain]);
+        }
+
+        string fingerprint = Fingerprint(linux, binding, paths, environment);
+        return new(cmake.Command!, ninja.Command, cxx, sdk?.Command, binding.EnvironmentProfileId, binding.Generator, fingerprint,
             environment.ToFrozenDictionary(StringComparer.Ordinal))
         {
+            Vcpkg = vcpkg,
+            LinuxCompiler = compiler,
             Linux = linux,
             CCompiler = cc,
             CTest = ctest.Command,
@@ -118,7 +177,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             .Where(Path.IsPathFullyQualified);
         string childPath = string.Join(Path.PathSeparator, new[]
         {
-            Path.GetDirectoryName(cmake)!, Path.GetDirectoryName(ninja)!
+            Path.GetDirectoryName(cmake), Path.GetDirectoryName(ninja)
         }.Concat(systemPaths).Distinct(StringComparer.Ordinal));
         Dictionary<string, string> environment = new(StringComparer.Ordinal)
         {
@@ -142,6 +201,20 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         }
 
         return environment;
+    }
+
+    private static void ConfigureManagedEnvironment(Dictionary<string, string> environment, string bin)
+    {
+        environment["PATH"] = bin + Path.PathSeparator + environment["PATH"];
+        foreach (string key in new[] { "CFLAGS", "CXXFLAGS", "LDFLAGS", "CMAKE_PREFIX_PATH", "GCC_EXEC_PREFIX" })
+        {
+            environment[key] = "";
+        }
+
+        foreach (string key in new[] { "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "LIBRARY_PATH", "COMPILER_PATH" })
+        {
+            environment[key] = "/dev/null";
+        }
     }
 
     private static async Task<string> ReadTargetAsync(string compiler, Dictionary<string, string> environment,

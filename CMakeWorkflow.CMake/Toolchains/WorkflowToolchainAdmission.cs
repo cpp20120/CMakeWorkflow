@@ -45,6 +45,12 @@ public static class WorkflowToolchainAdmission
                 throw new InvalidDataException("Toolchain provider returned an invalid or incompatible selection.");
             }
 
+            if (resolved.Vcpkg is { } vcpkg && tree.Any(x => x.Requested.SourceDirectory is { } source &&
+                    !WorkflowPlanner.PathComparer.Equals(Path.TrimEndingDirectorySeparator(source), vcpkg.ManifestRoot)))
+            {
+                throw new InvalidOperationException("The vcpkg dependency plan belongs to a different project directory.");
+            }
+
             selected.Add(tree.Key, resolved);
         }
 
@@ -114,6 +120,25 @@ public static class WorkflowToolchainAdmission
         if (selected is null)
         {
             return;
+        }
+
+        if (selected.LinuxCompiler is { } linux &&
+            (properties.GetValueOrDefault("CMAKE_SYSROOT") != linux.Sysroot ||
+             properties.GetValueOrDefault("CMAKE_LINKER") != linux.Linker ||
+             properties.GetValueOrDefault("CMAKE_C_COMPILER_TARGET") != linux.TargetTriple ||
+             properties.GetValueOrDefault("CMAKE_CXX_COMPILER_TARGET") != linux.TargetTriple))
+        {
+            throw new InvalidOperationException("Configured Linux SDK, linker or target differs from the managed selection.");
+        }
+
+        if (selected.Vcpkg is { } vcpkg &&
+            (properties.GetValueOrDefault("VCPKG_INSTALLED_DIR") != vcpkg.InstalledDirectory ||
+             properties.GetValueOrDefault("VCPKG_TARGET_TRIPLET") != vcpkg.Triplet ||
+             properties.GetValueOrDefault("CMAKE_TOOLCHAIN_FILE") != vcpkg.VcpkgToolchain ||
+             properties.GetValueOrDefault("VCPKG_CHAINLOAD_TOOLCHAIN_FILE") != vcpkg.ChainloadToolchain ||
+             properties.GetValueOrDefault("VCPKG_MANIFEST_INSTALL") != "OFF"))
+        {
+            throw new InvalidOperationException("Configured vcpkg package selection differs from the approved project dependencies.");
         }
 
         if (properties.TryGetValue("CMAKE_GENERATOR", out string? generator) && generator != selected.Generator)

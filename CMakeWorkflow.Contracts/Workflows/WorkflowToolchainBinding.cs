@@ -26,4 +26,11 @@ public sealed record WorkflowToolchainBinding(
     string? EnvironmentProfileId = null,
     string Generator = "Ninja",
     string HostArchitecture = "x64",
-    string TargetArchitecture = "x64");
+    string TargetArchitecture = "x64")
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentLockSha256 { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VcpkgProjectSha256 { get; init; }
+}

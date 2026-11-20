@@ -137,12 +137,48 @@ internal static class ManagedToolTests
                     "Unsafe tar entries reached executable publication");
             }
 
+            await CheckEnvironmentAndProjectPlansAsync(root);
             Console.WriteLine("Managed tooling checks passed.");
         }
         finally
         {
             System.Environment.SetEnvironmentVariable("CMAKEWORKFLOW_TOOL_STORE", previous);
         }
+    }
+
+    private static async Task CheckEnvironmentAndProjectPlansAsync(string root)
+    {
+        byte[] environment = ManagedEnvironmentLocks.Serialize();
+        string digest = ManagedEnvironmentLocks.Hash(environment);
+        await RejectAsync<InvalidDataException>(() => ManagedEnvironmentLocks.VerifyAsync(digest, default));
+        await ManagedEnvironmentLocks.WriteAsync(environment, digest, default);
+        await ManagedEnvironmentLocks.VerifyAsync(digest, default);
+        await ManagedEnvironmentLocks.WriteAsync(environment, digest, default);
+
+        string project = Path.Combine(root, "vcpkg-project");
+        _ = Directory.CreateDirectory(project);
+        string manifest = Path.Combine(project, "vcpkg.json");
+        string configuration = Path.Combine(project, "vcpkg-configuration.json");
+        await File.WriteAllTextAsync(manifest, """{"dependencies":["expected-lite"]}""", CancellationToken.None);
+        VcpkgProjectPlan original = await VcpkgProjects.PlanAsync(project, default);
+        Check(original.EnvironmentSha256 == digest && original.Checkout.Version == ToolCatalog.VcpkgCommit &&
+              original.ConfigurationSha256 is null, "Project plan lost pinned dependencies or SDK identity");
+        await File.WriteAllTextAsync(configuration, """{"registries":[]}""", CancellationToken.None);
+        VcpkgProjectPlan configured = await VcpkgProjects.PlanAsync(project, default);
+        Check(configured.ConfigurationSha256 is not null &&
+              ManagedEnvironmentLocks.Hash(VcpkgProjects.Serialize(configured)) !=
+              ManagedEnvironmentLocks.Hash(VcpkgProjects.Serialize(original)), "Registry input did not affect approval");
+        await RejectAsync<InvalidDataException>(() => VcpkgProjects.ResolveAsync(
+            ManagedEnvironmentLocks.Hash(VcpkgProjects.Serialize(configured)), default));
+
+        await File.WriteAllTextAsync(configuration,
+            """{"default-registry":{"kind":"git","repository":"https://example.invalid/registry","baseline":"main"}}""",
+            CancellationToken.None);
+        await RejectAsync<InvalidDataException>(() => VcpkgProjects.PlanAsync(project, default));
+
+        string path = Path.Combine(ManagedToolStore.GetRoot(), "manifests", digest + ".json");
+        await File.WriteAllTextAsync(path, "tampered", CancellationToken.None);
+        await RejectAsync<InvalidDataException>(() => ManagedEnvironmentLocks.VerifyAsync(digest, default));
     }
 
     private static Task<ToolingPlan> PlanAsync(ToolingService service, ToolResolutionPolicy policy) =>

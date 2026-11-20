@@ -71,7 +71,7 @@ try
         Console.WriteLine($"PASS NativeAOT initialize: Host {hostPid}; workspace={workspace}");
         if (client.Host.Capabilities.Contains("tooling/linuxManaged", StringComparer.Ordinal))
         {
-            HostFixPlan reviewed = await client.Provisioning.PlanFixAsync(new(["cmake-ninja"])
+            HostFixPlan reviewed = await client.Provisioning.PlanFixAsync(new(["linux-clang", "vcpkg"])
             {
                 ResolutionPolicy = HostToolResolutionPolicy.ManagedOnly
             }, ct);

@@ -191,6 +191,16 @@ internal static class ToolchainWireTests
               clientPreparation.Contains("\"cmakeCandidateId\"", StringComparison.Ordinal),
             "Client SDK must use documented cmakeCandidateId for discovery and preparation.");
 
+        const string linuxBindingJson = """
+            {"environmentProfileId":"linux-managed-clang","environmentLockSha256":"lock","vcpkgProjectSha256":"project"}
+            """;
+        WorkflowToolchainBinding? linuxBinding = JsonSerializer.Deserialize(linuxBindingJson,
+            HostJson.Default.WorkflowToolchainBinding);
+        Check(linuxBinding is { EnvironmentProfileId: "linux-managed-clang", EnvironmentLockSha256: "lock", VcpkgProjectSha256: "project" }
+              && JsonSerializer.Deserialize(JsonSerializer.Serialize(linuxBinding, WorkflowJson.Default.WorkflowToolchainBinding),
+                  WorkflowJson.Default.WorkflowToolchainBinding) == linuxBinding,
+            "Managed SDK or dependency selection was lost on the Host/workflow wire.");
+
         // A selected toolchain is part of the manifest and checkpoint identity,
         // but its inherited environment must never be persisted in run.json.
         WorkflowToolchainBinding bound = new(

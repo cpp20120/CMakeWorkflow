@@ -12,6 +12,7 @@ internal static class CliUsage
         "Usage: CMakeWorkflow history <import|runs|show|metrics|query|compare|detect|host-summary> ...\n" +
         "Usage: CMakeWorkflow env <doctor|plan|setup> REQUIREMENTS.json [--json] [--yes --plan-sha SHA256] [--allow-system-changes]\n" +
         "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]\n" +
+        "       CMakeWorkflow tooling lock [--write] | tooling vcpkg plan PROJECT | tooling vcpkg install PROJECT --yes --plan-sha SHA\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz seed --layer NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz run --build-dir DIR --layer NAME [--duration SECONDS] [--corpus DIR] [--replay-only]\n" +

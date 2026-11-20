@@ -91,8 +91,8 @@ Release assembly metadata.
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
 | [CMakeWorkflow.Client](#cmakeworkflowclient) | 113 | 125 |
-| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 26 | 93 |
-| **Total** | **139** | **218** |
+| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 26 | 95 |
+| **Total** | **139** | **220** |
 
 ## CMakeWorkflow.Client
 
@@ -1864,6 +1864,10 @@ leave that selection unspecified.
 Source: [CMakeWorkflow.Contracts/Workflows/WorkflowToolchainBinding.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowToolchainBinding.cs#L22)
 
 ```csharp
-public sealed record WorkflowToolchainBinding(string? CMakeCandidateId = null, string? NinjaCandidateId = null, string? CompilerCandidateId = null, string? SdkCandidateId = null, string? EnvironmentProfileId = null, string Generator = "Ninja", string HostArchitecture = "x64", string TargetArchitecture = "x64");
+public sealed record WorkflowToolchainBinding(string? CMakeCandidateId = null, string? NinjaCandidateId = null, string? CompilerCandidateId = null, string? SdkCandidateId = null, string? EnvironmentProfileId = null, string Generator = "Ninja", string HostArchitecture = "x64", string TargetArchitecture = "x64")
+{
+    public string? EnvironmentLockSha256 { get; init; }
+    public string? VcpkgProjectSha256 { get; init; }
+}
 ```
 

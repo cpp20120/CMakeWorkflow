@@ -70,7 +70,8 @@ Set `CMAKEWORKFLOW_TOOL_STORE` on the CLI or Host process to configure the absol
 
 Published releases live under `toolchains/<tool>/<version>/linux-x64/<archive-sha256>`. Downloads and extraction
 run under a per-artifact lock and use staging on the store filesystem. An interrupted attempt can be retried.
-Installations are retained side by side. There is no automatic garbage collection. To reclaim space, stop all
+SDKs live under `sdks` and vcpkg registry and project trees under `vcpkg`. Installations are retained side by side.
+There is no automatic garbage collection. To reclaim space, stop all
 CLI and Host processes using the store and remove only obsolete digest directories without live workflows,
 build-tree bindings or retained checkpoints that need them. Leave the lock files in place. The project artifact
 CAS has a separate lifecycle and does not own user-wide installations.
@@ -100,11 +101,60 @@ The child environment and exact executable paths apply to configure, build, and 
 toolchain fingerprint, and resume checks it against the saved selection. Keep the original paths for an existing
 build tree or checkpoint. A relocated store can be used with a new build tree.
 
-Managed LLVM/LLD, verified sysroots, pinned vcpkg bootstrap, and reusable environment lock manifests are outside this
-slice. The host SDK and system runtime libraries remain part of the build environment. Release pins are from
-[Kitware CMake 4.1.2](https://github.com/Kitware/CMake/releases/tag/v4.1.2) and
-[Ninja 1.13.1](https://github.com/ninja-build/ninja/releases/tag/v1.13.1).
+The CMake and Ninja release pins come from [Kitware CMake 4.1.2](https://github.com/Kitware/CMake/releases/tag/v4.1.2)
+and [Ninja 1.13.1](https://github.com/ninja-build/ninja/releases/tag/v1.13.1).
 
-To exercise a real installation and native C++ configure/build/test, run
-`tests/infrastructure/managed-tooling/run-smoke.sh PATH_TO_CMAKEWORKFLOW`. This opt-in check downloads releases
-from GitHub into a disposable store. The regular Tooling tests use fake release data and HTTP responses.
+### Managed Clang and SDK
+
+Select `--profile linux-clang --tool-policy ManagedOnly` in the same doctor, plan and setup flow. The plan pins
+Chromium LLVM/Clang and LLD 21.0.0 at LLVM revision `fd3fecfc0936703f2715fe6fea890e81b0b3c2ac` and a separate
+Debian Bullseye amd64 sysroot. Installation requires `/usr/bin/xz` and validates C++ headers, startup objects,
+the LLD link inputs and native execution before publishing the compiler. The sysroot supplies the compile/link ABI
+including glibc 2.31 and GCC 10 libstdc++ headers. Executables use the host glibc 2.31+ and compatible libstdc++ and
+libgcc_s at runtime. The Chromium sysroot contains link stubs. [Chromium compiler pin](https://chromium.googlesource.com/chromium/src/+/refs/tags/138.0.7204.49/tools/clang/scripts/update.py)
+· [Chromium sysroot pins](https://chromium.googlesource.com/chromium/src/build/+/refs/heads/main/linux/sysroot_scripts/sysroots.json)
+
+Use the `linux-managed-clang` environment profile with native x64 and Ninja or Ninja Multi-Config.
+`compilerCandidateId` and `sdkCandidateId` accept `sha256:<archive-sha256>` to require exact selections.
+The workflow records the compiler, linker, sysroot, target and runtime identities. Existing build trees and resume
+checkpoints require matching identities.
+
+```sh
+CMakeWorkflow tooling plan --profile linux-clang --tool-policy ManagedOnly
+CMakeWorkflow tooling setup --profile linux-clang --tool-policy ManagedOnly --yes --plan-sha SHA_FROM_PLAN
+CMakeWorkflow tooling lock --write > environment.lock.json
+```
+
+`tooling lock` emits canonical JSON and prints its SHA-256 on stderr. `--write` also publishes it at
+`manifests/<sha256>.json` in the tool store. Copy that file to the same location in another compatible store
+to reuse it. Add `environmentLockSha256` to the workflow's toolchain binding to require that exact lock.
+The lock contains the release pins, target and runtime ABI and is independent of a machine's absolute paths.
+
+### vcpkg project dependencies
+
+Add `--profile vcpkg` to a managed tooling plan to install the Linux glibc vcpkg executable from release
+2025-12-05 and vcpkg checkout `84bab45d415d22042bd0b9081aea57f362da3f35`. The checkout also requires
+`/usr/bin/git`. Tool setup and project dependency installation have separate approvals. [vcpkg tool release](https://github.com/microsoft/vcpkg-tool/releases/tag/2025-12-05)
+· [Pinned registry checkout](https://github.com/microsoft/vcpkg/tree/84bab45d415d22042bd0b9081aea57f362da3f35)
+
+```sh
+CMakeWorkflow tooling vcpkg plan PROJECT_DIR
+CMakeWorkflow tooling vcpkg install PROJECT_DIR --yes --plan-sha SHA_FROM_PROJECT_PLAN
+```
+
+The project plan identifies and applies a snapshot of the exact `vcpkg.json` and optional `vcpkg-configuration.json` bytes and the pinned tool,
+registry and environment identities. Builtin baselines must match the managed checkout. Other baselines can be
+selected through explicit Git registries with exact commit IDs. Filesystem registries and overlay paths are outside
+this workflow. Apply installs a project-specific tree with the managed compiler and uses configured vcpkg binary caches.
+Ports can require additional host utilities. Ensure these are present before applying the dependency plan.
+
+Add the printed `Vcpkg project SHA-256` as `vcpkgProjectSha256` on the same `linux-managed-clang` workflow binding.
+Configure consumes the prepared dependency tree with vcpkg's automatic manifest installation disabled. Changing either
+manifest requires a new dependency plan. The project install and package-tree digests are recorded separately from
+the compiler and sysroot digests. Project installs are host-local.
+
+### Network smoke tests
+
+Run `bash tests/infrastructure/managed-tooling/run-smoke.sh PATH_TO_CMAKEWORKFLOW` to exercise managed CMake/Ninja,
+add `--clang` for the pinned SDK, or add `--vcpkg` for the SDK and an approved real vcpkg manifest dependency.
+The opt-in checks use disposable stores. The ordinary Tooling tests use fake release data and HTTP responses.

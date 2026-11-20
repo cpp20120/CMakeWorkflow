@@ -27,6 +27,11 @@ public sealed partial class ToolingService
         string[] profiles = requestedProfiles.Count == 0 ? ["cmake-ninja"] :
             [.. requestedProfiles.Select(x => ToolCatalog.CanonicalProfileId(x.Trim())).Distinct(StringComparer.Ordinal)];
         IReadOnlyList<ToolDefinition> definitions = ToolCatalog.ResolveProfiles(profiles, runtime.Platform);
+        if (profiles.Contains("linux-clang", StringComparer.Ordinal))
+        {
+            ManagedLinuxSdk.RequireHostAbi();
+        }
+
         List<ToolStatus> statuses = new(definitions.Count);
         List<ToolingStep> steps = [];
         Dictionary<ManagedToolRelease, bool> verified = [];
@@ -50,7 +55,7 @@ public sealed partial class ToolingService
                 }
 
                 status = new(tool.Id, tool.DisplayName, installed,
-                    installed ? ManagedToolStore.Executable(ManagedToolStore.Location(directory, release), tool.Id) : null,
+                    installed ? ManagedToolStore.ToolPath(directory, release, tool.Id) : null,
                     release.Version, tool.MinimumVersion?.ToString(), system?.Diagnostic)
                 {
                     Origin = "managed",
@@ -84,7 +89,7 @@ public sealed partial class ToolingService
         }
 
         return new ToolingPlan(1, runtime.Platform, profiles, directory, PackageManagerKind.None,
-            statuses.All(s => s.Installed), statuses, steps)
+            statuses.All(s => s.Installed), statuses, [.. steps.OrderBy(step => step.Tool != "sysroot")])
         {
             ResolutionPolicy = policy
         };
