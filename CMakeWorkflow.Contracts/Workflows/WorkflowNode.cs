@@ -40,6 +40,9 @@ public sealed class WorkflowNode
     /// <summary>Optional JSON stdout metric extraction for an uncached schema-v2 run node.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public BenchmarkMetrics? Metrics { get; init; }
+    /// <summary>Optional charting metadata for a generated schema-v2 benchmark run.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BenchmarkTrial? BenchmarkTrial { get; init; }
     /// <summary>Optional execution directory; null uses the executor default. Relative paths use the manifest base.</summary>
     public string? WorkingDirectory { get; set; }
     /// <summary>Environment overrides for execution; keys cannot contain equals or NUL, and values cannot contain NUL.</summary>

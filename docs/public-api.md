@@ -317,6 +317,7 @@ Source: [CMakeWorkflow.Client/History/HistoryReadModels.cs](../CMakeWorkflow.Cli
 public sealed record HistoryMeasurement(string RunId, string? NodeId, string Metric, string Unit, double Value, string? Variant, string? Scenario, string Source, string Method, int SampleIndex, string? Workload, string? Environment)
 {
     public string? Direction { get; init; }
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkTrial? BenchmarkTrial { get; init; }
 }
 ```
 
@@ -1497,7 +1498,10 @@ no I/O or validation; recipe builders enforce these requirements.
 Source: [CMakeWorkflow.Contracts/Recipes/BenchmarkAxisV1.cs](../CMakeWorkflow.Contracts/Recipes/BenchmarkAxisV1.cs#L15)
 
 ```csharp
-public sealed record BenchmarkAxisV1(string Name, string Flag, string[] Values);
+public sealed record BenchmarkAxisV1(string Name, string Flag, string[] Values)
+{
+    public string? Role { get; init; }
+}
 ```
 
 #### `BenchmarkMatrixRecipeV1`
@@ -1629,6 +1633,17 @@ Source: [CMakeWorkflow.Contracts/Workflows/BenchmarkMetrics.cs](../CMakeWorkflow
 ```csharp
 public sealed record BenchmarkMetricField(string Path, string Name, string Unit, string Direction);
 public sealed record BenchmarkMetrics(string Source, string Format, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Workflows.BenchmarkMetricField> Fields);
+```
+
+#### `BenchmarkAxisCoordinate` and `BenchmarkTrial`
+
+Resolved recipe axes, baseline variant, and execution order for a generated matrix run.
+
+Sources: [BenchmarkAxisCoordinate.cs](../CMakeWorkflow.Contracts/Workflows/BenchmarkAxisCoordinate.cs), [BenchmarkTrial.cs](../CMakeWorkflow.Contracts/Workflows/BenchmarkTrial.cs)
+
+```csharp
+public sealed record BenchmarkAxisCoordinate(string Name, string Flag, string Value, string? Role);
+public sealed record BenchmarkTrial(string BaselineVariant, string ExecutionOrder, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Workflows.BenchmarkAxisCoordinate> Axes);
 ```
 
 #### `ProcessResourceUsage`
@@ -1765,6 +1780,7 @@ public sealed class WorkflowNode
     public System.Collections.Generic.List<string> DependsOn { get; set; }
     public System.Collections.Generic.List<string> Arguments { get; set; }
     public CMakeWorkflow.Contracts.Workflows.BenchmarkMetrics? Metrics { get; init; }
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkTrial? BenchmarkTrial { get; init; }
     public string? WorkingDirectory { get; set; }
     public System.Collections.Generic.Dictionary<string, string> Environment { get; set; }
     public System.Collections.Generic.Dictionary<string, string> Options { get; set; }

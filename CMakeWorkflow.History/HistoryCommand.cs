@@ -28,7 +28,7 @@ public static class HistoryCommand
             HashSet<string> flags = new(StringComparer.Ordinal);
             for (int i = 1; i < args.Length; i++)
             {
-                if (args[i] is "--recursive" or "--json")
+                if (args[i] is "--recursive" or "--json" or "--paired")
                 {
                     _ = flags.Add(args[i]);
                     continue;
@@ -53,7 +53,7 @@ public static class HistoryCommand
             {
                 "--db", "--limit", "--status", "--since", "--until", "--workflow",
                 "--variant", "--metric", "--scenario", "--run", "--direction",
-                "--min-percent", "--alpha"
+                "--min-percent", "--alpha", "--baseline-variant", "--candidate-variant"
             };
             if (options.Keys.Any(x => !allowed.Contains(x)))
             {
@@ -63,6 +63,14 @@ public static class HistoryCommand
             string dbPath = options.GetValueOrDefault("--db") ?? HistoryStore.DefaultDatabasePath;
             using HistoryStore db = new(dbPath);
             bool json = flags.Contains("--json");
+            bool paired = flags.Contains("--paired");
+            string? baselineVariant = options.GetValueOrDefault("--baseline-variant");
+            string? candidateVariant = options.GetValueOrDefault("--candidate-variant");
+            if ((paired && command != "detect") || ((baselineVariant is not null || candidateVariant is not null)
+                && (!paired || baselineVariant is null || candidateVariant is null || options.ContainsKey("--variant"))))
+            {
+                throw new ArgumentException("Use --paired with history detect. Variant pairing requires both --baseline-variant and --candidate-variant.");
+            }
             if (json && html is not null)
             {
                 throw new ArgumentException("Select one output format: --json or --html.");
@@ -290,9 +298,19 @@ public static class HistoryCommand
 
                         HistoryDetail baseline = db.Show(positional[0], ct: ct);
                         HistoryDetail candidate = db.Show(positional[1], ct: ct);
-                        HistoryDetectionReport report = HistoryDetector.Detect(baseline, candidate,
-                        metric, options.GetValueOrDefault("--variant"),
-                        options.GetValueOrDefault("--scenario"), direction, minimum, alpha, ct);
+                        if (paired && baseline.Run.Id == candidate.Run.Id
+                            && (baselineVariant is null || baselineVariant == candidateVariant))
+                        {
+                            throw new ArgumentException("Pairing within one run requires two distinct variants.");
+                        }
+
+                        string? variant = options.GetValueOrDefault("--variant");
+                        string? scenario = options.GetValueOrDefault("--scenario");
+                        HistoryDetectionReport report = paired
+                            ? HistoryDetector.DetectPaired(SelectVariant(baseline, baselineVariant, baselineVariant),
+                                SelectVariant(candidate, candidateVariant, baselineVariant),
+                                metric, baselineVariant ?? variant, scenario, direction, minimum, alpha, ct)
+                            : HistoryDetector.Detect(baseline, candidate, metric, variant, scenario, direction, minimum, alpha, ct);
                         if (html is not null)
                         {
                             await WriteHtmlAsync(html, new()
@@ -300,7 +318,10 @@ public static class HistoryCommand
                                 ["detection"] = JsonSerializer.SerializeToNode(report, HistoryJson.Default.HistoryDetectionReport),
                                 ["measurements"] = PairMeasurements(baseline, candidate, metric),
                                 ["baseline"] = baseline.Run.Id,
-                                ["candidate"] = candidate.Run.Id
+                                ["candidate"] = candidate.Run.Id,
+                                ["paired"] = paired,
+                                ["baselineVariant"] = baselineVariant,
+                                ["candidateVariant"] = candidateVariant
                             });
                         }
                         else if (json)
@@ -310,6 +331,11 @@ public static class HistoryCommand
                         }
                         else
                         {
+                            if (paired)
+                            {
+                                Console.WriteLine(report.Test);
+                            }
+
                             foreach (HistoryDetection row in report.Results)
                             {
                                 Console.WriteLine($"{row.Metric} [{row.Unit}, {row.Method}, {row.Variant ?? "unknown"}, "
@@ -354,14 +380,21 @@ public static class HistoryCommand
                                  history query --metric NAME [--run RUN_ID] [--variant NAME] [--json]
                                  history compare BASELINE_RUN CANDIDATE_RUN [--json]
                                  history host-summary RUN_ID [RUN_ID...] [--db PATH] [--json]
-                                 history detect BASELINE_RUN CANDIDATE_RUN --metric NAME --direction higher-worse|lower-worse --min-percent N [--variant NAME] [--scenario NAME] [--alpha N] [--json]
+                                 history detect BASELINE_RUN CANDIDATE_RUN --metric NAME --direction higher-worse|lower-worse --min-percent N [--paired] [--variant NAME | --baseline-variant NAME --candidate-variant NAME] [--scenario NAME] [--alpha N] [--json]
                                  history matrix|sweep --metric NAME [--run ID] [--variant NAME] [--scenario NAME] --html OUTPUT.html
                                  """;
 
     private static JsonNode? PairMeasurements(HistoryDetail baseline, HistoryDetail candidate, string? metric = null) =>
-        JsonSerializer.SerializeToNode([.. baseline.Measurements.Concat(candidate.Measurements)
+        JsonSerializer.SerializeToNode([.. (baseline.Run.Id == candidate.Run.Id
+                ? baseline.Measurements : baseline.Measurements.Concat(candidate.Measurements))
                 .Where(row => row.Metric != "artifact_result_bytes" && (metric is null || row.Metric == metric))],
             HistoryJson.Default.ListHistoryMeasurement);
+
+    private static HistoryDetail SelectVariant(HistoryDetail detail, string? variant, string? common) =>
+        variant is null ? detail : detail with
+        {
+            Measurements = [.. detail.Measurements.Where(row => row.Variant == variant).Select(row => row with { Variant = common })]
+        };
 
     private static string? DateOption(string? value, string option)
     {

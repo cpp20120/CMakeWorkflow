@@ -12,7 +12,7 @@ Language:** [Русский](results-and-history.md) · [English](en/results-and
 | Входной workflow manifest                              | 1 или 2                   |
 | `WorkflowPlanView`, `WorkflowEvent`, target resolution | `schemaVersion: 1`        |
 | Сохраняемый `WorkflowReport` (`run.json`)              | `schemaVersion: 1`        |
-| SQLite schema                                          | `PRAGMA user_version = 6` |
+| SQLite schema                                          | `PRAGMA user_version = 7` |
 
 Проверяйте схему конкретного ответа на стороне интеграции. Версия установленного бинарника и наличие дополнительных
 команд — отдельная задача совместимости.

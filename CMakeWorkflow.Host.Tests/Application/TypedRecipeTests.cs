@@ -139,7 +139,7 @@ internal static class TypedRecipeTests
         BenchmarkMatrixRecipeV1 matrix = new("benchmark-matrix", 1, variants, "worker", 2, 30,
             ["--literal", "a b"], [
                 new("case", "--case", ["chain", "noop"]),
-                new("workers", "--workers", ["1", "2"])
+                new("parallelism", "--workers", ["1", "2"]) { Role = "workers" }
             ], "round-robin");
         WorkflowDocument graph = BenchmarkMatrixWorkflowBuilder.Build(matrix);
         WorkflowNode[] timing = [.. graph.Nodes.Where(n => n.Kind == "run")];
@@ -149,6 +149,9 @@ internal static class TypedRecipeTests
               && timing[0].Id == "timing_debug_0001_001"
               && timing[1].Id == "timing_release_0001_001"
               && timing[8].Id == "timing_release_0001_002"
+              && timing[0].BenchmarkTrial is { BaselineVariant: "debug", ExecutionOrder: "round-robin" } trial
+              && trial.Axes[1] is { Name: "parallelism", Flag: "--workers", Value: "1", Role: "workers" }
+              && timing[2].BenchmarkTrial?.Axes[1].Value == "2"
               && timing.Skip(1).Select((n, i) => n.DependsOn.SequenceEqual([timing[i].Id])).All(x => x),
             "Benchmark Matrix order, isolation or argv");
         Check(WorkflowManifestBytes.Serialize(graph).SequenceEqual(WorkflowManifestBytes.Serialize(
@@ -158,6 +161,10 @@ internal static class TypedRecipeTests
               && sequential.Nodes[3].Id == "timing_debug_0001_002", "Benchmark Matrix sequential order");
         Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with { Repeats = 0 }));
         Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with { Axes = [new("bad", "workers", ["1"])] }));
+        Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with
+        {
+            Axes = [new("a", "--a", ["1"]) { Role = "workers" }, new("b", "--b", ["2"]) { Role = "workers" }]
+        }));
         Reject(() => BenchmarkMatrixWorkflowBuilder.Build(matrix with
         {
             Axes = [new("huge", "--huge", [.. Enumerable.Range(0, 32).Select(i => i.ToString(System.Globalization.CultureInfo.CurrentCulture))])],

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.History.Analysis;
 using CMakeWorkflow.History.Models;
 
@@ -8,6 +9,7 @@ namespace CMakeWorkflow.History;
 [JsonSerializable(typeof(List<HistoryRun>))]
 [JsonSerializable(typeof(HistoryDetail))]
 [JsonSerializable(typeof(List<HistoryMeasurement>))]
+[JsonSerializable(typeof(BenchmarkTrial))]
 [JsonSerializable(typeof(List<HistoryDifference>))]
 [JsonSerializable(typeof(HistoryHostEnvironment))]
 [JsonSerializable(typeof(List<HistoryBuildEnvironment>))]

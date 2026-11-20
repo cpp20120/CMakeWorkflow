@@ -631,6 +631,7 @@ public sealed class NodeResult
 {
     public string Id { get; set; }
     public string Kind { get; set; }
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkTrial? BenchmarkTrial { get; init; }
     public System.Collections.Generic.List<string> Dependencies { get; set; }
     public string BuildDirectory { get; set; }
     public string? Configuration { get; set; }
@@ -2431,6 +2432,7 @@ Source: [CMakeWorkflow.History/Models/HistoryMeasurement.cs](../CMakeWorkflow.Hi
 public sealed record HistoryMeasurement(string RunId, string? NodeId, string Metric, string Unit, double Value, string? Variant, string? Scenario, string Source, string Method, int SampleIndex, string? Workload, string? Environment)
 {
     public string? Direction { get; init; }
+    public CMakeWorkflow.Contracts.Workflows.BenchmarkTrial? BenchmarkTrial { get; init; }
 }
 ```
 

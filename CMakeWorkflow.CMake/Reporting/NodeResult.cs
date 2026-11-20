@@ -8,6 +8,8 @@ public sealed class NodeResult
 {
     public string Id { get; set; } = "";
     public string Kind { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BenchmarkTrial? BenchmarkTrial { get; init; }
 
     public List<string> Dependencies { get; set; } = [];
     public string BuildDirectory { get; set; } = "";

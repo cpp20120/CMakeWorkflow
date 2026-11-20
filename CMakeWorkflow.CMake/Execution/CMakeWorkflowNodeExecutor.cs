@@ -53,6 +53,7 @@ internal static class CMakeWorkflowNodeExecutor
         {
             Id = definition.Id,
             Kind = definition.Kind,
+            BenchmarkTrial = definition.BenchmarkTrial,
             Dependencies = [.. node.Dependencies],
             BuildDirectory = node.Target.BuildDirectory,
             Configuration = node.Target.Configuration,

@@ -74,6 +74,10 @@ public static class WorkflowPlanner
 
                 BenchmarkMetricExtractor.Validate(node.Metrics);
             }
+            if (node.BenchmarkTrial is not null && (document.SchemaVersion != 2 || node.Kind != "run" || node.ActionCache))
+            {
+                throw new ArgumentException($"{node.Id}: benchmarkTrial requires an uncached schema-v2 run.");
+            }
         }
 
         string[] orderedNodeIds = [.. document.Nodes.Select(node => node.Id)];

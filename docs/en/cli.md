@@ -77,6 +77,15 @@ Varying `workers` and `shards` produce a heatmap, `arrival_rate` and latency pro
 and throughput across `workers` produces a scalability curve. Efficiency uses the one-worker point
 from the same series. Other workload parameters are held fixed within each curve.
 
+The relative heatmap shows `100 × (candidate median − baseline median) / |baseline median|` for each
+comparable cell. Its colors use the metric's declared direction. A missing side or a zero baseline leaves
+the percentage blank. Absolute heatmaps remain available.
+
+A benchmark matrix recipe axis can declare a `role` of `workers`, `shards`, `arrival-rate`, `matrix-x`,
+`matrix-y`, `sweep`, or `facet`. Workflow results and History carry the resolved coordinates, first
+variant as baseline, and execution order as `benchmarkTrial`. Older results derive axes from arguments.
+Facet axes are held fixed within each chart.
+
 ## History
 
 ```sh
@@ -95,6 +104,7 @@ HTML for `runs`, `matrix`, and `sweep` requires `--metric NAME`. The latter two 
 ```sh
 CMakeWorkflow history compare BASELINE_ID CANDIDATE_ID --db CATALOG --html compare.html
 CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric METRIC --direction higher-worse --min-percent 5 --db CATALOG --html detect.html
+CMakeWorkflow history detect RUN_ID RUN_ID --paired --baseline-variant baseline --candidate-variant candidate --metric METRIC --direction higher-worse --min-percent 5 --db CATALOG --html paired.html
 CMakeWorkflow history matrix --metric METRIC --run RUN_ID --db CATALOG --html matrix.html
 CMakeWorkflow history sweep --metric METRIC --run RUN_ID --db CATALOG --html sweep.html
 CMakeWorkflow history runs --metric METRIC --limit 50 --db CATALOG --html runs.html
@@ -106,6 +116,13 @@ Matrix shows a heatmap across workers and shards or another varying numeric pair
 curves. Runs shows per-run medians by date or run index
 with recorded commit, compiler, generator, and host. A comparable series with nine or more points
 can show control limits estimated from its first eight run medians.
+
+`history detect --paired` opts into a one-sided sign-flip test with Holm correction. Use it when matching
+`sampleIndex` values reflect experimental pairs. It requires at least 10 pairs, unique indices, and identical
+index sets. To pair two variants from one run, pass both variant selectors. A recorded sequential matrix is
+ineligible for within-run paired detection. The effect is the median paired difference divided by the
+absolute baseline median. The HTML bootstrap resamples complete pairs. The default detector uses
+independent-group permutations.
 
 `runs` also supports `--since`, `--until` (ISO timestamps), `--workflow` and `--variant`. `metrics` requires `--run`,
 while `query` requires `--metric`; both support filtering. `detect` can narrow the family via `--variant` and

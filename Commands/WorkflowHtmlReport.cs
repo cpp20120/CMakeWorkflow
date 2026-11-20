@@ -13,7 +13,7 @@ internal static class WorkflowHtmlReport
     private static readonly string[] NodeFields =
     [
         "id", "kind", "target", "configuration", "status",
-        "durationSeconds", "processDurationSeconds", "metrics", "processResources", "actionCacheHit", "arguments"
+        "durationSeconds", "processDurationSeconds", "metrics", "processResources", "actionCacheHit", "arguments", "benchmarkTrial"
     ];
     private static readonly string[] CaptureFields =
     [

@@ -112,6 +112,9 @@
           "type": "string",
           "pattern": "^--[^\\s\\u0000]+$"
         },
+        "role": {
+          "enum": [null, "workers", "shards", "arrival-rate", "matrix-x", "matrix-y", "sweep", "facet"]
+        },
         "values": {
           "type": "array",
           "minItems": 1,

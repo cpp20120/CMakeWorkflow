@@ -118,6 +118,15 @@ manifest и создаёт внутри отдельный run. Явный от�
 насыщения, `workers` и throughput — кривую масштабирования. Efficiency рассчитывается при наличии
 точки с одним worker в той же серии. Для каждой кривой остальные параметры нагрузки фиксированы.
 
+Относительная heatmap показывает `100 × (медиана candidate − медиана baseline) / |медиана baseline|`
+для каждой сопоставимой ячейки. Цвет учитывает `direction` метрики. Пустая ячейка означает, что
+одной стороны нет или процент невозможно вычислить. Абсолютные тепловые карты доступны рядом.
+
+В benchmark-matrix recipe ось может объявить `role` со значением `workers`, `shards`, `arrival-rate`,
+`matrix-x`, `matrix-y`, `sweep` или `facet`. Workflow сохраняет выбранные значения, роли, первый вариант
+как baseline и порядок выполнения в `benchmarkTrial`. History переносит метаданные в каталог. Для
+старых результатов отчёт извлекает оси из аргументов. Ось `facet` фиксируется при построении среза.
+
 ### Флаги генерации манифестов
 
 `--compiler-cache-profile NAME` у benchmark выбирает именованный профиль измерения кеша компилятора.
@@ -155,6 +164,7 @@ CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric process_wall_time
 ```sh
 CMakeWorkflow history compare BASELINE_ID CANDIDATE_ID --db CATALOG --html compare.html
 CMakeWorkflow history detect BASELINE_ID CANDIDATE_ID --metric METRIC --direction higher-worse --min-percent 5 --db CATALOG --html detect.html
+CMakeWorkflow history detect RUN_ID RUN_ID --paired --baseline-variant baseline --candidate-variant candidate --metric METRIC --direction higher-worse --min-percent 5 --db CATALOG --html paired.html
 CMakeWorkflow history matrix --metric METRIC --run RUN_ID --db CATALOG --html matrix.html
 CMakeWorkflow history sweep --metric METRIC --run RUN_ID --db CATALOG --html sweep.html
 CMakeWorkflow history runs --metric METRIC --limit 50 --db CATALOG --html runs.html
@@ -166,6 +176,14 @@ Holm. `matrix` строит heatmap по `workers` и `shards` или друго
 `sweep` строит XY по числовым параметрам, `runs` — ряд медиан по дате
 или номеру запуска с commit SHA, компилятором, генератором и хостом, если они сохранены. При наличии
 сопоставимой серии из девяти и более точек контрольные границы вычисляются по первым восьми запускам.
+
+`history detect --paired` включает отдельный односторонний sign-flip test с поправкой Холма. Флаг означает,
+что одинаковые `sampleIndex` действительно образуют экспериментальные пары. Требуются не менее 10 пар,
+уникальные индексы и точное совпадение их наборов. Для двух вариантов одного запуска укажите
+`--baseline-variant` и `--candidate-variant`. Если сохранённый рецепт использовал `sequential`, такой
+запуск не подходит для парного детекта. Эффект считается как медиана парных разностей, делённая на
+модуль медианы baseline. HTML bootstrap пересэмплирует целые пары. Обычный `history detect` использует
+перестановки между двумя выборками.
 
 `runs` поддерживает также `--since`, `--until` с ISO timestamps, `--workflow`
 и `--variant`. В `metrics` обязателен `--run`, в `query` — `--metric`; они принимают фильтры `--variant` и `--scenario`.

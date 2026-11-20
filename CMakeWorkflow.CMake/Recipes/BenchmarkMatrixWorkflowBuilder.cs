@@ -68,6 +68,7 @@ public static class BenchmarkMatrixWorkflowBuilder
 
         HashSet<string> axisNames = new(StringComparer.Ordinal);
         HashSet<string> flags = new(StringComparer.Ordinal);
+        HashSet<string> primaryRoles = new(StringComparer.Ordinal);
         long combinations = 1;
         foreach (BenchmarkAxisV1? axis in recipe.Axes)
         {
@@ -77,6 +78,12 @@ public static class BenchmarkMatrixWorkflowBuilder
             }
 
             RecipeRules.Id(axis.Name, "axis name");
+            if (axis.Role is not (null or "workers" or "shards" or "arrival-rate" or "matrix-x" or "matrix-y" or "sweep" or "facet")
+                || (axis.Role is { } role && role is not ("sweep" or "facet") && !primaryRoles.Add(role)))
+            {
+                throw new ArgumentException($"{axis.Name}: invalid or duplicate benchmark axis role.");
+            }
+
             if (!axisNames.Add(axis.Name))
             {
                 throw new ArgumentException($"Duplicate benchmark axis: {axis.Name}.");
@@ -123,6 +130,9 @@ public static class BenchmarkMatrixWorkflowBuilder
             argumentSets = next;
         }
 
+        BenchmarkTrial[] trials = [.. argumentSets.Select(args => new BenchmarkTrial(
+            recipe.Variants[0].Name, recipe.ExecutionOrder,
+            [.. recipe.Axes.Select((axis, i) => new BenchmarkAxisCoordinate(axis.Name, axis.Flag, args[(i * 2) + 1], axis.Role))]))];
         Dictionary<string, WorkflowContext> contexts = new(StringComparer.Ordinal);
         List<WorkflowNode> nodes = new((int)nodesCount);
         foreach (BuildVariantV1 variant in recipe.Variants)
@@ -153,6 +163,7 @@ public static class BenchmarkMatrixWorkflowBuilder
                 DependsOn = previous is null ? [.. builds] : [previous],
                 Arguments = [.. recipe.FixedArguments, .. argumentSets[combo]],
                 Metrics = recipe.Metrics,
+                BenchmarkTrial = trials[combo],
                 TimeoutSeconds = recipe.TimeoutSeconds,
                 Resources = ["measurement-host"]
             });

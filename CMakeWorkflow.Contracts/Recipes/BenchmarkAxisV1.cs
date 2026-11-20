@@ -18,4 +18,9 @@ public sealed record BenchmarkAxisV1(
 #pragma warning disable CA1819 // Preserve this existing array-valued SDK/DTO property and its serialization contract.
 [property: JsonRequired] string[] Values
 #pragma warning restore CA1819
-);
+)
+{
+    /// <summary>Optional charting role: workers, shards, arrival-rate, matrix-x, matrix-y, sweep or facet.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Role { get; init; }
+}

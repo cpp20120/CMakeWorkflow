@@ -13,7 +13,7 @@ or an executable alone.
 | Workflow manifest input                                | `schemaVersion: 1` or `2` |
 | `WorkflowPlanView`, `WorkflowEvent`, target resolution | `schemaVersion: 1`        |
 | `WorkflowReport` in `run.json`                         | `schemaVersion: 1`        |
-| SQLite catalog                                         | `PRAGMA user_version = 6` |
+| SQLite catalog                                         | `PRAGMA user_version = 7` |
 
 These are not a single product version. The installed binary and client/extension compatibility must be checked
 separately.

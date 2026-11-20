@@ -812,10 +812,11 @@ try
     string statisticalWorkers = Path.Combine(root, "statistical-workers");
     string statisticalShort = Path.Combine(root, "statistical-short");
     string statisticalLarge = Path.Combine(root, "statistical-large");
+    string statisticalPaired = Path.Combine(root, "statistical-paired");
     foreach (string? dir in new[]
              {
                  statisticalBase, statisticalSlow, statisticalEqual,
-                 statisticalWorkers, statisticalShort, statisticalLarge
+                 statisticalWorkers, statisticalShort, statisticalLarge, statisticalPaired
              })
     {
         _ = Directory.CreateDirectory(dir);
@@ -830,12 +831,23 @@ try
     Write(statisticalShort, "run.json", StatisticalReport([130, 131], control: [100, 101]));
     Write(statisticalLarge, "run.json", StatisticalReport(
         [.. Enumerable.Range(0, 11).Select(i => 130.0 + (i % 5))]));
+    double[] pairedBase = [1, 2, 3, 4, 5, 100, 200, 300, 400, 500];
+    double[] pairedCandidate = [101, 102, 103, 104, 105, 101, 201, 301, 401, 501];
+    JsonObject pairedReport = JsonNode.Parse(StatisticalReport(pairedBase, control: pairedCandidate))!.AsObject();
+    foreach (JsonNode? node in pairedReport["nodes"]!.AsArray())
+    {
+        node!["benchmarkTrial"] = JsonNode.Parse("""
+            {"baselineVariant":"main","executionOrder":"round-robin",
+             "axes":[{"name":"parallelism","flag":"--workers","value":"1","role":"workers"}]}
+            """);
+    }
+    Write(statisticalPaired, "run.json", pairedReport.ToJsonString());
     using (HistoryStore store = new(dbPath))
     {
         foreach (string? dir in new[]
                  {
                      statisticalBase, statisticalSlow, statisticalEqual,
-                     statisticalWorkers, statisticalShort, statisticalLarge
+                     statisticalWorkers, statisticalShort, statisticalLarge, statisticalPaired
                  })
         {
             _ = await store.ImportAsync(dir, false);
@@ -889,6 +901,27 @@ try
         {
             Check(equal.RootElement.GetProperty("results")[0].GetProperty("status").GetString()
                   == "inconclusive", "equal samples detector");
+        }
+
+        Check(store.Metrics(IdOf(statisticalPaired), "process_wall_time", "main", null)[0]
+            .BenchmarkTrial?.Axes.Single() is { Name: "parallelism", Role: "workers", Value: "1" }, "stored chart axes");
+        using (JsonDocument paired = await DetectJson(statisticalPaired, statisticalPaired,
+                   "--paired", "--baseline-variant", "main", "--candidate-variant", "control"))
+        {
+            JsonElement report = paired.RootElement;
+            JsonElement result = report.GetProperty("results")[0];
+            Check(report.GetProperty("test").GetString()?.Contains("paired sign-flip", StringComparison.Ordinal) == true
+                  && result.GetProperty("absoluteChange").GetDouble() == 50.5
+                  && result.GetProperty("pValue").GetDouble() == 31.0 / 1024
+                  && result.GetProperty("permutations").GetInt32() == 1024
+                  && result.GetProperty("status").GetString() == "regression", "exact paired permutation test");
+        }
+
+        using (JsonDocument unmatched = await DetectJson(statisticalBase, statisticalLarge, "--paired", "--variant", "main"))
+        {
+            JsonElement result = unmatched.RootElement.GetProperty("results")[0];
+            Check(result.GetProperty("status").GetString() == "unverified"
+                  && result.GetProperty("pValue").ValueKind == JsonValueKind.Null, "paired detector rejects unmatched indices");
         }
 
         using (JsonDocument incompatible = await DetectJson(statisticalBase, statisticalWorkers))
@@ -964,6 +997,7 @@ try
                               ALTER TABLE runs DROP COLUMN source_snapshot_id;
                               ALTER TABLE runs DROP COLUMN indexer_version;
                               ALTER TABLE measurements DROP COLUMN direction;
+                              ALTER TABLE measurements DROP COLUMN benchmark_trial;
                               PRAGMA user_version=1;
                               """;
         _ = await command.ExecuteNonQueryAsync();
@@ -998,6 +1032,7 @@ try
                               ALTER TABLE runs DROP COLUMN source_snapshot_id;
                               UPDATE runs SET indexer_version=2;
                               ALTER TABLE measurements DROP COLUMN direction;
+                              ALTER TABLE measurements DROP COLUMN benchmark_trial;
                               PRAGMA user_version=2;
                               """;
         _ = await command.ExecuteNonQueryAsync();

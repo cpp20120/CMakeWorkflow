@@ -73,6 +73,7 @@ public static class WorkflowRunner
             {
                 Id = n.Definition.Id,
                 Kind = n.Definition.Kind,
+                BenchmarkTrial = n.Definition.BenchmarkTrial,
                 Dependencies = [.. n.Dependencies],
                 BuildDirectory = n.Target.BuildDirectory,
                 Configuration = n.Target.Configuration,

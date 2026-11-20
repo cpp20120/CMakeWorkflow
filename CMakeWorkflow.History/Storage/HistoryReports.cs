@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.History.Models;
 
 namespace CMakeWorkflow.History.Storage;
@@ -258,18 +259,23 @@ internal static class HistoryReports
             run.Nodes.Add(new(run.Run.Id, id, Str(node, "kind") ?? "unknown",
                 Str(node, "status")!, Num(node, "durationSeconds"), Json(node, "dependencies"),
                 Str(node, "buildDirectory"), Str(node, "configuration"), Str(node, "target")));
+            BenchmarkTrial? trial = node.TryGetProperty("benchmarkTrial", out JsonElement trialJson)
+                ? trialJson.Deserialize(HistoryJson.Default.BenchmarkTrial) : null;
             if (Num(node, "processDurationSeconds") is { } seconds
                 && Str(node, "kind") == "run" && Str(node, "status") == "succeeded")
             {
                 string? variant = TimingVariant(id);
                 run.Measurements.Add(new(run.Run.Id, id, "process_wall_time", "s", seconds,
                     variant, Scenario(node), "run.json", "uninstrumented process wall time",
-                    run.Measurements.Count(m => m.Metric == "process_wall_time"
-                                                && m.Variant == variant), Json(node, "arguments"), null));
+                    (trial is null ? null : TimingSampleIndex(id)) ?? run.Measurements.Count(m =>
+                        m.Metric == "process_wall_time" && m.Variant == variant), Json(node, "arguments"), null)
+                {
+                    BenchmarkTrial = trial
+                });
             }
 
             ImportProcessResources(run, node, id);
-            ImportBenchmarkMeasurements(run, node, id);
+            ImportBenchmarkMeasurements(run, node, id, trial);
             ImportBuildMeasurements(run, node, id);
             await ImportDagFlowHarnessAsync(directory, run, node, id, pathGuard, ct);
             AddArtifact(run, id, "stdout", Str(node, "stdout"));
@@ -353,7 +359,8 @@ internal static class HistoryReports
         return run;
     }
 
-    private static void ImportBenchmarkMeasurements(ParsedRun run, JsonElement node, string id)
+    private static void ImportBenchmarkMeasurements(ParsedRun run, JsonElement node, string id,
+        BenchmarkTrial? trial)
     {
         if (Str(node, "kind") != "run" || Str(node, "status") != "succeeded"
             || !node.TryGetProperty("metrics", out JsonElement metrics) || metrics.ValueKind == JsonValueKind.Null)
@@ -382,11 +389,7 @@ internal static class HistoryReports
             }
         }
 
-        int sampleIndex = id.StartsWith("timing_", StringComparison.Ordinal)
-                          && int.TryParse(id.AsSpan(id.LastIndexOf('_') + 1), NumberStyles.None,
-                              CultureInfo.InvariantCulture, out int repeat) && repeat > 0
-            ? repeat - 1
-            : 0;
+        int sampleIndex = TimingSampleIndex(id) ?? 0;
         string? workload = Json(node, "arguments");
         HashSet<string> names = new(StringComparer.Ordinal);
         foreach (JsonElement sample in metrics.EnumerateArray())
@@ -404,7 +407,8 @@ internal static class HistoryReports
             run.Measurements.Add(new(run.Run.Id, id, name, unit, value, variant, scenario,
                 "run.json", "benchmark stdout JSON: " + field, sampleIndex, workload, null)
             {
-                Direction = Str(sample, "direction")
+                Direction = Str(sample, "direction"),
+                BenchmarkTrial = trial
             });
         }
     }
@@ -663,6 +667,11 @@ internal static class HistoryReports
         int split = tail.LastIndexOf('_');
         return split > 0 && int.TryParse(tail[(split + 1)..], out _) ? tail[..split] : null;
     }
+
+    private static int? TimingSampleIndex(string id) =>
+        id.StartsWith("timing_", StringComparison.Ordinal)
+        && int.TryParse(id.AsSpan(id.LastIndexOf('_') + 1), NumberStyles.None,
+            CultureInfo.InvariantCulture, out int repeat) && repeat > 0 ? repeat - 1 : null;
 
     private static string? Scenario(JsonElement node)
     {

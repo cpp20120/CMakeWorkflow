@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using CMakeWorkflow.History.Models;
@@ -16,7 +17,17 @@ public static class HistoryDetector
     public static HistoryDetectionReport Detect(HistoryDetail baseline,
         HistoryDetail candidate, string metric, string? variant, string? scenario,
         string direction,
-        double minimumEffectPercent, double alpha, CancellationToken ct)
+        double minimumEffectPercent, double alpha, CancellationToken ct) =>
+        DetectCore(baseline, candidate, metric, variant, scenario, direction, minimumEffectPercent, alpha, false, ct);
+
+    internal static HistoryDetectionReport DetectPaired(HistoryDetail baseline, HistoryDetail candidate,
+        string metric, string? variant, string? scenario, string direction, double minimumEffectPercent,
+        double alpha, CancellationToken ct) =>
+        DetectCore(baseline, candidate, metric, variant, scenario, direction, minimumEffectPercent, alpha, true, ct);
+
+    private static HistoryDetectionReport DetectCore(HistoryDetail baseline, HistoryDetail candidate,
+        string metric, string? variant, string? scenario, string direction, double minimumEffectPercent,
+        double alpha, bool paired, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(candidate);
@@ -53,6 +64,8 @@ public static class HistoryDetector
             double? p = null;
             int? permutations = null;
             bool? exact = null;
+            double? change = paired ? null : difference.AbsoluteChange;
+            double? percent = paired ? null : difference.PercentChange;
             if (status == "compatible")
             {
                 if (baseline.Run.Status != "succeeded" || candidate.Run.Status != "succeeded")
@@ -72,7 +85,8 @@ public static class HistoryDetector
                     if (left.Count < MinimumSamples || right.Count < MinimumSamples)
                     {
                         status = "insufficient";
-                        reason = $"At least {MinimumSamples} individual samples per run are required.";
+                        reason = paired ? $"At least {MinimumSamples} complete pairs are required."
+                            : $"At least {MinimumSamples} individual samples per run are required.";
                     }
                     else if (left.Select(x => x.SampleIndex).Distinct().Count() != left.Count
                              || right.Select(x => x.SampleIndex).Distinct().Count() != right.Count)
@@ -80,7 +94,18 @@ public static class HistoryDetector
                         status = "unverified";
                         reason = "Individual sample indices are duplicated.";
                     }
-                    else if (difference.Baseline!.Median == 0 || difference.PercentChange is null)
+                    else if (paired && !left.Select(x => x.SampleIndex).SequenceEqual(right.Select(x => x.SampleIndex)))
+                    {
+                        status = "unverified";
+                        reason = "The two sides must have identical sample-index sets for paired detection.";
+                    }
+                    else if (paired && baseline.Run.Id == candidate.Run.Id
+                        && left.Concat(right).Any(x => x.BenchmarkTrial?.ExecutionOrder == "sequential"))
+                    {
+                        status = "unverified";
+                        reason = "The recorded matrix used sequential variant scheduling.";
+                    }
+                    else if (difference.Baseline is not { Median: not 0 } baselineStats || (!paired && difference.PercentChange is null))
                     {
                         status = "unverified";
                         reason = "A zero baseline median cannot support a percentage effect threshold.";
@@ -88,21 +113,38 @@ public static class HistoryDetector
                     else
                     {
                         int seed = Seed(baseline.Run.Id, candidate.Run.Id, difference);
-                        (double PValue, int Permutations, bool Exact) = PermutationTest([.. left.Select(x => x.Value)],
-                            [.. right.Select(x => x.Value)], sign, seed, ct);
-                        p = PValue;
-                        permutations = Permutations;
-                        exact = Exact;
                         status = "inconclusive";
                         reason = "Evidence has not met both the adjusted p-value and minimum effect requirements.";
+                        if (paired)
+                        {
+                            double[] deltas = [.. left.Zip(right, (a, b) => b.Value - a.Value)];
+                            double effect = Median((double[])deltas.Clone());
+                            double relative = effect / Math.Abs(baselineStats.Median) * 100;
+                            if (double.IsFinite(relative) && deltas.All(double.IsFinite))
+                            {
+                                change = effect;
+                                percent = relative;
+                                (p, permutations, exact) = PairedPermutationTest(deltas, sign, seed, ct);
+                            }
+                            else
+                            {
+                                status = "unverified";
+                                reason = "Paired effect or differences are outside the finite numeric range.";
+                            }
+                        }
+                        else
+                        {
+                            (p, permutations, exact) = PermutationTest([.. left.Select(x => x.Value)],
+                                [.. right.Select(x => x.Value)], sign, seed, ct);
+                        }
                     }
                 }
             }
 
             results.Add(new(difference.Metric, difference.Unit, difference.Variant,
                 difference.Scenario, difference.Method, status, reason,
-                difference.Baseline, difference.Candidate, difference.AbsoluteChange,
-                difference.PercentChange, p, null, permutations, exact));
+                difference.Baseline, difference.Candidate, change,
+                percent, p, null, permutations, exact));
         }
 
         if (results.Count == 0)
@@ -130,15 +172,49 @@ public static class HistoryDetector
                 AdjustedPValue = adjustedFloor,
                 Status = regression ? "regression" : "inconclusive",
                 Reason = regression
-                    ? "One-sided permutation test and practical effect threshold both passed. "
+                    ? (paired ? "Paired sign-flip test" : "One-sided permutation test") + " and practical effect threshold both passed. "
                       + "Independence, thermal drift and background load remain unverified."
                     : "Evidence has not met both the adjusted p-value and minimum effect requirements."
             };
         }
 
         return new(1, baseline.Run.Id, candidate.Run.Id, metric, direction,
-            minimumEffectPercent, alpha, "one-sided permutation test of median difference; Holm correction",
+            minimumEffectPercent, alpha, paired
+                ? "one-sided paired sign-flip test of median paired difference; Holm correction"
+                : "one-sided permutation test of median difference; Holm correction",
             results);
+    }
+
+    private static (double PValue, int Permutations, bool Exact) PairedPermutationTest(
+        double[] deltas, int sign, int seed, CancellationToken ct)
+    {
+        double[] flipped = new double[deltas.Length];
+        double observed = sign * Median((double[])deltas.Clone());
+        int exactLimit = BitOperations.Log2(MaximumExactPermutations);
+        bool exact = deltas.Length <= exactLimit;
+        int iterations = exact ? 1 << deltas.Length : MonteCarloPermutations;
+        Random random = new(seed);
+        int extreme = 0;
+        for (int iteration = 0; iteration < iterations; iteration++)
+        {
+            if ((iteration & 1023) == 0)
+            {
+                ct.ThrowIfCancellationRequested();
+            }
+
+            for (int i = 0; i < deltas.Length; i++)
+            {
+                bool swap = exact ? ((iteration >> i) & 1) != 0 : PermutationIndex(random, 2) != 0;
+                flipped[i] = swap ? -deltas[i] : deltas[i];
+            }
+
+            if (sign * Median(flipped) >= observed)
+            {
+                extreme++;
+            }
+        }
+
+        return (exact ? (double)extreme / iterations : (double)(extreme + 1) / (iterations + 1), iterations, exact);
     }
 
     private static List<HistoryMeasurement> Samples(HistoryDetail run, HistoryDifference key) =>
@@ -231,9 +307,7 @@ public static class HistoryDetector
             for (int i = shuffled.Length - 1; i > 0; i--)
             {
 
-#pragma warning disable CA5394 // Seeded randomness makes statistical permutation tests reproducible; it is not used for security.
-                int swap = random.Next(i + 1);
-#pragma warning restore CA5394
+                int swap = PermutationIndex(random, i + 1);
 
                 (shuffled[i], shuffled[swap]) = (shuffled[swap], shuffled[i]);
             }
@@ -249,6 +323,10 @@ public static class HistoryDetector
         return ((double)(extreme + 1) / (MonteCarloPermutations + 1),
             MonteCarloPermutations, false);
     }
+
+#pragma warning disable CA5394 // Seeded randomness makes statistical permutation tests reproducible; it is not used for security.
+    private static int PermutationIndex(Random random, int limit) => random.Next(limit);
+#pragma warning restore CA5394
 
     private static double CombinationCount(int total, int selected)
     {

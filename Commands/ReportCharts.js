@@ -68,15 +68,21 @@ function xy(parent, label, points, xLabel, yLabel, options = {}) {
         svg(dot, 'title', {}, point.label ?? xFormat(point.x) + ' · ' + number(point.y));
     }
 }
-function heatmap(parent, rows, [xAxis, yAxis], label) {
-    const cells = [...groupBy(rows, row => JSON.stringify([row.meta[xAxis], row.meta[yAxis]])).values()].map(cell => ({
+function matrixCells(rows, [xAxis, yAxis]) {
+    return [...groupBy(rows, row => JSON.stringify([row.meta[xAxis], row.meta[yAxis]])).values()].map(cell => ({
         x: cell[0].meta[xAxis], y: cell[0].meta[yAxis], value: median(valuesOf(cell)), count: cell.length
     }));
+}
+function heatmap(parent, cells, [xAxis, yAxis], label, direction) {
     const columns = [...new Set(cells.map(cell => cell.x))].sort((a, b) => a - b);
     const lines = [...new Set(cells.map(cell => cell.y))].sort((a, b) => a - b);
     const lookup = new Map(cells.map(cell => [JSON.stringify([cell.x, cell.y]), cell]));
     const width = 770 / columns.length;
     const shade = domain(cells.map(cell => cell.value), .16, .88);
+    const maxDelta = cells.reduce((max, cell) => Number.isFinite(cell.value) ? Math.max(max, Math.abs(cell.value)) : max, 0);
+    const percent = value => signed(value, '%');
+    const improvement = value => direction === 'lower-is-better' ? -value : value;
+    if (direction) text(parent, 'p', 'Green · improvement. Red · regression. Δ% = 100 × (candidate median − baseline median) / |baseline median|.', 'note');
     const plot = chart(parent, label, 60 + lines.length * 38);
     svg(plot, 'text', {x: 0, y: 17}, yAxis.replaceAll('_', ' ') + ' ↓');
     svg(plot, 'text', {x: 130, y: 17}, xAxis.replaceAll('_', ' ') + ' →');
@@ -87,25 +93,40 @@ function heatmap(parent, rows, [xAxis, yAxis], label) {
         columns.forEach((column, i) => {
             const cell = lookup.get(JSON.stringify([column, value]));
             const x = 110 + i * width;
+            const hasValue = Number.isFinite(cell?.value);
+            const opacity = hasValue ? (direction ? .16 + .72 * Math.abs(cell.value) / (maxDelta || 1) : shade.at(cell.value)) : 0;
+            const result = direction && hasValue ? (improvement(cell.value) > 0 ? 'better' : improvement(cell.value) < 0 ? 'worse' : 'neutral') : '';
             const mark = svg(plot, 'rect', {x, y, width: Math.max(0, width - 2), height: 36,
-                class: cell ? 'box' : '', style: cell ? 'fill-opacity:' + shade.at(cell.value) : 'fill:none;stroke:var(--line)'});
-            svg(mark, 'title', {}, cell ? `${xAxis}=${column} · ${yAxis}=${value} · Median ${number(cell.value)} · n=${cell.count}` : 'No measurements');
+                class: hasValue ? 'box ' + result : '', style: hasValue ? 'fill-opacity:' + opacity : 'fill:none;stroke:var(--line)'});
+            const detail = direction ? (hasValue ? percent(cell.value) + ' · ' + result : cell?.reason)
+                : hasValue ? 'Median ' + number(cell.value) + ' · n=' + cell.count : null;
+            svg(mark, 'title', {}, `${xAxis}=${column} · ${yAxis}=${value} · ${detail ?? 'No measurements'}`);
             if (width >= 34) svg(plot, 'text', {x: x + width / 2, y: y + 23, 'text-anchor': 'middle',
-                style: cell && shade.at(cell.value) > .5 ? 'fill:var(--paper)' : ''}, cell ? number(cell.value) : '—');
+                style: !direction && opacity > .5 ? 'fill:var(--paper)' : ''},
+                hasValue ? (direction ? percent(cell.value) : number(cell.value)) : '—');
         });
     });
-    table(parent, [xAxis, yAxis, 'Median', 'Measurements'], cells.map(cell =>
-        [number(cell.x), number(cell.y), number(cell.value), number(cell.count)]));
+    if (direction) {
+        table(parent, [xAxis, yAxis, 'Baseline median (n)', 'Candidate median (n)', 'Δ %', 'Effect'], cells.map(cell => [
+            number(cell.x), number(cell.y), cell.before ? number(cell.before.value) + ' (' + cell.before.count + ')' : 'Unavailable',
+            cell.after ? number(cell.after.value) + ' (' + cell.after.count + ')' : 'Unavailable', percent(cell.value),
+            cell.reason ?? (improvement(cell.value) > 0 ? 'Improvement' : improvement(cell.value) < 0 ? 'Regression' : 'No change')
+        ]));
+    } else {
+        table(parent, [xAxis, yAxis, 'Median', 'Measurements'], cells.map(cell =>
+            [number(cell.x), number(cell.y), number(cell.value), number(cell.count)]));
+    }
 }
+const coordinateValue = value => typeof value === 'string' && /^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(value) ? Number(value) : value;
+const argumentKey = key => key.replace(/^--/, '').replaceAll('-', '_').toLowerCase();
 function parseWorkload(input) {
     if (typeof input === 'string') {
         try { input = JSON.parse(input); } catch { return {recorded_workload: input}; }
     }
     const args = Array.isArray(input) ? input : input?.arguments ?? input?.args;
     const meta = Object.create(null);
-    const keyOf = key => key.replace(/^--/, '').replaceAll('-', '_').toLowerCase();
     const set = (key, value) => {
-        meta[keyOf(key)] = typeof value === 'string' && /^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(value) ? Number(value) : value;
+        meta[argumentKey(key)] = coordinateValue(value);
     };
     if (input && typeof input === 'object' && !Array.isArray(input)) {
         for (const [key, value] of Object.entries(input)) {
@@ -127,29 +148,41 @@ function parseWorkload(input) {
     }
     return meta;
 }
+function workload(input, trial) {
+    const meta = parseWorkload(input);
+    for (const axis of trial?.axes ?? []) {
+        delete meta[argumentKey(axis.flag)];
+    }
+    for (const axis of trial?.axes ?? []) {
+        meta[axis.name] = coordinateValue(axis.value);
+    }
+    return meta;
+}
 function workflowMeasurements() {
     const rows = [];
     for (const node of data.nodes) {
         if (node.kind !== 'run' || node.status !== 'succeeded') continue;
-        const meta = parseWorkload(node.arguments);
+        const meta = workload(node.arguments, node.benchmarkTrial);
         const timing = /^timing_(.+?)(?:_(\d{4}))?_(\d+)$/.exec(node.id);
         const details = {nodeId: node.id, target: node.target, configuration: node.configuration,
-            variant: timing?.[1] ?? null, scenario: meta.scenario ?? (timing?.[2] ? 'Case ' + timing[2] : null),
-            sampleIndex: timing ? Number(timing[3]) - 1 : null, meta};
+            variant: timing?.[1] ?? null, scenario: meta.scenario ?? null,
+            sampleIndex: timing ? Number(timing[3]) - 1 : null, meta, benchmarkTrial: node.benchmarkTrial};
         for (const sample of node.metrics ?? []) rows.push({...details, metric: sample.name, unit: sample.unit, value: sample.value,
             method: 'Benchmark stdout JSON · ' + sample.path, direction: sample.direction});
         if (timing && Number.isFinite(node.processDurationSeconds)) rows.push({...details, metric: 'process_wall_time', unit: 's',
-            method: 'Uninstrumented process wall time', value: node.processDurationSeconds});
+            method: 'Uninstrumented process wall time', value: node.processDurationSeconds, direction: 'lower-is-better'});
     }
     return rows;
 }
 const runTable = new Map((data.runs ?? []).map(row => [row.id, row]));
 const measurementRows = [...(data.measurements ?? []).map(row => {
-    const meta = parseWorkload(row.workload);
+    const meta = workload(row.workload, row.benchmarkTrial);
     const timing = /^timing_(.+?)_(\d{4})_\d+$/.exec(row.nodeId ?? '');
     const variant = timing && row.variant === timing[1] + '_' + timing[2] ? timing[1] : row.variant;
-    return {...row, meta, variant, indexedVariant: row.variant, caseId: row.scenario,
-        scenario: row.method === 'dagflow-harness' ? row.scenario : meta.scenario ?? row.scenario};
+    const scenario = timing && row.scenario === 'case_' + timing[2] ? null : row.scenario;
+    return {...row, meta, variant, direction: row.direction ?? (row.metric === 'process_wall_time' ? 'lower-is-better' : null),
+        indexedVariant: row.variant, caseId: row.scenario,
+        scenario: row.method === 'dagflow-harness' ? row.scenario : meta.scenario ?? scenario};
 }), ...workflowMeasurements()].filter(row => Number.isFinite(row.value));
 
 function pointDetails(row) {
@@ -194,7 +227,10 @@ function dumbbell(parent, rows, label, unit) {
 const comparisonSamples = data.baseline ? groupBy(measurementRows, sample =>
     JSON.stringify([sample.runId, seriesKey({...sample, variant: sample.indexedVariant, scenario: sample.caseId})])) : new Map();
 function rawComparison(row) {
-    return [data.baseline, data.candidate].map(run => valuesOf(comparisonSamples.get(JSON.stringify([run, seriesKey(row)])) ?? []));
+    return [[data.baseline, data.baselineVariant], [data.candidate, data.candidateVariant]].map(([run, variant]) => {
+        const samples = comparisonSamples.get(JSON.stringify([run, seriesKey({...row, variant: variant ?? row.variant})])) ?? [];
+        return valuesOf(data.paired ? [...samples].sort((a, b) => a.sampleIndex - b.sampleIndex) : samples);
+    });
 }
 function withinRunComparison(parent, rows, unit) {
     const grouped = groupBy(rows.filter(row => row.variant), row => JSON.stringify([row.runId, row.nodeId && row.method === 'dagflow-harness' ? row.nodeId : null,
@@ -203,7 +239,8 @@ function withinRunComparison(parent, rows, unit) {
     for (const group of grouped.values()) {
         const variants = groupBy(group, row => row.variant);
         if (variants.size < 2) continue;
-        const first = [data.timing?.baseline, 'baseline', 'before'].find(name => variants.has(name)) ?? variants.keys().next().value;
+        const first = [group[0].benchmarkTrial?.baselineVariant, data.timing?.baseline, 'baseline', 'before']
+            .find(name => variants.has(name)) ?? variants.keys().next().value;
         const left = variants.get(first);
         for (const [name, right] of variants) {
             if (name === first) continue;
@@ -266,29 +303,58 @@ function expandableChart(parent, title, open, draw) {
         });
     }
 }
+function relativeCells(baseline, candidate, axes) {
+    const left = new Map(matrixCells(baseline, axes).map(cell => [JSON.stringify([cell.x, cell.y]), cell]));
+    const right = new Map(matrixCells(candidate, axes).map(cell => [JSON.stringify([cell.x, cell.y]), cell]));
+    return [...new Set([...left.keys(), ...right.keys()])].map(key => {
+        const before = left.get(key), after = right.get(key);
+        const [x, y] = JSON.parse(key);
+        if (!before || !after) return {x, y, before, after, reason: 'Missing ' + (before ? 'candidate' : 'baseline')};
+        if (before.value === 0) return {x, y, before, after, reason: 'Zero baseline'};
+        const value = (after.value - before.value) / Math.abs(before.value) * 100;
+        return Number.isFinite(value) ? {x, y, before, after, value} : {x, y, before, after, reason: 'Δ outside numeric range'};
+    });
+}
 function drawWorkloads(parent, rows, mode) {
     if (!rows.length) return;
+    const shapes = groupBy(rows, row => JSON.stringify(row.benchmarkTrial?.axes?.map(axis => [axis.name, axis.role]) ?? null));
+    if (shapes.size > 1) {
+        for (const group of shapes.values()) drawWorkloads(parent, group, mode);
+        return;
+    }
     const first = rows[0];
-    const dims = [...new Set(rows.flatMap(row => Object.keys(row.meta)))]
-        .filter(key => !['scenario', 'warmup', 'warmup_ms', 'repeats', 'sample_stride'].includes(key))
+    const declared = first.benchmarkTrial?.axes;
+    const legacy = ['workers', 'shards', 'arrival_rate'];
+    const axisFor = (role, name) => declared
+        ? declared.find(axis => axis.role === role)?.name
+            ?? declared.find(axis => !axis.role && (axis.name === name || argumentKey(axis.flag) === name))?.name
+        : name;
+    const workers = axisFor('workers', 'workers');
+    const shards = axisFor('shards', 'shards');
+    const arrival = axisFor('arrival-rate', 'arrival_rate');
+    const matrixX = axisFor('matrix-x', undefined);
+    const matrixY = axisFor('matrix-y', undefined);
+    const dims = (declared
+        ? declared.filter(axis => axis.role !== 'facet').map(axis => axis.name)
+        : [...new Set(rows.flatMap(row => Object.keys(row.meta)))].filter(key => !['scenario', 'warmup', 'warmup_ms', 'repeats', 'sample_stride'].includes(key)))
         .filter(key => new Set(rows.map(row => row.meta[key]).filter(Number.isFinite)).size > 1);
     const throughput = /throughput|tasks_per_(sec|second)|tasks\/s|ops\/s/i.test(first.metric + ' ' + first.unit);
     const latency = /latency|(?:start|finish|run)_p\d|scheduled[-_ ]start|submit[-_ ]call|producer[-_ ]lag|backpressure/i
         .test(first.metric + ' ' + first.method);
     const sweeps = mode === 'matrix' ? [] : [
-        ...(latency && dims.includes('arrival_rate') ? [['arrival_rate', 'Saturation curve']] : []),
-        ...(throughput && dims.includes('workers') ? [['workers', 'Scalability curve']] : []),
+        ...(latency && dims.includes(arrival) ? [[arrival, 'Saturation curve']] : []),
+        ...(throughput && dims.includes(workers) ? [[workers, 'Scalability curve']] : []),
         ...(mode === 'sweep' ? dims.map(key => [key, 'Sweep · ' + key]) : [])
     ].filter(([key], index, items) => items.findIndex(([other]) => other === key) === index);
-    const groups = (axes, accept) => [...groupBy(rows.filter(accept), row => JSON.stringify([
-        row.runId, row.variant, family(row), row.environment, workloadKey(row.meta, axes)
+    const groups = (axes, accept, splitVariants = true) => [...groupBy(rows.filter(accept), row => JSON.stringify([
+        row.runId, splitVariants ? row.variant : row.benchmarkTrial?.baselineVariant, family(row), row.environment, workloadKey(row.meta, axes)
     ])).values()];
     let rendered = 0;
-    function add(group, axes, title, draw) {
+    function add(group, axes, title, draw, variant = group[0].variant) {
         const row = group[0];
         const fixed = Object.entries(row.meta).filter(([key]) => !axes.includes(key));
         const settings = workloadLabel(Object.fromEntries(fixed.filter(([key]) => dims.includes(key))));
-        expandableChart(parent, [title, row.variant, family(row), settings].filter(Boolean).join(' · '),
+        expandableChart(parent, [title, variant, family(row), settings].filter(Boolean).join(' · '),
             rendered++ === 0, item => {
                 text(item, 'p', [row.runId, workloadLabel(Object.fromEntries(fixed))].filter(Boolean).join(' · '), 'note');
                 draw(item);
@@ -296,23 +362,42 @@ function drawWorkloads(parent, rows, mode) {
     }
     function drawMatrix(axes) {
         if (!axes.every(axis => dims.includes(axis))) return false;
-        const slices = groups(axes, row => axes.every(key => Number.isFinite(row.meta[key])))
-            .filter(group => axes.every(key => new Set(group.map(row => row.meta[key])).size > 1));
+        const numeric = row => axes.every(key => Number.isFinite(row.meta[key]));
+        const spans = group => axes.every(key => new Set(group.map(row => row.meta[key])).size > 1);
+        const slices = groups(axes, numeric).filter(spans);
         const title = axes.join(' × ').replaceAll('_', ' ');
+        let relative = false;
+        if (['lower-is-better', 'higher-is-better'].includes(first.direction)) {
+            for (const group of groups(axes, numeric, false).filter(spans)) {
+                const variants = groupBy(group.filter(row => row.variant), row => row.variant);
+                const name = [group[0].benchmarkTrial?.baselineVariant, data.timing?.baseline, 'baseline', 'before']
+                    .find(variant => variants.has(variant));
+                if (!name) continue;
+                for (const [candidate, samples] of variants) {
+                    if (candidate === name) continue;
+                    const before = variants.get(name);
+                    if (!spans([...before, ...samples])) continue;
+                    relative = true;
+                    add(group, axes, 'Relative benchmark matrix · ' + title, item => heatmap(item,
+                        relativeCells(before, samples, axes), axes, 'Relative ' + title + ' · ' + first.metric, first.direction),
+                    name + ' → ' + candidate);
+                }
+            }
+        }
         for (const group of slices) add(group, axes, 'Benchmark matrix · ' + title,
-            item => heatmap(item, group, axes, title + ' · ' + first.metric));
-        return slices.length > 0;
+            item => heatmap(item, matrixCells(group, axes), axes, title + ' · ' + first.metric));
+        return relative || slices.length > 0;
     }
-    if (mode !== 'sweep' && !drawMatrix(['workers', 'shards']) && mode === 'matrix') {
-        const ordered = [...new Set(['workers', 'shards', 'arrival_rate', ...dims])].filter(axis => dims.includes(axis));
+    if (mode !== 'sweep' && !drawMatrix([matrixX, matrixY]) && !drawMatrix([workers, shards]) && mode === 'matrix') {
+        const ordered = [...new Set([...(declared ? [workers, shards, arrival] : legacy), ...dims])].filter(axis => dims.includes(axis));
         const pairs = ordered.flatMap((axis, index) => ordered.slice(index + 1).map(other => [axis, other]));
         pairs.some(drawMatrix);
     }
     for (const [axis, title] of sweeps) {
         for (const group of groups([axis], row => Number.isFinite(row.meta[axis]) &&
-            (axis !== 'arrival_rate' || row.meta[axis] > 0) && (axis !== 'workers' || row.meta[axis] > 0))) {
+            ((axis !== arrival && axis !== workers) || row.meta[axis] > 0))) {
             if (new Set(group.map(row => row.meta[axis])).size < 2) continue;
-            add(group, [axis], title, item => xyGroups(item, group, axis, title, axis === 'workers' && throughput));
+            add(group, [axis], title, item => xyGroups(item, group, axis, title, axis === workers && throughput));
         }
     }
     if (!rendered && ['matrix', 'sweep'].includes(mode)) text(parent, 'p', 'No varying recorded axes for this selection.', 'note');
@@ -342,7 +427,7 @@ function historyComparison(parent, rows, first) {
             signed(row.absoluteChange), signed(row.percentChange, '%'), row.status, row.reason]));
 }
 
-function bootstrapInterval(left, right, alpha) {
+function bootstrapInterval(left, right, alpha, paired) {
     if (left.length < 10 || right.length < 10) return null;
     let seed = 0x30cf6383;
     const random = size => {
@@ -354,8 +439,16 @@ function bootstrapInterval(left, right, alpha) {
     const count = Math.min(999, Math.floor(2_000_000 / (left.length + right.length)));
     if (count < 399) return null;
     for (let i = 0; i < count; i++) {
-        const base = resample(left), candidate = resample(right);
-        const effect = 100 * (candidate - base) / base;
+        let effect;
+        if (paired) {
+            const sample = Array.from(left, () => random(left.length));
+            const base = median(sample.map(index => left[index]));
+            const change = median(sample.map(index => right[index] - left[index]));
+            effect = 100 * change / Math.abs(base);
+        } else {
+            const base = resample(left);
+            effect = 100 * (resample(right) - base) / base;
+        }
         if (Number.isFinite(effect)) estimates.push(effect);
     }
     if (estimates.length < count * .95) return null;
@@ -364,10 +457,14 @@ function bootstrapInterval(left, right, alpha) {
 }
 function historyEffects(parent, rows) {
     const settings = data.detection;
+    if (data.paired) {
+        text(parent, 'p', 'Paired detection · median of candidate − baseline within matching sample indices.', 'note');
+        if (data.baselineVariant) text(parent, 'p', data.baselineVariant + ' → ' + data.candidateVariant, 'note');
+    }
     const sign = settings.direction === 'higher-worse' ? 1 : -1;
     const threshold = settings.minimumEffectPercent * sign;
     const effects = rows.map(row => {
-        const interval = Number.isFinite(row.pValue) ? bootstrapInterval(...rawComparison(row), settings.alpha) : null;
+        const interval = Number.isFinite(row.pValue) ? bootstrapInterval(...rawComparison(row), settings.alpha, data.paired) : null;
         return {row, interval, label: [row.variant, row.scenario].filter(Boolean).join(' · ') || row.metric};
     });
     const plotted = effects.filter(effect => Number.isFinite(effect.row.percentChange)).slice(0, 40);
@@ -388,7 +485,8 @@ function historyEffects(parent, rows) {
         });
         for (const [value, align] of [[x.min, 'start'], [x.max, 'end']]) svg(plot, 'text',
             {x: x.at(value), y: height - 3, 'text-anchor': align}, number(value) + '%');
-        text(parent, 'p', `Dashed line · regression threshold ${signed(threshold, '%')}. Intervals are descriptive ${number(100 * (1 - settings.alpha))}% percentile bootstrap intervals for tested rows, assuming independent observations. Verdicts use the History permutation test with Holm correction.`, 'note');
+        const resampling = data.paired ? 'resampling complete pairs' : 'assuming independent observations';
+        text(parent, 'p', `Dashed line · regression threshold ${signed(threshold, '%')}. Descriptive ${number(100 * (1 - settings.alpha))}% percentile bootstrap intervals use ${resampling}. Verdicts use the ${settings.test}.`, 'note');
     }
     table(parent, ['Case', 'Effect', 'Bootstrap interval', 'Holm p', 'Status', 'Reason'],
         effects.map(({row, label, interval}) => [label, signed(row.percentChange, '%'),
