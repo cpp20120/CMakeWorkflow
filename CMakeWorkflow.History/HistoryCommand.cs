@@ -81,7 +81,9 @@ public static class HistoryCommand
                         string summary = await db.ImportAsync(positional[0], flags.Contains("--recursive"),
                         value => result = value, ct: ct);
                         Console.WriteLine(json
-                            ? JsonSerializer.Serialize(result!, HistoryJson.Default.HistoryImportResult)
+                            ? JsonSerializer.Serialize(
+                                result ?? throw new InvalidDataException("History import completed without a result."),
+                                HistoryJson.Default.HistoryImportResult)
                             : summary);
                         break;
                     }
@@ -107,7 +109,7 @@ public static class HistoryCommand
                                 measurements.AddRange(db.Metrics(run.Id, metric, variant, scenario, ct: ct));
                             }
 
-                            await WriteHtmlAsync(new()
+                            await WriteHtmlAsync(html, new()
                             {
                                 ["runs"] = JsonSerializer.SerializeToNode(runs, HistoryJson.Default.ListHistoryRun),
                                 ["measurements"] = JsonSerializer.SerializeToNode(measurements, HistoryJson.Default.ListHistoryMeasurement)
@@ -192,7 +194,7 @@ public static class HistoryCommand
                         List<HistoryMeasurement> rows = db.Metrics(run, metric, options.GetValueOrDefault("--variant"), options.GetValueOrDefault("--scenario"), ct: ct);
                         if (html is not null)
                         {
-                            await WriteHtmlAsync(new()
+                            await WriteHtmlAsync(html, new()
                             {
                                 ["measurements"] = JsonSerializer.SerializeToNode(rows, HistoryJson.Default.ListHistoryMeasurement)
                             });
@@ -242,7 +244,7 @@ public static class HistoryCommand
                         List<HistoryDifference> rows = Compare(baseline, candidate);
                         if (html is not null)
                         {
-                            await WriteHtmlAsync(new()
+                            await WriteHtmlAsync(html, new()
                             {
                                 ["differences"] = JsonSerializer.SerializeToNode(rows, HistoryJson.Default.ListHistoryDifference),
                                 ["measurements"] = PairMeasurements(baseline, candidate),
@@ -293,7 +295,7 @@ public static class HistoryCommand
                         options.GetValueOrDefault("--scenario"), direction, minimum, alpha, ct);
                         if (html is not null)
                         {
-                            await WriteHtmlAsync(new()
+                            await WriteHtmlAsync(html, new()
                             {
                                 ["detection"] = JsonSerializer.SerializeToNode(report, HistoryJson.Default.HistoryDetectionReport),
                                 ["measurements"] = PairMeasurements(baseline, candidate, metric),
@@ -328,11 +330,11 @@ public static class HistoryCommand
 
             return 0;
 
-            Task WriteHtmlAsync(JsonObject data)
+            Task WriteHtmlAsync(Func<JsonObject, Task> write, JsonObject data)
             {
                 data["name"] = $"History · {command}";
                 data["historyMode"] = command;
-                return html!(data);
+                return write(data);
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException
