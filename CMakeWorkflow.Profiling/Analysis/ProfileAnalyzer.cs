@@ -9,6 +9,17 @@ namespace CMakeWorkflow.Profiling.Analysis;
 
 public static class ProfileAnalyzer
 {
+    internal static (int? ExactCount, bool HasSamples) ReadPerfReportSampleCount(string output)
+    {
+        // A single, unscaled header is the only exact total in the text report.
+        MatchCollection headers = Regex.Matches(output, @"(?m)^#[ \t]*Samples:[ \t]*([0-9]+)([KMGTPE]?)(?=\s|$)");
+        int? exactCount = headers.Count == 1 && headers[0].Groups[2].Length == 0 &&
+                          int.TryParse(headers[0].Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int count)
+            ? count
+            : null;
+        return (exactCount, headers.Any(header => header.Groups[1].ValueSpan.ContainsAnyExcept('0')));
+    }
+
     public static async Task<int> AnalyzeAsync(string directory, CancellationToken ct,
         bool emitResultPath = true)
     {
@@ -144,22 +155,21 @@ public static class ProfileAnalyzer
                             item["captureId"]!.GetValue<string>(), ct);
                         item["stacks"] = Path.GetRelativePath(directory, stacks);
                         JsonObject normalized = JsonNode.Parse(await File.ReadAllTextAsync(stacks, ct))!.AsObject();
-                        Match reportSamples = Regex.Match(result.Output,
-                            @"(?m)^#\s*Samples:\s*(\d+)");
                         int normalizedCount = normalized["samples"]!.GetValue<int>();
                         int parsedCount = normalized["parsedSamples"]!.GetValue<int>();
                         string status = normalized["analysisStatus"]!.GetValue<string>();
-                        if (reportSamples.Success && int.TryParse(reportSamples.Groups[1].Value, out int reported))
+                        (int? exactCount, bool hasSamples) = ReadPerfReportSampleCount(result.Output);
+                        if (hasSamples && (normalizedCount == 0 || parsedCount == 0))
+                        {
+                            throw new InvalidDataException(
+                                "perf report indicates a nonempty capture, but perf script decoded " +
+                                $"{normalizedCount} sample headers and {parsedCount} nonempty stacks.");
+                        }
+
+                        if (exactCount is int reported)
                         {
                             item["reportedSamples"] = reported;
                             item["sampleCountMatchesReport"] = reported == normalizedCount;
-                            if (reported > 0 && (normalizedCount == 0 || parsedCount == 0))
-                            {
-                                throw new InvalidDataException(
-                                    $"perf report contains {reported} samples, but perf script decoded " +
-                                    $"{normalizedCount} sample headers and {parsedCount} nonempty stacks.");
-                            }
-
                             if (reported != normalizedCount)
                             {
                                 // The two perf interfaces can expose different subsets. Do not

@@ -199,8 +199,8 @@ stack walks in the ETL using TraceEvent. The ETW summary records `cpuSampleSourc
 contain CPU samples without stack walks and require a new capture for stack analysis.
 
 The CPU normalizer also accepts `perf script` formats with an inline sampled leaf after the event header. For CPU
-captures, `analysis.json` reports `reportedSamples` from `perf report`, `sampleCountMatchesReport`, and `parsedSamples`
-in the summary. A mismatch is marked `partial`, not silently `complete`; a nonempty capture with no decoded stacks is a
+captures, `analysis.json` includes `parsedSamples` in the summary. It also includes `reportedSamples` and
+`sampleCountMatchesReport` when `perf report` provides a single exact count. A mismatch is marked `partial`, not silently `complete`; a nonempty capture with no decoded stacks is a
 failed analysis. Errors from `perf report` itself are also recorded as `analysisStatus: failed`, while the original
 trace remains available. An interrupted capture with a manifest but no committed `.results.json` is recorded as
 `capture_incomplete` using its `runs.jsonl` status, instead of disappearing from analysis. Partial decoding lists

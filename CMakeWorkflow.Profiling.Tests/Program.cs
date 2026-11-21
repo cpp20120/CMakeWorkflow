@@ -37,6 +37,13 @@ try
     await HistoricalScheduleTests.RunAsync();
     await EtwPmcTests.RunAsync(root);
     await DurableReplayTests.RunAsync(root);
+    Check(ProfileAnalyzer.ReadPerfReportSampleCount("# Samples: 75710 of event 'cycles:u'") == (75710, true),
+        "The exact perf report count was not read.");
+    Check(ProfileAnalyzer.ReadPerfReportSampleCount("# Samples: 75K of event 'cycles:u'") is (null, true),
+        "An abbreviated perf report count was treated as exact.");
+    Check(ProfileAnalyzer.ReadPerfReportSampleCount(
+        "# Samples: 42 of event 'cycles:u'\n# Samples: 5 of event 'instructions:u'") is (null, true),
+        "A per-event count was mistaken for the total.");
     Check(HistoricalProgress.TotalOperations(5, 3) == 397,
         "Historical progress step count changed.");
     // A real process executed through the shared workflow process owner must
