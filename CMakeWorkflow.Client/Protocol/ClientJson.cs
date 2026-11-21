@@ -15,6 +15,11 @@ namespace CMakeWorkflow.Client.Protocol;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ExperimentStageRequest))]
+[JsonSerializable(typeof(ExperimentResourceRequest))]
+[JsonSerializable(typeof(ExperimentHostResources))]
+[JsonSerializable(typeof(ExperimentPlacement))]
+[JsonSerializable(typeof(ExperimentSourceChunk))]
+[JsonSerializable(typeof(ExperimentSourceBundle))]
 [JsonSerializable(typeof(ExperimentStageReceipt))]
 [JsonSerializable(typeof(ToolchainCandidate))]
 [JsonSerializable(typeof(VisualStudioInstance))]

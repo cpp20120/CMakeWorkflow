@@ -147,7 +147,7 @@ internal static class HistoryReports
     /// rather than asserting that measurements shared one environment. This does not verify a durable ledger row.
     /// </remarks>
     internal static async Task<ParsedRun?> ParseWorkflowAsync(string directory, string path, string? reportSha256,
-        Action<string>? pathGuard, CancellationToken ct)
+        Action<string>? pathGuard, CancellationToken ct, bool includeSupplemental = true)
     {
         pathGuard?.Invoke(path);
         byte[] bytes = await File.ReadAllBytesAsync(path, ct);
@@ -274,6 +274,11 @@ internal static class HistoryReports
                 });
             }
 
+            if (!includeSupplemental)
+            {
+                continue;
+            }
+
             ImportProcessResources(run, node, id);
             ImportBenchmarkMeasurements(run, node, id, trial);
             ImportBuildMeasurements(run, node, id);
@@ -291,6 +296,12 @@ internal static class HistoryReports
             {
                 AddArtifact(run, id, "executable", executable, Str(node, "executableSha256"));
             }
+        }
+
+        if (!includeSupplemental)
+        {
+            SetMeasurementEnvironments(run, builds, overrides);
+            return run;
         }
 
         await ImportProfileAsync(directory, run, pathGuard, ct);
@@ -321,6 +332,23 @@ internal static class HistoryReports
             run.Measurements.Add(new(run.Run.Id, null, "artifact_result_bytes", "B", observedBytes,
                 null, null, "run.json", "referenced result files at import, distinct paths", 0, null, null));
         }
+        SetMeasurementEnvironments(run, builds, overrides);
+
+        FinalizeHash(run);
+        if (observedFiles)
+        {
+            run.Run = run.Run with
+            {
+                SourceHash = Hash(Encoding.UTF8.GetBytes(run.Run.SourceHash + "|result-bytes:" +
+                    observedBytes.ToString(CultureInfo.InvariantCulture)))
+            };
+        }
+        return run;
+    }
+
+    private static void SetMeasurementEnvironments(ParsedRun run, Dictionary<string, string> builds,
+        Dictionary<string, string> overrides)
+    {
         for (int i = 0; i < run.Measurements.Count; i++)
         {
             HistoryMeasurement measurement = run.Measurements[i];
@@ -346,17 +374,6 @@ internal static class HistoryReports
                     + overrides.GetValueOrDefault(node.Id)))
             };
         }
-
-        FinalizeHash(run);
-        if (observedFiles)
-        {
-            run.Run = run.Run with
-            {
-                SourceHash = Hash(Encoding.UTF8.GetBytes(run.Run.SourceHash + "|result-bytes:" +
-                    observedBytes.ToString(CultureInfo.InvariantCulture)))
-            };
-        }
-        return run;
     }
 
     private static void ImportBenchmarkMeasurements(ParsedRun run, JsonElement node, string id,

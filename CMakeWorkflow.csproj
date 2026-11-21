@@ -20,6 +20,7 @@
         <Compile Include="Commands/RemoteCommand.cs"/>
         <Compile Include="Commands/ExperimentCommand.cs"/>
         <Compile Include="Commands/ExperimentPlan.cs"/>
+        <Compile Include="Commands/ExperimentHostSelection.cs"/>
         <Compile Include="Commands/ArtifactCasCommand.cs"/>
         <Compile Include="Commands/ArtifactCas.cs"/>
         <Compile Include="Commands/ArtifactCasJson.cs"/>

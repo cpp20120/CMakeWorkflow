@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using CMakeWorkflow.Contracts.Workflows;
@@ -9,6 +11,37 @@ namespace CMakeWorkflow.Host.Sessions;
 
 public sealed partial class DoctorSession
 {
+    /// <summary>Writes a bounded chunk to the workspace staging area and returns the saved offset.</summary>
+    public Task<long> WriteExperimentSourceChunkAsync(ExperimentSourceChunk request, CancellationToken ct) =>
+        ApplicationCallAsync(request, async (paths, token) =>
+        {
+            if (!OperatingSystem.IsLinux() || !IsStageHash(request.ExperimentId) || !IsStageHash(request.Sha256) ||
+                request.Size is <= 0 or > ExperimentSourceBundle.MaximumArchiveBytes || request.Offset < 0 ||
+                request.Data.Length > ExperimentSourceBundle.ChunkBytes ||
+                request.Offset > request.Size - request.Data.Length)
+            {
+                throw new ArgumentException("Invalid experiment source chunk.");
+            }
+
+            string path = SourceUploadPath(paths, request.ExperimentId, request.Sha256);
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await using FileStream output = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
+                4096, FileOptions.Asynchronous | FileOptions.WriteThrough);
+            if (output.Length > request.Size || request.Offset > output.Length)
+            {
+                throw new InvalidDataException("Invalid experiment source upload offset or size.");
+            }
+
+            if (request.Data.Length == 0 || request.Offset < output.Length)
+            {
+                return output.Length;
+            }
+            output.Position = request.Offset;
+            await output.WriteAsync(request.Data, token);
+            await output.FlushAsync(token);
+            return output.Length;
+        }, ct);
+
     /// <summary>Verifies and publishes a source snapshot and manifest without admitting execution.</summary>
     public Task<ExperimentStageReceipt> StageExperimentAsync(ExperimentStageRequest request,
         CancellationToken ct) => ApplicationCallAsync(request, async (paths, token) =>
@@ -21,7 +54,11 @@ public sealed partial class DoctorSession
         if (!IsStageHash(request.ExperimentId) || !IsStageHash(request.SourceSnapshotId) ||
             !IsStageHash(request.ManifestSha256) ||
             request.Manifest is not { Length: > 0 and <= ExperimentStageRequest.MaximumManifestCharacters } ||
-            request.Files is not { Count: > 0 and <= ExperimentStageRequest.MaximumFiles })
+            (request.Bundle is null
+                ? request.Files is not { Count: > 0 and <= ExperimentStageRequest.MaximumFiles }
+                : request.Files is not { Count: 0 } || !IsStageHash(request.Bundle.Sha256) ||
+                  request.Bundle.Size is <= 0 or > ExperimentSourceBundle.MaximumArchiveBytes ||
+                  request.Bundle.FileCount is <= 0 or > ExperimentSourceBundle.MaximumFiles))
         {
             throw new ArgumentException("Invalid experiment staging identity or bundle size.");
         }
@@ -32,11 +69,10 @@ public sealed partial class DoctorSession
             throw new InvalidDataException("Experiment manifest SHA-256 mismatch.");
         }
 
-        Dictionary<string, byte[]> files = DecodeFiles(request.Files);
-        SnapshotFile[] evidence = [.. files.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-            .Select(pair => new SnapshotFile(pair.Key, Convert.ToHexString(SHA256.HashData(pair.Value)),
-                pair.Value.LongLength))];
-        if (LoreSnapshotStore.GetSnapshotId(evidence) != request.SourceSnapshotId)
+        Dictionary<string, byte[]>? inline = request.Bundle is null ? DecodeFiles(request.Files) : null;
+        if (inline is not null && LoreSnapshotStore.GetSnapshotId([.. inline.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair =>
+                new SnapshotFile(pair.Key, Convert.ToHexString(SHA256.HashData(pair.Value)), pair.Value.LongLength))]) !=
+            request.SourceSnapshotId)
         {
             throw new InvalidDataException("Experiment source snapshot SHA-256 mismatch.");
         }
@@ -56,15 +92,10 @@ public sealed partial class DoctorSession
             string staging = Path.Combine(root, ".stage-" + Guid.NewGuid().ToString("N"));
             try
             {
-                foreach ((string relative, byte[] bytes) in files)
-                {
-                    string file = Path.Combine(scratch.FullName, relative);
-                    _ = Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                    await using FileStream output = new(file, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                    await output.WriteAsync(bytes, token);
-                }
-
-                string captured = await store.CaptureAsync(scratch.FullName, files.Keys, token);
+                IReadOnlyCollection<string> files = request.Bundle is { } bundle
+                    ? await ExtractBundleAsync(paths, request, bundle, scratch.FullName, token)
+                    : await ExtractInlineAsync(inline!, scratch.FullName, token);
+                string captured = await store.CaptureAsync(scratch.FullName, files, token);
                 if (captured != request.SourceSnapshotId)
                 {
                     throw new InvalidDataException("Captured source does not match the approved snapshot.");
@@ -100,6 +131,149 @@ public sealed partial class DoctorSession
         await WorkflowSourceSnapshotExecution.VerifyExistingMaterializationAsync(snapshot, source, token);
         return new ExperimentStageReceipt(manifest, request.ManifestSha256, request.SourceSnapshotId);
     }, ct);
+
+    private static string SourceUploadPath(WorkspaceReadPaths paths, string experimentId, string sha256) =>
+        RequireStagePath(paths, Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "experiment-uploads",
+            experimentId, sha256 + ".zip"));
+
+    private static async Task<IReadOnlyCollection<string>> ExtractInlineAsync(Dictionary<string, byte[]> files,
+        string destination, CancellationToken ct)
+    {
+        foreach ((string relative, byte[] bytes) in files)
+        {
+            await using FileStream output = CreateSourceFile(destination, relative);
+            await output.WriteAsync(bytes, ct);
+        }
+        return files.Keys;
+    }
+
+    private static async Task<IReadOnlyCollection<string>> ExtractBundleAsync(WorkspaceReadPaths paths,
+        ExperimentStageRequest request, ExperimentSourceBundle bundle, string destination, CancellationToken ct)
+    {
+        string path = SourceUploadPath(paths, request.ExperimentId, bundle.Sha256);
+        await using FileStream input = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        if (input.Length != bundle.Size)
+        {
+            throw new InvalidDataException("Experiment source upload is incomplete.");
+        }
+        if (Convert.ToHexString(await SHA256.HashDataAsync(input, ct)) != bundle.Sha256)
+        {
+            input.SetLength(0);
+            throw new InvalidDataException("Experiment source upload SHA-256 mismatch. Retry the approved upload.");
+        }
+        await VerifyZipDirectoryAsync(input, bundle.FileCount, ct);
+        input.Position = 0;
+        await using ZipArchive zip = await ZipArchive.CreateAsync(input, ZipArchiveMode.Read, leaveOpen: true, entryNameEncoding: null, cancellationToken: ct);
+        if (zip.Entries.Count != bundle.FileCount)
+        {
+            throw new InvalidDataException("Experiment ZIP entry count does not match the plan.");
+        }
+
+        HashSet<string> files = new(StringComparer.OrdinalIgnoreCase);
+        long total = 0;
+        foreach (ZipArchiveEntry entry in zip.Entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            string relative = entry.FullName;
+            SourcePathPolicy.Validate(relative);
+            if (relative.Length > 1024 || !files.Add(relative) ||
+                entry.ExternalAttributes is not (ExperimentSourceBundle.RegularFile or ExperimentSourceBundle.ExecutableFile) ||
+                entry.Length is < 0 or > ExperimentSourceBundle.MaximumFileBytes ||
+                entry.Length > ExperimentSourceBundle.MaximumSourceBytes - total)
+            {
+                throw new InvalidDataException($"Invalid, duplicate or oversized ZIP entry: {relative}");
+            }
+            total += entry.Length;
+            await using FileStream output = CreateSourceFile(destination, relative);
+            await using Stream contents = await entry.OpenAsync(ct);
+            await CopyEntryAsync(contents, output, entry.Length, ct);
+            if (entry.ExternalAttributes == ExperimentSourceBundle.ExecutableFile && OperatingSystem.IsLinux())
+            {
+                File.SetUnixFileMode(output.Name, File.GetUnixFileMode(output.Name) | UnixFileMode.UserExecute);
+            }
+        }
+        return files.AsEnumerable().Contains("CMakeLists.txt", StringComparer.Ordinal) ? files
+            : throw new InvalidDataException("Experiment source requires CMakeLists.txt at its root.");
+    }
+
+    private static async Task VerifyZipDirectoryAsync(FileStream input, int fileCount, CancellationToken ct)
+    {
+        // The bundle wire format uses a single ZIP disk, with no archive comment or ZIP64 metadata.
+        // Bound the actual count before ZipArchive allocates the entry objects.
+        const int endRecordSize = 22;
+        if (input.Length < endRecordSize)
+        {
+            throw new InvalidDataException("Missing ZIP directory.");
+        }
+        long endOffset = input.Length - endRecordSize;
+        input.Position = endOffset;
+        byte[] end = new byte[endRecordSize];
+        await input.ReadExactlyAsync(end, ct);
+        long start = BinaryPrimitives.ReadUInt32LittleEndian(end.AsSpan(16));
+        long size = BinaryPrimitives.ReadUInt32LittleEndian(end.AsSpan(12));
+        if (BinaryPrimitives.ReadUInt32LittleEndian(end) != 0x06054B50 ||
+            BinaryPrimitives.ReadUInt32LittleEndian(end.AsSpan(4)) != 0 ||
+            BinaryPrimitives.ReadUInt16LittleEndian(end.AsSpan(8)) != fileCount ||
+            BinaryPrimitives.ReadUInt16LittleEndian(end.AsSpan(10)) != fileCount ||
+            BinaryPrimitives.ReadUInt16LittleEndian(end.AsSpan(20)) != 0 || start + size != endOffset)
+        {
+            throw new InvalidDataException("Invalid experiment ZIP directory.");
+        }
+        input.Position = start;
+        byte[] entry = new byte[46];
+        for (int i = 0; i < fileCount; i++)
+        {
+            if (input.Position > endOffset - entry.Length)
+            {
+                throw new InvalidDataException("Truncated experiment ZIP directory.");
+            }
+            await input.ReadExactlyAsync(entry, ct);
+            int name = BinaryPrimitives.ReadUInt16LittleEndian(entry.AsSpan(28));
+            int extra = BinaryPrimitives.ReadUInt16LittleEndian(entry.AsSpan(30));
+            int comment = BinaryPrimitives.ReadUInt16LittleEndian(entry.AsSpan(32));
+            if (BinaryPrimitives.ReadUInt32LittleEndian(entry) != 0x02014B50 || name is 0 or > 4096 ||
+                extra > 4096 || comment != 0 || input.Position + name + extra > endOffset)
+            {
+                throw new InvalidDataException("Invalid experiment ZIP entry metadata.");
+            }
+            input.Position += name + extra;
+        }
+        if (input.Position != endOffset)
+        {
+            throw new InvalidDataException("Unexpected entries in the experiment ZIP directory.");
+        }
+    }
+
+    private static async Task CopyEntryAsync(Stream input, Stream output, long size, CancellationToken ct)
+    {
+        byte[] buffer = new byte[81920];
+        long copied = 0;
+        int count;
+        while ((count = await input.ReadAsync(buffer.AsMemory(), ct)) != 0)
+        {
+            copied += count;
+            if (copied > size)
+            {
+                throw new InvalidDataException("ZIP entry exceeds its declared size.");
+            }
+            await output.WriteAsync(buffer.AsMemory(0, count), ct);
+        }
+        if (copied != size)
+        {
+            throw new InvalidDataException("ZIP entry is shorter than its declared size.");
+        }
+    }
+
+    private static FileStream CreateSourceFile(string destination, string relative)
+    {
+        string file = Path.GetFullPath(Path.Combine(destination, relative));
+        if (!file.StartsWith(destination + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Source file escapes the staging directory.");
+        }
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        return new(file, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+    }
 
     private static Dictionary<string, byte[]> DecodeFiles(IReadOnlyList<ExperimentSourceFile> files)
     {

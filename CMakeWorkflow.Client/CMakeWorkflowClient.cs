@@ -1,3 +1,4 @@
+using CMakeWorkflow.Client.Experiments;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net.Sockets;
@@ -44,6 +45,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
         this.ownedSocketDirectory = ownedSocketDirectory;
         this.sshConnection = sshConnection;
         Workflows = new(this);
+        Experiments = new(this);
         Executions = new(this);
         Operations = new(this);
         Profiles = new(this);
@@ -60,6 +62,7 @@ public sealed partial class CMakeWorkflowClient : IAsyncDisposable
     public HostIdentity Host { get; }
     /// <summary>Manifest planning, preflight and durable workflow admission on this connection.</summary>
     public WorkflowService Workflows { get; }
+    public ExperimentService Experiments { get; }
     /// <summary>Domain-qualified durable execution admission on this connection.</summary>
     public ExecutionService Executions { get; }
     /// <summary>Workspace operation lookup and handles bound to this client lifetime.</summary>

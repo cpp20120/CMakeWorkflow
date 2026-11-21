@@ -1178,6 +1178,8 @@ Source: [CMakeWorkflow.Host/Protocol/ApplicationProtocol.cs](../CMakeWorkflow.Ho
 ```csharp
 public interface IHostRpc
 {
+    System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentHostResources> GetExperimentResourcesAsync(CMakeWorkflow.Contracts.Workflows.ExperimentResourceRequest request, System.Threading.CancellationToken ct);
+    System.Threading.Tasks.Task<long> WriteExperimentSourceChunkAsync(CMakeWorkflow.Contracts.Workflows.ExperimentSourceChunk request, System.Threading.CancellationToken ct);
     System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentStageReceipt> StageExperimentAsync(CMakeWorkflow.Contracts.Workflows.ExperimentStageRequest request, System.Threading.CancellationToken ct);
     System.Threading.Tasks.Task<CMakeWorkflow.Host.Workflows.WorkflowPreflightResult> WorkflowPreflightAsync(CMakeWorkflow.Host.Workflows.WorkflowPreflightRequest request, System.Threading.CancellationToken cancellationToken);
     System.Threading.Tasks.Task<System.Text.Json.JsonElement> ExecutionReportAsync(CMakeWorkflow.Host.Workflows.OperationGetRequest request, System.Threading.CancellationToken cancellationToken);
@@ -1430,6 +1432,8 @@ Source: [CMakeWorkflow.Host/Sessions/ApplicationSession.cs](../CMakeWorkflow.Hos
 ```csharp
 public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tools.ToolingService> createTooling, System.Func<CMakeWorkflow.Host.Provisioning.DoctorProgress, System.Threading.Tasks.Task> progress, System.Threading.CancellationToken disconnected, CMakeWorkflow.Host.Provisioning.FixCoordinator fixes, System.Func<CMakeWorkflow.Host.Provisioning.FixProgress, System.Threading.Tasks.Task> fixProgress, System.TimeProvider? timeProvider = null, CMakeWorkflow.Host.Workflows.DurableExecutionCoordinator? durableExecutions = null) : CMakeWorkflow.Host.Protocol.IHostRpc
 {
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentHostResources> GetExperimentResourcesAsync(CMakeWorkflow.Contracts.Workflows.ExperimentResourceRequest request, System.Threading.CancellationToken ct);
+    public System.Threading.Tasks.Task<long> WriteExperimentSourceChunkAsync(CMakeWorkflow.Contracts.Workflows.ExperimentSourceChunk request, System.Threading.CancellationToken ct);
     public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentStageReceipt> StageExperimentAsync(CMakeWorkflow.Contracts.Workflows.ExperimentStageRequest request, System.Threading.CancellationToken ct);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Workflows.OperationReference> WorkflowStartAsync(CMakeWorkflow.Host.Workflows.WorkflowStartRequest request, System.Threading.CancellationToken cancellationToken);
     public System.Threading.Tasks.Task<CMakeWorkflow.Host.Workflows.OperationCancelResult> OperationCancelAsync(CMakeWorkflow.Host.Workflows.OperationCancelRequest request, System.Threading.CancellationToken cancellationToken);
@@ -2384,6 +2388,7 @@ Source: [CMakeWorkflow.History/Analysis/HistoryComparison.cs](../CMakeWorkflow.H
 ```csharp
 public static class HistoryComparison
 {
+    public static System.Threading.Tasks.Task<HistoryDifference> CompareWorkflowTimingAsync(string baselinePath, string baselineSha256, string candidatePath, string candidateSha256, System.Threading.CancellationToken ct);
     public static System.Collections.Generic.List<CMakeWorkflow.History.Analysis.HistoryDifference> Compare(CMakeWorkflow.History.Models.HistoryDetail baseline, CMakeWorkflow.History.Models.HistoryDetail candidate);
 }
 ```
@@ -3327,6 +3332,19 @@ Source: [CMakeWorkflow.Sources/GitSourceSelector.cs](../CMakeWorkflow.Sources/Gi
 public sealed class GitSourceSelector(string gitExecutable = "git")
 {
     public System.Threading.Tasks.Task<GitSourceSelection> SelectAsync(string sourceRoot, bool includeUntracked = false, System.Threading.CancellationToken ct = default);
+}
+```
+
+#### `SnapshotFile`
+
+Source: [SnapshotModels.cs](../CMakeWorkflow.Sources/SnapshotModels.cs).
+
+```csharp
+public sealed record SnapshotFile(string Path, string Sha256, long Size)
+{
+    public bool Executable { get; init; }
+    public static bool IsExecutable(string path);
+    public void ApplyMode(string path);
 }
 ```
 

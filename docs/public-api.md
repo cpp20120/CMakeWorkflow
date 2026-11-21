@@ -115,6 +115,7 @@ public sealed class CMakeWorkflowClient : System.IAsyncDisposable
 {
     public CMakeWorkflow.Client.Protocol.HostIdentity Host { get; }
     public CMakeWorkflow.Client.Workflows.WorkflowService Workflows { get; }
+    public CMakeWorkflow.Client.Experiments.ExperimentService Experiments { get; }
     public CMakeWorkflow.Client.Workflows.ExecutionService Executions { get; }
     public CMakeWorkflow.Client.Workflows.OperationService Operations { get; }
     public CMakeWorkflow.Client.Profiling.ProfileService Profiles { get; }
@@ -1023,6 +1024,37 @@ public sealed record SshNetLaunchOptions(string Host, string Username, string Pr
 }
 ```
 
+### Namespace `CMakeWorkflow.Client.Experiments`
+
+#### `ExperimentService` and `PreparedExperimentPlan`
+
+Sources [ExperimentService.cs](../CMakeWorkflow.Client/Experiments/ExperimentService.cs) and
+[PreparedExperimentPlan.cs](../CMakeWorkflow.Client/Experiments/PreparedExperimentPlan.cs).
+
+```csharp
+public sealed class ExperimentService(CMakeWorkflowClient client)
+{
+    public Task<ExperimentHostResources> InspectResourcesAsync(bool managedClang = false, CancellationToken ct = default);
+    public Task VerifyPlacementAsync(ExperimentPlacement placement, CancellationToken ct = default);
+    public static Task<PreparedExperimentPlan> ReadPlanAsync(string planPath, string approvedId, CancellationToken ct = default);
+    public Task<WorkflowOperation> StartApprovedAsync(PreparedExperimentPlan plan, CancellationToken ct = default);
+    public Task<WorkflowOperation> FindAsync(PreparedExperimentPlan plan, CancellationToken ct = default);
+    public Task<ExperimentStageReceipt> StageAsync(ExperimentStageRequest request, string archivePath, CancellationToken ct = default);
+}
+public sealed class PreparedExperimentPlan
+{
+    public string Id { get; }
+    public string Repository { get; }
+    public string Commit { get; }
+    public string Workspace { get; }
+    public string ArchivePath { get; }
+    public string SourceSnapshotId { get; }
+    public string ManifestSha256 { get; }
+    public string RequestId { get; }
+    public ExperimentPlacement? Placement { get; }
+}
+```
+
 ### Namespace `CMakeWorkflow.Client.Workflows`
 
 #### `BuildContextObservation`
@@ -1686,21 +1718,56 @@ public sealed record BenchmarkAxisCoordinate(string Name, string Flag, string Va
 public sealed record BenchmarkTrial(string BaselineVariant, string ExecutionOrder, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Workflows.BenchmarkAxisCoordinate> Axes);
 ```
 
-#### `ExperimentStageRequest`, `ExperimentSourceFile` and `ExperimentStageReceipt`
+#### Experiment resource contracts
+
+Source [ExperimentResources.cs](../CMakeWorkflow.Contracts/Workflows/ExperimentResources.cs).
+
+```csharp
+public sealed record ExperimentResourceRequest(bool ManagedClang);
+public sealed record ExperimentHostResources(string Architecture, int AvailableProcessors,
+    string? ManagedCompilerVersion, string? ManagedToolchainFingerprint);
+public sealed record ExperimentPlacement(string Name, int MinProcessors, ExperimentHostResources Resources);
+```
+
+#### Experiment source transfer contracts
 
 Bounded experiment staging on a Linux Host. See [Git experiments](en/experiments.md).
 
 Source [ExperimentStage.cs](../CMakeWorkflow.Contracts/Workflows/ExperimentStage.cs).
 
 ```csharp
+/// <summary>One regular file in a bounded, source-only experiment upload.</summary>
 public sealed record ExperimentSourceFile(string Path, string Base64);
-public sealed record ExperimentStageRequest(string ExperimentId, string SourceSnapshotId, string ManifestSha256, string Manifest, System.Collections.Generic.IReadOnlyList<ExperimentSourceFile> Files)
+
+/// <summary>Exact manifest text and source files to publish under a workspace-owned experiment ID.</summary>
+public sealed record ExperimentStageRequest(string ExperimentId, string SourceSnapshotId,
+    string ManifestSha256, string Manifest, IReadOnlyList<ExperimentSourceFile> Files)
 {
+    public ExperimentSourceBundle? Bundle { get; init; }
+
     public const int MaximumSourceBytes = 8 * 1024 * 1024;
     public const int MaximumFiles = 2048;
     public const int MaximumManifestCharacters = 262144;
 }
+
+/// <summary>Verified remote paths and content identities. Staging does not admit execution.</summary>
 public sealed record ExperimentStageReceipt(string Manifest, string ManifestSha256, string SourceSnapshotId);
+
+/// <summary>Identity and limits of an experiment ZIP upload.</summary>
+public sealed record ExperimentSourceBundle(string Sha256, long Size, int FileCount)
+{
+    public const int MaximumFiles = 16384;
+    public const long MaximumSourceBytes = 512L * 1024 * 1024;
+    public const long MaximumArchiveBytes = MaximumSourceBytes + (40L * 1024 * 1024);
+    public const int MaximumFileBytes = 128 * 1024 * 1024;
+    // ZIP external attributes: Unix regular-file type and 0644/0755 permissions.
+    public const int RegularFile = unchecked((int)0x81A40000);
+    public const int ExecutableFile = unchecked((int)0x81ED0000);
+    public const int ChunkBytes = 512 * 1024;
+}
+
+/// <summary>Append a bounded source chunk or query the saved offset with empty data.</summary>
+public sealed record ExperimentSourceChunk(string ExperimentId, string Sha256, long Size, long Offset, ReadOnlyMemory<byte> Data);
 ```
 
 #### `ProcessResourceUsage`

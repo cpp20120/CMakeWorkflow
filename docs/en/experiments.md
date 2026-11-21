@@ -117,9 +117,128 @@ Download a verified log or other artifact named in `result.json`:
 cmakeworkflow experiment download PLAN_ID --artifact stdout:timing_001 --output ./bench.stdout
 ```
 
-The initial upload supports up to 2,048 regular non-executable files and
-8 MiB of source content. Gitlinks/submodules, symlinks, Git LFS pointers,
-unsafe paths and checkouts that alter Git blob bytes are rejected. The Host
-receives the source and manifest through the `experiment/stage` capability.
-This version handles one revision, Host, configuration and optional benchmark
-executable per plan.
+Schema-v2 plans store `plan.json` and `source.zip` together. The plan binds
+both the exact archive SHA-256 and the source snapshot identity. The source
+limit is 512 MiB total, 128 MiB per file and 16,384 files. Git modes `100644`
+and `100755` are supported and executable permissions are included in the
+snapshot identity. Gitlinks/submodules, symlinks, Git LFS pointers, unsafe
+paths and checkouts that alter Git blob bytes are rejected. Retry `run --plan
+PLAN_ID --approve` after an upload interruption to resume in 512 KiB chunks
+from the saved Host offset. The controller and Host retain the archive for
+recovery. Existing v1 plans continue to use the bounded inline upload.
+
+## Reproduce an upstream C++ project
+
+With managed tools provisioned on an isolated Host, plan and run {fmt} 11.2.0
+at its pinned upstream commit. `format-test` is a test executable used as a
+repeatable timing smoke workload.
+
+```bash
+cmakeworkflow experiment plan --repo https://github.com/fmtlib/fmt.git \
+  --ref 40626af88bd7df9a5fb80be7b25ac85b122d6c21 \
+  --host bench-server --workspace /home/bench/experiments \
+  --endpoint /home/bench/.cmwf/host.sock \
+  --managed-clang --config Release --benchmark-target format-test --repeats 3
+cmakeworkflow experiment run --plan PLAN_ID --approve
+```
+
+The [upstream SSH smoke](../../tests/infrastructure/sshnet/experiment-upstream.sh)
+runs this sequence and verifies the CTest log and result. It uses the SSH.NET
+fixture variables and an already provisioned managed toolchain.
+
+## Select a Host from a pool
+
+Use a local JSON file listing the Linux Hosts and their existing workspaces.
+Each entry has a name and a connection. OpenSSH entries use a configured SSH
+alias and its host-key policy.
+
+```json
+{
+  "hosts": [
+    {
+      "name": "build-a",
+      "connection": {
+        "destination": "bench-a",
+        "workspace": "/home/bench/experiments",
+        "endpoint": "/home/bench/.cmwf/host.sock"
+      }
+    },
+    {
+      "name": "build-b",
+      "connection": {
+        "destination": "bench-b",
+        "workspace": "/home/bench/experiments",
+        "endpoint": "/home/bench/.cmwf/host.sock"
+      }
+    }
+  ]
+}
+```
+
+For SSH.NET add `username`, `keyFile` and `hostKeySha256` to the connection.
+A relative `keyFile` is resolved beside the pool file. The optional `port` defaults
+to 22. The optional `executable` names the Host command and defaults to
+`cmakeworkflow`.
+
+```bash
+cmakeworkflow experiment plan --repo https://github.com/fmtlib/fmt.git \
+  --ref 40626af88bd7df9a5fb80be7b25ac85b122d6c21 \
+  --host-pool hosts.json --arch x64 --min-cpus 4 \
+  --managed-clang --config Release --benchmark-target format-test --repeats 3
+cmakeworkflow experiment run --plan PLAN_ID --approve
+```
+
+Planning probes up to 16 entries over SSH. It skips unreachable Hosts, Hosts
+without the experiment capabilities and those below the requested CPU count
+or on a different architecture. With `--managed-clang` the Host must already
+have a usable managed toolchain. With `--preset` CMake still resolves the
+preset's compiler when configuring.
+
+The eligible Host with the most processors visible to its .NET process wins.
+The order in the pool file breaks ties. This metric reflects Host process
+capacity. Resource selection does not measure live load, reserve CPUs or limit
+CMake build parallelism.
+
+The plan records the connection and resource evidence. Approval rechecks the
+selected Host's architecture, requested minimum CPU count and managed toolchain
+identity before staging. If these checks fail, create a new plan to select again.
+Recovery follows the approved connection and the saved operation ID.
+
+## Compare and run on multiple Hosts
+
+For revision comparisons, prepare and run both plans with the same repository,
+workflow options and Host. `compare` checks verified report bytes and History
+comparability evidence before applying a threshold to the median process durations.
+It requires at least three timings per revision. The default threshold is 5%.
+A regression exits with code 1 and an inconclusive comparison exits with code 2.
+
+```bash
+cmakeworkflow experiment compare BASELINE_ID CANDIDATE_ID --threshold-percent 10
+```
+
+For platform or compiler comparisons, prepare a plan for each selected Linux
+Host with the same snapshot and benchmark target, arguments and repetitions.
+The preselected Hosts may use different presets and toolchains. A single command approves the named plans in
+order. Each keeps its own request identity and report. Across-Host comparison
+prints the recorded platform, compiler and median for each Host.
+
+```bash
+cmakeworkflow experiment run --plan FIRST_HOST_ID --plan SECOND_HOST_ID --approve
+cmakeworkflow experiment compare FIRST_HOST_ID SECOND_HOST_ID --across-hosts
+```
+
+## Use from .NET
+
+`CMakeWorkflowClient.Experiments` stages and starts a prepared schema-v2 plan on
+an explicitly connected Host. Generate the plan and ZIP using `experiment plan`.
+Keep the approved plan ID and select the same Host when connecting. For SDK
+admission, use `FindAsync` after a lost reply, then use the existing workflow
+operation's polling, report and verified artifact methods. The SDK uses its
+own durable admission ID for each plan.
+
+```csharp
+PreparedExperimentPlan plan = await ExperimentService.ReadPlanAsync(planPath, approvedId, ct);
+WorkflowOperation operation = await client.Experiments.StartApprovedAsync(plan, ct);
+OperationSnapshot final = await operation.WaitForCompletionAsync(ct: ct);
+OperationReportSnapshot report = await operation.GetReportAsync(ct);
+```

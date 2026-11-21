@@ -93,7 +93,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
 
                 string sha256 = Sha256(bytes);
                 LoreAddress address = await lore.PutAsync(bytes);
-                list.Add(new SnapshotFile(relative, sha256, bytes.LongLength));
+                list.Add(new SnapshotFile(relative, sha256, bytes.LongLength) { Executable = SnapshotFile.IsExecutable(full) });
                 locations.Add(new LorePointer(relative,
                     Convert.ToHexString(address.Hash.Data),
                     Convert.ToHexString(address.Context.Data)));
@@ -202,6 +202,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
                     string path = Path.Combine(stage, entry.Path.Replace('/', Path.DirectorySeparatorChar));
                     _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                     await File.WriteAllBytesAsync(path, bytes, ct);
+                    entry.ApplyMode(path);
                 }
             }
             ct.ThrowIfCancellationRequested();

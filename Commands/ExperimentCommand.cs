@@ -5,6 +5,7 @@ using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.History.Analysis;
 using CMakeWorkflow.Pipelines.Coordinator;
 using CMakeWorkflow.Pipelines.Persistence;
 
@@ -14,21 +15,25 @@ internal static class ExperimentCommand
 {
     private const string StageId = "workflow";
     private const string Usage = """
-        CMakeWorkflow experiment plan --repo URL --ref REF --host HOST --workspace PATH --endpoint SOCKET
+        CMakeWorkflow experiment plan --repo URL --ref REF
+            (--host HOST --workspace PATH --endpoint SOCKET | --host-pool FILE [--arch ARCH] [--min-cpus N])
             (--preset NAME [--config NAME] | --managed-clang --config NAME) [--build-target TARGET]... [--ctest]
             [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
             [--remote-executable PATH] [--user USER --key-file PATH --host-key-sha256 HASH [--port PORT]]
-        CMakeWorkflow experiment run --plan ID --approve [--wait-seconds N]
+        CMakeWorkflow experiment run --plan ID [--plan ID]... --approve [--wait-seconds N]
         CMakeWorkflow experiment report ID [--wait-seconds N]
+        CMakeWorkflow experiment compare BASELINE CANDIDATE [--threshold-percent N | --across-hosts]
         CMakeWorkflow experiment download ID --artifact ARTIFACT_ID --output FILE
         """;
 
     internal static Task<int> ExecuteAsync(string[] args, CancellationToken ct) => args switch
     {
-        [] or ["help" or "--help"] => Help(),
+        [] => Help(),
+        ["help" or "--help"] => Help(),
         ["plan", .. string[] tail] => PlanAsync(tail, ct),
         ["run", .. string[] tail] => RunAsync(tail, ct),
         ["report", string id, .. string[] tail] => ObserveAsync(id, ParseWait(tail, 0), false, ct),
+        ["compare", string baseline, string candidate, .. string[] tail] => CompareAsync(baseline, candidate, tail, ct),
         ["download", string id, "--artifact", string artifact, "--output", string output] =>
             DownloadAsync(id, artifact, output, ct),
         _ => throw new ArgumentException(Usage)
@@ -59,7 +64,7 @@ internal static class ExperimentCommand
                 case "--benchmark-arg": arguments.Add(Next(args, ref i)); break;
                 case "--repo" or "--ref" or "--host" or "--workspace" or "--endpoint" or "--preset"
                     or "--config" or "--benchmark-target" or "--repeats" or "--remote-executable" or "--user"
-                    or "--key-file" or "--host-key-sha256" or "--port":
+                    or "--key-file" or "--host-key-sha256" or "--port" or "--host-pool" or "--arch" or "--min-cpus":
                     if (!options.TryAdd(option, Next(args, ref i)))
                     {
                         throw new ArgumentException($"Duplicate option {option}.");
@@ -68,25 +73,6 @@ internal static class ExperimentCommand
                 default: throw new ArgumentException($"Unknown experiment option: {option}");
             }
         }
-
-        string? user = options.GetValueOrDefault("--user");
-        string? key = options.GetValueOrDefault("--key-file");
-        string? hostKey = options.GetValueOrDefault("--host-key-sha256");
-        if (user is null ? key is not null || hostKey is not null || options.ContainsKey("--port") :
-                string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(hostKey))
-        {
-            throw new ArgumentException("SSH.NET requires --user, --key-file and --host-key-sha256 together; otherwise use an OpenSSH alias.");
-        }
-        string host = Required(options, "--host");
-        if (host.StartsWith('-') || host.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)))
-        {
-            throw new ArgumentException("Supply an SSH destination or configured SSH alias for --host.");
-        }
-        ExperimentHost remote = new(host,
-            PosixPath(Required(options, "--workspace")), PosixPath(Required(options, "--endpoint")),
-            options.GetValueOrDefault("--remote-executable", "cmakeworkflow"), user,
-            key is null ? null : Path.GetFullPath(key), hostKey,
-            Number(options.GetValueOrDefault("--port", "22"), "--port", 1, 65535));
 
         string? benchmark = options.GetValueOrDefault("--benchmark-target");
         if (benchmark is null && options.ContainsKey("--repeats"))
@@ -100,19 +86,31 @@ internal static class ExperimentCommand
             throw new ArgumentException("Select --preset NAME or --managed-clang --config NAME.");
         }
 
-        ExperimentPlan plan = await ExperimentPlanning.CreateAsync(Required(options, "--repo"),
-            Required(options, "--ref"), remote, preset, configuration,
-            targets, benchmark, Number(options.GetValueOrDefault("--repeats", "3"), "--repeats", 1, 200),
-            arguments, profile, ct);
+        string repository = Required(options, "--repo");
+        string revision = Required(options, "--ref");
+        int repeats = Number(options.GetValueOrDefault("--repeats", "3"), "--repeats", 1, 200);
+        (ExperimentHost remote, ExperimentPlacement? placement) = options.GetValueOrDefault("--host-pool") is { } pool
+            ? await SelectHostAsync(pool, options, managed, ct)
+            : (DirectHost(options), null);
+        using TemporaryExperimentArchive archive = new();
+        ExperimentPlan plan = await ExperimentPlanning.CreateAsync(repository, revision, remote, preset, configuration,
+            targets, benchmark, repeats, arguments, profile, archive.Path, ct);
+        plan = plan with { Placement = placement };
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan, ExperimentJson.Default.ExperimentPlan);
         string id = ExperimentPlan.Hash(bytes);
         string directory = PlanDirectory(id);
         _ = Directory.CreateDirectory(directory);
+        await archive.PublishAsync(Path.Combine(directory, "source.zip"), ct);
         await PublishAsync(Path.Combine(directory, "plan.json"), bytes, ct);
+        if (placement is not null)
+        {
+            Console.WriteLine(FormattableString.Invariant(
+                $"Selected Host {placement.Name} ({placement.Resources.Architecture}, {placement.Resources.AvailableProcessors} CPUs)"));
+        }
         Console.WriteLine($"""
             Repository {plan.Repository}
             Ref {plan.RequestedRef} -> {plan.Commit}
-            Source snapshot {plan.SourceSnapshotId} ({plan.Files.Count} files)
+            Source snapshot {plan.SourceSnapshotId} ({plan.Bundle?.FileCount ?? plan.Files.Count} files)
             Workflow manifest {plan.ManifestSha256}
             Host {remote.Destination} workspace {remote.Workspace} ({preset ?? "managed Clang"}, {configuration ?? "preset default"})
             {plan.Manifest}
@@ -122,11 +120,73 @@ internal static class ExperimentCommand
         return 0;
     }
 
-    private static Task<int> RunAsync(string[] args, CancellationToken ct)
+    private static ExperimentHost DirectHost(Dictionary<string, string> options)
     {
-        return args is ["--plan", string id, "--approve", .. string[] tail]
-            ? ObserveAsync(id, ParseWait(tail, 600), true, ct)
-            : throw new ArgumentException("Execution requires explicit approval: experiment run --plan ID --approve.");
+        if (options.ContainsKey("--arch") || options.ContainsKey("--min-cpus"))
+        {
+            throw new ArgumentException("--arch and --min-cpus require --host-pool.");
+        }
+        string? user = options.GetValueOrDefault("--user");
+        string? key = options.GetValueOrDefault("--key-file");
+        string? hostKey = options.GetValueOrDefault("--host-key-sha256");
+        if (user is null ? key is not null || hostKey is not null || options.ContainsKey("--port") :
+                string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(hostKey))
+        {
+            throw new ArgumentException("SSH.NET requires --user, --key-file and --host-key-sha256 together; otherwise use an OpenSSH alias.");
+        }
+        string host = Required(options, "--host");
+        return host.StartsWith('-') || host.Any(c => char.IsControl(c) || char.IsWhiteSpace(c))
+            ? throw new ArgumentException("Supply an SSH destination or configured SSH alias for --host.")
+            : new(host,
+                PosixPath(Required(options, "--workspace")), PosixPath(Required(options, "--endpoint")),
+                options.GetValueOrDefault("--remote-executable", "cmakeworkflow"), user,
+                key is null ? null : Path.GetFullPath(key), hostKey,
+                Number(options.GetValueOrDefault("--port", "22"), "--port", 1, 65535));
+    }
+
+    private static async Task<(ExperimentHost Host, ExperimentPlacement Placement)> SelectHostAsync(string path,
+        Dictionary<string, string> options, bool managed, CancellationToken ct)
+    {
+        string[] directOptions = ["--host", "--workspace", "--endpoint", "--user", "--key-file",
+            "--host-key-sha256", "--port", "--remote-executable"];
+        if (directOptions.Any(options.ContainsKey))
+        {
+            throw new ArgumentException("--host-pool supplies all Host connection options.");
+        }
+        string? architecture = options.GetValueOrDefault("--arch")?.ToUpperInvariant();
+        if (architecture is not (null or "X64" or "ARM64" or "X86" or "ARM"))
+        {
+            throw new ArgumentException("--arch requires x64, arm64, x86 or arm.");
+        }
+        int minimum = Number(options.GetValueOrDefault("--min-cpus", "1"), "--min-cpus", 1, int.MaxValue);
+        return await ExperimentHostSelection.SelectAsync(path, architecture, minimum, managed, ct);
+    }
+
+    private static async Task<int> RunAsync(string[] args, CancellationToken ct)
+    {
+        List<string> ids = [];
+        int index = 0;
+        while (index + 1 < args.Length && args[index] == "--plan")
+        {
+            ids.Add(args[index + 1]);
+            index += 2;
+        }
+        if (ids.Count == 0 || index == args.Length || args[index] != "--approve" ||
+            ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+        {
+            throw new ArgumentException("Execution requires explicit approval: experiment run --plan ID [--plan ID]... --approve.");
+        }
+        int wait = ParseWait(args[(index + 1)..], 600);
+        foreach (string id in ids)
+        {
+            _ = await ReadPlanAsync(PlanDirectory(id), id, ct);
+        }
+        int status = 0;
+        foreach (string id in ids)
+        {
+            status = Math.Max(status, await ObserveAsync(id, wait, true, ct));
+        }
+        return status;
     }
 
     private static async Task<int> ObserveAsync(string id, int waitSeconds, bool approve, CancellationToken ct)
@@ -180,8 +240,16 @@ internal static class ExperimentCommand
         });
         if (approve && pipeline.Stages.Single().Status == PipelineStageStates.Pending)
         {
-            ExperimentStageReceipt staged = await client.Workflows.StageExperimentAsync(
-                new(id, plan.SourceSnapshotId, plan.ManifestSha256, plan.Manifest, plan.Files), ct);
+            if (plan.Placement is not null)
+            {
+                await client.Experiments.VerifyPlacementAsync(plan.Placement, ct);
+            }
+
+            ExperimentStageRequest stage = new(id, plan.SourceSnapshotId, plan.ManifestSha256, plan.Manifest, plan.Files)
+            { Bundle = plan.Bundle };
+            ExperimentStageReceipt staged = plan.Bundle is null
+                ? await client.Workflows.StageExperimentAsync(stage, ct)
+                : await client.Experiments.StageAsync(stage, Path.Combine(directory, "source.zip"), ct);
             if (staged != new ExperimentStageReceipt(manifest, plan.ManifestSha256, plan.SourceSnapshotId))
             {
                 throw new InvalidDataException("Host staged identity does not match the approved plan.");
@@ -249,6 +317,102 @@ internal static class ExperimentCommand
             Path.Combine(directory, "report.html"), history, catalog.Artifacts, raw.RootElement.Clone());
     }
 
+    private static async Task<int> CompareAsync(string baselineId, string candidateId, string[] args, CancellationToken ct)
+    {
+        bool acrossHosts = args is ["--across-hosts"];
+        double threshold = args switch
+        {
+        [] or ["--across-hosts"] => 5,
+            ["--threshold-percent", string value] when double.TryParse(value, NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out double parsed) && double.IsFinite(parsed) && parsed > 0 => parsed,
+            _ => throw new ArgumentException("--threshold-percent requires a positive number.")
+        };
+        (ExperimentPlan baseline, string baselineReport, string baselineHash) = await ReadComparisonInputAsync(baselineId, ct);
+        (ExperimentPlan candidate, string candidateReport, string candidateHash) = await ReadComparisonInputAsync(candidateId, ct);
+        if (baseline.Repository != candidate.Repository || (!acrossHosts && baseline.ManifestSha256 != candidate.ManifestSha256))
+        {
+            Console.WriteLine("Inconclusive. Repository or workflow inputs differ.");
+            return 2;
+        }
+
+        if (acrossHosts && (baseline.SourceSnapshotId != candidate.SourceSnapshotId ||
+                            !BenchmarkInputs(baseline).SequenceEqual(BenchmarkInputs(candidate), StringComparer.Ordinal)))
+        {
+            Console.WriteLine("Inconclusive. Host comparison requires the same source snapshot and benchmark target, arguments and repetitions.");
+            return 2;
+        }
+
+        HistoryDifference difference = await HistoryComparison.CompareWorkflowTimingAsync(baselineReport, baselineHash,
+            candidateReport, candidateHash, ct);
+        Console.WriteLine($"Baseline {baseline.Commit} | candidate {candidate.Commit}");
+        if (acrossHosts)
+        {
+            if (difference.Baseline is not { } first || difference.Candidate is not { } second || first.Median <= 0)
+            {
+                Console.WriteLine("Inconclusive. Both Hosts must report benchmark durations with a positive baseline median.");
+                return 2;
+            }
+            await PrintHostTimingAsync(baseline.Host, baselineReport, baselineHash, first, ct);
+            await PrintHostTimingAsync(candidate.Host, candidateReport, candidateHash, second, ct);
+            Console.WriteLine(FormattableString.Invariant($"Candidate median is {second.Median / first.Median:P2} of baseline. Descriptive Host comparison."));
+            return 0;
+        }
+        if (difference.Status != "compatible" || difference.Baseline is not { Count: >= 3 } left ||
+            difference.Candidate is not { Count: >= 3 } right || difference.PercentChange is not { } delta ||
+            !double.IsFinite(delta))
+        {
+            Console.WriteLine(difference.Status == "compatible"
+                ? "Inconclusive. At least three timings per revision and a positive baseline median are required."
+                : $"Inconclusive. {difference.Reason}");
+            return 2;
+        }
+
+        string verdict = delta >= threshold ? "Regression" : delta <= -threshold ? "Improvement" : "Within threshold";
+        Console.WriteLine(FormattableString.Invariant(
+            $"{verdict}. Median {left.Median:G6} s ({left.Count} samples) -> {right.Median:G6} s ({right.Count} samples), {delta:+0.00;-0.00;0.00}% (threshold {threshold:G}%). Descriptive comparison."));
+        return delta >= threshold ? 1 : 0;
+    }
+
+    private static string[] BenchmarkInputs(ExperimentPlan plan)
+    {
+        using JsonDocument document = JsonDocument.Parse(plan.Manifest);
+        return [.. document.RootElement.GetProperty("nodes").EnumerateArray()
+            .Where(node => node.GetProperty("id").GetString() == "benchmark_build" ||
+                           node.GetProperty("id").GetString()!.StartsWith("timing_", StringComparison.Ordinal))
+            .Select(node => node.GetRawText())];
+    }
+
+    private static async Task PrintHostTimingAsync(ExperimentHost host, string path, string hash, HistoryStats stats,
+        CancellationToken ct)
+    {
+        using JsonDocument document = JsonDocument.Parse(await ReadVerifiedRunAsync(path, hash, ct));
+        JsonElement environment = document.RootElement.GetProperty("environment");
+        JsonElement.ArrayEnumerator builds = document.RootElement.GetProperty("buildEnvironments").EnumerateArray();
+        string[] compilers = [.. builds.Select(build => $"{build.GetProperty("compilerId")} {build.GetProperty("compilerVersion")}".Trim())
+            .Where(name => name.Length > 0).Distinct(StringComparer.Ordinal)];
+        string platform = environment.ValueKind == JsonValueKind.Object
+            ? $"{environment.GetProperty("operatingSystem")} {environment.GetProperty("architecture")}"
+            : "unknown platform";
+        Console.WriteLine(FormattableString.Invariant(
+            $"{host.Destination}:{host.Port} | {platform} | {(compilers.Length == 0 ? "unknown compiler" : string.Join(", ", compilers))} | {stats.Median:G6} s ({stats.Count} samples)"));
+    }
+
+    private static async Task<(ExperimentPlan Plan, string ReportPath, string ReportHash)> ReadComparisonInputAsync(
+        string id, CancellationToken ct)
+    {
+        string directory = PlanDirectory(id);
+        ExperimentPlan plan = await ReadPlanAsync(directory, id, ct);
+        using PipelineLedger ledger = new(Path.Combine(directory, "pipeline.db"));
+        PipelineStageSnapshot? terminal = ledger.Find(id)?.Stages.Single();
+        ExperimentResult? result = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(Path.Combine(directory, "result.json"), ct),
+            ExperimentJson.Default.ExperimentResult);
+        return result is not null && result.ExperimentId == id && result.State == PipelineStageStates.Succeeded &&
+               terminal?.Status == result.State && terminal.ChildOperationId == result.OperationId &&
+               terminal.EvidenceReference == ReportReference(result.OperationId, result.ReportSha256)
+            ? (plan, Path.Combine(directory, "run.json"), result.ReportSha256)
+            : throw new InvalidDataException("Comparison requires finalized, verified experiment reports.");
+    }
+
     private static async Task<int> DownloadAsync(string id, string artifactId, string output, CancellationToken ct)
     {
         string directory = PlanDirectory(id);
@@ -303,7 +467,7 @@ internal static class ExperimentCommand
             throw new InvalidDataException("Stored experiment plan does not match its approved SHA-256.");
         }
         ExperimentPlan? plan = JsonSerializer.Deserialize(bytes, ExperimentJson.Default.ExperimentPlan);
-        return plan is { SchemaVersion: 1 } ? plan : throw new InvalidDataException("Unsupported experiment plan.");
+        return plan is { SchemaVersion: 1, Bundle: null } or { SchemaVersion: 2, Bundle: not null } ? plan : throw new InvalidDataException("Unsupported experiment plan.");
     }
 
     private static async Task PublishAsync(string path, byte[] bytes, CancellationToken ct)
@@ -351,7 +515,7 @@ internal static class ExperimentCommand
         options.TryGetValue(key, out string? value) && !string.IsNullOrWhiteSpace(value)
             ? value : throw new ArgumentException($"Required option {key}.");
 
-    private static string PosixPath(string path) =>
+    internal static string PosixPath(string path) =>
         path.StartsWith('/') && !path.Contains('\\', StringComparison.Ordinal) &&
             !path.Any(char.IsControl) && !path.Split('/').Skip(1).Any(p => p is "" or "." or "..")
             ? path : throw new ArgumentException($"Expected a canonical absolute Linux path: {path}");
@@ -367,4 +531,37 @@ internal static class ExperimentCommand
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int parsed) &&
             parsed >= minimum && parsed <= maximum ? parsed
             : throw new ArgumentException($"{option} must be between {minimum} and {maximum}.");
+
+    private sealed class TemporaryExperimentArchive : IDisposable
+    {
+        private readonly DirectoryInfo directory = Directory.CreateTempSubdirectory("cmwf-experiment-");
+        internal string Path => System.IO.Path.Combine(directory.FullName, "source.zip");
+
+        internal async Task PublishAsync(string destination, CancellationToken ct)
+        {
+            if (File.Exists(destination))
+            {
+                return;
+            }
+            string temporary = destination + "." + Guid.NewGuid().ToString("N");
+            try
+            {
+                await using (FileStream input = File.OpenRead(Path))
+                await using (FileStream output = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    await input.CopyToAsync(output, ct);
+                    await output.FlushAsync(ct);
+                }
+                try { File.Move(temporary, destination); }
+                catch (IOException) when (File.Exists(destination)) { }
+            }
+            finally
+            {
+                File.Delete(temporary);
+            }
+        }
+
+        public void Dispose() => directory.Delete(recursive: true);
+    }
+
 }

@@ -1,10 +1,32 @@
 using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.History.Models;
+using CMakeWorkflow.History.Storage;
 
 namespace CMakeWorkflow.History.Analysis;
 
 public static class HistoryComparison
 {
+    /// <summary>Compares process durations in two SHA-256-bound reports without reading referenced artifacts.</summary>
+    public static async Task<HistoryDifference> CompareWorkflowTimingAsync(string baselinePath, string baselineSha256,
+        string candidatePath, string candidateSha256, CancellationToken ct)
+    {
+        HistoryDetail baseline = await ReadTimingAsync(baselinePath, baselineSha256, ct);
+        HistoryDetail candidate = await ReadTimingAsync(candidatePath, candidateSha256, ct);
+        List<HistoryDifference> rows = Compare(baseline, candidate);
+        return rows.Count == 1 ? rows[0]
+            : throw new InvalidDataException("Expected one benchmark timing series in each experiment.");
+    }
+
+    private static async Task<HistoryDetail> ReadTimingAsync(string path, string sha256, CancellationToken ct)
+    {
+        string fullPath = Path.GetFullPath(path);
+        ParsedRun? parsed = await HistoryReports.ParseWorkflowAsync(Path.GetDirectoryName(fullPath)!, fullPath,
+            sha256, null, ct, includeSupplemental: false);
+        return parsed?.Run.Status == "succeeded"
+            ? new(parsed.Run, parsed.Nodes, parsed.Measurements, [])
+            : throw new InvalidDataException("Benchmark comparison requires successful workflow reports.");
+    }
+
     private static HistoryStats Stats(List<double> values)
     {
         double[] sorted = [.. values.Order()];

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -30,6 +31,11 @@ internal sealed record ExperimentPlan(int SchemaVersion, string Repository, stri
     ExperimentHost Host, string SourceSnapshotId, string ManifestSha256, string Manifest,
     IReadOnlyList<ExperimentSourceFile> Files)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ExperimentPlacement? Placement { get; init; }
+
+    public ExperimentSourceBundle? Bundle { get; init; }
+
     internal static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 }
 
@@ -42,13 +48,14 @@ internal sealed record ExperimentResult(int SchemaVersion, string ExperimentId, 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(ExperimentPlan))]
 [JsonSerializable(typeof(ExperimentResult))]
+[JsonSerializable(typeof(ExperimentHostPool))]
 internal sealed partial class ExperimentJson : JsonSerializerContext;
 
 internal static class ExperimentPlanning
 {
     internal static async Task<ExperimentPlan> CreateAsync(string repository, string revision, ExperimentHost host,
         string? preset, string? configuration, IReadOnlyList<string> targets, string? benchmark, int repeats,
-        IReadOnlyList<string> arguments, bool profile, CancellationToken ct)
+        IReadOnlyList<string> arguments, bool profile, string archivePath, CancellationToken ct)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
@@ -110,7 +117,7 @@ internal static class ExperimentPlanning
             GitSourceSelection selected = await new GitSourceSelector("git", environment)
                 .SelectAsync(checkout.FullName, ct: ct);
             if (selected.HeadCommit != commit || selected.DeletedTrackedCount != 0 ||
-                selected.Files.Count > ExperimentStageRequest.MaximumFiles)
+                selected.Files.Count > ExperimentSourceBundle.MaximumFiles)
             {
                 throw new InvalidDataException("Incomplete, changed or oversized Git source selection.");
             }
@@ -123,31 +130,57 @@ internal static class ExperimentPlanning
                 throw new InvalidDataException("Add a committed root CMakePresets.json with a Linux configure preset, or use --managed-clang --config Release.");
             }
 
-            await VerifyCheckoutAsync(checkout.FullName, selected.Files, environment, ct);
-            List<ExperimentSourceFile> files = [];
+            IReadOnlySet<string> executable = await VerifyCheckoutAsync(checkout.FullName, selected.Files, environment, ct);
             List<SnapshotFile> evidence = [];
             long total = 0;
-            foreach (string relative in selected.Files)
+            await using FileStream archive = File.Open(archivePath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+            await using (ZipArchive zip = await ZipArchive.CreateAsync(archive, ZipArchiveMode.Create, leaveOpen: true, entryNameEncoding: null, cancellationToken: ct))
             {
-                string path = Path.Combine(checkout.FullName, relative);
-                FileInfo file = new(path);
-                if (file.LinkTarget is not null || file.Length > ExperimentStageRequest.MaximumSourceBytes - total)
+                foreach (string relative in selected.Files.Order(StringComparer.Ordinal))
                 {
-                    throw new InvalidDataException($"Unsupported file or source exceeds 8 MiB: {relative}");
-                }
-                byte[] bytes = await File.ReadAllBytesAsync(path, ct);
-                total += bytes.Length;
-                if (total > ExperimentStageRequest.MaximumSourceBytes ||
-                    bytes.AsSpan().StartsWith("version https://git-lfs.github.com/spec/v1"u8))
-                {
-                    throw new InvalidDataException($"Git LFS or oversized source is unsupported: {relative}");
-                }
-                files.Add(new(relative, Convert.ToBase64String(bytes)));
-                evidence.Add(new(relative, ExperimentPlan.Hash(bytes), bytes.LongLength));
-            }
+                    string path = Path.Combine(checkout.FullName, relative);
+                    FileInfo file = new(path);
+                    if (file.LinkTarget is not null || file.Length > ExperimentSourceBundle.MaximumFileBytes ||
+                        file.Length > ExperimentSourceBundle.MaximumSourceBytes - total)
+                    {
+                        throw new InvalidDataException($"Unsupported file or source size exceeds transfer limit: {relative}");
+                    }
+                    await using FileStream input = file.OpenRead();
+                    ReadOnlyMemory<byte> lfsSignature = "version https://git-lfs.github.com/spec/v1"u8.ToArray();
+                    if (input.Length >= lfsSignature.Length)
+                    {
+                        byte[] prefix = new byte[lfsSignature.Length];
+                        await input.ReadExactlyAsync(prefix, ct);
+                        if (prefix.AsSpan().SequenceEqual(lfsSignature.Span))
+                        {
+                            throw new InvalidDataException($"Git LFS pointers are unsupported: {relative}");
+                        }
+                    }
+                    input.Position = 0;
+                    string hash = Convert.ToHexString(await SHA256.HashDataAsync(input, ct));
+                    total += input.Length;
+                    bool canExecute = executable.Contains(relative);
+                    evidence.Add(new(relative, hash, input.Length) { Executable = canExecute });
 
-            return new(1, uri.AbsoluteUri, revision, commit, host, LoreSnapshotStore.GetSnapshotId(evidence),
-                ExperimentPlan.Hash(Encoding.UTF8.GetBytes(manifest)), manifest, files);
+                    input.Position = 0;
+                    ZipArchiveEntry entry = zip.CreateEntry(relative, CompressionLevel.NoCompression);
+                    entry.LastWriteTime = DateTimeOffset.UnixEpoch.AddYears(10);
+                    entry.ExternalAttributes = canExecute ? ExperimentSourceBundle.ExecutableFile : ExperimentSourceBundle.RegularFile;
+                    await using Stream output = await entry.OpenAsync(ct);
+                    await input.CopyToAsync(output, ct);
+                }
+            }
+            if (archive.Length > ExperimentSourceBundle.MaximumArchiveBytes)
+            {
+                throw new InvalidDataException("Source ZIP exceeds the archive size limit, including file metadata.");
+            }
+            archive.Position = 0;
+            string archiveHash = Convert.ToHexString(await SHA256.HashDataAsync(archive, ct));
+            return new(2, uri.AbsoluteUri, revision, commit, host, LoreSnapshotStore.GetSnapshotId(evidence),
+                ExperimentPlan.Hash(Encoding.UTF8.GetBytes(manifest)), manifest, [])
+            {
+                Bundle = new(archiveHash, archive.Length, evidence.Count)
+            };
         }
         finally
         {
@@ -155,27 +188,32 @@ internal static class ExperimentPlanning
         }
     }
 
-    private static async Task VerifyCheckoutAsync(string root, IReadOnlyList<string> files,
+    private static async Task<IReadOnlySet<string>> VerifyCheckoutAsync(string root, IReadOnlyList<string> files,
         Dictionary<string, string?> environment, CancellationToken ct)
     {
         // Compare the checked-out bytes to index blob IDs. Attributes such as eol,
         // ident, and working-tree-encoding can otherwise change the approved source.
         string index = await GitAsync(root, ["ls-files", "--stage", "-z"], environment, ct);
         Dictionary<string, string> ids = new(StringComparer.Ordinal);
+        HashSet<string> executable = new(StringComparer.Ordinal);
         foreach (string entry in index.Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
             int tab = entry.IndexOf('\t', StringComparison.Ordinal);
             string[] fields = entry[..tab].Split(' ');
             string path = entry[(tab + 1)..];
-            if (fields[0] != "100644")
+            if (fields[0] is not ("100644" or "100755"))
             {
-                throw new InvalidDataException($"Unsupported Git mode {fields[0]}: {path}. Experiment snapshots require non-executable regular files.");
+                throw new InvalidDataException($"Unsupported Git mode {fields[0]}: {path}. Experiment snapshots require regular files.");
             }
             if (path.Length > 1024)
             {
                 throw new InvalidDataException($"Experiment source path exceeds 1024 characters: {path}");
             }
             ids.Add(path, fields[1]);
+            if (fields[0] == "100755")
+            {
+                _ = executable.Add(path);
+            }
         }
         foreach (string[] batch in files.Chunk(32))
         {
@@ -185,6 +223,7 @@ internal static class ExperimentPlanning
                 throw new InvalidDataException("Git checkout differs from committed blobs. Remove checkout-transforming attributes or use a revision with byte-identical checkout.");
             }
         }
+        return executable;
     }
 
     private static string CreateManifest(string? preset, string? configuration, IReadOnlyList<string> targets,

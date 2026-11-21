@@ -10,18 +10,18 @@ internal static class SshLostReplyPeer
 {
     internal static async Task RunAsync(string endpoint, string marker)
     {
-        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(15));
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
         CancellationToken ct = deadline.Token;
         using Stream input = Console.OpenStandardInput();
         using Stream output = Console.OpenStandardOutput();
         await using Stream host = await LocalTransport.ConnectAsync(endpoint, ct);
-        for (int request = 0; request < 4; request++)
+        for (int request = 0; request < 2048; request++)
         {
             (byte[]? Header, byte[]? Body) = await ReadFrameAsync(input, ct);
             using JsonDocument json = JsonDocument.Parse(Body);
             string? method = json.RootElement.GetProperty("method").GetString();
             SshTransportTests.Check(request == 0 ? method == "initialize" :
-                method is "experiment/stage" or "workflow/preflight" or "workflow/start",
+                method is "experiment/sourceChunk" or "experiment/stage" or "workflow/preflight" or "workflow/start",
                 "Unexpected RPC in lost-reply fixture.");
             await host.WriteAsync(Header, ct);
             await host.WriteAsync(Body, ct);
@@ -32,6 +32,11 @@ internal static class SshLostReplyPeer
                                     json.RootElement.GetProperty("id").GetRawText(), "Wrong response ID.");
             SshTransportTests.Check(reply.RootElement.TryGetProperty("result", out JsonElement result),
                 "Host refused the fault-injection request.");
+            if (method == "experiment/sourceChunk" && result.GetInt64() > 0 && !File.Exists(marker + ".upload"))
+            {
+                await File.WriteAllTextAsync(marker + ".upload", "chunk saved", ct);
+                return;
+            }
             if (method == "workflow/start")
             {
                 // Record proof of acceptance, but never deliver its operation ID to the client.

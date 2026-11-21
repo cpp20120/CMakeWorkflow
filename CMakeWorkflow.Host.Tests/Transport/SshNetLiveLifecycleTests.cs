@@ -1,4 +1,5 @@
 using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Client.Experiments;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Sources;
 using System.Security.Cryptography;
@@ -21,9 +22,9 @@ internal static class SshNetLiveLifecycleTests
 {
     internal static async Task RunAsync(string? scenario)
     {
-        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage"))
+        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage" or "experiment-sdk"))
         {
-            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent|experiment-stage].");
+            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent|experiment-stage|experiment-sdk].");
         }
 
         static string Required(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
@@ -64,6 +65,11 @@ internal static class SshNetLiveLifecycleTests
             await ExperimentStageAsync(probe, options, timeout.Token);
         }
 
+        if (scenario == "experiment-sdk")
+        {
+            await ExperimentSdkAsync(options, Required("CMWF_SSHNET_PLAN"), Required("CMWF_SSHNET_PLAN_ID"), timeout.Token);
+        }
+
         Console.WriteLine("PASS SSH.NET live lifecycle: " + (scenario ?? "handshake, workflow"));
     }
 
@@ -96,6 +102,39 @@ internal static class SshNetLiveLifecycleTests
         }
         Check(probe.Alive(pid), "The second SSH.NET disconnect terminated the persistent Host.");
         Console.WriteLine("PASS SSH.NET persistent Host survives two SSH exec channels and reconnect");
+    }
+
+    private static async Task ExperimentSdkAsync(SshNetLaunchOptions options, string path, string id, CancellationToken ct)
+    {
+        PreparedExperimentPlan plan = await ExperimentService.ReadPlanAsync(path, id, ct);
+        SshNetHostOptions persistent = new(options.Host, options.Username, options.PrivateKeyPath,
+            options.HostKeySha256, Environment.GetEnvironmentVariable("CMWF_SSHNET_ENDPOINT")!, options.Workspace)
+        {
+            Port = options.Port,
+            RemoteExecutable = options.RemoteExecutable
+        };
+        string operationId;
+        await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(persistent, ct))
+        {
+            ExperimentPlacement placement = plan.Placement
+                ?? throw new InvalidDataException("Resource selection evidence is missing from the SDK plan.");
+            try
+            {
+                await client.Experiments.VerifyPlacementAsync(placement with { MinProcessors = int.MaxValue }, ct);
+                throw new InvalidDataException("The SDK accepted an unsatisfied approved CPU requirement.");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("no longer meets", StringComparison.Ordinal))
+            {
+            }
+            operationId = (await client.Experiments.StartApprovedAsync(plan, ct)).OperationId;
+        }
+        await using CMakeWorkflowClient reconnected = await CMakeWorkflowClient.ConnectSshNetAsync(persistent, ct);
+        WorkflowOperation operation = await reconnected.Experiments.FindAsync(plan, ct);
+        Check(operationId == operation.OperationId, "SDK resumed a different experiment operation.");
+        OperationSnapshot snapshot = await operation.WaitForCompletionAsync(ct: ct);
+        Check(snapshot.State == "succeeded", "SDK experiment failed.");
+        Check((await operation.ListArtifactsAsync(ct)).Artifacts.Any(a => a.RelativePath == "run.json"),
+            "SDK experiment report artifact is unavailable.");
     }
 
     private static async Task ExperimentStageAsync(Probe probe, SshNetLaunchOptions options, CancellationToken ct)

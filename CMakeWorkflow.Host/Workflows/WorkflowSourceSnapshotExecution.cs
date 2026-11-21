@@ -189,7 +189,7 @@ internal static class WorkflowSourceSnapshotExecution
                 throw new InvalidDataException("Materialized source is missing: " + entry.Path);
             }
             await using FileStream input = File.OpenRead(file);
-            if (input.Length != entry.Size ||
+            if (input.Length != entry.Size || SnapshotFile.IsExecutable(file) != entry.Executable ||
                 !Convert.ToHexString(await SHA256.HashDataAsync(input, ct))
                     .Equals(entry.Sha256, StringComparison.Ordinal))
             {
