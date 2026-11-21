@@ -322,7 +322,8 @@ internal static class ExperimentCommand
         bool acrossHosts = args is ["--across-hosts"];
         double threshold = args switch
         {
-        [] or ["--across-hosts"] => 5,
+            [] => 5,
+            ["--across-hosts"] => 5,
             ["--threshold-percent", string value] when double.TryParse(value, NumberStyles.AllowDecimalPoint,
                 CultureInfo.InvariantCulture, out double parsed) && double.IsFinite(parsed) && parsed > 0 => parsed,
             _ => throw new ArgumentException("--threshold-percent requires a positive number.")
