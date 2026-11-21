@@ -6,6 +6,7 @@ using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Workflows;
 using CMakeWorkflow.Sources;
+using CMakeWorkflow.Tooling.Tools;
 
 namespace CMakeWorkflow.Host.Sessions;
 
@@ -25,6 +26,7 @@ public sealed partial class DoctorSession
 
             string path = SourceUploadPath(paths, request.ExperimentId, request.Sha256);
             _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await using FileStream lease = await LockStageAsync(paths, request.ExperimentId, token);
             await using FileStream output = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
                 4096, FileOptions.Asynchronous | FileOptions.WriteThrough);
             if (output.Length > request.Size || request.Offset > output.Length)
@@ -77,6 +79,7 @@ public sealed partial class DoctorSession
             throw new InvalidDataException("Experiment source snapshot SHA-256 mismatch.");
         }
 
+        await using FileStream lease = await LockStageAsync(paths, request.ExperimentId, token);
         string root = RequireStagePath(paths, Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "experiments"));
         _ = Directory.CreateDirectory(root);
         string stage = RequireStagePath(paths, Path.Combine(root, request.ExperimentId));
@@ -131,6 +134,14 @@ public sealed partial class DoctorSession
         await WorkflowSourceSnapshotExecution.VerifyExistingMaterializationAsync(snapshot, source, token);
         return new ExperimentStageReceipt(manifest, request.ManifestSha256, request.SourceSnapshotId);
     }, ct);
+
+    private static Task<FileStream> LockStageAsync(WorkspaceReadPaths paths, string experimentId, CancellationToken ct)
+    {
+        string path = RequireStagePath(paths, Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow",
+            "experiment-locks", experimentId + ".lock"));
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        return ManagedToolStore.LockAsync(path, ct);
+    }
 
     private static string SourceUploadPath(WorkspaceReadPaths paths, string experimentId, string sha256) =>
         RequireStagePath(paths, Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "experiment-uploads",

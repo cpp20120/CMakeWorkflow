@@ -229,6 +229,22 @@ internal static class HistoryReports
             }
         }
 
+        if (root.TryGetProperty("toolchains", out JsonElement toolchains) && toolchains.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement toolchain in toolchains.EnumerateArray())
+            {
+                if (Str(toolchain, "buildDirectory") is { } directoryKey && Obj(toolchain, "linux") is { } linux &&
+                    Str(linux, "vcpkgPackageTreeSha256") is { } packageTree)
+                {
+                    string prefix = directoryKey + "\u001f";
+                    foreach (string key in builds.Keys.Where(key => key.StartsWith(prefix, StringComparison.Ordinal)).ToArray())
+                    {
+                        builds[key] = Hash(Encoding.UTF8.GetBytes(builds[key] + "\n" + packageTree));
+                    }
+                }
+            }
+        }
+
         AddArtifact(run, null, "workflow-report", path, run.Run.SourceHash);
         string eventJournal = Path.Combine(directory, "events.jsonl");
         if (File.Exists(eventJournal))

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
@@ -69,7 +70,46 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
             : null;
         return new(RequiredString(root, "repository"), RequiredString(root, "commit"),
             RequiredString(root.GetProperty("host"), "workspace"),
-            Path.Combine(Path.GetDirectoryName(fullPath)!, "source.zip"), stage, placement);
+            Path.Combine(Path.GetDirectoryName(fullPath)!, "source.zip"), stage, placement,
+            root.TryGetProperty("dependencyPlanSha256", out JsonElement dependencies) ? dependencies.GetString() : null);
+    }
+
+    /// <summary>Stages the approved source and inspects or explicitly applies its dependency plan.</summary>
+    public async Task<ExperimentDependencyResult> PrepareDependenciesAsync(PreparedExperimentPlan plan,
+        string? approvalSha256 = null, CancellationToken ct = default)
+    {
+        ValidateWorkspace(plan);
+        client.RequireCapability("experiment/dependencies");
+        if (plan.DependencyPlanSha256 is null)
+        {
+            throw new InvalidOperationException("This experiment does not opt into vcpkg.");
+        }
+        if (plan.Placement is not null)
+        {
+            await VerifyPlacementAsync(plan.Placement, ct);
+        }
+        _ = await StageAsync(plan.Stage, plan.ArchivePath, ct);
+        return await DependenciesAsync(plan, approvalSha256, false, ct);
+    }
+
+    /// <summary>Checks that the staged plan has a valid installed package receipt.</summary>
+    public async Task VerifyDependenciesAsync(PreparedExperimentPlan plan, CancellationToken ct = default)
+    {
+        ValidateWorkspace(plan);
+        _ = await DependenciesAsync(plan, null, true, ct);
+    }
+
+    private async Task<ExperimentDependencyResult> DependenciesAsync(PreparedExperimentPlan plan, string? approval,
+        bool verify, CancellationToken ct)
+    {
+        client.RequireCapability("experiment/dependencies");
+        string expected = plan.DependencyPlanSha256 ??
+            throw new InvalidOperationException("This experiment does not opt into vcpkg.");
+        ExperimentDependencyResult result = await RpcRefusals.TranslateAsync(() => client.Proxy.ExperimentDependenciesAsync(
+            new(plan.Id, plan.Commit, plan.SourceSnapshotId, plan.ManifestSha256, expected, approval, verify), ct));
+        return result.PlanSha256 == expected &&
+               Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(result.Plan))) == expected && (!(verify || approval is not null) || result.InstalledTreeSha256 is not null)
+            ? result : throw new InvalidDataException("Host dependency evidence differs from the experiment plan.");
     }
 
     /// <summary>Stages and explicitly authorizes execution of the prepared plan on the connected Host.</summary>
@@ -83,6 +123,10 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         }
         string manifest = plan.Workspace + $"/.cmakeworkflow/experiments/{plan.Id}/workflow.json";
         ExperimentStageReceipt staged = await StageAsync(plan.Stage, plan.ArchivePath, ct);
+        if (plan.DependencyPlanSha256 is not null)
+        {
+            await VerifyDependenciesAsync(plan, ct);
+        }
         StartWorkflowOptions options = new(plan.RequestId, manifest, plan.ManifestSha256, 1,
             plan.Workspace + $"/.cmakeworkflow/experiment-sdk-results/{plan.Id}")
         {

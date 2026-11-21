@@ -6,7 +6,7 @@ internal static class CliUsage
     {
         Console.Error.WriteLine(
         "Usage: CMakeWorkflow remote <start|find|status|inspect|events|report|artifacts|download|cancel> --destination USER@HOST --endpoint REMOTE_SOCKET --workspace REMOTE_DIR ...\n" +
-        "       CMakeWorkflow experiment <plan|run|report|compare|download> (use experiment help for options)\n" +
+        "       CMakeWorkflow experiment <plan|deps|run|report|compare|download> (use experiment help for options)\n" +
         "       CMakeWorkflow remote stash --operation ID --store LOCAL_CAS (use remote help for transport options)\n" +
         "Usage: CMakeWorkflow cas STORE <show|fetch|pin|unpin|drop-action|gc> ...\n" +
         "Usage: CMakeWorkflow host serve --endpoint PATH | host <doctor|fix> --endpoint PATH [--workspace DIR] [--profile NAME] [--tool-policy AllowSystem|ManagedOnly] [--json]; fix: [--yes|--dry-run] [--pm NAME] [--no-fallback]\n" +

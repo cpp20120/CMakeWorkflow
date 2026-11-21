@@ -6,7 +6,7 @@ namespace CMakeWorkflow.Client.Experiments;
 public sealed class PreparedExperimentPlan
 {
     internal PreparedExperimentPlan(string repository, string commit, string workspace, string archivePath,
-        ExperimentStageRequest stage, ExperimentPlacement? placement)
+        ExperimentStageRequest stage, ExperimentPlacement? placement, string? dependencyPlanSha256)
     {
         Repository = repository;
         Commit = commit;
@@ -14,6 +14,7 @@ public sealed class PreparedExperimentPlan
         ArchivePath = archivePath;
         Stage = stage;
         Placement = placement;
+        DependencyPlanSha256 = dependencyPlanSha256;
     }
 
     public string Id => Stage.ExperimentId;
@@ -25,5 +26,6 @@ public sealed class PreparedExperimentPlan
     public string ManifestSha256 => Stage.ManifestSha256;
     public string RequestId => "experiment-sdk-" + Id;
     public ExperimentPlacement? Placement { get; }
+    public string? DependencyPlanSha256 { get; }
     internal ExperimentStageRequest Stage { get; }
 }

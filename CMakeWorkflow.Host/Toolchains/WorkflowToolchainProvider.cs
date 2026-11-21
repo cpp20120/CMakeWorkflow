@@ -13,6 +13,17 @@ namespace CMakeWorkflow.Host.Toolchains;
 
 public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
 {
+    private readonly string? snapshotId;
+    private readonly string? snapshotRoot;
+
+    public WorkflowToolchainProvider() { }
+
+    internal WorkflowToolchainProvider(string? snapshotId, string? snapshotRoot)
+    {
+        this.snapshotId = snapshotId;
+        this.snapshotRoot = snapshotRoot;
+    }
+
     public Task<WorkflowToolchainRuntime> ResolveAsync(WorkflowToolchainBinding binding, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(binding);
@@ -27,7 +38,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         };
     }
 
-    private static async Task<WorkflowToolchainRuntime> ResolveLinuxAsync(WorkflowToolchainBinding binding,
+    private async Task<WorkflowToolchainRuntime> ResolveLinuxAsync(WorkflowToolchainBinding binding,
         ToolResolutionPolicy policy, CancellationToken ct)
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
@@ -98,7 +109,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         }
 
         ManagedVcpkgInstallation? packages = binding.VcpkgProjectSha256 is { } dependencyPlan
-            ? await VcpkgProjects.ResolveAsync(dependencyPlan, ct) : null;
+            ? await VcpkgProjects.ResolveAsync(dependencyPlan, snapshotId, snapshotRoot, ct) : null;
         LinuxToolchainIdentity linux = new(await IdentifyAsync(cmake, ct), await IdentifyAsync(ctest, ct),
             await IdentifyAsync(ninja, ct), cc, await CommandExecution.Sha256Async(cc, ct),
             await CommandExecution.Sha256Async(cxx, ct), triple)
@@ -110,7 +121,8 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             Runtime = managedCompiler ? ManagedLinuxSdk.Runtime : null,
             EnvironmentLockSha256 = binding.EnvironmentLockSha256,
             VcpkgProjectSha256 = binding.VcpkgProjectSha256,
-            VcpkgPackageTreeSha256 = packages?.PackageTreeSha256
+            VcpkgPackageTreeSha256 = packages?.PackageTreeSha256,
+            VcpkgDownloadTreeSha256 = packages?.DownloadTreeSha256
         };
         List<string> paths = [cmake.Command!, ctest.Command!, ninja.Command!];
         if (compiler is not null)

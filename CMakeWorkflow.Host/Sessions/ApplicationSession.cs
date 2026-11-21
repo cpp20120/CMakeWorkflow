@@ -46,7 +46,7 @@ public sealed partial class DoctorSession
     /// Checks initial RPC cancellation, then hands work to the Host coordinator without linking its token to this request.
     /// Cancellation/lost reply can race with acceptance and dispatch. The caller must find the saved request ID to recover the result.
     /// </remarks>
-    public Task<OperationReference> WorkflowStartAsync(WorkflowStartRequest request,
+    public async Task<OperationReference> WorkflowStartAsync(WorkflowStartRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -69,8 +69,16 @@ public sealed partial class DoctorSession
         // Request cancellation is intentionally not propagated after acceptance.
         try
         {
-            return Task.FromResult(durableExecutions.Start(paths.WorkspaceDirectory,
-                request with { Manifest = manifest, ResultsDirectory = output }));
+            WorkflowStartRequest canonical = request with { Manifest = manifest, ResultsDirectory = output };
+            if (request.SourceSnapshotId is not null)
+            {
+                using DurableAcceptanceStore store = new(paths.WorkspaceDirectory);
+                if (store.Find(request.ClientRequestId) is null)
+                {
+                    await ValidateSourceDependenciesAsync(paths, canonical, cancellationToken);
+                }
+            }
+            return durableExecutions.Start(paths.WorkspaceDirectory, canonical);
         }
         catch (ApplicationRefusal error)
         {

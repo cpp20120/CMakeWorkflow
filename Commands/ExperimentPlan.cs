@@ -13,6 +13,7 @@ using CMakeWorkflow.Contracts.Recipes;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Sources;
+using CMakeWorkflow.Tooling.Tools;
 
 namespace CMakeWorkflow.Commands;
 
@@ -36,6 +37,9 @@ internal sealed record ExperimentPlan(int SchemaVersion, string Repository, stri
 
     public ExperimentSourceBundle? Bundle { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DependencyPlanSha256 { get; init; }
+
     internal static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 }
 
@@ -55,7 +59,7 @@ internal static class ExperimentPlanning
 {
     internal static async Task<ExperimentPlan> CreateAsync(string repository, string revision, ExperimentHost host,
         string? preset, string? configuration, IReadOnlyList<string> targets, string? benchmark, int repeats,
-        IReadOnlyList<string> arguments, bool profile, string archivePath, CancellationToken ct)
+        IReadOnlyList<string> arguments, bool profile, bool vcpkg, string archivePath, CancellationToken ct)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
@@ -99,11 +103,6 @@ internal static class ExperimentPlanning
             throw new ArgumentException("--profile and --benchmark-arg require --benchmark-target.");
         }
 
-        string manifest = CreateManifest(preset, configuration, targets, benchmark, repeats, arguments, profile);
-        if (manifest.Length > ExperimentStageRequest.MaximumManifestCharacters)
-        {
-            throw new ArgumentException("Generated manifest is too large. Reduce benchmark arguments or repetitions.");
-        }
         DirectoryInfo checkout = Directory.CreateTempSubdirectory("cmwf-git-");
         try
         {
@@ -176,11 +175,22 @@ internal static class ExperimentPlanning
             }
             archive.Position = 0;
             string archiveHash = Convert.ToHexString(await SHA256.HashDataAsync(archive, ct));
-            return new(2, uri.AbsoluteUri, revision, commit, host, LoreSnapshotStore.GetSnapshotId(evidence),
-                ExperimentPlan.Hash(Encoding.UTF8.GetBytes(manifest)), manifest, [])
-            {
-                Bundle = new(archiveHash, archive.Length, evidence.Count)
-            };
+            string snapshotId = LoreSnapshotStore.GetSnapshotId(evidence);
+            VcpkgProjectPlan? dependencies = vcpkg
+                ? await VcpkgProjects.PlanSnapshotAsync(checkout.FullName, commit, snapshotId, ct)
+                : null;
+            string? dependencyDigest = dependencies is null ? null :
+                ManagedEnvironmentLocks.Hash(VcpkgProjects.Serialize(dependencies));
+            string manifest = CreateManifest(preset, configuration, targets, benchmark, repeats, arguments, profile,
+                dependencyDigest, dependencies?.EnvironmentSha256);
+            return manifest.Length <= ExperimentStageRequest.MaximumManifestCharacters
+                ? new(2, uri.AbsoluteUri, revision, commit, host, snapshotId,
+                    ExperimentPlan.Hash(Encoding.UTF8.GetBytes(manifest)), manifest, [])
+                {
+                    Bundle = new(archiveHash, archive.Length, evidence.Count),
+                    DependencyPlanSha256 = dependencyDigest
+                }
+                : throw new ArgumentException("Generated manifest is too large. Reduce benchmark arguments or repetitions.");
         }
         finally
         {
@@ -227,7 +237,7 @@ internal static class ExperimentPlanning
     }
 
     private static string CreateManifest(string? preset, string? configuration, IReadOnlyList<string> targets,
-        string? benchmark, int repeats, IReadOnlyList<string> arguments, bool profile)
+        string? benchmark, int repeats, IReadOnlyList<string> arguments, bool profile, string? dependencyDigest, string? environmentDigest)
     {
         const string context = "experiment";
         WorkflowContext build = new()
@@ -239,6 +249,10 @@ internal static class ExperimentPlanning
             Mode = "managed",
             Toolchain = preset is null
                 ? new WorkflowToolchainBinding(EnvironmentProfileId: "linux-managed-clang", Generator: "Ninja Multi-Config")
+                {
+                    VcpkgProjectSha256 = dependencyDigest,
+                    EnvironmentLockSha256 = environmentDigest
+                }
                 : null
         };
         WorkflowDocument document = new() { SchemaVersion = 2, Contexts = { [context] = build } };

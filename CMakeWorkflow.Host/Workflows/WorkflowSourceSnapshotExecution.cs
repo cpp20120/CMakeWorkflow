@@ -78,7 +78,7 @@ internal static class WorkflowSourceSnapshotExecution
         // CMakeFiles/CMakeScratch/TryCompile paths on Windows.
         string operationPath = Path.Combine(paths.WorkspaceDirectory, ".cw", operationId);
         string executionRoot = paths.Require(operationPath);
-        string sourcePath = Path.Combine(executionRoot, "s");
+        string sourcePath = SourcePath(paths.WorkspaceDirectory, operationId);
         string materialized = paths.Require(sourcePath);
         string buildPath = Path.Combine(executionRoot, "b");
         string buildRoot = paths.Require(buildPath);
@@ -156,6 +156,9 @@ internal static class WorkflowSourceSnapshotExecution
         string acceptedHash = Convert.ToHexString(SHA256.HashData(acceptedManifest));
         return plan with { ManifestHash = acceptedHash };
     }
+
+    internal static string SourcePath(string workspace, string operationId) =>
+        Path.Combine(workspace, ".cw", operationId, "s");
 
     internal static async Task VerifyExistingMaterializationAsync(
         SnapshotManifest manifest, string root, CancellationToken ct)

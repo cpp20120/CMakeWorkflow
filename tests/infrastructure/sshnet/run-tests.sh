@@ -49,6 +49,7 @@ dotnet build CMakeWorkflow.Host.Tests/CMakeWorkflow.Host.Tests.csproj -c Release
 docker build --quiet -t "$image" -f tests/infrastructure/sshnet/Dockerfile \
   tests/infrastructure/sshnet >/dev/null
 container="$(docker run -d --publish 127.0.0.1::22/tcp \
+  --env CMAKEWORKFLOW_TOOL_STORE=/home/cmwf/.local/share/CMakeWorkflow \
   --mount "type=bind,src=$tmp/publish,dst=/opt/cmwf,readonly" \
   --mount "type=bind,src=$tmp/authorized_keys,dst=/run/cmwf-ssh-test/authorized_keys,readonly" \
   "$image")"
@@ -121,3 +122,21 @@ exec dotnet /opt/cmwf-test-peer/CMakeWorkflow.Host.Tests.dll --ssh-drop-start-wo
 BRIDGE
 CMAKEWORKFLOW_EXPERIMENT_STORE="$tmp/experiments" bash tests/infrastructure/sshnet/experiment.sh \
   "$tmp/publish/CMakeWorkflow" "$tmp/git-project" "$container"
+
+
+if [[ ${CMWF_SSHNET_TEST_VCPKG:-0} == 1 ]]; then
+  echo '=== Real sshd / SSH.NET: pinned Git experiment with vcpkg ==='
+  approval=$(docker exec --user cmwf "$container" "$CMWF_SSHNET_EXE" tooling setup \
+    --profile linux-clang --profile vcpkg --tool-policy ManagedOnly --dry-run --json 2>&1 \
+    | awk '/^Plan SHA-256: / {print $3}')
+  [[ -n "$approval" ]]
+  docker exec --user cmwf "$container" "$CMWF_SSHNET_EXE" tooling setup \
+    --profile linux-clang --profile vcpkg --tool-policy ManagedOnly --yes --plan-sha "$approval"
+  docker exec --user cmwf "$container" "$CMWF_SSHNET_EXE" tooling lock --write
+  CMWF_SSHNET_VCPKG_EXE=/opt/cmwf-experiment-bridge \
+  CMWF_SSHNET_VCPKG_LOST_REPLY="$CMWF_SSHNET_WORKSPACE/lost-experiment-operation" \
+  CMAKEWORKFLOW_EXPERIMENT_STORE="$tmp/experiments" bash tests/infrastructure/sshnet/experiment-vcpkg.sh \
+    "$tmp/publish/CMakeWorkflow" "$tmp/vcpkg-project" "$container"
+  CMAKEWORKFLOW_EXPERIMENT_STORE="$tmp/experiments" bash tests/infrastructure/sshnet/experiment-vcpkg-upstream.sh \
+    "$tmp/publish/CMakeWorkflow" "$tmp/vcpkg-upstream"
+fi

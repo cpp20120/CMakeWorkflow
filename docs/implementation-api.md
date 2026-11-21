@@ -826,6 +826,7 @@ public sealed record LinuxToolchainIdentity(CMakeWorkflow.CMake.Toolchains.Workf
     public string? EnvironmentLockSha256 { get; init; }
     public string? VcpkgProjectSha256 { get; init; }
     public string? VcpkgPackageTreeSha256 { get; init; }
+    public string? VcpkgDownloadTreeSha256 { get; init; }
 }
 ```
 
@@ -1178,6 +1179,7 @@ Source: [CMakeWorkflow.Host/Protocol/ApplicationProtocol.cs](../CMakeWorkflow.Ho
 ```csharp
 public interface IHostRpc
 {
+    System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentDependencyResult> ExperimentDependenciesAsync(CMakeWorkflow.Contracts.Workflows.ExperimentDependencyRequest request, System.Threading.CancellationToken ct);
     System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentHostResources> GetExperimentResourcesAsync(CMakeWorkflow.Contracts.Workflows.ExperimentResourceRequest request, System.Threading.CancellationToken ct);
     System.Threading.Tasks.Task<long> WriteExperimentSourceChunkAsync(CMakeWorkflow.Contracts.Workflows.ExperimentSourceChunk request, System.Threading.CancellationToken ct);
     System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentStageReceipt> StageExperimentAsync(CMakeWorkflow.Contracts.Workflows.ExperimentStageRequest request, System.Threading.CancellationToken ct);
@@ -1432,6 +1434,7 @@ Source: [CMakeWorkflow.Host/Sessions/ApplicationSession.cs](../CMakeWorkflow.Hos
 ```csharp
 public sealed class DoctorSession(System.Func<string, CMakeWorkflow.Tooling.Tools.ToolingService> createTooling, System.Func<CMakeWorkflow.Host.Provisioning.DoctorProgress, System.Threading.Tasks.Task> progress, System.Threading.CancellationToken disconnected, CMakeWorkflow.Host.Provisioning.FixCoordinator fixes, System.Func<CMakeWorkflow.Host.Provisioning.FixProgress, System.Threading.Tasks.Task> fixProgress, System.TimeProvider? timeProvider = null, CMakeWorkflow.Host.Workflows.DurableExecutionCoordinator? durableExecutions = null) : CMakeWorkflow.Host.Protocol.IHostRpc
 {
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentDependencyResult> ExperimentDependenciesAsync(CMakeWorkflow.Contracts.Workflows.ExperimentDependencyRequest request, System.Threading.CancellationToken ct);
     public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentHostResources> GetExperimentResourcesAsync(CMakeWorkflow.Contracts.Workflows.ExperimentResourceRequest request, System.Threading.CancellationToken ct);
     public System.Threading.Tasks.Task<long> WriteExperimentSourceChunkAsync(CMakeWorkflow.Contracts.Workflows.ExperimentSourceChunk request, System.Threading.CancellationToken ct);
     public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentStageReceipt> StageExperimentAsync(CMakeWorkflow.Contracts.Workflows.ExperimentStageRequest request, System.Threading.CancellationToken ct);
@@ -3111,7 +3114,10 @@ public sealed record ToolingStep(string Tool, string Method, string? Executable,
 Source: [CMakeWorkflow.Tooling/Tools/VcpkgProjects.cs](../CMakeWorkflow.Tooling/Tools/VcpkgProjects.cs)
 
 ```csharp
-public sealed record ManagedVcpkgInstallation(string ManifestRoot, string InstalledDirectory, string VcpkgToolchain, string ChainloadToolchain, string Triplet, string PackageTreeSha256);
+public sealed record ManagedVcpkgInstallation(string ManifestRoot, string InstalledDirectory, string VcpkgToolchain, string ChainloadToolchain, string Triplet, string PackageTreeSha256)
+{
+    public string? DownloadTreeSha256 { get; init; }
+}
 ```
 
 #### `VcpkgProjects`

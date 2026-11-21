@@ -24,6 +24,8 @@ using CMakeWorkflow.Tooling.VisualStudio;
 namespace CMakeWorkflow.Host.Protocol;
 
 [JsonSerializable(typeof(ExperimentStageRequest))]
+[JsonSerializable(typeof(ExperimentDependencyRequest))]
+[JsonSerializable(typeof(ExperimentDependencyResult))]
 [JsonSerializable(typeof(ExperimentResourceRequest))]
 [JsonSerializable(typeof(ExperimentHostResources))]
 [JsonSerializable(typeof(ExperimentSourceChunk))]

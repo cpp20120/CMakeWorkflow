@@ -132,6 +132,11 @@ The lock contains the release pins, target and runtime ABI and is independent of
 
 ### vcpkg project dependencies
 
+For remote Git experiments, provision both managed profiles and publish the
+environment lock with `tooling lock --write`. The controller stages the
+immutable source and approves dependencies through `experiment deps apply`
+before approving execution. See [the SSH vcpkg experiment walkthrough](docs/en/experiments.md#run-an-experiment-with-pinned-vcpkg-dependencies).
+
 Add `--profile vcpkg` to a managed tooling plan to install the Linux glibc vcpkg executable from release
 2025-12-05 and vcpkg checkout `84bab45d415d22042bd0b9081aea57f362da3f35`. The checkout also requires
 `/usr/bin/git`. Tool setup and project dependency installation have separate approvals. [vcpkg tool release](https://github.com/microsoft/vcpkg-tool/releases/tag/2025-12-05)

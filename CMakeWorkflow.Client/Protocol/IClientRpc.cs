@@ -22,6 +22,9 @@ namespace CMakeWorkflow.Client.Protocol;
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 internal partial interface IClientRpc
 {
+    [JsonRpcMethod("experiment/dependencies")]
+    Task<ExperimentDependencyResult> ExperimentDependenciesAsync(ExperimentDependencyRequest request, CancellationToken ct);
+
     [JsonRpcMethod("experiment/resources")]
     Task<ExperimentHostResources> GetExperimentResourcesAsync(ExperimentResourceRequest request, CancellationToken ct);
 

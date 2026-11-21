@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using CMakeWorkflow.Client;
+using CMakeWorkflow.Client.Experiments;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Contracts.Workflows;
@@ -18,8 +19,10 @@ internal static class ExperimentCommand
         CMakeWorkflow experiment plan --repo URL --ref REF
             (--host HOST --workspace PATH --endpoint SOCKET | --host-pool FILE [--arch ARCH] [--min-cpus N])
             (--preset NAME [--config NAME] | --managed-clang --config NAME) [--build-target TARGET]... [--ctest]
-            [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
+            [--vcpkg] [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
             [--remote-executable PATH] [--user USER --key-file PATH --host-key-sha256 HASH [--port PORT]]
+        CMakeWorkflow experiment deps plan ID
+        CMakeWorkflow experiment deps apply ID --approve --plan-sha SHA256
         CMakeWorkflow experiment run --plan ID [--plan ID]... --approve [--wait-seconds N]
         CMakeWorkflow experiment report ID [--wait-seconds N]
         CMakeWorkflow experiment compare BASELINE CANDIDATE [--threshold-percent N | --across-hosts]
@@ -31,6 +34,8 @@ internal static class ExperimentCommand
         [] => Help(),
         ["help" or "--help"] => Help(),
         ["plan", .. string[] tail] => PlanAsync(tail, ct),
+        ["deps", "plan", string id] => DependenciesAsync(id, null, ct),
+        ["deps", "apply", string id, "--approve", "--plan-sha", string sha] => DependenciesAsync(id, sha, ct),
         ["run", .. string[] tail] => RunAsync(tail, ct),
         ["report", string id, .. string[] tail] => ObserveAsync(id, ParseWait(tail, 0), false, ct),
         ["compare", string baseline, string candidate, .. string[] tail] => CompareAsync(baseline, candidate, tail, ct),
@@ -52,12 +57,14 @@ internal static class ExperimentCommand
         List<string> arguments = [];
         bool profile = false;
         bool managed = false;
+        bool vcpkg = false;
         for (int i = 0; i < args.Length; i++)
         {
             string option = args[i];
             switch (option)
             {
                 case "--profile": profile = true; break;
+                case "--vcpkg": vcpkg = true; break;
                 case "--managed-clang": managed = true; break;
                 case "--ctest": break; // Always included in this recipe.
                 case "--build-target": targets.Add(Next(args, ref i)); break;
@@ -86,6 +93,11 @@ internal static class ExperimentCommand
             throw new ArgumentException("Select --preset NAME or --managed-clang --config NAME.");
         }
 
+        if (vcpkg && !managed)
+        {
+            throw new ArgumentException("--vcpkg requires --managed-clang.");
+        }
+
         string repository = Required(options, "--repo");
         string revision = Required(options, "--ref");
         int repeats = Number(options.GetValueOrDefault("--repeats", "3"), "--repeats", 1, 200);
@@ -94,7 +106,7 @@ internal static class ExperimentCommand
             : (DirectHost(options), null);
         using TemporaryExperimentArchive archive = new();
         ExperimentPlan plan = await ExperimentPlanning.CreateAsync(repository, revision, remote, preset, configuration,
-            targets, benchmark, repeats, arguments, profile, archive.Path, ct);
+            targets, benchmark, repeats, arguments, profile, vcpkg, archive.Path, ct);
         plan = plan with { Placement = placement };
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan, ExperimentJson.Default.ExperimentPlan);
         string id = ExperimentPlan.Hash(bytes);
@@ -102,6 +114,10 @@ internal static class ExperimentCommand
         _ = Directory.CreateDirectory(directory);
         await archive.PublishAsync(Path.Combine(directory, "source.zip"), ct);
         await PublishAsync(Path.Combine(directory, "plan.json"), bytes, ct);
+        if (plan.DependencyPlanSha256 is { } dependencyDigest)
+        {
+            Console.WriteLine($"Dependency plan {dependencyDigest}. Review with experiment deps plan {id}.");
+        }
         if (placement is not null)
         {
             Console.WriteLine(FormattableString.Invariant(
@@ -160,6 +176,33 @@ internal static class ExperimentCommand
         }
         int minimum = Number(options.GetValueOrDefault("--min-cpus", "1"), "--min-cpus", 1, int.MaxValue);
         return await ExperimentHostSelection.SelectAsync(path, architecture, minimum, managed, ct);
+    }
+
+    private static async Task<int> DependenciesAsync(string id, string? approval, CancellationToken ct)
+    {
+        string directory = PlanDirectory(id);
+        ExperimentPlan plan = await ReadPlanAsync(directory, id, ct);
+        string expected = plan.DependencyPlanSha256 ??
+            throw new InvalidOperationException("This experiment does not opt into vcpkg.");
+        if (approval is not null && !string.Equals(expected, approval, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Approval does not match the experiment dependency plan SHA-256.");
+        }
+
+        await using CMakeWorkflowClient client = await plan.Host.ConnectAsync(ct);
+        PreparedExperimentPlan prepared = await ExperimentService.ReadPlanAsync(Path.Combine(directory, "plan.json"), id, ct);
+        ExperimentDependencyResult result = await client.Experiments.PrepareDependenciesAsync(prepared, approval, ct);
+        Console.WriteLine(result.Plan);
+        Console.WriteLine($"Dependency plan SHA-256 {result.PlanSha256}");
+        if (result.InstalledTreeSha256 is { } tree)
+        {
+            Console.WriteLine($"Installed package tree SHA-256 {tree}");
+        }
+        if (result.DownloadTreeSha256 is { } downloads)
+        {
+            Console.WriteLine($"Download tree SHA-256 {downloads}");
+        }
+        return 0;
     }
 
     private static async Task<int> RunAsync(string[] args, CancellationToken ct)
@@ -253,6 +296,12 @@ internal static class ExperimentCommand
             if (staged != new ExperimentStageReceipt(manifest, plan.ManifestSha256, plan.SourceSnapshotId))
             {
                 throw new InvalidDataException("Host staged identity does not match the approved plan.");
+            }
+
+            if (plan.DependencyPlanSha256 is not null)
+            {
+                PreparedExperimentPlan prepared = await ExperimentService.ReadPlanAsync(Path.Combine(directory, "plan.json"), id, ct);
+                await client.Experiments.VerifyDependenciesAsync(prepared, ct);
             }
 
             await Console.Error.WriteLineAsync($"Experiment {id}. If the connection is interrupted, run experiment report {id}.");

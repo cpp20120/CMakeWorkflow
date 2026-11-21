@@ -41,7 +41,9 @@ internal static class OperationOverviewReader
                 accepted.ClientRequestId, store.GetDomainKind(operationId), accepted.State,
                 accepted.ManifestSha256, accepted.ManifestBaseDirectory);
             sourceId = store.GetSourceSnapshotId(operationId);
-            finalized = store.GetFinalization(operationId) is not null;
+            // Get returns acceptance and terminal state in one SQLite statement.
+            // A separate finalization read could observe a commit after Get returned.
+            finalized = accepted.State is "succeeded" or "failed" or "canceled";
         }
 
         // A dispatch-authorized operation can have an incomplete or ambiguous report.

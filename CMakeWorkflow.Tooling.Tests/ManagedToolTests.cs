@@ -176,6 +176,34 @@ internal static class ManagedToolTests
             CancellationToken.None);
         await RejectAsync<InvalidDataException>(() => VcpkgProjects.PlanAsync(project, default));
 
+        string commit = new('a', 40);
+        string snapshot = new('B', 64);
+        File.Delete(configuration);
+        await RejectAsync<InvalidDataException>(() => VcpkgProjects.PlanSnapshotAsync(project, commit, snapshot, default));
+        string pinned = $$"""{"builtin-baseline":"{{ToolCatalog.VcpkgCommit}}","dependencies":["expected-lite"]}""";
+        await File.WriteAllTextAsync(manifest, pinned, CancellationToken.None);
+        VcpkgProjectPlan experiment = await VcpkgProjects.PlanSnapshotAsync(project, commit, snapshot, default);
+        string relocated = Path.Combine(root, "relocated-project");
+        _ = Directory.CreateDirectory(relocated);
+        string relocatedManifest = Path.Combine(relocated, "vcpkg.json");
+        await File.WriteAllTextAsync(relocatedManifest, pinned, CancellationToken.None);
+        Check(experiment == await VcpkgProjects.PlanSnapshotAsync(relocated, commit, snapshot, default),
+            "Experiment dependency digest depends on the staging path");
+        await File.WriteAllTextAsync(relocatedManifest, pinned + "\n", CancellationToken.None);
+        Check(experiment != await VcpkgProjects.PlanSnapshotAsync(relocated, commit, snapshot, default),
+            "Experiment dependency digest ignored exact manifest bytes");
+        await File.WriteAllTextAsync(manifest, """{"dependencies":["expected-lite"]}""", CancellationToken.None);
+        await File.WriteAllTextAsync(configuration,
+            $$$"""{"default-registry":{"kind":"git","repository":"https://example.invalid/registry","baseline":"{{{commit}}}","reference":"{{{commit}}}"}}""",
+            CancellationToken.None);
+        VcpkgProjectPlan gitRegistry = await VcpkgProjects.PlanSnapshotAsync(project, commit, snapshot, default);
+        Check(gitRegistry.ConfigurationSha256 is not null && gitRegistry.TargetTriplet == VcpkgProjects.Triplet,
+            "Experiment dependency plan lost its pinned registry or triplet");
+        await File.WriteAllTextAsync(configuration,
+            $$$"""{"default-registry":{"kind":"git","repository":"https://example.invalid/registry","baseline":"{{{commit}}}","reference":"main"}}""",
+            CancellationToken.None);
+        await RejectAsync<InvalidDataException>(() => VcpkgProjects.PlanSnapshotAsync(project, commit, snapshot, default));
+
         string path = Path.Combine(ManagedToolStore.GetRoot(), "manifests", digest + ".json");
         await File.WriteAllTextAsync(path, "tampered", CancellationToken.None);
         await RejectAsync<InvalidDataException>(() => ManagedEnvironmentLocks.VerifyAsync(digest, default));

@@ -27,4 +27,7 @@ public sealed record LinuxToolchainIdentity(
     public string? VcpkgProjectSha256 { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? VcpkgPackageTreeSha256 { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VcpkgDownloadTreeSha256 { get; init; }
+
 }

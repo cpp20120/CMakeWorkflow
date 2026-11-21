@@ -4,7 +4,7 @@ FROM mcr.microsoft.com/dotnet/runtime:10.0-noble
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       openssh-server cmake ninja-build gcc g++ libc6-dev procps coreutils \
+       openssh-server cmake ninja-build gcc g++ libc6-dev procps coreutils git curl zip unzip pkg-config ca-certificates xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/sh cmwf \
     && echo 'cmwf:integration-fixture-password-auth-disabled' | chpasswd \

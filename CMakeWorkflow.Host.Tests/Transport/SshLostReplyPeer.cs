@@ -21,7 +21,7 @@ internal static class SshLostReplyPeer
             using JsonDocument json = JsonDocument.Parse(Body);
             string? method = json.RootElement.GetProperty("method").GetString();
             SshTransportTests.Check(request == 0 ? method == "initialize" :
-                method is "experiment/sourceChunk" or "experiment/stage" or "workflow/preflight" or "workflow/start",
+                method is "experiment/sourceChunk" or "experiment/stage" or "experiment/dependencies" or "workflow/preflight" or "workflow/start",
                 "Unexpected RPC in lost-reply fixture.");
             await host.WriteAsync(Header, ct);
             await host.WriteAsync(Body, ct);

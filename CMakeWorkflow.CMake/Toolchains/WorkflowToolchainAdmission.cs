@@ -134,6 +134,8 @@ public static class WorkflowToolchainAdmission
         if (selected.Vcpkg is { } vcpkg &&
             (properties.GetValueOrDefault("VCPKG_INSTALLED_DIR") != vcpkg.InstalledDirectory ||
              properties.GetValueOrDefault("VCPKG_TARGET_TRIPLET") != vcpkg.Triplet ||
+             properties.GetValueOrDefault("VCPKG_HOST_TRIPLET") != vcpkg.Triplet ||
+             properties.GetValueOrDefault("VCPKG_MANIFEST_DIR") != vcpkg.ManifestRoot ||
              properties.GetValueOrDefault("CMAKE_TOOLCHAIN_FILE") != vcpkg.VcpkgToolchain ||
              properties.GetValueOrDefault("VCPKG_CHAINLOAD_TOOLCHAIN_FILE") != vcpkg.ChainloadToolchain ||
              properties.GetValueOrDefault("VCPKG_MANIFEST_INSTALL") != "OFF"))

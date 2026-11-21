@@ -1037,6 +1037,8 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
     public Task<ExperimentHostResources> InspectResourcesAsync(bool managedClang = false, CancellationToken ct = default);
     public Task VerifyPlacementAsync(ExperimentPlacement placement, CancellationToken ct = default);
     public static Task<PreparedExperimentPlan> ReadPlanAsync(string planPath, string approvedId, CancellationToken ct = default);
+    public Task<ExperimentDependencyResult> PrepareDependenciesAsync(PreparedExperimentPlan plan, string? approvalSha256 = null, CancellationToken ct = default);
+    public Task VerifyDependenciesAsync(PreparedExperimentPlan plan, CancellationToken ct = default);
     public Task<WorkflowOperation> StartApprovedAsync(PreparedExperimentPlan plan, CancellationToken ct = default);
     public Task<WorkflowOperation> FindAsync(PreparedExperimentPlan plan, CancellationToken ct = default);
     public Task<ExperimentStageReceipt> StageAsync(ExperimentStageRequest request, string archivePath, CancellationToken ct = default);
@@ -1052,6 +1054,7 @@ public sealed class PreparedExperimentPlan
     public string ManifestSha256 { get; }
     public string RequestId { get; }
     public ExperimentPlacement? Placement { get; }
+    public string? DependencyPlanSha256 { get; }
 }
 ```
 
@@ -1716,6 +1719,19 @@ Sources: [BenchmarkAxisCoordinate.cs](../CMakeWorkflow.Contracts/Workflows/Bench
 ```csharp
 public sealed record BenchmarkAxisCoordinate(string Name, string Flag, string Value, string? Role);
 public sealed record BenchmarkTrial(string BaselineVariant, string ExecutionOrder, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Workflows.BenchmarkAxisCoordinate> Axes);
+```
+
+#### Experiment dependency contracts
+
+Source [ExperimentDependencies.cs](../CMakeWorkflow.Contracts/Workflows/ExperimentDependencies.cs).
+
+```csharp
+public sealed record ExperimentDependencyRequest(string ExperimentId, string Commit, string SourceSnapshotId,
+    string ManifestSha256, string PlanSha256, string? ApprovalSha256, bool VerifyInstalled);
+public sealed record ExperimentDependencyResult(string PlanSha256, string Plan, string? InstalledTreeSha256)
+{
+    public string? DownloadTreeSha256 { get; init; }
+}
 ```
 
 #### Experiment resource contracts

@@ -16,6 +16,7 @@ CMake and Ninja manage native builds. CMakeWorkflow coordinates the operations a
 - [Compiler cache profiles and build statistics](docs/en/compiler-cache.md)
 - [Artifact storage, action reuse and History summaries](docs/en/artifact-cas.md)
 - [Host RPC and .NET workflow API](docs/en/workflow-authoring-api.md), [operation and History read API](docs/en/host-read-api.md)
+- [Run a pinned Git experiment over SSH with vcpkg dependencies](docs/en/experiments.md#run-an-experiment-with-pinned-vcpkg-dependencies)
 - [Use the .NET SDK from a separate project](docs/en/sdk-quickstart.md)
 - [VS Code integration](docs/en/integrations.md#vs-code-extension)
 - [Документация на русском](docs/ru/README.md)

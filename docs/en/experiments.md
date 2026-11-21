@@ -85,9 +85,65 @@ cmakeworkflow host fix --endpoint "$HOME/.cmwf/host.sock" \
   --workspace "$HOME/experiments" --profile linux-clang --yes --json
 ```
 
-Review the dry-run before applying it. Experiments do not run Doctor/Fix
-installers or prepare vcpkg packages automatically. See [Host
+Review the dry-run before applying it. Experiments prepare vcpkg packages only during the separately approved dependency phase. See [Host
 provisioning](host-ipc.md) for approval and tool policy.
+
+## Run an experiment with pinned vcpkg dependencies
+
+On the isolated Linux x86-64 Host, provision the existing managed toolchain
+and vcpkg profiles. Run these commands as the account running the Host.
+
+```bash
+cmakeworkflow tooling plan --profile linux-clang --profile vcpkg --tool-policy ManagedOnly
+cmakeworkflow tooling setup --profile linux-clang --profile vcpkg --tool-policy ManagedOnly --yes --plan-sha TOOL_PLAN_SHA256
+cmakeworkflow tooling lock --write
+```
+
+The pinned Git revision must track a root `vcpkg.json` and may track a root
+`vcpkg-configuration.json`. For the builtin registry use baseline
+`84bab45d415d22042bd0b9081aea57f362da3f35`. For a Git registry use a
+credential-free HTTPS URL and set both `baseline` and `reference` to the same
+full commit. Custom triplets and overlays are unsupported. Both the target and
+Host triplets are `x64-linux-cmwf`.
+
+```bash
+cmakeworkflow experiment plan --repo REPO_URL --ref COMMIT_SHA \
+  --host-pool hosts.json --managed-clang --config Release --vcpkg \
+  --benchmark-target benchmarks --repeats 3
+cmakeworkflow experiment deps plan PLAN_ID
+cmakeworkflow experiment deps apply PLAN_ID --approve --plan-sha DEPENDENCY_PLAN_SHA256
+cmakeworkflow experiment run --plan PLAN_ID --approve
+cmakeworkflow experiment report PLAN_ID --wait-seconds 60
+```
+
+`deps plan` stages the source and prints the exact dependency plan. It binds
+the Git commit, Lore snapshot, manifest and configuration bytes, registry
+commits, vcpkg executable, triplets and managed environment lock. Review those
+inputs before granting permission to execute the registry's port scripts.
+Moving the original branch does not change the pinned inputs.
+
+`deps apply` serializes installs of the same digest on the Host. An interrupted
+install can be retried with the same approval. A published receipt records the
+verified package-tree and chainload toolchain digests and a digest of downloads
+retained by vcpkg. vcpkg's resolved package versions and available ABI records
+are part of the verified installed tree. If the Host uses binary caching,
+configure only trusted cache providers on the Host. A cache hit may have no
+corresponding local source downloads. Registry baselines and download evidence
+do not make arbitrary port scripts hermetic.
+
+`run --approve` checks the receipt and starts the existing durable operation.
+CMake uses the verified installed directory with `VCPKG_MANIFEST_INSTALL=OFF`.
+The operation checks the same dependency identity against its materialized
+source, including during resume. The final report records the dependency plan,
+package-tree and download-tree digests with the managed toolchain identity.
+If installation is missing, apply the approved dependency plan first. If the
+tree is corrupt, restore it from trusted evidence or use a fresh isolated Host.
+Run both SSH cases with `CMWF_SSHNET_TEST_VCPKG=1 bash tests/infrastructure/sshnet/run-tests.sh`.
+The [builtin-registry test](../../tests/infrastructure/sshnet/experiment-vcpkg.sh)
+consumes cxxopts. The [upstream Git-registry test](../../tests/infrastructure/sshnet/experiment-vcpkg-upstream.sh)
+fetches HelloWorld at commit `a0d572ea1d8d62c0154ca82d65397bd4cec195dc`, keeps
+its fmt consumer, pins the registry, disables copying an untracked resources
+directory and registers the executable with CTest in a derived Git commit.
 
 ## Report and recovery
 
