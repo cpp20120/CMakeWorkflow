@@ -21,7 +21,8 @@ public static class SourceStorePaths
             throw new ArgumentException("An absolute workspace path is required.", nameof(canonicalWorkspace));
         }
 
-        string data = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string data = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
+            Environment.SpecialFolderOption.DoNotVerify);
         if (string.IsNullOrWhiteSpace(data) || !Path.IsPathFullyQualified(data))
         {
             throw new InvalidOperationException("A stable per-user application-data directory is required for source snapshots.");

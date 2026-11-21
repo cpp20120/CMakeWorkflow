@@ -25,6 +25,13 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
     private static readonly byte[] Context = "CMWF-SOURCE-0001"u8.ToArray(); // 16 bytes
     private readonly string _storeRoot = Path.GetFullPath(storeRoot ?? throw new ArgumentNullException(nameof(storeRoot)));
 
+    /// <summary>Computes the canonical snapshot identity from ordinally sorted file evidence.</summary>
+    public static string GetSnapshotId(IReadOnlyList<SnapshotFile> files) => Sha256(SerializeManifest(files));
+
+    private static byte[] SerializeManifest(IReadOnlyList<SnapshotFile> files) =>
+        JsonSerializer.SerializeToUtf8Bytes(new SnapshotManifest(SchemaVersion, files),
+            SourceSnapshotJson.Default.SnapshotManifest);
+
     public async Task<string> CaptureAsync(string sourceRoot, IReadOnlyCollection<string> relativeFiles,
         CancellationToken ct = default)
     {
@@ -96,8 +103,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         }
 
         ct.ThrowIfCancellationRequested();
-        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(
-            new SnapshotManifest(SchemaVersion, entries), SourceSnapshotJson.Default.SnapshotManifest);
+        byte[] manifestBytes = SerializeManifest(entries);
         string snapshotId = Sha256(manifestBytes);
         byte[] bindingBytes = JsonSerializer.SerializeToUtf8Bytes(
             new LoreBindings(SchemaVersion, snapshotId, pointers), SourceSnapshotJson.Default.LoreBindings);

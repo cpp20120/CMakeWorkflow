@@ -157,7 +157,7 @@ internal static class WorkflowSourceSnapshotExecution
         return plan with { ManifestHash = acceptedHash };
     }
 
-    private static async Task VerifyExistingMaterializationAsync(
+    internal static async Task VerifyExistingMaterializationAsync(
         SnapshotManifest manifest, string root, CancellationToken ct)
     {
         // An accepted-but-not-dispatched operation may be restarted after materialization.

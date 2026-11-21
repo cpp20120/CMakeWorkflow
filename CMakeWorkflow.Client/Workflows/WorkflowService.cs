@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.Workflows;
 using System.Text.Json;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Recipes;
@@ -11,6 +12,16 @@ namespace CMakeWorkflow.Client.Workflows;
 /// </remarks>
 public sealed class WorkflowService(CMakeWorkflowClient client)
 {
+    /// <summary>Publishes and verifies an experiment bundle in the initialized Linux workspace.</summary>
+    /// <remarks>An identical request may be retried. Staging does not start a workflow.</remarks>
+    public Task<ExperimentStageReceipt> StageExperimentAsync(ExperimentStageRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        client.RequireCapability("experiment/stage");
+        return RpcRefusals.TranslateAsync(() => client.Proxy.StageExperimentAsync(request, ct));
+    }
+
     /// <summary>Submits a workflow through durable Host admission.</summary>
     /// <remarks>
     /// Save ClientRequestId before calling. Identical request identities reuse acceptance; changed parameters under the same ID conflict.

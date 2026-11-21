@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.26)
+project(cmwf_experiment C)
+enable_testing()
+add_executable(benchmarks benchmark.c)
+add_test(NAME benchmark_smoke COMMAND benchmarks)

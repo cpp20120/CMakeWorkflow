@@ -18,6 +18,8 @@
         <Compile Include="Commands/TargetCommand.cs"/>
         <Compile Include="Commands/WorkflowCliCommand.cs"/>
         <Compile Include="Commands/RemoteCommand.cs"/>
+        <Compile Include="Commands/ExperimentCommand.cs"/>
+        <Compile Include="Commands/ExperimentPlan.cs"/>
         <Compile Include="Commands/ArtifactCasCommand.cs"/>
         <Compile Include="Commands/ArtifactCas.cs"/>
         <Compile Include="Commands/ArtifactCasJson.cs"/>
@@ -38,6 +40,8 @@
         <ProjectReference Include="CMakeWorkflow.Tooling/CMakeWorkflow.Tooling.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Host/CMakeWorkflow.Host.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
+        <ProjectReference Include="CMakeWorkflow.Pipelines.Coordinator/CMakeWorkflow.Pipelines.Coordinator.csproj"/>
+        <ProjectReference Include="CMakeWorkflow.Sources/CMakeWorkflow.Sources.csproj"/>
         <None Update="docs/licenses/*.txt" CopyToPublishDirectory="PreserveNewest" TargetPath="licenses/%(Filename)%(Extension)"/>
         <None Update="docs/prng-notices.md" CopyToPublishDirectory="PreserveNewest" TargetPath="prng-notices.md"/>
     </ItemGroup>

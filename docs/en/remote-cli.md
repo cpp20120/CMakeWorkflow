@@ -57,3 +57,6 @@ Optional connection flags: `--ssh-executable PATH`, `--remote-executable PATH`,
 `--connect-timeout-seconds N` (1–3600). OpenSSH authentication and host key
 verification are supplied by the user's SSH configuration. No username,
 password or private key is read from workflow JSON.
+
+For fetching a pinned Git revision, staging its source and running a single
+configure/build/CTest/benchmark workflow remotely, see [Git experiments](experiments.md).

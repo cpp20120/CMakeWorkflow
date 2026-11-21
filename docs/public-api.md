@@ -1398,6 +1398,7 @@ Source: [CMakeWorkflow.Client/Workflows/WorkflowService.cs](../CMakeWorkflow.Cli
 ```csharp
 public sealed class WorkflowService(CMakeWorkflow.Client.CMakeWorkflowClient client)
 {
+    public System.Threading.Tasks.Task<CMakeWorkflow.Contracts.Workflows.ExperimentStageReceipt> StageExperimentAsync(CMakeWorkflow.Contracts.Workflows.ExperimentStageRequest request, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.WorkflowOperation> StartAsync(CMakeWorkflow.Client.Workflows.StartWorkflowOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.WorkflowPreflightResult> PreflightAsync(CMakeWorkflow.Client.Workflows.WorkflowPreflightOptions options, System.Threading.CancellationToken ct = default);
     public System.Threading.Tasks.Task<CMakeWorkflow.Client.Workflows.WorkflowPreflightResult> PreflightAsync(CMakeWorkflow.Client.Recipes.PreparedRecipe prepared, int jobs, string resultsDirectory, System.Threading.CancellationToken ct = default);
@@ -1683,6 +1684,23 @@ Sources: [BenchmarkAxisCoordinate.cs](../CMakeWorkflow.Contracts/Workflows/Bench
 ```csharp
 public sealed record BenchmarkAxisCoordinate(string Name, string Flag, string Value, string? Role);
 public sealed record BenchmarkTrial(string BaselineVariant, string ExecutionOrder, System.Collections.Generic.IReadOnlyList<CMakeWorkflow.Contracts.Workflows.BenchmarkAxisCoordinate> Axes);
+```
+
+#### `ExperimentStageRequest`, `ExperimentSourceFile` and `ExperimentStageReceipt`
+
+Bounded experiment staging on a Linux Host. See [Git experiments](en/experiments.md).
+
+Source [ExperimentStage.cs](../CMakeWorkflow.Contracts/Workflows/ExperimentStage.cs).
+
+```csharp
+public sealed record ExperimentSourceFile(string Path, string Base64);
+public sealed record ExperimentStageRequest(string ExperimentId, string SourceSnapshotId, string ManifestSha256, string Manifest, System.Collections.Generic.IReadOnlyList<ExperimentSourceFile> Files)
+{
+    public const int MaximumSourceBytes = 8 * 1024 * 1024;
+    public const int MaximumFiles = 2048;
+    public const int MaximumManifestCharacters = 262144;
+}
+public sealed record ExperimentStageReceipt(string Manifest, string ManifestSha256, string SourceSnapshotId);
 ```
 
 #### `ProcessResourceUsage`

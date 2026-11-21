@@ -15,11 +15,13 @@ internal static class SshLostReplyPeer
         using Stream input = Console.OpenStandardInput();
         using Stream output = Console.OpenStandardOutput();
         await using Stream host = await LocalTransport.ConnectAsync(endpoint, ct);
-        foreach (string? method in new[] { "initialize", "workflow/start" })
+        for (int request = 0; request < 4; request++)
         {
             (byte[]? Header, byte[]? Body) = await ReadFrameAsync(input, ct);
             using JsonDocument json = JsonDocument.Parse(Body);
-            SshTransportTests.Check(json.RootElement.GetProperty("method").GetString() == method,
+            string? method = json.RootElement.GetProperty("method").GetString();
+            SshTransportTests.Check(request == 0 ? method == "initialize" :
+                method is "experiment/stage" or "workflow/preflight" or "workflow/start",
                 "Unexpected RPC in lost-reply fixture.");
             await host.WriteAsync(Header, ct);
             await host.WriteAsync(Body, ct);
@@ -40,6 +42,7 @@ internal static class SshLostReplyPeer
             await output.WriteAsync(response.Body, ct);
             await output.FlushAsync(ct);
         }
+        throw new InvalidDataException("No workflow/start passed through the lost-reply fixture.");
     }
 
     private static async Task<(byte[] Header, byte[] Body)> ReadFrameAsync(Stream stream, CancellationToken ct)

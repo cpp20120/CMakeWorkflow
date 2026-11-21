@@ -73,6 +73,11 @@ public sealed partial class DoctorSession(
             "tooling/doctor", "tooling/progress", "tooling/planFix", "tooling/applyFix", "tooling/fixProgress",
             "environment/plan", "environment/apply", "request-cancellation", .. ReadCapabilities
         ];
+        if (OperatingSystem.IsLinux())
+        {
+            capabilities = [.. capabilities, "experiment/stage"];
+        }
+
         if (OperatingSystem.IsWindows())
         {
             capabilities = [.. capabilities, "tooling/visualStudioFix"];

@@ -309,3 +309,16 @@ client or a forcibly stopped Host may not receive/save a result. Closing VS Code
 configuration can interrupt its owned Host. Keep it open during Fix. If the result is lost, run Doctor before attempting
 another Fix; never infer that installation succeeded or automatically retry it. This slice does not provide durable
 installation operations, recovery journals or resume-after-crash.
+
+## Experiment staging on Linux
+
+A Linux Host advertises `experiment/stage`. The request contains
+`experimentId`, `sourceSnapshotId`, `manifestSha256`, the UTF-8 `manifest`
+as a JSON string, and `files` containing `path` and `base64` fields. IDs and
+hashes use uppercase SHA-256 hexadecimal. The Host validates paths and
+contents, then publishes the exact manifest in the initialized workspace
+alongside the materialized source. An identical request can be repeated
+after an interrupted response. The receipt returns the absolute Host
+manifest path and both verified digests. The SDK exposes this as
+`client.Workflows.StageExperimentAsync`. Workflow preflight and admission
+remain separate calls. See [Git experiments](experiments.md).

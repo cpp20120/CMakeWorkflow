@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Host.Provisioning;
 using CMakeWorkflow.Host.Toolchains;
 using CMakeWorkflow.Tooling.Environment;
@@ -11,6 +12,9 @@ namespace CMakeWorkflow.Host.Protocol;
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 public partial interface IHostRpc
 {
+    [JsonRpcMethod("experiment/stage")]
+    Task<ExperimentStageReceipt> StageExperimentAsync(ExperimentStageRequest request, CancellationToken ct);
+
     [JsonRpcMethod("initialize")]
     Task<HostInfo> InitializeAsync(InitializeRequest request, CancellationToken cancellationToken);
 

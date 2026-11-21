@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Contracts.History;
 using System.Text.Json;
 using CMakeWorkflow.Client.Campaigns;
@@ -21,6 +22,9 @@ namespace CMakeWorkflow.Client.Protocol;
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 internal partial interface IClientRpc
 {
+    [JsonRpcMethod("experiment/stage")]
+    Task<ExperimentStageReceipt> StageExperimentAsync(ExperimentStageRequest request, CancellationToken ct);
+
     [JsonRpcMethod("tooling/doctor")]
     Task<HostToolingPlan> DoctorAsync(HostDoctorOptions request, CancellationToken ct);
 

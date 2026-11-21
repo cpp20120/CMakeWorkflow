@@ -1,3 +1,6 @@
+using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Sources;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,9 +21,9 @@ internal static class SshNetLiveLifecycleTests
 {
     internal static async Task RunAsync(string? scenario)
     {
-        if (scenario is not (null or "handshake" or "workflow" or "persistent"))
+        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage"))
         {
-            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent].");
+            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent|experiment-stage].");
         }
 
         static string Required(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
@@ -56,6 +59,11 @@ internal static class SshNetLiveLifecycleTests
             await PersistentAsync(probe, options, timeout.Token);
         }
 
+        if (scenario == "experiment-stage")
+        {
+            await ExperimentStageAsync(probe, options, timeout.Token);
+        }
+
         Console.WriteLine("PASS SSH.NET live lifecycle: " + (scenario ?? "handshake, workflow"));
     }
 
@@ -88,6 +96,51 @@ internal static class SshNetLiveLifecycleTests
         }
         Check(probe.Alive(pid), "The second SSH.NET disconnect terminated the persistent Host.");
         Console.WriteLine("PASS SSH.NET persistent Host survives two SSH exec channels and reconnect");
+    }
+
+    private static async Task ExperimentStageAsync(Probe probe, SshNetLaunchOptions options, CancellationToken ct)
+    {
+        string workspace = options.Workspace + "/stage-" + Guid.NewGuid().ToString("N");
+        _ = probe.Run("mkdir -- " + Quote(workspace));
+        SshNetHostOptions persistent = new(options.Host, options.Username, options.PrivateKeyPath,
+            options.HostKeySha256, Environment.GetEnvironmentVariable("CMWF_SSHNET_ENDPOINT")!, workspace)
+        {
+            Port = options.Port,
+            RemoteExecutable = options.RemoteExecutable
+        };
+        await using CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(persistent, ct);
+        string stageRoot = workspace + "/.cmakeworkflow";
+        byte[] source = "cmake_minimum_required(VERSION 3.26)\n"u8.ToArray();
+        string sha = Convert.ToHexString(SHA256.HashData(source));
+        string snapshot = LoreSnapshotStore.GetSnapshotId([new SnapshotFile("CMakeLists.txt", sha, source.Length)]);
+        ExperimentSourceFile file = new("CMakeLists.txt", Convert.ToBase64String(source));
+        ExperimentStageRequest request = new(new string('A', 64), snapshot,
+            Convert.ToHexString(SHA256.HashData("{}"u8)), "{}", [file]);
+
+        async Task RefusedAsync(ExperimentStageRequest invalid, string diagnostic)
+        {
+            try { _ = await client.Workflows.StageExperimentAsync(invalid, ct); }
+            catch (CMakeWorkflowRpcRefusalException error) when (error.Message.Contains(diagnostic, StringComparison.Ordinal))
+            {
+                return;
+            }
+            throw new InvalidDataException("Invalid stage was accepted: " + diagnostic);
+        }
+
+        await RefusedAsync(request with { Files = [file with { Path = "../escaped" }] }, "Unsafe");
+        await RefusedAsync(request with { SourceSnapshotId = new string('B', 64) }, "source snapshot SHA-256 mismatch");
+        await RefusedAsync(request with { Manifest = "{  }" }, "manifest SHA-256 mismatch");
+
+        // Stage root crossing the workspace boundary.
+        _ = probe.Run("ln -s /tmp " + Quote(stageRoot));
+        await RefusedAsync(request, "outside the initialized workspace");
+        _ = probe.Run("rm -- " + Quote(stageRoot));
+        ExperimentStageReceipt staged = await client.Workflows.StageExperimentAsync(request, ct);
+        Check(staged == await client.Workflows.StageExperimentAsync(request, ct), "Identical stage was not idempotent.");
+        string sourcePath = Path.GetDirectoryName(staged.Manifest)! + "/source/CMakeLists.txt";
+        _ = probe.Run("printf corrupt > " + Quote(sourcePath));
+        await RefusedAsync(request, "Materialized source changed");
+        Check((await client.Operations.ListAsync(ct: ct)).Items.Count == 0, "Staging admitted a workflow.");
     }
 
     private static async Task HandshakeAsync(Probe probe, SshNetLaunchOptions options, CancellationToken ct)

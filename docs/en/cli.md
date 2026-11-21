@@ -86,6 +86,13 @@ A benchmark matrix recipe axis can declare a `role` of `workers`, `shards`, `arr
 variant as baseline, and execution order as `benchmarkTrial`. Older results derive axes from arguments.
 Facet axes are held fixed within each chart.
 
+## Remote Git experiments
+
+Use `experiment plan`, `experiment run --plan ID --approve` and
+`experiment report ID` to run configure, build, CTest and optional benchmark
+trials for a pinned Git commit on a persistent Linux Host. See the
+[runnable example and recovery instructions](experiments.md).
+
 ## History
 
 ```sh

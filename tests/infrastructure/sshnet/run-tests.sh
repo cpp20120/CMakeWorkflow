@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # No external credentials, Docker socket mount, privileged container, or TOFU.
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$repo_root"
-for command in docker dotnet ssh-keygen ssh-keyscan timeout; do
+for command in docker dotnet ssh-keygen ssh-keyscan timeout git jq; do
   command -v "$command" >/dev/null || { echo "Missing prerequisite: $command" >&2; exit 2; }
 done
 
@@ -38,13 +38,13 @@ cp "$tmp/id_ed25519.pub" "$tmp/authorized_keys"
 # The Docker image supplies the .NET runtime; the CLI is built on the host and
 # mounted read-only. This tests actual SSH/network transport, not NativeAOT.
 dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 \
-  --self-contained false -p:PublishAot=false -o "$tmp/publish"
+  --self-contained false -p:PublishAot=false -m:2 -nr:false -o "$tmp/publish"
 test -x "$tmp/publish/CMakeWorkflow"
 # Keep umask 077 for the private SSH key and temporary credentials, but the
 # published CLI is mounted read-only and executed as the unprivileged cmwf user.
 # It must be traversable/readable by that user; root's test -x alone is not enough.
 chmod -R a+rX "$tmp/publish"
-dotnet build CMakeWorkflow.Host.Tests/CMakeWorkflow.Host.Tests.csproj -c Release
+dotnet build CMakeWorkflow.Host.Tests/CMakeWorkflow.Host.Tests.csproj -c Release -m:2 -nr:false
 
 docker build --quiet -t "$image" -f tests/infrastructure/sshnet/Dockerfile \
   tests/infrastructure/sshnet >/dev/null
@@ -92,7 +92,7 @@ export CMWF_SSHNET_EXE=/opt/cmwf/CMakeWorkflow
 export CMWF_SSHNET_ENDPOINT=/home/cmwf/private/host.sock
 
 suite=CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll
-for scenario in handshake workflow persistent; do
+for scenario in handshake workflow persistent experiment-stage; do
   echo "=== Real sshd / SSH.NET: $scenario ==="
   timeout --signal=TERM --kill-after=5s 150s dotnet "$suite" \
     --sshnet-live-lifecycle-tests "$scenario"
@@ -103,3 +103,21 @@ timeout --signal=TERM --kill-after=5s 150s dotnet "$suite" --sshnet-provision-li
 
 echo 'PASS real SSH.NET integration: host-key pin, authentication, private lifecycle, workflow cleanup, persistent reconnect'
 echo 'PASS F2 real SSH.NET Host provisioning: approved SFTP install, SHA256 verification and idempotent activation'
+
+
+echo '=== Real sshd / SSH.NET: pinned Git experiment and lost start response ==='
+test_peer="$tmp/test-peer"
+mkdir "$test_peer"
+cp -a CMakeWorkflow.Host.Tests/bin/Release/net10.0/. "$test_peer"
+docker cp "$test_peer" "$container:/opt/cmwf-test-peer"
+docker exec "$container" chmod -R a+rX /opt/cmwf-test-peer
+docker exec -i "$container" sh -c 'cat > /opt/cmwf-experiment-bridge && chmod 0755 /opt/cmwf-experiment-bridge' <<'BRIDGE'
+#!/bin/sh
+marker=/home/cmwf/workspace/lost-experiment-operation
+if test -f "$marker"; then
+  exec /opt/cmwf/CMakeWorkflow "$@"
+fi
+exec dotnet /opt/cmwf-test-peer/CMakeWorkflow.Host.Tests.dll --ssh-drop-start-worker /home/cmwf/private/host.sock "$marker"
+BRIDGE
+CMAKEWORKFLOW_EXPERIMENT_STORE="$tmp/experiments" bash tests/infrastructure/sshnet/experiment.sh \
+  "$tmp/publish/CMakeWorkflow" "$tmp/git-project" "$container"

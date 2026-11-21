@@ -11,8 +11,10 @@ public sealed record GitSourceSelection(
     int ExcludedUntrackedCount,
     int DeletedTrackedCount);
 
-public sealed class GitSourceSelector(string gitExecutable = "git")
+public sealed class GitSourceSelector(string gitExecutable, IReadOnlyDictionary<string, string?>? environment)
 {
+    public GitSourceSelector(string gitExecutable = "git") : this(gitExecutable, null) { }
+
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly string _gitExecutable = !string.IsNullOrWhiteSpace(gitExecutable)
         ? gitExecutable : throw new ArgumentException("Git executable is required.", nameof(gitExecutable));
@@ -136,6 +138,13 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
         foreach (string argument in arguments)
         {
             start.ArgumentList.Add(argument);
+        }
+        if (environment is not null)
+        {
+            foreach ((string key, string? value) in environment)
+            {
+                start.Environment[key] = value;
+            }
         }
         using Process process = Process.Start(start)
             ?? throw new IOException("Failed to start Git executable.");
