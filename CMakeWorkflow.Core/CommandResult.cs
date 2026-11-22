@@ -1,6 +1,15 @@
+#if EXPERIMENT_SDK
+namespace CMakeWorkflow.Client.Experiments;
+#else
 namespace CMakeWorkflow.Core;
+#endif
 
-public sealed record CommandResult(
+#if EXPERIMENT_SDK
+internal
+#else
+public
+#endif
+sealed record CommandResult(
     int ExitCode,
     string Output,
     bool TimedOut,

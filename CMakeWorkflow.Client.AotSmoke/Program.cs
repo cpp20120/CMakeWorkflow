@@ -15,6 +15,13 @@ if (args.Length == 4 && args[0] == "--verify-package")
     return PackageAudit.Run(args[1], args[2], args[3]);
 }
 
+if (args is ["--experiment-planner"])
+{
+    using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(90));
+    await ExperimentPlannerSmoke.RunAsync(deadline.Token);
+    return 0;
+}
+
 bool inFlight = args.Length == 3 && args[2] == "--inflight";
 if (args.Length != 2 && !inFlight)
 {

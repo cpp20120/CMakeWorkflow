@@ -1026,6 +1026,35 @@ public sealed record SshNetLaunchOptions(string Host, string Username, string Pr
 
 ### Namespace `CMakeWorkflow.Client.Experiments`
 
+#### `ExperimentPlanner`, `ExperimentPlanOptions` and `ExperimentHost`
+
+Source [ExperimentPlanner.cs](../CMakeWorkflow.Client/Experiments/ExperimentPlanner.cs).
+The planner requires Git on a Linux or macOS controller and publishes the same bundle as the CLI.
+
+```csharp
+public static class ExperimentPlanner
+{
+    public static Task<PreparedExperimentPlan> CreateAsync(ExperimentPlanOptions options, string storeDirectory, CancellationToken ct = default);
+}
+public sealed record ExperimentPlanOptions(string Repository, string Revision, ExperimentHost Host)
+{
+    public string? ConfigurePreset { get; init; }
+    public string? Configuration { get; init; }
+    public IReadOnlyList<string> BuildTargets { get; init; }
+    public string? BenchmarkTarget { get; init; }
+    public int Repeats { get; init; }
+    public IReadOnlyList<string> BenchmarkArguments { get; init; }
+    public bool Profile { get; init; }
+    public bool Vcpkg { get; init; }
+    public ExperimentPlacement? Placement { get; init; }
+}
+public sealed record ExperimentHost(string Destination, string Workspace, string Endpoint, string Executable = "cmakeworkflow",
+    string? Username = null, string? KeyFile = null, string? HostKeySha256 = null, int Port = 22)
+{
+    public Task<CMakeWorkflowClient> ConnectAsync(CancellationToken ct = default);
+}
+```
+
 #### `ExperimentService` and `PreparedExperimentPlan`
 
 Sources [ExperimentService.cs](../CMakeWorkflow.Client/Experiments/ExperimentService.cs) and
@@ -1047,6 +1076,11 @@ public sealed class PreparedExperimentPlan
 {
     public string Id { get; }
     public string Repository { get; }
+    public string RequestedRef { get; }
+    public ExperimentHost Host { get; }
+    public string PlanPath { get; }
+    public string Manifest { get; }
+    public int SourceFileCount { get; }
     public string Commit { get; }
     public string Workspace { get; }
     public string ArchivePath { get; }

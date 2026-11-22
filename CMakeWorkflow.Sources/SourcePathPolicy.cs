@@ -1,8 +1,17 @@
 using System.Text;
 
+#if EXPERIMENT_SDK
+namespace CMakeWorkflow.Client.Experiments;
+#else
 namespace CMakeWorkflow.Sources;
+#endif
 
-public static class SourcePathPolicy
+#if EXPERIMENT_SDK
+internal
+#else
+public
+#endif
+static class SourcePathPolicy
 {
     private static readonly HashSet<string> WindowsDevices = new(StringComparer.OrdinalIgnoreCase)
     {

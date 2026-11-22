@@ -1,9 +1,18 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 
+#if EXPERIMENT_SDK
+namespace CMakeWorkflow.Client.Experiments;
+#else
 namespace CMakeWorkflow.Core;
+#endif
 
-public static class CommandExecution
+#if EXPERIMENT_SDK
+internal
+#else
+public
+#endif
+static class CommandExecution
 {
     public static async Task<CommandResult> RunAsync(
         string executable, IEnumerable<string> arguments, string workingDirectory,

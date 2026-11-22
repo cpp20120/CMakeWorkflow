@@ -19,18 +19,14 @@ internal sealed record LoreBindings(int SchemaVersion, string SnapshotId, LorePo
 
 public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = SnapshotIdentity.SchemaVersion;
     private const int MaxFileBytes = 128 * 1024 * 1024; // LoreVcs 0.10.0 Put takes byte[].
     private static readonly byte[] Partition = "CMWF-SNAPSHOT-V1"u8.ToArray(); // 16 bytes
     private static readonly byte[] Context = "CMWF-SOURCE-0001"u8.ToArray(); // 16 bytes
     private readonly string _storeRoot = Path.GetFullPath(storeRoot ?? throw new ArgumentNullException(nameof(storeRoot)));
 
     /// <summary>Computes the canonical snapshot identity from ordinally sorted file evidence.</summary>
-    public static string GetSnapshotId(IReadOnlyList<SnapshotFile> files) => Sha256(SerializeManifest(files));
-
-    private static byte[] SerializeManifest(IReadOnlyList<SnapshotFile> files) =>
-        JsonSerializer.SerializeToUtf8Bytes(new SnapshotManifest(SchemaVersion, files),
-            SourceSnapshotJson.Default.SnapshotManifest);
+    public static string GetSnapshotId(IReadOnlyList<SnapshotFile> files) => SnapshotIdentity.GetId(files);
 
     public async Task<string> CaptureAsync(string sourceRoot, IReadOnlyCollection<string> relativeFiles,
         CancellationToken ct = default)
@@ -103,7 +99,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         }
 
         ct.ThrowIfCancellationRequested();
-        byte[] manifestBytes = SerializeManifest(entries);
+        byte[] manifestBytes = SnapshotIdentity.Serialize(entries);
         string snapshotId = Sha256(manifestBytes);
         byte[] bindingBytes = JsonSerializer.SerializeToUtf8Bytes(
             new LoreBindings(SchemaVersion, snapshotId, pointers), SourceSnapshotJson.Default.LoreBindings);
@@ -126,7 +122,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
         {
             throw new InvalidDataException("Manifest hash does not match snapshot ID.");
         }
-        SnapshotManifest manifest = JsonSerializer.Deserialize(data, SourceSnapshotJson.Default.SnapshotManifest)
+        SnapshotManifest manifest = JsonSerializer.Deserialize(data, SnapshotEvidenceJson.Default.SnapshotManifest)
             ?? throw new InvalidDataException("Invalid snapshot manifest.");
         if (manifest.SchemaVersion != SchemaVersion || manifest.Files is null)
         {
@@ -148,7 +144,7 @@ public sealed class LoreSnapshotStore(string storeRoot) : ISourceSnapshotStore
             }
             previous = file.Path;
         }
-        if (!JsonSerializer.SerializeToUtf8Bytes(manifest, SourceSnapshotJson.Default.SnapshotManifest)
+        if (!JsonSerializer.SerializeToUtf8Bytes(manifest, SnapshotEvidenceJson.Default.SnapshotManifest)
                 .AsSpan().SequenceEqual(data))
         {
             throw new InvalidDataException("Noncanonical snapshot manifest encoding.");

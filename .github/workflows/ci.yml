@@ -163,6 +163,10 @@ jobs:
           New-Item -ItemType Directory -Force out/smoke-logs | Out-Null
           & out/sdk-aot/${{ matrix.consumer }} --verify-package "out/sdk-packages/CMakeWorkflow.Client.$env:SDK_VERSION.nupkg" out/sdk-smoke-artifacts/obj/CMakeWorkflow.Client.AotSmoke/project.assets.json $env:SDK_VERSION 2>&1 | Tee-Object out/smoke-logs/package-audit.log
           if ($LASTEXITCODE -ne 0) { throw "Package audit failed: $LASTEXITCODE" }
+      - name: NativeAOT SDK experiment planner
+        if: runner.os != 'Windows'
+        shell: bash
+        run: out/sdk-aot/${{ matrix.consumer }} --experiment-planner
       - name: NativeAOT Host IPC smoke
         shell: pwsh
         run: ./scripts/ci-native-smoke.ps1 -Cli out/native/${{ matrix.executable }} -Consumer out/sdk-aot/${{ matrix.consumer }}

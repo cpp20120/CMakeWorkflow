@@ -1,17 +1,31 @@
 using System.Diagnostics;
 using System.Text;
 
+#if EXPERIMENT_SDK
+namespace CMakeWorkflow.Client.Experiments;
+#else
 namespace CMakeWorkflow.Sources;
+#endif
 
 /// <summary>Git index/file-system selection. File bytes always come from the working tree.</summary>
-public sealed record GitSourceSelection(
+#if EXPERIMENT_SDK
+internal
+#else
+public
+#endif
+sealed record GitSourceSelection(
     string RepositoryRoot,
     string? HeadCommit,
     IReadOnlyList<string> Files,
     int ExcludedUntrackedCount,
     int DeletedTrackedCount);
 
-public sealed class GitSourceSelector(string gitExecutable, IReadOnlyDictionary<string, string?>? environment)
+#if EXPERIMENT_SDK
+internal
+#else
+public
+#endif
+sealed class GitSourceSelector(string gitExecutable, IReadOnlyDictionary<string, string?>? environment)
 {
     public GitSourceSelector(string gitExecutable = "git") : this(gitExecutable, null) { }
 

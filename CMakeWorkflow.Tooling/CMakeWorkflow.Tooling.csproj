@@ -8,6 +8,5 @@
     <ItemGroup>
         <InternalsVisibleTo Include="CMakeWorkflow.Tooling.Tests"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Host"/>
-        <InternalsVisibleTo Include="CMakeWorkflow"/>
     </ItemGroup>
 </Project>

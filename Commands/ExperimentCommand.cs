@@ -104,16 +104,19 @@ internal static class ExperimentCommand
         (ExperimentHost remote, ExperimentPlacement? placement) = options.GetValueOrDefault("--host-pool") is { } pool
             ? await SelectHostAsync(pool, options, managed, ct)
             : (DirectHost(options), null);
-        using TemporaryExperimentArchive archive = new();
-        ExperimentPlan plan = await ExperimentPlanning.CreateAsync(repository, revision, remote, preset, configuration,
-            targets, benchmark, repeats, arguments, profile, vcpkg, archive.Path, ct);
-        plan = plan with { Placement = placement };
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan, ExperimentJson.Default.ExperimentPlan);
-        string id = ExperimentPlan.Hash(bytes);
-        string directory = PlanDirectory(id);
-        _ = Directory.CreateDirectory(directory);
-        await archive.PublishAsync(Path.Combine(directory, "source.zip"), ct);
-        await PublishAsync(Path.Combine(directory, "plan.json"), bytes, ct);
+        PreparedExperimentPlan plan = await ExperimentPlanner.CreateAsync(new(repository, revision, remote)
+        {
+            ConfigurePreset = preset,
+            Configuration = configuration,
+            BuildTargets = targets,
+            BenchmarkTarget = benchmark,
+            Repeats = repeats,
+            BenchmarkArguments = arguments,
+            Profile = profile,
+            Vcpkg = vcpkg,
+            Placement = placement
+        }, ExperimentStore(), ct);
+        string id = plan.Id;
         if (plan.DependencyPlanSha256 is { } dependencyDigest)
         {
             Console.WriteLine($"Dependency plan {dependencyDigest}. Review with experiment deps plan {id}.");
@@ -126,7 +129,7 @@ internal static class ExperimentCommand
         Console.WriteLine($"""
             Repository {plan.Repository}
             Ref {plan.RequestedRef} -> {plan.Commit}
-            Source snapshot {plan.SourceSnapshotId} ({plan.Bundle?.FileCount ?? plan.Files.Count} files)
+            Source snapshot {plan.SourceSnapshotId} ({plan.SourceFileCount} files)
             Workflow manifest {plan.ManifestSha256}
             Host {remote.Destination} workspace {remote.Workspace} ({preset ?? "managed Clang"}, {configuration ?? "preset default"})
             {plan.Manifest}
@@ -509,16 +512,8 @@ internal static class ExperimentCommand
         Console.WriteLine($"Verified workflow report {result.RunJson}");
     }
 
-    private static async Task<ExperimentPlan> ReadPlanAsync(string directory, string id, CancellationToken ct)
-    {
-        byte[] bytes = await File.ReadAllBytesAsync(Path.Combine(directory, "plan.json"), ct);
-        if (ExperimentPlan.Hash(bytes) != id)
-        {
-            throw new InvalidDataException("Stored experiment plan does not match its approved SHA-256.");
-        }
-        ExperimentPlan? plan = JsonSerializer.Deserialize(bytes, ExperimentJson.Default.ExperimentPlan);
-        return plan is { SchemaVersion: 1, Bundle: null } or { SchemaVersion: 2, Bundle: not null } ? plan : throw new InvalidDataException("Unsupported experiment plan.");
-    }
+    private static Task<ExperimentPlan> ReadPlanAsync(string directory, string id, CancellationToken ct) =>
+        ExperimentPlan.ReadAsync(Path.Combine(directory, "plan.json"), id, ct);
 
     private static async Task PublishAsync(string path, byte[] bytes, CancellationToken ct)
     {
@@ -546,17 +541,15 @@ internal static class ExperimentCommand
         }
     }
 
-    private static string PlanDirectory(string id)
-    {
-        if (id.Length != 64 || !id.All(char.IsAsciiHexDigitUpper))
-        {
-            throw new ArgumentException("Experiment ID must be the 64-character uppercase plan SHA-256.", nameof(id));
-        }
-        string store = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_EXPERIMENT_STORE") ??
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
-                Environment.SpecialFolderOption.DoNotVerify), "CMakeWorkflow", "experiments");
-        return Path.Combine(Path.GetFullPath(store), id);
-    }
+    private static string PlanDirectory(string id) =>
+        id.Length == 64 && id.All(char.IsAsciiHexDigitUpper)
+            ? Path.Combine(ExperimentStore(), id)
+            : throw new ArgumentException("Experiment ID must be the 64-character uppercase plan SHA-256.", nameof(id));
+
+    private static string ExperimentStore() => Path.GetFullPath(
+        Environment.GetEnvironmentVariable("CMAKEWORKFLOW_EXPERIMENT_STORE") ??
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData,
+            Environment.SpecialFolderOption.DoNotVerify), "CMakeWorkflow", "experiments"));
 
     private static string Next(string[] args, ref int index) => ++index < args.Length ? args[index]
         : throw new ArgumentException($"Missing value for {args[index - 1]}.");
@@ -581,37 +574,4 @@ internal static class ExperimentCommand
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int parsed) &&
             parsed >= minimum && parsed <= maximum ? parsed
             : throw new ArgumentException($"{option} must be between {minimum} and {maximum}.");
-
-    private sealed class TemporaryExperimentArchive : IDisposable
-    {
-        private readonly DirectoryInfo directory = Directory.CreateTempSubdirectory("cmwf-experiment-");
-        internal string Path => System.IO.Path.Combine(directory.FullName, "source.zip");
-
-        internal async Task PublishAsync(string destination, CancellationToken ct)
-        {
-            if (File.Exists(destination))
-            {
-                return;
-            }
-            string temporary = destination + "." + Guid.NewGuid().ToString("N");
-            try
-            {
-                await using (FileStream input = File.OpenRead(Path))
-                await using (FileStream output = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                {
-                    await input.CopyToAsync(output, ct);
-                    await output.FlushAsync(ct);
-                }
-                try { File.Move(temporary, destination); }
-                catch (IOException) when (File.Exists(destination)) { }
-            }
-            finally
-            {
-                File.Delete(temporary);
-            }
-        }
-
-        public void Dispose() => directory.Delete(recursive: true);
-    }
-
 }

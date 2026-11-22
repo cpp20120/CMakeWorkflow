@@ -5,7 +5,23 @@
         <Nullable>enable</Nullable>
         <IsAotCompatible>true</IsAotCompatible>
         <EnableStreamJsonRpcInterceptors>true</EnableStreamJsonRpcInterceptors>
+        <DefineConstants>$(DefineConstants);EXPERIMENT_SDK</DefineConstants>
     </PropertyGroup>
+    <!-- Compile standalone planning helpers without bringing Host, Lore, or tooling runtimes into the SDK package. -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="CMakeWorkflow"/>
+        <Compile Include="../CMakeWorkflow.Core/CommandExecution.cs" Link="Planning/CommandExecution.cs"/>
+        <Compile Include="../CMakeWorkflow.Core/CommandResult.cs" Link="Planning/CommandResult.cs"/>
+        <Compile Include="../CMakeWorkflow.Sources/GitSourceSelector.cs" Link="Planning/GitSourceSelector.cs"/>
+        <Compile Include="../CMakeWorkflow.Sources/SourcePathPolicy.cs" Link="Planning/SourcePathPolicy.cs"/>
+        <Compile Include="../CMakeWorkflow.Sources/SnapshotEvidence.cs" Link="Planning/SnapshotEvidence.cs"/>
+        <Compile Include="../CMakeWorkflow.Sources/SnapshotIdentity.cs" Link="Planning/SnapshotIdentity.cs"/>
+        <Compile Include="../CMakeWorkflow.Tooling/Tools/ManagedToolRelease.cs" Link="Planning/ManagedToolRelease.cs"/>
+        <Compile Include="../CMakeWorkflow.Tooling/Tools/ManagedReleases.cs" Link="Planning/ManagedReleases.cs"/>
+        <Compile Include="../CMakeWorkflow.Tooling/Tools/ManagedEnvironmentIdentity.cs" Link="Planning/ManagedEnvironmentIdentity.cs"/>
+        <Compile Include="../CMakeWorkflow.Tooling/Tools/VcpkgProjectPlanning.cs" Link="Planning/VcpkgProjectPlanning.cs"/>
+        <Compile Include="../CMakeWorkflow.CMake/Recipes/BenchmarkWorkflowNodes.cs" Link="Planning/BenchmarkWorkflowNodes.cs"/>
+    </ItemGroup>
     <ItemGroup>
         <PackageReference Include="StreamJsonRpc" Version="2.26.150"/>
         <PackageReference Include="SSH.NET" Version="2026.0.0"/>

@@ -3343,7 +3343,7 @@ public sealed class GitSourceSelector(string gitExecutable = "git")
 
 #### `SnapshotFile`
 
-Source: [SnapshotModels.cs](../CMakeWorkflow.Sources/SnapshotModels.cs).
+Source: [SnapshotEvidence.cs](../CMakeWorkflow.Sources/SnapshotEvidence.cs).
 
 ```csharp
 public sealed record SnapshotFile(string Path, string Sha256, long Size)

@@ -285,16 +285,52 @@ cmakeworkflow experiment compare FIRST_HOST_ID SECOND_HOST_ID --across-hosts
 
 ## Use from .NET
 
-`CMakeWorkflowClient.Experiments` stages and starts a prepared schema-v2 plan on
-an explicitly connected Host. Generate the plan and ZIP using `experiment plan`.
-Keep the approved plan ID and select the same Host when connecting. For SDK
-admission, use `FindAsync` after a lost reply, then use the existing workflow
-operation's polling, report and verified artifact methods. The SDK uses its
-own durable admission ID for each plan.
+On a Linux or macOS controller with Git, `ExperimentPlanner.CreateAsync`
+resolves the revision and publishes `plan.json` and `source.zip` together
+under `<storeDirectory>/<plan.Id>/`. The planner does not contact the Host
+or install tools. Set `ConfigurePreset` to use a committed preset, or set
+`Configuration` for managed Clang. The CLI uses the same planner and bundle
+format.
+
+```csharp
+using CMakeWorkflow.Client.Experiments;
+
+var options = new ExperimentPlanOptions(
+    repositoryUrl, revision,
+    new ExperimentHost("bench-server", "/home/bench/experiments", "/home/bench/.cmwf/host.sock"))
+{
+    Configuration = "Release",
+    Vcpkg = true,
+    BenchmarkTarget = "benchmarks",
+    Repeats = 3
+};
+PreparedExperimentPlan draft = await ExperimentPlanner.CreateAsync(options, storeDirectory, ct);
+Console.WriteLine($"{draft.Commit} {draft.SourceSnapshotId}");
+Console.WriteLine(draft.PlanPath);
+Console.WriteLine(draft.Id);
+```
+
+Keep the approved plan ID and reopen the plan before approving execution.
+Use its saved Host connection. For vcpkg, first inspect the dependency
+plan and obtain separate approval for its exact digest.
 
 ```csharp
 PreparedExperimentPlan plan = await ExperimentService.ReadPlanAsync(planPath, approvedId, ct);
-WorkflowOperation operation = await client.Experiments.StartApprovedAsync(plan, ct);
-OperationSnapshot final = await operation.WaitForCompletionAsync(ct: ct);
-OperationReportSnapshot report = await operation.GetReportAsync(ct);
+await using var client = await plan.Host.ConnectAsync(ct);
+
+// Review the dependency plan before calling the overload with the approved digest.
+var dependencies = await client.Experiments.PrepareDependenciesAsync(plan, ct: ct);
+Console.WriteLine(dependencies.Plan);
+// After explicit dependency approval
+await client.Experiments.PrepareDependenciesAsync(plan, approvedDependencySha256, ct);
+
+// After explicit execution approval
+var operation = await client.Experiments.StartApprovedAsync(plan, ct);
+var final = await operation.WaitForCompletionAsync(ct: ct);
+var report = await operation.GetReportAsync(ct);
 ```
+
+For a plan without vcpkg, skip the dependency phase. After a lost admission
+reply, use `FindAsync` with the same plan and connection. The SDK uses its
+own durable admission ID for each plan. Keep both bundle files together for
+later use. Staging verifies the archive against the approved plan.

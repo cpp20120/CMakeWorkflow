@@ -78,29 +78,8 @@ public static class BenchmarkWorkflowBuilder
         {
             nodes.Add(new() { Id = "configure", Kind = "configure", Context = "benchmark" });
         }
-
-        nodes.Add(new()
-        {
-            Id = "build",
-            Kind = "build",
-            Context = "benchmark",
-            Target = recipe.Target,
-            DependsOn = managed ? ["configure"] : []
-        });
-        for (int repeat = 1; repeat <= recipe.Repeats; repeat++)
-        {
-            nodes.Add(new WorkflowNode
-            {
-                Id = $"timing_{repeat:D3}",
-                Kind = "run",
-                From = "build",
-                DependsOn = [repeat == 1 ? "build" : $"timing_{repeat - 1:D3}"],
-                Arguments = [.. recipe.Arguments],
-                Metrics = recipe.Metrics,
-                TimeoutSeconds = recipe.TimeoutSeconds,
-                Resources = ["measurement-host"]
-            });
-        }
+        BenchmarkWorkflowNodes.Add(nodes, recipe.Target, recipe.Repeats, recipe.Arguments, recipe.TimeoutSeconds,
+            recipe.Metrics, managed);
 
         return new WorkflowDocument
         {

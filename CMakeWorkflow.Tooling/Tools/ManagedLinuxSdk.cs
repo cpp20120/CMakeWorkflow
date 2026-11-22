@@ -4,8 +4,8 @@ namespace CMakeWorkflow.Tooling.Tools;
 
 public static class ManagedLinuxSdk
 {
-    public const string TargetTriple = "x86_64-unknown-linux-gnu";
-    public const string Runtime = "glibc >= 2.31, libstdc++ (GCC 10 ABI), libgcc_s";
+    public const string TargetTriple = ManagedEnvironmentIdentity.TargetTriple;
+    public const string Runtime = ManagedEnvironmentIdentity.Runtime;
 
     private const string MultiArch = "x86_64-linux-gnu";
     private static readonly Version MinimumGlibc = new(2, 31);

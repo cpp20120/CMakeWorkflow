@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Client.Protocol;
@@ -47,31 +46,8 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
         string fullPath = Path.GetFullPath(planPath);
-        byte[] bytes = await File.ReadAllBytesAsync(fullPath, ct);
-        if (Convert.ToHexString(SHA256.HashData(bytes)) != approvedId)
-        {
-            throw new InvalidDataException("Experiment plan does not match its approved SHA-256.");
-        }
-        using JsonDocument document = JsonDocument.Parse(bytes);
-        JsonElement root = document.RootElement;
-        if (root.GetProperty("schemaVersion").GetInt32() != 2)
-        {
-            throw new InvalidDataException("The SDK requires a schema-v2 experiment plan.");
-        }
-        ExperimentSourceBundle bundle = root.GetProperty("bundle").Deserialize(ClientJson.Default.ExperimentSourceBundle)
-            ?? throw new InvalidDataException("Missing experiment source bundle.");
-        ExperimentStageRequest stage = new(approvedId, RequiredString(root, "sourceSnapshotId"),
-            RequiredString(root, "manifestSha256"), RequiredString(root, "manifest"), [])
-        {
-            Bundle = bundle
-        };
-        ExperimentPlacement? placement = root.TryGetProperty("placement", out JsonElement selection)
-            ? selection.Deserialize(ClientJson.Default.ExperimentPlacement)
-            : null;
-        return new(RequiredString(root, "repository"), RequiredString(root, "commit"),
-            RequiredString(root.GetProperty("host"), "workspace"),
-            Path.Combine(Path.GetDirectoryName(fullPath)!, "source.zip"), stage, placement,
-            root.TryGetProperty("dependencyPlanSha256", out JsonElement dependencies) ? dependencies.GetString() : null);
+        ExperimentPlan plan = await ExperimentPlan.ReadAsync(fullPath, approvedId, ct);
+        return PreparedExperimentPlan.FromPlan(plan, approvedId, fullPath);
     }
 
     /// <summary>Stages the approved source and inspects or explicitly applies its dependency plan.</summary>
@@ -157,9 +133,6 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         }
     }
 
-    private static string RequiredString(JsonElement element, string property) => element.GetProperty(property).GetString()
-        ?? throw new InvalidDataException($"Missing experiment plan property {property}.");
-
     /// <summary>Uploads and publishes a SHA-256-bound source archive and workflow manifest.</summary>
     /// <remarks>Call again with the same inputs after reconnecting to resume an interrupted upload.</remarks>
     public async Task<ExperimentStageReceipt> StageAsync(ExperimentStageRequest request, string archivePath,
@@ -169,12 +142,7 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
         ExperimentSourceBundle bundle = request.Bundle ?? throw new ArgumentException("Source bundle metadata is required.", nameof(request));
         client.RequireCapability("experiment/sourceChunk");
-        await using FileStream archive = File.OpenRead(archivePath);
-        if (bundle.Size is <= 0 or > ExperimentSourceBundle.MaximumArchiveBytes || archive.Length != bundle.Size ||
-            Convert.ToHexString(await SHA256.HashDataAsync(archive, ct)) != bundle.Sha256)
-        {
-            throw new InvalidDataException("Local source archive does not match the approved plan.");
-        }
+        await using FileStream archive = await OpenVerifiedArchiveAsync(bundle, archivePath, ct);
 
         ExperimentSourceChunk chunk = new(request.ExperimentId, bundle.Sha256, bundle.Size, 0, ReadOnlyMemory<byte>.Empty);
         long offset = await WriteChunkAsync(chunk, ct);
@@ -193,6 +161,23 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         return offset == bundle.Size
             ? await client.Workflows.StageExperimentAsync(request, ct)
             : throw new InvalidDataException("Host returned an invalid source upload offset.");
+    }
+
+    internal static async Task<FileStream> OpenVerifiedArchiveAsync(ExperimentSourceBundle bundle, string archivePath,
+        CancellationToken ct)
+    {
+        FileStream archive = File.OpenRead(archivePath);
+        try
+        {
+            return bundle.Size is > 0 and <= ExperimentSourceBundle.MaximumArchiveBytes && archive.Length == bundle.Size &&
+                   Convert.ToHexString(await SHA256.HashDataAsync(archive, ct)) == bundle.Sha256
+                ? archive : throw new InvalidDataException("Local source archive does not match the approved plan.");
+        }
+        catch
+        {
+            await archive.DisposeAsync();
+            throw;
+        }
     }
 
     private Task<long> WriteChunkAsync(ExperimentSourceChunk chunk, CancellationToken ct) =>
