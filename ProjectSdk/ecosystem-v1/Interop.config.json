@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "debug": { "configuration": "Debug" },
+    "release": { "configuration": "Release" },
+    "shared": { "configuration": "Release", "linkage": "shared" }
+  },
+  "matrix": { "axes": { "configuration": ["Debug", "Release"], "linkage": ["static", "shared"] } }
+}

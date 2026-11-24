@@ -1,0 +1,606 @@
+{
+  "schemaVersion": 1,
+  "sdks": [
+    {
+      "id": "Native.Base",
+      "version": "1.1.0",
+      "alias": null,
+      "extends": null,
+      "status": "abstract",
+      "projectKind": "base",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": 23,
+        "cxxExtensions": false,
+        "warningsAsErrors": false
+      },
+      "capabilities": {
+        "linkage": [],
+        "testing": false,
+        "sanitizers": false,
+        "packaging": false,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": []
+      },
+      "requirements": [],
+      "modules": [],
+      "scaffold": [],
+      "variantTemplate": null,
+      "buildTarget": "@NAME@",
+      "recipes": [],
+      "payload": "legacy-v1"
+    },
+    {
+      "id": "Native.Library",
+      "version": "1.1.0",
+      "alias": "library",
+      "extends": {
+        "id": "Native.Base",
+        "version": "1.1.0"
+      },
+      "status": "available",
+      "projectKind": "library",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [
+          "static",
+          "shared"
+        ],
+        "testing": true,
+        "sanitizers": true,
+        "packaging": true,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": [
+          "ambient",
+          "linux-managed-clang"
+        ]
+      },
+      "requirements": [],
+      "modules": [],
+      "scaffold": [
+        {
+          "path": "CMakeLists.txt",
+          "resource": "Library.CMakeLists.txt"
+        },
+        {
+          "path": "include/@NAME@/api.hpp",
+          "resource": "api.hpp"
+        },
+        {
+          "path": "src/library.cpp",
+          "resource": "library.cpp"
+        },
+        {
+          "path": "tests/smoke.cpp",
+          "resource": "smoke.cpp"
+        }
+      ],
+      "variantTemplate": "Library.CMakeLists.txt",
+      "buildTarget": "@NAME@_smoke",
+      "recipes": [
+        "build",
+        "test"
+      ],
+      "payload": "legacy-v1"
+    },
+    {
+      "id": "Native.Application",
+      "version": "1.1.0",
+      "alias": "application",
+      "extends": {
+        "id": "Native.Base",
+        "version": "1.1.0"
+      },
+      "status": "available",
+      "projectKind": "application",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [],
+        "testing": true,
+        "sanitizers": true,
+        "packaging": true,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": [
+          "ambient",
+          "linux-managed-clang"
+        ]
+      },
+      "requirements": [],
+      "modules": [],
+      "scaffold": [
+        {
+          "path": "CMakeLists.txt",
+          "resource": "Application.CMakeLists.txt"
+        },
+        {
+          "path": "src/main.cpp",
+          "resource": "main.cpp"
+        }
+      ],
+      "variantTemplate": "Application.CMakeLists.txt",
+      "buildTarget": "@NAME@",
+      "recipes": [
+        "build",
+        "test"
+      ],
+      "payload": "legacy-v1"
+    },
+    {
+      "id": "Native.Runtime",
+      "version": "1.0.0",
+      "alias": "runtime",
+      "extends": {
+        "id": "Native.Library",
+        "version": "1.1.0"
+      },
+      "status": "available",
+      "projectKind": "library",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [
+          "static",
+          "shared"
+        ],
+        "testing": true,
+        "sanitizers": true,
+        "packaging": true,
+        "benchmarking": true,
+        "profiling": true,
+        "executionModes": [
+          "ambient",
+          "linux-managed-clang"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "target-package",
+          "name": "Threads",
+          "minimumVersion": null,
+          "admission": "optional-cmake"
+        }
+      ],
+      "modules": [
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Native.cmake",
+          "resource": "Native.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Policy.cmake",
+          "resource": "Policy.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/PackageConfig.cmake.in",
+          "resource": "PackageConfig.cmake.in"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Runtime.cmake",
+          "resource": "Runtime.cmake"
+        }
+      ],
+      "scaffold": [
+        {
+          "path": "CMakeLists.txt",
+          "resource": "Runtime.CMakeLists.txt"
+        },
+        {
+          "path": "include/@NAME@/queue.hpp",
+          "resource": "queue.hpp"
+        },
+        {
+          "path": "src/queue.cpp",
+          "resource": "queue.cpp"
+        },
+        {
+          "path": "tests/smoke.cpp",
+          "resource": "runtime-smoke.cpp"
+        },
+        {
+          "path": "bench/benchmark.cpp",
+          "resource": "runtime-bench.cpp"
+        },
+        {
+          "path": "README.md",
+          "resource": "Runtime.md"
+        },
+        {
+          "path": "cmwf.config.json",
+          "resource": "Runtime.config.json"
+        }
+      ],
+      "variantTemplate": null,
+      "buildTarget": "@NAME@_smoke",
+      "recipes": [
+        "build",
+        "test",
+        "benchmark",
+        "profile"
+      ],
+      "payload": "ecosystem-v1"
+    },
+    {
+      "id": "Native.Interop",
+      "version": "1.0.0",
+      "alias": "interop",
+      "extends": {
+        "id": "Native.Library",
+        "version": "1.1.0"
+      },
+      "status": "available",
+      "projectKind": "library",
+      "languages": [
+        "C",
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [
+          "static",
+          "shared"
+        ],
+        "testing": true,
+        "sanitizers": false,
+        "packaging": true,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": [
+          "ambient",
+          "linux-managed-clang"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "host-tool",
+          "name": "dotnet",
+          "minimumVersion": "10.0",
+          "admission": "optional-ctest"
+        }
+      ],
+      "modules": [
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Native.cmake",
+          "resource": "Native.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Policy.cmake",
+          "resource": "Policy.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/PackageConfig.cmake.in",
+          "resource": "PackageConfig.cmake.in"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Interop.cmake",
+          "resource": "Interop.cmake"
+        }
+      ],
+      "scaffold": [
+        {
+          "path": "CMakeLists.txt",
+          "resource": "Interop.CMakeLists.txt"
+        },
+        {
+          "path": "include/@NAME@/api.h",
+          "resource": "interop.h"
+        },
+        {
+          "path": "src/interop.cpp",
+          "resource": "interop.cpp"
+        },
+        {
+          "path": "tests/smoke.c",
+          "resource": "interop-smoke.c"
+        },
+        {
+          "path": "tests/abi.cpp",
+          "resource": "interop-abi.cpp"
+        },
+        {
+          "path": "managed/Consumer.csproj",
+          "resource": "Consumer.csproj"
+        },
+        {
+          "path": "managed/Program.cs",
+          "resource": "Consumer.cs"
+        },
+        {
+          "path": "README.md",
+          "resource": "Interop.md"
+        },
+        {
+          "path": "cmwf.config.json",
+          "resource": "Interop.config.json"
+        }
+      ],
+      "variantTemplate": null,
+      "buildTarget": "@NAME@_smoke",
+      "recipes": [
+        "build",
+        "test"
+      ],
+      "payload": "ecosystem-v1"
+    },
+    {
+      "id": "Native.Qt",
+      "version": "1.0.0",
+      "alias": "qt",
+      "extends": {
+        "id": "Native.Application",
+        "version": "1.1.0"
+      },
+      "status": "available",
+      "projectKind": "application",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [],
+        "testing": true,
+        "sanitizers": false,
+        "packaging": false,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": [
+          "ambient"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "target-package",
+          "name": "Qt6 Core Widgets Test",
+          "minimumVersion": "6.3",
+          "admission": "ambient-cmake"
+        },
+        {
+          "kind": "host-tool",
+          "name": "Qt moc/uic/rcc",
+          "minimumVersion": "6.3",
+          "admission": "ambient-cmake"
+        },
+        {
+          "kind": "runtime",
+          "name": "Qt offscreen platform plugin",
+          "minimumVersion": null,
+          "admission": "ctest"
+        }
+      ],
+      "modules": [
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Native.cmake",
+          "resource": "Native.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Policy.cmake",
+          "resource": "Policy.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/PackageConfig.cmake.in",
+          "resource": "PackageConfig.cmake.in"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Qt.cmake",
+          "resource": "Qt.cmake"
+        }
+      ],
+      "scaffold": [
+        {
+          "path": "CMakeLists.txt",
+          "resource": "Qt.CMakeLists.txt"
+        },
+        {
+          "path": "src/main.cpp",
+          "resource": "qt-main.cpp"
+        },
+        {
+          "path": "src/window.hpp",
+          "resource": "qt-window.hpp"
+        },
+        {
+          "path": "src/window.cpp",
+          "resource": "qt-window.cpp"
+        },
+        {
+          "path": "src/window.ui",
+          "resource": "qt-window.ui"
+        },
+        {
+          "path": "src/app.qrc",
+          "resource": "qt-app.qrc"
+        },
+        {
+          "path": "src/banner.txt",
+          "resource": "qt-banner.txt"
+        },
+        {
+          "path": "tests/smoke.cpp",
+          "resource": "qt-smoke.cpp"
+        }
+      ],
+      "variantTemplate": null,
+      "buildTarget": "@NAME@",
+      "recipes": [
+        "build",
+        "test"
+      ],
+      "payload": "ecosystem-v1"
+    },
+    {
+      "id": "Native.Graphics",
+      "version": "1.0.0",
+      "alias": "graphics",
+      "extends": {
+        "id": "Native.Application",
+        "version": "1.1.0"
+      },
+      "status": "available",
+      "projectKind": "application",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [],
+        "testing": true,
+        "sanitizers": false,
+        "packaging": false,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": [
+          "ambient"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "target-package",
+          "name": "Vulkan headers and loader",
+          "minimumVersion": "1.0",
+          "admission": "ambient-cmake"
+        },
+        {
+          "kind": "host-tool",
+          "name": "glslc",
+          "minimumVersion": null,
+          "admission": "ambient-cmake"
+        },
+        {
+          "kind": "runtime",
+          "name": "Vulkan ICD or GPU",
+          "minimumVersion": null,
+          "admission": "optional-ctest"
+        }
+      ],
+      "modules": [
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Native.cmake",
+          "resource": "Native.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Policy.cmake",
+          "resource": "Policy.cmake"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/PackageConfig.cmake.in",
+          "resource": "PackageConfig.cmake.in"
+        },
+        {
+          "path": "cmake/cmwf-sdk/ecosystem-v1/Graphics.cmake",
+          "resource": "Graphics.cmake"
+        }
+      ],
+      "scaffold": [
+        {
+          "path": "CMakeLists.txt",
+          "resource": "Graphics.CMakeLists.txt"
+        },
+        {
+          "path": "src/main.cpp",
+          "resource": "graphics-main.cpp"
+        },
+        {
+          "path": "shaders/probe.comp",
+          "resource": "probe.comp"
+        },
+        {
+          "path": "shaders/values.glsl",
+          "resource": "values.glsl"
+        }
+      ],
+      "variantTemplate": null,
+      "buildTarget": "@NAME@",
+      "recipes": [
+        "build",
+        "test"
+      ],
+      "payload": "ecosystem-v1"
+    },
+    {
+      "id": "Native.Embedded",
+      "version": "1.0.0",
+      "alias": "embedded",
+      "extends": null,
+      "status": "unsupported",
+      "projectKind": "embedded",
+      "languages": [
+        "CXX"
+      ],
+      "defaults": {
+        "cxxStandard": null,
+        "cxxExtensions": null,
+        "warningsAsErrors": null
+      },
+      "capabilities": {
+        "linkage": [],
+        "testing": false,
+        "sanitizers": false,
+        "packaging": false,
+        "benchmarking": false,
+        "profiling": false,
+        "executionModes": []
+      },
+      "requirements": [
+        {
+          "kind": "target-toolchain",
+          "name": "Target triple, architecture, ABI and explicit toolchain identity",
+          "minimumVersion": null,
+          "admission": "unsupported-provider"
+        },
+        {
+          "kind": "target-sdk",
+          "name": "Sysroot, linker script, startup objects and firmware image format",
+          "minimumVersion": null,
+          "admission": "unsupported-provider"
+        },
+        {
+          "kind": "runtime",
+          "name": "Emulator, hardware transport and flashing",
+          "minimumVersion": null,
+          "admission": "optional-unavailable"
+        }
+      ],
+      "modules": [],
+      "scaffold": [],
+      "variantTemplate": null,
+      "buildTarget": "@NAME@",
+      "recipes": [],
+      "payload": "ecosystem-v1"
+    }
+  ]
+}

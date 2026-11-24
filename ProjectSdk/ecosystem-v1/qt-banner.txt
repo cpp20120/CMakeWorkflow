@@ -1,0 +1,1 @@
+CMakeWorkflow Qt resource

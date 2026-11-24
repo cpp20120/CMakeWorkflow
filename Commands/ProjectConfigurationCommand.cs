@@ -136,6 +136,7 @@ internal static class ProjectConfigurationCommand
         using JsonDocument sdkDocument = JsonDocument.Parse(sdk);
         string sdkIdentity = BuildVariantConfiguration.Hash(sdk);
         string kind = sdkDocument.RootElement.GetProperty("sdk").GetString()!;
+        SdkDescriptor descriptor = ProjectSdkCatalog.Resolve(kind, sdkDocument.RootElement.GetProperty("sdkVersion").GetString());
         VariantEnvironment environment = ReadEnvironment(sdkDocument.RootElement.GetProperty("effective"));
         SortedDictionary<string, string> inputs = new(StringComparer.Ordinal) { [BuildVariantConfiguration.SdkLock] = sdkIdentity };
         foreach (string collection in new[] { "inputs", "modules" })
@@ -212,7 +213,7 @@ internal static class ProjectConfigurationCommand
             Layer effective = overrides is null ? candidate.Policy : Overlay(candidate.Policy, overrides.RootElement, "override:" + selection.Overrides);
             try
             {
-                BuildVariantConfiguration.Validate(effective.Settings, environment, kind);
+                BuildVariantConfiguration.Validate(effective.Settings, environment, descriptor);
             }
             catch (InvalidDataException error)
             {
@@ -396,7 +397,11 @@ internal static class ProjectConfigurationCommand
         string module = Path.Combine(root, BuildVariantConfiguration.Module);
         _ = Directory.CreateDirectory(Path.GetDirectoryName(module)!);
         await File.WriteAllBytesAsync(module, await ResourceAsync("Variant.cmake", ct), ct);
-        await File.WriteAllBytesAsync(Path.Combine(root, Manifest), await ResourceAsync("config.json", ct), ct);
+        string configuration = Path.Combine(root, Manifest);
+        if (!File.Exists(configuration))
+        {
+            await File.WriteAllBytesAsync(configuration, await ResourceAsync("config.json", ct), ct);
+        }
         await File.AppendAllTextAsync(Path.Combine(root, ".gitattributes"), "cmake/cmwf-config/v1/* text eol=lf\n", ct);
     }
 

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Window</class>
+ <widget class="QWidget" name="Window">
+  <layout class="QVBoxLayout" name="layout">
+   <item><widget class="QLabel" name="banner"/></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

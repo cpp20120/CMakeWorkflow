@@ -1,0 +1,43 @@
+name: SDK ecosystem dependencies
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  domain-sdk:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: [qt, graphics]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Qt development and headless runtime dependencies
+        if: matrix.domain == 'qt'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build qt6-base-dev qt6-base-dev-tools qt6-qpa-plugins
+          dpkg-query -W qt6-base-dev qt6-base-dev-tools qt6-qpa-plugins
+      - name: Install Vulkan, shader compiler and software ICD
+        if: matrix.domain == 'graphics'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libvulkan-dev glslc mesa-vulkan-drivers
+          dpkg-query -W libvulkan-dev glslc mesa-vulkan-drivers
+          glslc --version
+          icd=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)
+          test -n "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+      - name: Build CLI with analyzers
+        run: dotnet build CMakeWorkflow.csproj -c Release -p:TreatWarningsAsErrors=true
+      - name: Build and execute SDK fixture
+        run: bash tests/infrastructure/sdk-ecosystem/run-tests.sh "$PWD/bin/Release/net10.0/CMakeWorkflow" ${{ matrix.domain }}

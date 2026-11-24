@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "debug": { "configuration": "Debug" },
+    "release": { "configuration": "Release" },
+    "asan": { "configuration": "RelWithDebInfo", "instrumentation": ["address", "undefined"], "lto": false }
+  },
+  "matrix": { "axes": { "configuration": ["Debug", "Release"], "linkage": ["static", "shared"] } }
+}

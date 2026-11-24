@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Text;
+using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.Tooling;
 
 namespace CMakeWorkflow.Commands;
@@ -7,7 +9,7 @@ namespace CMakeWorkflow.Commands;
 internal static class ProjectSdkCommand
 {
     private const string ResourcePrefix = "CMakeWorkflow.ProjectSdk.v1.";
-    private const string Usage = "project new <library|application> NAME DIRECTORY [--variants] [--environment-lock SHA256] | " +
+    private const string Usage = "project new SDK NAME DIRECTORY [--sdk-version VERSION] [--variants] [--environment-lock SHA256] | " +
                                  "project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256] | project sdk <list|plan|lock|verify|workflow>";
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
@@ -41,23 +43,20 @@ internal static class ProjectSdkCommand
                 [args[1], "--profile", "linux-clang", "--profile", "packaging", "--tool-policy", "ManagedOnly", .. tail], ct);
         }
 
-        if (args is not ["new", "library" or "application", string name, string directory, .. string[] options])
+        if (args is not ["new", string sdkName, string name, string directory, .. string[] options])
         {
             throw new ArgumentException(Usage);
         }
 
-        bool variants = options.Contains("--variants", StringComparer.Ordinal);
-        string? environmentLock = options switch
+        (string? version, string? environmentLock, bool variants) = ParseOptions(options);
+        SdkDescriptor sdk = ProjectSdkCatalog.Resolve(sdkName, version);
+        ProjectSdkCatalog.RequireAvailable(sdk);
+        if (environmentLock is not null && !sdk.Capabilities.ExecutionModes.Contains("linux-managed-clang", StringComparer.Ordinal))
         {
-            [] => null,
-            ["--variants"] => null,
-            ["--environment-lock", string digest] when IsDigest(digest) => digest,
-            ["--variants", "--environment-lock", string digest] when IsDigest(digest) => digest,
-            ["--environment-lock", string digest, "--variants"] when IsDigest(digest) => digest,
-            _ => throw new ArgumentException(Usage)
-        };
+            throw new InvalidDataException("unsupported-sdk-environment: " + sdk.Id + " requires ambient dependencies.");
+        }
+        variants |= !sdk.Legacy;
         ValidateName(name);
-        bool library = args[1] == "library";
         string destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
         string parent = Path.GetDirectoryName(destination) ?? throw new ArgumentException("Choose a new project directory.");
         if (!Directory.Exists(parent) || Path.Exists(destination))
@@ -69,37 +68,30 @@ internal static class ProjectSdkCommand
         _ = Directory.CreateDirectory(staging);
         try
         {
-            string buildTarget = library ? name + "_smoke" : name;
-            string template = library ? "Library.CMakeLists.txt" : "Application.CMakeLists.txt";
-            if (variants)
+            string buildTarget = sdk.BuildTarget.Replace("@NAME@", name, StringComparison.Ordinal);
+            foreach (SdkFile file in sdk.Scaffold)
             {
-                byte[] input = await ProjectConfigurationCommand.ResourceAsync(template, ct);
-                string content = System.Text.Encoding.UTF8.GetString(input).Replace("@NAME@", name, StringComparison.Ordinal);
-                await File.WriteAllTextAsync(Path.Combine(staging, "CMakeLists.txt"), content, ct);
+                string path = file.Path.Replace("@NAME@", name, StringComparison.Ordinal);
+                byte[] bytes = sdk.Legacy
+                    ? variants && path == "CMakeLists.txt" && sdk.VariantTemplate is { } template
+                        ? await ProjectConfigurationCommand.ResourceAsync(template, ct)
+                        : await ReadLegacyAsync(file.Resource, ct)
+                    : ProjectSdkCatalog.ReadResource(file.Resource);
+                await WriteAsync(staging, path, bytes, name, buildTarget, environmentLock, ct);
             }
-            else
-            {
-                await WriteAsync(staging, "CMakeLists.txt", template, name, buildTarget, environmentLock, ct);
-            }
-            await WriteAsync(staging, "CMakePresets.json", "CMakePresets.json", name, buildTarget, environmentLock, ct);
-            await WriteAsync(staging, "workflow.json", "workflow.json", name, buildTarget, environmentLock, ct);
+
+            byte[] presets = sdk.Capabilities.Packaging ? await ReadLegacyAsync("CMakePresets.json", ct) :
+                ProjectSdkCatalog.ReadResource("NoPackagePresets.json");
+            await WriteAsync(staging, "CMakePresets.json", presets, name, buildTarget, environmentLock, ct);
+            byte[] workflow = await ReadLegacyAsync("workflow.json", ct);
+            await WriteAsync(staging, "workflow.json", WorkflowTemplate(sdk, workflow), name, buildTarget, environmentLock, ct);
             if (environmentLock is not null)
             {
-                await WriteAsync(staging, "workflow.managed.json", "workflow.managed.json", name, buildTarget, environmentLock, ct);
+                byte[] managed = await ReadLegacyAsync("workflow.managed.json", ct);
+                await WriteAsync(staging, "workflow.managed.json", WorkflowTemplate(sdk, managed), name, buildTarget, environmentLock, ct);
             }
 
-            if (library)
-            {
-                await WriteAsync(staging, "include/" + name + "/api.hpp", "api.hpp", name, buildTarget, environmentLock, ct);
-                await WriteAsync(staging, "src/library.cpp", "library.cpp", name, buildTarget, environmentLock, ct);
-                await WriteAsync(staging, "tests/smoke.cpp", "smoke.cpp", name, buildTarget, environmentLock, ct);
-            }
-            else
-            {
-                await WriteAsync(staging, "src/main.cpp", "main.cpp", name, buildTarget, environmentLock, ct);
-            }
-
-            await ProjectSdkResolution.InitializeAsync(staging, library, environmentLock, ct);
+            await ProjectSdkResolution.InitializeAsync(staging, sdk, environmentLock, ct);
             if (variants)
             {
                 await ProjectConfigurationCommand.InitializeAsync(staging, ct);
@@ -134,19 +126,49 @@ internal static class ProjectSdkCommand
         }
     }
 
-    private static async Task WriteAsync(string root, string path, string resource, string name, string target,
-        string? environmentLock, CancellationToken ct)
+    private static (string? Version, string? EnvironmentLock, bool Variants) ParseOptions(string[] options)
+    {
+        string? version = null;
+        string? environmentLock = null;
+        bool variants = false;
+        for (int i = 0; i < options.Length; i++)
+        {
+            switch (options[i])
+            {
+                case "--variants" when !variants: variants = true; break;
+                case "--sdk-version" when version is null && i + 1 < options.Length:
+                    version = options[++i]; break;
+                case "--environment-lock" when environmentLock is null && i + 1 < options.Length && IsDigest(options[i + 1]):
+                    environmentLock = options[++i]; break;
+                default: throw new ArgumentException(Usage);
+            }
+        }
+        return (version, environmentLock, variants);
+    }
+
+    private static byte[] WorkflowTemplate(SdkDescriptor sdk, byte[] original) =>
+        sdk.Legacy ? original : Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(original)
+            .Replace("\"kind\": \"build\"", "\"kind\": \"invoke\"", StringComparison.Ordinal)
+            .Replace("@BUILD_TARGET@", "all", StringComparison.Ordinal));
+
+    private static async Task<byte[]> ReadLegacyAsync(string resource, CancellationToken ct)
     {
         using Stream input = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourcePrefix + resource)
             ?? throw new InvalidOperationException("Missing Project SDK resource: " + resource);
         using StreamReader reader = new(input);
-        string content = (await reader.ReadToEndAsync(ct))
-            .ReplaceLineEndings("\n")
+        return Encoding.UTF8.GetBytes((await reader.ReadToEndAsync(ct)).ReplaceLineEndings("\n"));
+    }
+
+    private static async Task WriteAsync(string root, string path, byte[] bytes, string name, string target,
+        string? environmentLock, CancellationToken ct)
+    {
+        string content = Encoding.UTF8.GetString(bytes)
             .Replace("@NAME@", name, StringComparison.Ordinal)
             .Replace("@BUILD_TARGET@", target, StringComparison.Ordinal)
             .Replace("@ENVIRONMENT_LOCK@", environmentLock ?? "", StringComparison.Ordinal);
-        string destination = Path.Combine(root, path);
+        string destination = BuildVariantConfiguration.CheckedPath(root, path);
         _ = Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        await File.WriteAllTextAsync(destination, content, ct);
+        await using FileStream file = new(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await file.WriteAsync(Encoding.UTF8.GetBytes(content), ct);
     }
 }

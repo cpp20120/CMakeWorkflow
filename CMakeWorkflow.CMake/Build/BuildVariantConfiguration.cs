@@ -74,7 +74,7 @@ internal static class BuildVariantConfiguration
         }
     }
 
-    internal static void Validate(VariantSettings settings, VariantEnvironment environment, string projectType)
+    internal static void Validate(VariantSettings settings, VariantEnvironment environment, SdkDescriptor sdk)
     {
         if (!Enum.IsDefined(settings.Configuration) || !Enum.IsDefined(settings.Linkage) ||
             !Enum.IsDefined(settings.Optimization) || !Enum.IsDefined(settings.DebugInformation) ||
@@ -83,13 +83,23 @@ internal static class BuildVariantConfiguration
             throw new InvalidDataException("invalid-setting: unknown build variant value.");
         }
 
-        if (projectType is not ("Native.Library" or "Native.Application") ||
-            (projectType == "Native.Application" && settings.Linkage != VariantLinkage.Default))
+        ProjectSdkCatalog.RequireAvailable(sdk);
+        if ((settings.Linkage == VariantLinkage.Static && !sdk.Capabilities.Linkage.Contains("static", StringComparer.Ordinal)) ||
+            (settings.Linkage == VariantLinkage.Shared && !sdk.Capabilities.Linkage.Contains("shared", StringComparer.Ordinal)))
         {
-            throw new InvalidDataException("unsupported-linkage: explicit linkage requires Native.Library.");
+            throw new InvalidDataException("unsupported-linkage: explicit linkage is unavailable for " + sdk.Id + ".");
+        }
+
+        if (settings.Testing && !sdk.Capabilities.Testing)
+        {
+            throw new InvalidDataException("unsupported-testing: " + sdk.Id);
         }
 
         bool ambient = environment.EnvironmentLockSha256 is null;
+        if (!sdk.Capabilities.ExecutionModes.Contains(ambient ? "ambient" : "linux-managed-clang", StringComparer.Ordinal))
+        {
+            throw new InvalidDataException("unsupported-sdk-environment: " + sdk.Id);
+        }
         bool supported = ambient
             ? environment is
             {
@@ -108,7 +118,7 @@ internal static class BuildVariantConfiguration
         }
 
         if (settings.Instrumentation == VariantInstrumentation.Thread ||
-            (!ambient && settings.Instrumentation != VariantInstrumentation.None))
+            ((!ambient || !sdk.Capabilities.Sanitizers) && settings.Instrumentation != VariantInstrumentation.None))
         {
             throw new InvalidDataException("unsupported-instrumentation: the selected profile has no admitted sanitizer runtime.");
         }
@@ -198,7 +208,33 @@ internal static class BuildVariantConfiguration
             throw new InvalidDataException("variant-identity-changed: configuration evidence does not match its ID.");
         }
 
-        Validate(selected.Effective, selected.Environment, plan.ProjectType);
+        byte[] sdkBytes = await ReadBoundedAsync(CheckedPath(source, SdkLock, readGuard), ct);
+        if (Hash(sdkBytes) != plan.SdkSha256)
+        {
+            throw new InvalidDataException("configuration-input-changed: " + SdkLock);
+        }
+        using JsonDocument document = JsonDocument.Parse(sdkBytes);
+        JsonElement policy = document.RootElement;
+        SdkDescriptor sdk = ProjectSdkCatalog.Resolve(policy.GetProperty("sdk").GetString() ?? "",
+            policy.GetProperty("sdkVersion").GetString() ?? "");
+        if (sdk.Id != plan.ProjectType)
+        {
+            throw new InvalidDataException("configuration-sdk-mismatch");
+        }
+        if (!sdk.Legacy && (policy.GetProperty("descriptorSha256").GetString() != ProjectSdkCatalog.Digest(sdk) ||
+            sdk.Modules.Any(module => plan.Inputs.GetValueOrDefault(module.Path) != Hash(ProjectSdkCatalog.ReadResource(module.Resource)))))
+        {
+            throw new InvalidDataException("configuration-sdk-evidence-mismatch: descriptor or shipped module differs.");
+        }
+        JsonElement effective = policy.GetProperty("effective");
+        string? environmentDigest = effective.TryGetProperty("toolchain", out JsonElement toolchain)
+            ? toolchain.GetProperty("environmentLockSha256").GetString() : null;
+        if (environmentDigest != selected.Environment.EnvironmentLockSha256 ||
+            (environmentDigest is not null && toolchain.GetProperty("generator").GetString() != selected.Environment.Generator))
+        {
+            throw new InvalidDataException("configuration-sdk-environment-mismatch");
+        }
+        Validate(selected.Effective, selected.Environment, sdk);
         foreach ((string path, string digest) in plan.Inputs)
         {
             if (Hash(await ReadBoundedAsync(CheckedPath(source, path, readGuard), ct)) != digest)

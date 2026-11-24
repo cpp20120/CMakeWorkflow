@@ -1,0 +1,27 @@
+include_guard(GLOBAL)
+option(CMWF_INTEROP_MANAGED_TEST "Run a .NET 10 consumer against the shared library." OFF)
+
+function(cmwf_interop_library target)
+    get_target_property(kind ${target} TYPE)
+    if(kind STREQUAL "STATIC_LIBRARY")
+        target_compile_definitions(${target} PUBLIC "${target}_STATIC")
+    endif()
+    target_compile_definitions(${target} PRIVATE "${target}_BUILD")
+    set_target_properties(${target} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    cmwf_sdk_library(${target})
+    cmwf_variant_apply(${target})
+endfunction()
+
+function(cmwf_interop_managed_test target)
+    if(NOT CMWF_INTEROP_MANAGED_TEST)
+        return()
+    endif()
+    get_target_property(kind ${target} TYPE)
+    if(NOT kind STREQUAL "SHARED_LIBRARY")
+        message(FATAL_ERROR "The .NET ABI test requires the shared library.")
+    endif()
+    find_program(CMWF_DOTNET dotnet REQUIRED)
+    add_test(NAME "${target}.managed" COMMAND "${CMWF_DOTNET}" run --project
+        "${PROJECT_SOURCE_DIR}/managed/Consumer.csproj" --artifacts-path "${CMAKE_CURRENT_BINARY_DIR}/dotnet" --
+        "$<TARGET_FILE:${target}>")
+endfunction()

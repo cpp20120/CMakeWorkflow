@@ -16,6 +16,12 @@ using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 using IHostRpc = CMakeWorkflow.Host.Protocol.IHostRpc;
 
+if (args is ["--sdk-catalog-tests"])
+{
+    ProjectSdkCatalogTests.Run();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--process-recovery-child")
 {
     await ProcessRecoveryTests.ChildAsync(args[1..]);

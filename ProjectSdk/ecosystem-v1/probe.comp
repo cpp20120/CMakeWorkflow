@@ -1,0 +1,6 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "values.glsl"
+layout(local_size_x = WORKGROUP_SIZE) in;
+layout(set = 0, binding = 0) buffer Output { uint values[]; };
+void main() { values[gl_GlobalInvocationID.x] = gl_GlobalInvocationID.x + 7; }

@@ -60,6 +60,8 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
       - name: Build solution
         run: dotnet build CMakeWorkflow.slnx -c Release -p:TreatWarningsAsErrors=true
+      - name: Project SDK catalog validation
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll --sdk-catalog-tests
       - name: Pure workflow SDK checks
         run: dotnet CMakeWorkflow.Contracts.Tests/bin/Release/net10.0/CMakeWorkflow.Contracts.Tests.dll
       - name: Pure pipeline v1 planner checks
@@ -181,6 +183,14 @@ jobs:
           options=()
           if [[ "$RUNNER_OS" == Linux ]]; then options+=(--sanitizers); fi
           bash tests/infrastructure/configuration/run-tests.sh "$PWD/out/native/${{ matrix.executable }}" "${options[@]}"
+      - name: NativeAOT Runtime and Interop SDK integration
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash tests/infrastructure/sdk-ecosystem/run-tests.sh "$PWD/out/native/${{ matrix.executable }}" core
+      - name: Runtime library and Windows C ABI / .NET consumer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/infrastructure/sdk-ecosystem/windows.ps1 -Cli out/native/${{ matrix.executable }}
       - name: Publish and exercise NativeAOT historical scheduling
         shell: pwsh
         run: |

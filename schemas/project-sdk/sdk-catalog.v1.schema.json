@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow built-in SDK catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sdks"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sdks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sdk" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^Native\\.[A-Za-z0-9]+$" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "file": {
+      "type": "object", "additionalProperties": false, "required": ["path", "resource"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^[A-Za-z0-9_@.-]+(/[A-Za-z0-9_@.-]+)*$" },
+        "resource": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" }
+      }
+    },
+    "sdk": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id","version","alias","extends","status","projectKind","payload","languages","defaults","capabilities","requirements","modules","scaffold","variantTemplate","buildTarget","recipes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "$ref": "#/$defs/version" },
+        "alias": { "type": ["string", "null"] },
+        "extends": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "additionalProperties": false, "required": ["id", "version"],
+              "properties": { "id": { "$ref": "#/$defs/id" }, "version": { "$ref": "#/$defs/version" } } }
+          ]
+        },
+        "status": { "enum": ["abstract", "available", "unsupported"] },
+        "projectKind": { "enum": ["base", "library", "application", "embedded"] },
+        "payload": { "enum": ["legacy-v1", "ecosystem-v1"] },
+        "languages": { "type": "array", "items": { "enum": ["C", "CXX"] } },
+        "defaults": {
+          "type": "object", "additionalProperties": false,
+          "required": ["cxxStandard", "cxxExtensions", "warningsAsErrors"],
+          "properties": {
+            "cxxStandard": { "enum": [null, 17, 20, 23] },
+            "cxxExtensions": { "type": ["boolean", "null"] },
+            "warningsAsErrors": { "type": ["boolean", "null"] }
+          }
+        },
+        "capabilities": {
+          "type": "object", "additionalProperties": false,
+          "required": ["linkage","testing","sanitizers","packaging","benchmarking","profiling","executionModes"],
+          "properties": {
+            "linkage": { "type": "array", "items": { "enum": ["static", "shared"] }, "uniqueItems": true },
+            "testing": { "type": "boolean" }, "sanitizers": { "type": "boolean" },
+            "packaging": { "type": "boolean" }, "benchmarking": { "type": "boolean" }, "profiling": { "type": "boolean" },
+            "executionModes": { "type": "array", "items": { "enum": ["ambient", "linux-managed-clang"] }, "uniqueItems": true }
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["kind", "name", "minimumVersion", "admission"],
+            "properties": {
+              "kind": { "enum": ["host-tool","target-package","runtime","target-toolchain","target-sdk"] },
+              "name": { "type": "string" }, "minimumVersion": { "type": ["string", "null"] },
+              "admission": { "enum": ["optional-cmake","optional-ctest","ambient-cmake","ctest","unsupported-provider","optional-unavailable"] }
+            }
+          }
+        },
+        "modules": { "type": "array", "items": { "$ref": "#/$defs/file" } },
+        "scaffold": { "type": "array", "items": { "$ref": "#/$defs/file" } },
+        "variantTemplate": { "type": ["string", "null"] },
+        "buildTarget": { "type": "string" },
+        "recipes": { "type": "array", "items": { "enum": ["build","test","benchmark","profile"] } }
+      }
+    }
+  }
+}

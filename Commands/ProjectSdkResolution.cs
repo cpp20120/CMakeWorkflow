@@ -1,3 +1,4 @@
+using CMakeWorkflow.CMake.Build;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -11,7 +12,6 @@ internal static class ProjectSdkResolution
 {
     private const string Manifest = "cmwf.project.json";
     private const string Lock = "cmwf.sdk.lock.json";
-    private const string Version = "1.1.0";
     private const string Prefix = "cmake/cmwf-sdk/v1/";
     private const string Resources = "CMakeWorkflow.ProjectSdk.v1.";
     private static readonly string[] Modules = ["Native.cmake", "PackageConfig.cmake.in", "Policy.cmake", "Catalog.json"];
@@ -22,17 +22,33 @@ internal static class ProjectSdkResolution
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        if (args is ["list", "--json"])
+        {
+            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(ProjectSdkCatalog.Document,
+                ProjectSdkCatalogJson.Default.SdkCatalogDocument));
+            return 0;
+        }
         if (args is ["list"])
         {
-            using JsonDocument catalog = JsonDocument.Parse(await ResourceAsync("Catalog.json", ct));
-            foreach (JsonProperty sdk in catalog.RootElement.GetProperty("sdks").EnumerateObject())
+            foreach (SdkDescriptor item in ProjectSdkCatalog.Document.Sdks.Where(item => item.Status != "abstract"))
             {
-                if (!sdk.Value.GetProperty("abstract").GetBoolean())
-                {
-                    await Console.Out.WriteLineAsync(sdk.Name + " " + Version);
-                }
+                await Console.Out.WriteLineAsync(item.Id + " " + item.Version + (item.Status == "available" ? "" : " " + item.Status));
             }
-
+            return 0;
+        }
+        if (args is ["show", ..] or ["requirements", _, ..])
+        {
+            SdkDescriptor descriptor = args switch
+            {
+                ["show", string id] => ProjectSdkCatalog.Resolve(id, null),
+                ["show", string id, "--json"] => ProjectSdkCatalog.Resolve(id, null),
+                ["show", string id, "--version", string version] => ProjectSdkCatalog.Resolve(id, version),
+                ["show", string id, "--version", string version, "--json"] => ProjectSdkCatalog.Resolve(id, version),
+                ["requirements", string directory] => await ReadDescriptorAsync(directory, ct),
+                ["requirements", string directory, "--json"] => await ReadDescriptorAsync(directory, ct),
+                _ => throw new ArgumentException("Usage: project sdk show SDK [--version VERSION] [--json] | requirements DIRECTORY")
+            };
+            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(descriptor, ProjectSdkCatalogJson.Default.SdkDescriptor));
             return 0;
         }
 
@@ -79,22 +95,24 @@ internal static class ProjectSdkResolution
         return 0;
     }
 
-    internal static async Task InitializeAsync(string root, bool library, string? environmentLock, CancellationToken ct)
+    internal static async Task InitializeAsync(string root, SdkDescriptor sdk, string? environmentLock, CancellationToken ct)
     {
-        string sdk = library ? "Native.Library" : "Native.Application";
         string settings = environmentLock is null ? "{}" :
             "{\"toolchain\":{\"profile\":\"linux-clang\",\"policy\":\"ManagedOnly\",\"generator\":\"Ninja Multi-Config\"," +
             "\"target\":{\"os\":\"linux\",\"architecture\":\"x64\"},\"environmentLockSha256\":\"" + environmentLock + "\"}}";
-        string manifest = "{\n  \"schemaVersion\": 1,\n  \"sdk\": \"" + sdk + "\",\n  \"sdkVersion\": \"" + Version +
+        string manifest = "{\n  \"schemaVersion\": 1,\n  \"sdk\": \"" + sdk.Id + "\",\n  \"sdkVersion\": \"" + sdk.Version +
                           "\",\n  \"policyFiles\": [],\n  \"settings\": " + settings + "\n}\n";
         await File.WriteAllTextAsync(Path.Combine(root, Manifest), manifest, ct);
-        _ = Directory.CreateDirectory(Path.Combine(root, Prefix));
-        foreach (string module in Modules)
+        foreach (SdkFile module in ModuleFiles(sdk))
         {
-            await File.WriteAllBytesAsync(Path.Combine(root, Prefix, module), await ResourceAsync(module, ct), ct);
+            string path = CheckedPath(root, module.Path);
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, await ModuleAsync(sdk, module, ct), ct);
         }
 
-        await File.WriteAllTextAsync(Path.Combine(root, ".gitattributes"), "*.json text eol=lf\ncmake/cmwf-sdk/v1/* text eol=lf\n", ct);
+        await File.WriteAllTextAsync(Path.Combine(root, ".gitattributes"),
+            sdk.Legacy ? "*.json text eol=lf\ncmake/cmwf-sdk/v1/* text eol=lf\n" :
+                "*.json text eol=lf\ncmake/cmwf-sdk/ecosystem-v1/* text eol=lf\n", ct);
         await PublishAsync(root, await EvaluateAsync(root, ct), ct);
     }
 
@@ -109,35 +127,28 @@ internal static class ProjectSdkResolution
             throw new InvalidDataException("Unsupported project manifest schema.");
         }
 
-        string sdk = project.GetProperty("sdk").GetString() ?? "";
-        if (project.GetProperty("sdkVersion").GetString() != Version)
+        SdkDescriptor sdk = Descriptor(project);
+        ProjectSdkCatalog.RequireAvailable(sdk);
+        SdkDescriptor[] lineage = [.. ProjectSdkCatalog.Lineage(sdk)];
+        Policy policy = new();
+        foreach (SdkDescriptor ancestor in lineage)
         {
-            throw new InvalidDataException("Unknown SDK or unsupported exact SDK version. Run project sdk list.");
+            policy = policy with
+            {
+                CxxStandard = ancestor.Defaults.CxxStandard ?? policy.CxxStandard,
+                CxxExtensions = ancestor.Defaults.CxxExtensions ?? policy.CxxExtensions,
+                WarningsAsErrors = ancestor.Defaults.WarningsAsErrors ?? policy.WarningsAsErrors
+            };
         }
-
-        // Base defaults -> ordered policy files -> project-local settings. No implicit machine-local inputs.
-        using JsonDocument catalog = JsonDocument.Parse(await ResourceAsync("Catalog.json", ct));
-        if (catalog.RootElement.GetProperty("version").GetString() != Version)
-        {
-            throw new InvalidDataException("Embedded SDK catalog version mismatch.");
-        }
-
-        JsonElement definitions = catalog.RootElement.GetProperty("sdks");
-        if (!definitions.TryGetProperty(sdk, out JsonElement selected) || selected.GetProperty("abstract").GetBoolean())
-        {
-            throw new InvalidDataException("Unknown or abstract SDK. Run project sdk list.");
-        }
-
-        List<string> lineage = [];
-        Policy policy = ResolveDefaults(definitions, sdk, lineage, new HashSet<string>(StringComparer.Ordinal));
         Dictionary<string, string> inputs = new(StringComparer.OrdinalIgnoreCase) { [Manifest] = Digest(manifest) };
+        string modulePrefix = sdk.Legacy ? Prefix : "cmake/cmwf-sdk/ecosystem-v1/";
         foreach (JsonElement entry in project.GetProperty("policyFiles").EnumerateArray())
         {
             string path = entry.GetString() ?? "";
             if (!path.EndsWith(".json", StringComparison.Ordinal) ||
                 string.Equals(path, Lock, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(path, Manifest, StringComparison.OrdinalIgnoreCase) ||
-                path.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) || inputs.Count >= 65 || inputs.ContainsKey(path))
+                path.StartsWith(modulePrefix, StringComparison.OrdinalIgnoreCase) || inputs.Count >= 65 || inputs.ContainsKey(path))
             {
                 throw new InvalidDataException("Invalid or repeated SDK policy file: " + path);
             }
@@ -149,11 +160,15 @@ internal static class ProjectSdkResolution
         }
 
         policy = Overlay(policy, project.GetProperty("settings"));
-        Dictionary<string, string> modules = new(StringComparer.Ordinal);
-        foreach (string module in Modules)
+        if (policy.Toolchain is not null && !sdk.Capabilities.ExecutionModes.Contains("linux-managed-clang", StringComparer.Ordinal))
         {
-            string path = Prefix + module;
-            byte[] expected = await ResourceAsync(module, ct);
+            throw new InvalidDataException("unsupported-sdk-environment: " + sdk.Id + " requires ambient dependencies.");
+        }
+        Dictionary<string, string> modules = new(StringComparer.Ordinal);
+        foreach (SdkFile module in ModuleFiles(sdk))
+        {
+            string path = module.Path;
+            byte[] expected = await ModuleAsync(sdk, module, ct);
             byte[] actual = await File.ReadAllBytesAsync(CheckedPath(root, path), ct);
             if (!expected.AsSpan().SequenceEqual(actual))
             {
@@ -168,12 +183,16 @@ internal static class ProjectSdkResolution
         {
             writer.WriteStartObject();
             writer.WriteNumber("schemaVersion", 1);
-            writer.WriteString("sdk", sdk);
-            writer.WriteString("sdkVersion", Version);
-            writer.WriteStartArray("sdkLineage");
-            foreach (string ancestor in lineage)
+            writer.WriteString("sdk", sdk.Id);
+            writer.WriteString("sdkVersion", sdk.Version);
+            if (!sdk.Legacy)
             {
-                writer.WriteStringValue(ancestor + "/" + Version);
+                writer.WriteString("descriptorSha256", ProjectSdkCatalog.Digest(sdk));
+            }
+            writer.WriteStartArray("sdkLineage");
+            foreach (SdkDescriptor ancestor in lineage)
+            {
+                writer.WriteStringValue(ancestor.Id + "/" + ancestor.Version);
             }
 
             writer.WriteEndArray();
@@ -203,18 +222,25 @@ internal static class ProjectSdkResolution
         return stream.ToArray();
     }
 
-    private static Policy ResolveDefaults(JsonElement definitions, string id, List<string> lineage, HashSet<string> visited)
+    private static SdkDescriptor Descriptor(JsonElement project)
     {
-        if (!visited.Add(id) || !definitions.TryGetProperty(id, out JsonElement definition))
-        {
-            throw new InvalidDataException("Invalid SDK inheritance: " + id);
-        }
-
-        string? parent = definition.GetProperty("extends").GetString();
-        Policy inherited = parent is null ? new() : ResolveDefaults(definitions, parent, lineage, visited);
-        lineage.Add(id);
-        return Overlay(inherited, definition.GetProperty("settings"));
+        string id = project.GetProperty("sdk").GetString() ?? "";
+        SdkDescriptor sdk = ProjectSdkCatalog.Resolve(id, project.GetProperty("sdkVersion").GetString() ?? "");
+        return sdk.Id == id ? sdk : throw new InvalidDataException("Project manifests require the exact SDK ID.");
     }
+
+    private static async Task<SdkDescriptor> ReadDescriptorAsync(string directory, CancellationToken ct)
+    {
+        using JsonDocument sdk = JsonDocument.Parse(await ReadVerifiedAsync(Path.GetFullPath(directory), ct));
+        return Descriptor(sdk.RootElement);
+    }
+
+    private static SdkFile[] ModuleFiles(SdkDescriptor sdk) => sdk.Legacy
+        ? [.. Modules.Select(module => new SdkFile(Prefix + module, module))]
+        : sdk.Modules;
+
+    private static Task<byte[]> ModuleAsync(SdkDescriptor sdk, SdkFile module, CancellationToken ct) =>
+        sdk.Legacy ? ResourceAsync(module.Resource, ct) : Task.FromResult(ProjectSdkCatalog.ReadResource(module.Resource));
 
     private static Policy Overlay(Policy inherited, JsonElement settings)
     {

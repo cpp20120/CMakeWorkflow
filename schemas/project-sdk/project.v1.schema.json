@@ -3,15 +3,72 @@
   "title": "CMakeWorkflow project manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "sdk", "sdkVersion", "policyFiles", "settings"],
+  "required": [
+    "schemaVersion",
+    "sdk",
+    "sdkVersion",
+    "policyFiles",
+    "settings"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "sdk": { "enum": ["Native.Library", "Native.Application"] },
-    "sdkVersion": { "const": "1.1.0" },
-    "policyFiles": {
-      "type": "array", "maxItems": 64, "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.json$" }
+    "schemaVersion": {
+      "const": 1
     },
-    "settings": { "$ref": "policy.v1.schema.json" }
-  }
+    "sdk": {
+      "enum": [
+        "Native.Library",
+        "Native.Application",
+        "Native.Runtime",
+        "Native.Interop",
+        "Native.Qt",
+        "Native.Graphics"
+      ]
+    },
+    "sdkVersion": {
+      "enum": [
+        "1.1.0",
+        "1.0.0"
+      ]
+    },
+    "policyFiles": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.json$"
+      }
+    },
+    "settings": {
+      "$ref": "policy.v1.schema.json"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sdk": {
+            "enum": [
+              "Native.Library",
+              "Native.Application"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sdkVersion": {
+            "const": "1.1.0"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "sdkVersion": {
+            "const": "1.0.0"
+          }
+        }
+      }
+    }
+  ]
 }
