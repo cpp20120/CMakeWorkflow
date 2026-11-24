@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "project": {
+      "sourceDirectory": ".",
+      "buildDirectory": "out/build/debug",
+      "configuration": "Debug",
+      "configurePreset": "debug",
+      "mode": "managed",
+      "provenancePolicy": "strict"
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "project" },
+    { "id": "build", "kind": "build", "context": "project", "target": "@BUILD_TARGET@", "dependsOn": ["configure"] },
+    { "id": "test", "kind": "ctest", "context": "project", "dependsOn": ["build"] }
+  ]
+}

@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.26)
+project(@NAME@ VERSION 0.1.0 LANGUAGES CXX)
+include(cmake/cmwf-sdk/v1/Native.cmake)
+option(BUILD_TESTING "Build the smoke test." ON)
+
+add_library(@NAME@ src/library.cpp)
+target_sources(@NAME@ PUBLIC FILE_SET HEADERS BASE_DIRS include FILES include/@NAME@/api.hpp)
+set_target_properties(@NAME@ PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+cmwf_sdk_library(@NAME@)
+
+if(BUILD_TESTING)
+    enable_testing()
+    add_executable(@NAME@_smoke tests/smoke.cpp)
+    target_link_libraries(@NAME@_smoke PRIVATE @NAME@::@NAME@)
+    add_test(NAME @NAME@.smoke COMMAND @NAME@_smoke)
+endif()
+
+include(CPack)

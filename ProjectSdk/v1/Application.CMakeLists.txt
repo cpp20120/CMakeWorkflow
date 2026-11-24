@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.26)
+project(@NAME@ VERSION 0.1.0 LANGUAGES CXX)
+include(cmake/cmwf-sdk/v1/Native.cmake)
+option(BUILD_TESTING "Build the smoke test." ON)
+
+add_executable(@NAME@ src/main.cpp)
+cmwf_sdk_application(@NAME@)
+if(BUILD_TESTING)
+    enable_testing()
+    add_test(NAME @NAME@.smoke COMMAND @NAME@)
+endif()
+
+include(CPack)

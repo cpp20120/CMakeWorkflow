@@ -13,6 +13,7 @@ internal static class CliApplication
 {
     internal static Task<int> ExecuteAsync(string[] args, CancellationToken ct) => args switch
     {
+        ["project", .. string[] tail] => ProjectSdkCommand.ExecuteAsync(tail, ct),
         ["experiment", .. string[] tail] => ExperimentCommand.ExecuteAsync(tail, ct),
         ["remote", .. string[] tail] => RemoteCommand.ExecuteAsync(tail, ct),
         ["cas", .. string[] tail] => ArtifactCasCommand.ExecuteAsync(tail, ct),

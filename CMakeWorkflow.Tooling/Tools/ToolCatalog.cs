@@ -15,7 +15,7 @@ public static class ToolCatalog
 
     internal static ManagedToolRelease? ManagedRelease(string tool) => tool switch
     {
-        "cmake" or "ctest" => CMakeRelease,
+        "cmake" or "ctest" or "cpack" => CMakeRelease,
         "ninja" => NinjaRelease,
         "clang" or "clang++" or "ld.lld" => LlvmRelease,
         "sysroot" => SysrootRelease,
@@ -86,6 +86,7 @@ public static class ToolCatalog
         new ToolProfile("vcpkg", "Pinned vcpkg tools and registry checkout",
             ["vcpkg", "vcpkg-registry"]),
         new ToolProfile("ninja", "Ninja generator support", ["ninja"]),
+        new ToolProfile("packaging", "CPack native product packaging", ["cpack"]),
         new ToolProfile("profiling", "Native capture backend for this OS",
             ["cmake", "ctest", "cxx", "native-profiler"]),
         new ToolProfile("fuzz", "Clang-based fuzz build and corpus campaigns",
@@ -136,6 +137,8 @@ public static class ToolCatalog
                 Packages("cmake", "cmake", "cmake", "cmake", "Kitware.CMake"), true),
             new ToolDefinition("ctest", "CTest >= 3.26", ["ctest"], ["--version"], new(3, 26),
                 Packages("cmake", "cmake", "cmake", "cmake", "Kitware.CMake"), true),
+            new ToolDefinition("cpack", "CPack >= 3.26", ["cpack"], ["--version"], new(3, 26),
+                Packages("cmake", "cmake", "cmake", "cmake", "Kitware.CMake")),
             new ToolDefinition("ninja", "Ninja", ["ninja", "ninja-build"], ["--version"], null,
                 Packages("ninja-build", "ninja", "ninja-build", "ninja", "Ninja-build.Ninja")),
             new ToolDefinition("clang", "Managed Clang C compiler", [], [], null, Packages()),

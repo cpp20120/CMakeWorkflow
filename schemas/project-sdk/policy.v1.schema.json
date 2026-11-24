@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow SDK policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cxxStandard": { "enum": [17, 20, 23] },
+    "cxxExtensions": { "type": "boolean" },
+    "warningsAsErrors": { "type": "boolean" }
+  }
+}

@@ -1,0 +1,291 @@
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace CMakeWorkflow.Commands;
+
+/// <summary>Pure project policy evaluation and explicit publication of a portable SDK lock.</summary>
+internal static class ProjectSdkResolution
+{
+    private const string Manifest = "cmwf.project.json";
+    private const string Lock = "cmwf.sdk.lock.json";
+    private const string Version = "1.1.0";
+    private const string Prefix = "cmake/cmwf-sdk/v1/";
+    private const string Resources = "CMakeWorkflow.ProjectSdk.v1.";
+    private static readonly string[] Modules = ["Native.cmake", "PackageConfig.cmake.in", "Policy.cmake", "Catalog.json"];
+
+    private sealed record Policy(int CxxStandard = 23, bool CxxExtensions = false, bool WarningsAsErrors = false);
+
+    internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
+    {
+        if (args is ["list"])
+        {
+            using JsonDocument catalog = JsonDocument.Parse(await ResourceAsync("Catalog.json", ct));
+            foreach (JsonProperty sdk in catalog.RootElement.GetProperty("sdks").EnumerateObject())
+            {
+                if (!sdk.Value.GetProperty("abstract").GetBoolean())
+                {
+                    await Console.Out.WriteLineAsync(sdk.Name + " " + Version);
+                }
+            }
+
+            return 0;
+        }
+
+        if (args is not (["plan" or "verify", _] or ["lock", _, "--plan-sha", _]))
+        {
+            throw new ArgumentException("Usage: project sdk list | plan DIRECTORY | verify DIRECTORY | lock DIRECTORY --plan-sha SHA256");
+        }
+
+        string root = Path.GetFullPath(args[1]);
+        byte[] plan = await EvaluateAsync(root, ct);
+        string digest = Digest(plan);
+        if (args[0] == "plan")
+        {
+            await Console.Out.WriteLineAsync(Encoding.UTF8.GetString(plan));
+            await Console.Error.WriteLineAsync("SDK plan SHA-256: " + digest);
+            return 0;
+        }
+
+        if (args[0] == "lock")
+        {
+            if (!string.Equals(args[3], digest, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("SDK plan changed after review. Review a new plan.");
+            }
+
+            await PublishAsync(root, plan, ct);
+        }
+
+        byte[] actual = await File.ReadAllBytesAsync(CheckedPath(root, Lock), ct);
+        byte[] current = await EvaluateAsync(root, ct);
+        if (!actual.AsSpan().SequenceEqual(current))
+        {
+            throw new InvalidDataException("SDK lock is stale or modified. Review project sdk plan and lock again.");
+        }
+
+        await Console.Out.WriteLineAsync("SDK lock SHA-256: " + Digest(actual));
+        return 0;
+    }
+
+    internal static async Task InitializeAsync(string root, bool library, CancellationToken ct)
+    {
+        string sdk = library ? "Native.Library" : "Native.Application";
+        string manifest = "{\n  \"schemaVersion\": 1,\n  \"sdk\": \"" + sdk + "\",\n  \"sdkVersion\": \"" + Version +
+                          "\",\n  \"policyFiles\": [],\n  \"settings\": {}\n}\n";
+        await File.WriteAllTextAsync(Path.Combine(root, Manifest), manifest, ct);
+        _ = Directory.CreateDirectory(Path.Combine(root, Prefix));
+        foreach (string module in Modules)
+        {
+            await File.WriteAllBytesAsync(Path.Combine(root, Prefix, module), await ResourceAsync(module, ct), ct);
+        }
+
+        await File.WriteAllTextAsync(Path.Combine(root, ".gitattributes"), "*.json text eol=lf\ncmake/cmwf-sdk/v1/* text eol=lf\n", ct);
+        await PublishAsync(root, await EvaluateAsync(root, ct), ct);
+    }
+
+    private static async Task<byte[]> EvaluateAsync(string root, CancellationToken ct)
+    {
+        byte[] manifest = await File.ReadAllBytesAsync(CheckedPath(root, Manifest), ct);
+        using JsonDocument document = JsonDocument.Parse(manifest);
+        JsonElement project = document.RootElement;
+        CheckObject(project, "schemaVersion", "sdk", "sdkVersion", "policyFiles", "settings");
+        if (project.GetProperty("schemaVersion").GetInt32() != 1)
+        {
+            throw new InvalidDataException("Unsupported project manifest schema.");
+        }
+
+        string sdk = project.GetProperty("sdk").GetString() ?? "";
+        if (project.GetProperty("sdkVersion").GetString() != Version)
+        {
+            throw new InvalidDataException("Unknown SDK or unsupported exact SDK version. Run project sdk list.");
+        }
+
+        // Base defaults -> ordered policy files -> project-local settings. No implicit machine-local inputs.
+        using JsonDocument catalog = JsonDocument.Parse(await ResourceAsync("Catalog.json", ct));
+        if (catalog.RootElement.GetProperty("version").GetString() != Version)
+        {
+            throw new InvalidDataException("Embedded SDK catalog version mismatch.");
+        }
+
+        JsonElement definitions = catalog.RootElement.GetProperty("sdks");
+        if (!definitions.TryGetProperty(sdk, out JsonElement selected) || selected.GetProperty("abstract").GetBoolean())
+        {
+            throw new InvalidDataException("Unknown or abstract SDK. Run project sdk list.");
+        }
+
+        List<string> lineage = [];
+        Policy policy = ResolveDefaults(definitions, sdk, lineage, new HashSet<string>(StringComparer.Ordinal));
+        Dictionary<string, string> inputs = new(StringComparer.OrdinalIgnoreCase) { [Manifest] = Digest(manifest) };
+        foreach (JsonElement entry in project.GetProperty("policyFiles").EnumerateArray())
+        {
+            string path = entry.GetString() ?? "";
+            if (!path.EndsWith(".json", StringComparison.Ordinal) ||
+                string.Equals(path, Lock, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, Manifest, StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) || inputs.Count >= 65 || inputs.ContainsKey(path))
+            {
+                throw new InvalidDataException("Invalid or repeated SDK policy file: " + path);
+            }
+
+            byte[] bytes = await File.ReadAllBytesAsync(CheckedPath(root, path), ct);
+            inputs.Add(path, Digest(bytes));
+            using JsonDocument layer = JsonDocument.Parse(bytes);
+            policy = Overlay(policy, layer.RootElement);
+        }
+
+        policy = Overlay(policy, project.GetProperty("settings"));
+        Dictionary<string, string> modules = new(StringComparer.Ordinal);
+        foreach (string module in Modules)
+        {
+            string path = Prefix + module;
+            byte[] expected = await ResourceAsync(module, ct);
+            byte[] actual = await File.ReadAllBytesAsync(CheckedPath(root, path), ct);
+            if (!expected.AsSpan().SequenceEqual(actual))
+            {
+                throw new InvalidDataException("Vendored SDK module differs from the installed SDK version: " + path);
+            }
+
+            modules.Add(path, Digest(expected));
+        }
+
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("schemaVersion", 1);
+            writer.WriteString("sdk", sdk);
+            writer.WriteString("sdkVersion", Version);
+            writer.WriteStartArray("sdkLineage");
+            foreach (string ancestor in lineage)
+            {
+                writer.WriteStringValue(ancestor + "/" + Version);
+            }
+
+            writer.WriteEndArray();
+            WriteDigests(writer, "inputs", inputs);
+            WriteDigests(writer, "modules", modules);
+            writer.WriteStartObject("effective");
+            writer.WriteNumber("cxxStandard", policy.CxxStandard);
+            writer.WriteBoolean("cxxExtensions", policy.CxxExtensions);
+            writer.WriteBoolean("warningsAsErrors", policy.WarningsAsErrors);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return stream.ToArray();
+    }
+
+    private static Policy ResolveDefaults(JsonElement definitions, string id, List<string> lineage, HashSet<string> visited)
+    {
+        if (!visited.Add(id) || !definitions.TryGetProperty(id, out JsonElement definition))
+        {
+            throw new InvalidDataException("Invalid SDK inheritance: " + id);
+        }
+
+        string? parent = definition.GetProperty("extends").GetString();
+        Policy inherited = parent is null ? new() : ResolveDefaults(definitions, parent, lineage, visited);
+        lineage.Add(id);
+        return Overlay(inherited, definition.GetProperty("settings"));
+    }
+
+    private static Policy Overlay(Policy inherited, JsonElement settings)
+    {
+        CheckObject(settings, "cxxStandard", "cxxExtensions", "warningsAsErrors");
+        int standard = settings.TryGetProperty("cxxStandard", out JsonElement s) ? s.GetInt32() : inherited.CxxStandard;
+        return standard is not (17 or 20 or 23)
+            ? throw new InvalidDataException("cxxStandard must be 17, 20 or 23.")
+            : new(standard,
+            settings.TryGetProperty("cxxExtensions", out JsonElement e) ? e.GetBoolean() : inherited.CxxExtensions,
+            settings.TryGetProperty("warningsAsErrors", out JsonElement w) ? w.GetBoolean() : inherited.WarningsAsErrors);
+    }
+
+    private static void CheckObject(JsonElement element, params string[] allowed)
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            if (!allowed.Contains(property.Name, StringComparer.Ordinal) || !seen.Add(property.Name))
+            {
+                throw new InvalidDataException("Unknown or duplicate SDK property: " + property.Name);
+            }
+        }
+    }
+
+    private static void WriteDigests(Utf8JsonWriter writer, string name, Dictionary<string, string> digests)
+    {
+        writer.WriteStartObject(name);
+        foreach ((string path, string digest) in digests.OrderBy(x => x.Key, StringComparer.Ordinal))
+        {
+            writer.WriteString(path, digest);
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static string Digest(ReadOnlySpan<byte> bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    private static string CheckedPath(string root, string relative)
+    {
+        string path = root;
+        if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new InvalidDataException("SDK project root must not be a link.");
+        }
+
+        foreach (string segment in relative.Split('/'))
+        {
+            if (segment is "" or "." or ".." || segment.EndsWith('.') ||
+                segment.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '_' or '-')) || IsDeviceName(segment))
+            {
+                throw new InvalidDataException("Unsafe SDK path: " + relative);
+            }
+
+            path = Path.Combine(path, segment);
+            FileInfo entry = new(path);
+            if (entry.LinkTarget is not null || (Path.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0))
+            {
+                throw new InvalidDataException("SDK paths must not contain links: " + relative);
+            }
+        }
+
+        return path;
+    }
+
+    private static bool IsDeviceName(string segment)
+    {
+        string stem = segment.Split('.')[0].ToUpperInvariant();
+        return stem is "CON" or "PRN" or "AUX" or "NUL" ||
+               (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal)) && char.IsAsciiDigit(stem[3]));
+    }
+
+    private static async Task<byte[]> ResourceAsync(string name, CancellationToken ct)
+    {
+        using Stream input = Assembly.GetExecutingAssembly().GetManifestResourceStream(Resources + name)
+            ?? throw new InvalidOperationException("Missing SDK resource: " + name);
+        using StreamReader reader = new(input);
+        return Encoding.UTF8.GetBytes((await reader.ReadToEndAsync(ct)).ReplaceLineEndings("\n"));
+    }
+
+    private static async Task PublishAsync(string root, byte[] plan, CancellationToken ct)
+    {
+        string destination = CheckedPath(root, Lock);
+        string temporary = Path.Combine(root, ".cmwf-lock-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (FileStream output = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await output.WriteAsync(plan, ct);
+                await output.FlushAsync(ct);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+    }
+}

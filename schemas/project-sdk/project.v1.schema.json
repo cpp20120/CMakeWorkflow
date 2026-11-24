@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow project manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sdk", "sdkVersion", "policyFiles", "settings"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sdk": { "enum": ["Native.Library", "Native.Application"] },
+    "sdkVersion": { "const": "1.1.0" },
+    "policyFiles": {
+      "type": "array", "maxItems": 64, "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.json$" }
+    },
+    "settings": { "$ref": "policy.v1.schema.json" }
+  }
+}

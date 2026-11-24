@@ -11,6 +11,9 @@
     <ItemGroup>
         <Compile Include="Program.cs"/>
         <Compile Include="Commands/CliApplication.cs"/>
+        <Compile Include="Commands/ProjectSdkCommand.cs"/>
+        <Compile Include="Commands/ProjectSdkResolution.cs"/>
+        <EmbeddedResource Include="ProjectSdk/v1/*" LogicalName="CMakeWorkflow.ProjectSdk.v1.%(Filename)%(Extension)"/>
         <Compile Include="Commands/CliErrors.cs"/>
         <Compile Include="Commands/CliHistory.cs"/>
         <Compile Include="Commands/CliUsage.cs"/>

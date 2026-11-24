@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "contexts": {
+    "project": {
+      "sourceDirectory": ".",
+      "buildDirectory": "out/build/managed-linux",
+      "configuration": "Release",
+      "generator": "Ninja Multi-Config",
+      "mode": "managed",
+      "provenancePolicy": "strict",
+      "toolchain": {
+        "environmentProfileId": "linux-managed-clang",
+        "generator": "Ninja Multi-Config",
+        "hostArchitecture": "x64",
+        "targetArchitecture": "x64",
+        "environmentLockSha256": "@ENVIRONMENT_LOCK@"
+      }
+    }
+  },
+  "nodes": [
+    { "id": "configure", "kind": "configure", "context": "project" },
+    { "id": "build", "kind": "build", "context": "project", "target": "@BUILD_TARGET@", "dependsOn": ["configure"] },
+    { "id": "test", "kind": "ctest", "context": "project", "dependsOn": ["build"] }
+  ]
+}

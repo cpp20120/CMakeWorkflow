@@ -1,0 +1,20 @@
+{
+  "version": "1.1.0",
+  "sdks": {
+    "Native.Base": {
+      "abstract": true,
+      "extends": null,
+      "settings": { "cxxStandard": 23, "cxxExtensions": false, "warningsAsErrors": false }
+    },
+    "Native.Library": {
+      "abstract": false,
+      "extends": "Native.Base",
+      "settings": {}
+    },
+    "Native.Application": {
+      "abstract": false,
+      "extends": "Native.Base",
+      "settings": {}
+    }
+  }
+}
