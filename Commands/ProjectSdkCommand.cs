@@ -49,7 +49,8 @@ internal static class ProjectSdkCommand
         bool variants = options.Contains("--variants", StringComparer.Ordinal);
         string? environmentLock = options switch
         {
-        [] or ["--variants"] => null,
+            [] => null,
+            ["--variants"] => null,
             ["--environment-lock", string digest] when IsDigest(digest) => digest,
             ["--variants", "--environment-lock", string digest] when IsDigest(digest) => digest,
             ["--environment-lock", string digest, "--variants"] when IsDigest(digest) => digest,
