@@ -13,5 +13,8 @@ public sealed class ConfigureProvenance
     public string? Executable { get; set; }
     public string? WorkingDirectory { get; set; }
 
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? BuildVariantId { get; set; }
+
     public List<string> Arguments { get; set; } = [];
 }

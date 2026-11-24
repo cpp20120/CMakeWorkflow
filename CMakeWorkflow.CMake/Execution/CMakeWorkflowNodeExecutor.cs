@@ -62,6 +62,7 @@ internal static class CMakeWorkflowNodeExecutor
             RequestedContext = node.Requested,
             EnvironmentOverrideHash = EnvironmentProvenance.FingerprintOverrides(definition.Environment),
             ToolchainFingerprint = toolchain?.Fingerprint,
+            BuildVariantId = node.VariantBinding?.Id,
             CompilerCacheFingerprint = compilerCache?.Fingerprint,
             StartedAt = DateTimeOffset.UtcNow,
             Status = "running",
@@ -83,6 +84,23 @@ internal static class CMakeWorkflowNodeExecutor
         WorkflowActionCache? actionCache = null;
         try
         {
+            EvaluatedVariant? variant = node.VariantBinding is { } binding
+                ? await BuildVariantConfiguration.LoadAsync(node.Requested.SourceDirectory!, binding, deadline.Token, node.VariantReadGuard)
+                : null;
+            if (variant is not null)
+            {
+                string tree = BuildVariantConfiguration.CheckedPath(node.Requested.SourceDirectory!,
+                    BuildVariantConfiguration.BuildDirectory(variant), node.VariantReadGuard);
+                BuildVariantConfiguration.VerifyTree(tree, variant, required: definition.Kind != "configure");
+                if (definition.Kind != "configure" && node.Observed.ManagedConfigure?.BuildVariantId != variant.Id)
+                {
+                    ObservedBuildContext current = await CMakeInspection.InspectAsync(node.Target.BuildDirectory, deadline.Token);
+                    if (current.ManagedConfigure?.BuildVariantId != variant.Id)
+                    {
+                        throw new InvalidDataException("variant-provenance-mismatch: configure the approved variant first.");
+                    }
+                }
+            }
             if (toolchain is not null || (OperatingSystem.IsLinux() && definition.Kind != "inspect"))
             {
                 WorkflowToolchainAdmission.ValidateBuildTree(node.Target.BuildDirectory, toolchain);
@@ -151,7 +169,7 @@ internal static class CMakeWorkflowNodeExecutor
             else if (definition.Kind == "configure")
             {
                 session.BeginConfigure();
-                await ConfigureAsync(node, result, session, output, toolchain, compilerCache, ct: deadline.Token);
+                await ConfigureAsync(node, result, session, output, toolchain, compilerCache, variant, ct: deadline.Token);
             }
             else
             {
@@ -557,7 +575,8 @@ internal static class CMakeWorkflowNodeExecutor
     /// A provenance-write failure can propagate and replace the original exception; native/tree effects are not undone.
     /// </remarks>
     private static async Task ConfigureAsync(PlannedNode node, NodeResult result, BuildContextSession session,
-        string output, WorkflowToolchainRuntime? toolchain, CompilerCacheProfile? compilerCache, CancellationToken ct)
+        string output, WorkflowToolchainRuntime? toolchain, CompilerCacheProfile? compilerCache,
+        EvaluatedVariant? variant, CancellationToken ct)
     {
         RequestedBuildContext request = node.Requested;
         if (request.SourceDirectory is null || !Directory.Exists(request.SourceDirectory))
@@ -571,7 +590,8 @@ internal static class CMakeWorkflowNodeExecutor
         {
             BuildDirectory = request.BuildDirectory,
             SourceDirectory = request.SourceDirectory,
-            Preset = request.ConfigurePreset
+            Preset = request.ConfigurePreset,
+            BuildVariantId = variant?.Id
         };
         result.Executable = toolchain?.CMake ?? result.ObservedContext?.CMakeExecutable ?? "cmake";
         result.WorkingDirectory = request.SourceDirectory;
@@ -640,6 +660,14 @@ internal static class CMakeWorkflowNodeExecutor
         }
 
         result.Arguments.AddRange(["-S", request.SourceDirectory, "-B", request.BuildDirectory]);
+        if (variant is not null)
+        {
+            if (toolchain is null)
+            {
+                result.Arguments.AddRange(["-G", variant.Environment.Generator]);
+            }
+            result.Arguments.AddRange(BuildVariantConfiguration.CacheArguments(variant));
+        }
         if (compilerCache is not null)
         {
             result.Arguments.AddRange([
@@ -683,6 +711,10 @@ internal static class CMakeWorkflowNodeExecutor
                 // Verify requested selection against the new observation; never silently
                 // replace a requested Debug/Release configuration with the generated one.
                 CMakeInspection.ValidateIdentity(request, result.ObservationAfter);
+                if (variant is not null)
+                {
+                    BuildVariantConfiguration.VerifyTree(request.BuildDirectory, variant, required: true);
+                }
                 if (toolchain?.RequireConfiguredFingerprint == true)
                 {
                     WorkflowToolchainAdmission.ValidateBuildTree(request.BuildDirectory, toolchain);

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "policyFiles": [],
+  "settings": {},
+  "profiles": {
+    "debug": { "configuration": "Debug" },
+    "release": { "configuration": "Release" }
+  },
+  "matrix": { "axes": { "configuration": ["Debug", "Release"] } }
+}

@@ -1,5 +1,7 @@
 # Project SDK v1.1 (P1: resolution and policy)
 
+[Configuration profiles and build variants](configuration-composition.md)
+
 The Project SDK owns conventions, not compilation. It emits a standalone CMake
 project and vendors versioned modules under `cmake/cmwf-sdk/v1`. CMake owns the
 native target graph; the existing workflow engine owns configure/build/test

@@ -5,7 +5,8 @@ internal static class CliUsage
     internal static int Write()
     {
         Console.Error.WriteLine(
-        "Usage: CMakeWorkflow project new <library|application> NAME DIRECTORY [--environment-lock SHA256]\n" +
+        "Usage: CMakeWorkflow project new <library|application> NAME DIRECTORY [--variants] [--environment-lock SHA256]\n" +
+        "       CMakeWorkflow project config <list|plan|lock|verify|workflow> DIRECTORY [--profile NAME|--matrix] [--overrides FILE] [--plan-sha SHA256] [--variant ID]\n" +
         "       CMakeWorkflow project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256]\n" +
         "       CMakeWorkflow project sdk <list|plan|lock|verify|workflow> [DIRECTORY] [--plan-sha SHA256]\n" +
         "Usage: CMakeWorkflow remote <start|find|status|inspect|events|report|artifacts|download|cancel> --destination USER@HOST --endpoint REMOTE_SOCKET --workspace REMOTE_DIR ...\n" +

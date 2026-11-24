@@ -250,6 +250,7 @@ public sealed class ConfigureProvenance
     public int? ExitCode { get; set; }
     public string? Executable { get; set; }
     public string? WorkingDirectory { get; set; }
+    public string? BuildVariantId { get; set; }
     public System.Collections.Generic.List<string> Arguments { get; set; }
 }
 ```

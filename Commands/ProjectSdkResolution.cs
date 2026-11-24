@@ -268,7 +268,7 @@ internal static class ProjectSdkResolution
         await Console.Out.WriteLineAsync(workflow.ToJsonString());
     }
 
-    private static void CheckObject(JsonElement element, params string[] allowed)
+    internal static void CheckObject(JsonElement element, params string[] allowed)
     {
         HashSet<string> seen = new(StringComparer.Ordinal);
         foreach (JsonProperty property in element.EnumerateObject())
@@ -292,6 +292,14 @@ internal static class ProjectSdkResolution
     }
 
     private static string Digest(ReadOnlySpan<byte> bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    internal static async Task<byte[]> ReadVerifiedAsync(string root, CancellationToken ct)
+    {
+        byte[] actual = await File.ReadAllBytesAsync(CheckedPath(root, Lock), ct);
+        byte[] expected = await EvaluateAsync(root, ct);
+        return actual.AsSpan().SequenceEqual(expected) ? actual :
+            throw new InvalidDataException("SDK lock is stale or modified. Review project sdk plan and lock again.");
+    }
 
     private static string CheckedPath(string root, string relative)
     {

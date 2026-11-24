@@ -86,6 +86,13 @@ jobs:
         run: dotnet publish CMakeWorkflow.csproj -c Release -p:PublishAot=false -p:RecoveryFaultInjection=true --artifacts-path out/recovery-artifacts -o out/recovery-cli
       - name: Recovery faults and manual reconciliation
         run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll out/recovery-cli/${{ matrix.executable }} --recovery
+      - name: Project SDK P3 configuration, matrix and recovery
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          options=()
+          if [[ "$RUNNER_OS" == Linux ]]; then options+=("$PWD/out/recovery-cli/${{ matrix.executable }}"); fi
+          bash tests/infrastructure/configuration/run-tests.sh "$PWD/bin/Release/net10.0/${{ matrix.executable }}" "${options[@]}"
       - name: History checks
         run: dotnet CMakeWorkflow.History.Tests/bin/Release/net10.0/CMakeWorkflow.History.Tests.dll
       - name: Profiling checks
@@ -167,6 +174,13 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: bash tests/infrastructure/toolchain-p2/run-tests.sh "$PWD/out/native/${{ matrix.executable }}"
+      - name: NativeAOT Project SDK P3 configuration and matrix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          options=()
+          if [[ "$RUNNER_OS" == Linux ]]; then options+=(--sanitizers); fi
+          bash tests/infrastructure/configuration/run-tests.sh "$PWD/out/native/${{ matrix.executable }}" "${options[@]}"
       - name: Publish and exercise NativeAOT historical scheduling
         shell: pwsh
         run: |

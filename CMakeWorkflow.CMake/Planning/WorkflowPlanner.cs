@@ -232,6 +232,22 @@ public static class WorkflowPlanner
                 string mode = spec.Mode ?? (hasConfigure || observed.ManagedConfigure is not null
                     ? "managed"
                     : "observe");
+                if (spec.BuildVariant is { } binding)
+                {
+                    if (document.SchemaVersion != 2 || source is null || mode != "managed" ||
+                        spec.ProvenancePolicy != "strict" || spec.ConfigurePreset is not null)
+                    {
+                        throw new InvalidDataException("invalid-variant-context: a variant requires strict managed configure without a preset.");
+                    }
+                    EvaluatedVariant variant = await BuildVariantConfiguration.LoadAsync(source, binding, ct, readGuard);
+                    BuildVariantConfiguration.MatchContext(variant, spec.Toolchain, spec.Configuration, spec.Generator);
+                    string variantTree = BuildVariantConfiguration.CheckedPath(source,
+                        BuildVariantConfiguration.BuildDirectory(variant), readGuard);
+                    if (!PathComparer.Equals(path, variantTree))
+                    {
+                        throw new InvalidDataException("variant-build-tree-mismatch: use the directory declared by the variant.");
+                    }
+                }
                 context = (new RequestedBuildContext(path, spec.Configuration, spec.ConfigurePreset, source,
                     spec.ProvenancePolicy, mode, spec.Generator), observed);
                 contexts.Add(contextName, context);
@@ -401,7 +417,9 @@ public static class WorkflowPlanner
             plan.Add(new PlannedNode(node, target, workingDirectory, dependencies[node.Id],
                 context.Request, context.Observed, diagnostics, document.Contexts[contextName].Toolchain)
             {
-                CompilerCacheProfile = compilerCache
+                CompilerCacheProfile = compilerCache,
+                VariantBinding = document.Contexts[contextName].BuildVariant,
+                VariantReadGuard = readGuard
             });
         }
 
@@ -424,6 +442,10 @@ public static class WorkflowPlanner
             {
                 throw new ArgumentException(
                     "Aliases of one physical build tree must use the same compiler cache profile.");
+            }
+            if (tree.Select(n => n.VariantBinding).Distinct().Count() != 1)
+            {
+                throw new InvalidDataException("variant-build-tree-conflict: aliases of a tree must use the same variant.");
             }
         }
 

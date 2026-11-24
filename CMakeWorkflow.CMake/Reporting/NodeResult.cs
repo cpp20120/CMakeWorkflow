@@ -32,6 +32,8 @@ public sealed class NodeResult
     public string? EnvironmentOverrideHash { get; set; }
     public string? ToolchainFingerprint { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BuildVariantId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CompilerCacheFingerprint { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public CompilerCacheStatistics? CompilerCache { get; set; }

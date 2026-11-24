@@ -1889,7 +1889,19 @@ public sealed class WorkflowContext
     public string ProvenancePolicy { get; set; }
     public CMakeWorkflow.Contracts.Workflows.WorkflowToolchainBinding? Toolchain { get; set; }
     public string? CompilerCacheProfile { get; set; }
+    public CMakeWorkflow.Contracts.Workflows.WorkflowVariantBinding? BuildVariant { get; set; }
 }
+```
+
+#### `WorkflowVariantBinding`
+
+References an approved Project SDK configuration lock in the context source tree.
+Both values are lowercase SHA-256 digests.
+
+Source [WorkflowVariantBinding.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowVariantBinding.cs).
+
+```csharp
+public sealed record WorkflowVariantBinding(string Id, string LockSha256);
 ```
 
 #### `WorkflowDocument`

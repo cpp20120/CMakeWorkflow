@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow Project SDK configuration v1",
+  "type": "object",
+  "required": ["schemaVersion", "profiles"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "policyFiles": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string" } },
+    "settings": { "$ref": "#/$defs/settings" },
+    "profiles": {
+      "type": "object", "maxProperties": 64,
+      "propertyNames": { "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+      "additionalProperties": { "$ref": "#/$defs/settings" }
+    },
+    "matrix": {
+      "type": "object", "required": ["axes"], "additionalProperties": false,
+      "properties": {
+        "profile": { "type": "string" },
+        "axes": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "configuration": { "$ref": "#/$defs/configurationAxis" },
+            "linkage": { "$ref": "#/$defs/linkageAxis" },
+            "optimization": { "$ref": "#/$defs/optimizationAxis" },
+            "debugInformation": { "$ref": "#/$defs/switchAxis" },
+            "instrumentation": { "$ref": "#/$defs/instrumentationAxis" },
+            "lto": { "$ref": "#/$defs/switchAxis" },
+            "testing": { "$ref": "#/$defs/testingAxis" }
+          }
+        },
+        "include": { "$ref": "#/$defs/rules" },
+        "exclude": { "$ref": "#/$defs/rules" }
+      }
+    }
+  },
+  "$defs": {
+    "configuration": { "enum": ["Debug", "Release", "RelWithDebInfo", "MinSizeRel"] },
+    "linkage": { "enum": ["default", "static", "shared"] },
+    "optimization": { "enum": ["default", "none", "speed", "size"] },
+    "switch": { "oneOf": [{ "type": "boolean" }, { "enum": ["default", "enabled", "disabled"] }] },
+    "instrumentation": {
+      "oneOf": [
+        { "enum": ["none", "address", "undefined", "addressUndefined", "thread"] },
+        { "type": "array", "uniqueItems": true, "maxItems": 2, "items": { "enum": ["address", "undefined", "thread"] } }
+      ]
+    },
+    "settings": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "configuration": { "$ref": "#/$defs/configuration" },
+        "linkage": { "$ref": "#/$defs/linkage" },
+        "optimization": { "$ref": "#/$defs/optimization" },
+        "debugInformation": { "$ref": "#/$defs/switch" },
+        "instrumentation": { "$ref": "#/$defs/instrumentation" },
+        "lto": { "$ref": "#/$defs/switch" },
+        "testing": { "type": "boolean" }
+      }
+    },
+    "configurationAxis": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/configuration" } },
+    "linkageAxis": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/linkage" } },
+    "optimizationAxis": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/optimization" } },
+    "switchAxis": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/switch" } },
+    "instrumentationAxis": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/instrumentation" } },
+    "testingAxis": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "boolean" } },
+    "rules": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/settings" } }
+  }
+}

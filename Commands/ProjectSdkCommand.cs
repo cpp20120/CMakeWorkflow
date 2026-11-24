@@ -7,11 +7,15 @@ namespace CMakeWorkflow.Commands;
 internal static class ProjectSdkCommand
 {
     private const string ResourcePrefix = "CMakeWorkflow.ProjectSdk.v1.";
-    private const string Usage = "project new <library|application> NAME DIRECTORY [--environment-lock SHA256] | " +
+    private const string Usage = "project new <library|application> NAME DIRECTORY [--variants] [--environment-lock SHA256] | " +
                                  "project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256] | project sdk <list|plan|lock|verify|workflow>";
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
+        if (args is ["config", .. string[] configuration])
+        {
+            return await ProjectConfigurationCommand.ExecuteAsync(configuration, ct);
+        }
         if (args is ["sdk", .. string[] sdkArgs])
         {
             return await ProjectSdkResolution.ExecuteAsync(sdkArgs, ct);
@@ -42,10 +46,13 @@ internal static class ProjectSdkCommand
             throw new ArgumentException(Usage);
         }
 
+        bool variants = options.Contains("--variants", StringComparer.Ordinal);
         string? environmentLock = options switch
         {
-            [] => null,
+        [] or ["--variants"] => null,
             ["--environment-lock", string digest] when IsDigest(digest) => digest,
+            ["--variants", "--environment-lock", string digest] when IsDigest(digest) => digest,
+            ["--environment-lock", string digest, "--variants"] when IsDigest(digest) => digest,
             _ => throw new ArgumentException(Usage)
         };
         ValidateName(name);
@@ -62,7 +69,17 @@ internal static class ProjectSdkCommand
         try
         {
             string buildTarget = library ? name + "_smoke" : name;
-            await WriteAsync(staging, "CMakeLists.txt", library ? "Library.CMakeLists.txt" : "Application.CMakeLists.txt", name, buildTarget, environmentLock, ct);
+            string template = library ? "Library.CMakeLists.txt" : "Application.CMakeLists.txt";
+            if (variants)
+            {
+                byte[] input = await ProjectConfigurationCommand.ResourceAsync(template, ct);
+                string content = System.Text.Encoding.UTF8.GetString(input).Replace("@NAME@", name, StringComparison.Ordinal);
+                await File.WriteAllTextAsync(Path.Combine(staging, "CMakeLists.txt"), content, ct);
+            }
+            else
+            {
+                await WriteAsync(staging, "CMakeLists.txt", template, name, buildTarget, environmentLock, ct);
+            }
             await WriteAsync(staging, "CMakePresets.json", "CMakePresets.json", name, buildTarget, environmentLock, ct);
             await WriteAsync(staging, "workflow.json", "workflow.json", name, buildTarget, environmentLock, ct);
             if (environmentLock is not null)
@@ -82,6 +99,10 @@ internal static class ProjectSdkCommand
             }
 
             await ProjectSdkResolution.InitializeAsync(staging, library, environmentLock, ct);
+            if (variants)
+            {
+                await ProjectConfigurationCommand.InitializeAsync(staging, ct);
+            }
             await File.WriteAllTextAsync(Path.Combine(staging, ".gitignore"), "/out/\n/CMakeUserPresets.json\n", ct);
             ct.ThrowIfCancellationRequested();
             Directory.Move(staging, destination);

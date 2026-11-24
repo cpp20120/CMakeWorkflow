@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow approved configuration lock v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "evaluatorVersion", "sdkSha256", "projectType", "inputs", "variants"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "evaluatorVersion": { "const": "1.0.0" },
+    "sdkSha256": { "$ref": "#/$defs/digest" },
+    "projectType": { "enum": ["Native.Library", "Native.Application"] },
+    "inputs": { "type": "object", "minProperties": 1, "maxProperties": 144, "additionalProperties": { "$ref": "#/$defs/digest" } },
+    "variants": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/variant" } }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "variant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "id", "effective", "environment", "origins"],
+      "properties": {
+        "name": { "type": "string" },
+        "id": { "$ref": "#/$defs/digest" },
+        "origins": { "type": "object", "additionalProperties": { "type": "string" } },
+        "effective": {
+          "type": "object", "additionalProperties": false,
+          "required": ["configuration", "linkage", "optimization", "debugInformation", "instrumentation", "lto", "testing"],
+          "properties": {
+            "configuration": { "enum": ["Debug", "Release", "RelWithDebInfo", "MinSizeRel"] },
+            "linkage": { "enum": ["Default", "Static", "Shared"] },
+            "optimization": { "enum": ["Default", "None", "Speed", "Size"] },
+            "debugInformation": { "$ref": "#/$defs/switch" },
+            "instrumentation": { "enum": ["None", "Address", "Undefined", "AddressUndefined", "Thread"] },
+            "lto": { "$ref": "#/$defs/switch" },
+            "testing": { "type": "boolean" }
+          }
+        },
+        "environment": {
+          "type": "object", "additionalProperties": false,
+          "required": ["hostOs", "hostArchitecture", "targetOs", "targetArchitecture", "abi", "generator", "environmentLockSha256"],
+          "properties": {
+            "hostOs": { "enum": ["linux", "native"] },
+            "hostArchitecture": { "enum": ["x64", "native"] },
+            "targetOs": { "enum": ["linux", "native"] },
+            "targetArchitecture": { "enum": ["x64", "native"] },
+            "abi": { "enum": ["gnu", "ambient"] },
+            "generator": { "enum": ["Ninja", "Ninja Multi-Config"] },
+            "environmentLockSha256": { "oneOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] }
+          }
+        }
+      }
+    },
+    "switch": { "enum": ["Default", "Enabled", "Disabled"] }
+  }
+}

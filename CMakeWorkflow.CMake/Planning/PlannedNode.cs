@@ -14,4 +14,6 @@ public sealed record PlannedNode(
     WorkflowToolchainBinding? Toolchain = null)
 {
     public string? CompilerCacheProfile { get; init; }
+    internal WorkflowVariantBinding? VariantBinding { get; init; }
+    internal Action<string>? VariantReadGuard { get; init; }
 }

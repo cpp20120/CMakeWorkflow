@@ -37,4 +37,8 @@ public sealed class WorkflowContext
     /// <summary>Optional compiler cache profile resolved on the execution host.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CompilerCacheProfile { get; set; }
+
+    /// <summary>Optional approved Project SDK build variant in the context source tree.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkflowVariantBinding? BuildVariant { get; set; }
 }
