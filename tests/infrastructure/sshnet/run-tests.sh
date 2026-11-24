@@ -133,6 +133,7 @@ if [[ ${CMWF_SSHNET_TEST_VCPKG:-0} == 1 ]]; then
   docker exec --user cmwf "$container" "$CMWF_SSHNET_EXE" tooling setup \
     --profile linux-clang --profile vcpkg --tool-policy ManagedOnly --yes --plan-sha "$approval"
   docker exec --user cmwf "$container" "$CMWF_SSHNET_EXE" tooling lock --write
+  bash tests/infrastructure/sshnet/toolchain-v2.sh "$tmp/publish/CMakeWorkflow" "$container"
   CMWF_SSHNET_VCPKG_EXE=/opt/cmwf-experiment-bridge \
   CMWF_SSHNET_VCPKG_LOST_REPLY="$CMWF_SSHNET_WORKSPACE/lost-experiment-operation" \
   CMAKEWORKFLOW_EXPERIMENT_STORE="$tmp/experiments" bash tests/infrastructure/sshnet/experiment-vcpkg.sh \

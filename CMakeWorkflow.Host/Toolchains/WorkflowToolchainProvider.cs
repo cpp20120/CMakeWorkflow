@@ -56,7 +56,23 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         }
 
         SystemToolingRuntime runtime = new();
-        ToolingService tooling = new(runtime, new VerifiedCMakeInstaller());
+        ToolchainEnvironmentLock? locked = binding.EnvironmentLockSha256 is { } environmentLock
+            ? await ManagedEnvironmentLocks.ReadAsync(environmentLock, ct) : null;
+        if (locked is not null && locked.Generator != binding.Generator)
+        {
+            throw new InvalidOperationException("The workflow generator differs from its approved environment lock.");
+        }
+        if (locked is not null && binding.VcpkgProjectSha256 is not null &&
+            locked.Components.Any(component => component.Distribution != ToolCatalog.ManagedRelease(
+                ManagedComponentCatalog.Find(component.Id, component.Version)!.Tools[0])))
+        {
+            throw new InvalidOperationException("The vcpkg project requires the existing pinned Linux toolchain releases.");
+        }
+        ToolingService tooling = new(runtime, new VerifiedCMakeInstaller())
+        {
+            FindManagedRelease = tool => locked is null ? ToolCatalog.ManagedRelease(tool) :
+                ToolchainEnvironment.ReleaseForTool(locked, tool)
+        };
         string profile = managedCompiler ? "linux-clang" : "cmake-ninja";
         ToolingPlan plan = await tooling.PlanAsync([profile], PackageManagerKind.None, false, null, ct,
             resolutionPolicy: policy);
@@ -101,11 +117,6 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         else if (await ReadTargetAsync(cc, environment, ct) != triple)
         {
             throw new InvalidOperationException("The host C and C++ compilers report different target triples.");
-        }
-
-        if (binding.EnvironmentLockSha256 is { } environmentLock)
-        {
-            await ManagedEnvironmentLocks.VerifyAsync(environmentLock, ct);
         }
 
         ManagedVcpkgInstallation? packages = binding.VcpkgProjectSha256 is { } dependencyPlan

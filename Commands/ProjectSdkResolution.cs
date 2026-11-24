@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CMakeWorkflow.Commands;
 
@@ -15,7 +16,9 @@ internal static class ProjectSdkResolution
     private const string Resources = "CMakeWorkflow.ProjectSdk.v1.";
     private static readonly string[] Modules = ["Native.cmake", "PackageConfig.cmake.in", "Policy.cmake", "Catalog.json"];
 
-    private sealed record Policy(int CxxStandard = 23, bool CxxExtensions = false, bool WarningsAsErrors = false);
+    private sealed record ToolchainPolicy(string Generator, string EnvironmentLockSha256);
+    private sealed record Policy(int CxxStandard = 23, bool CxxExtensions = false, bool WarningsAsErrors = false,
+        ToolchainPolicy? Toolchain = null);
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
@@ -33,9 +36,9 @@ internal static class ProjectSdkResolution
             return 0;
         }
 
-        if (args is not (["plan" or "verify", _] or ["lock", _, "--plan-sha", _]))
+        if (args is not (["plan" or "verify" or "workflow", _] or ["lock", _, "--plan-sha", _]))
         {
-            throw new ArgumentException("Usage: project sdk list | plan DIRECTORY | verify DIRECTORY | lock DIRECTORY --plan-sha SHA256");
+            throw new ArgumentException("Usage: project sdk list | plan DIRECTORY | verify DIRECTORY | workflow DIRECTORY | lock DIRECTORY --plan-sha SHA256");
         }
 
         string root = Path.GetFullPath(args[1]);
@@ -65,15 +68,25 @@ internal static class ProjectSdkResolution
             throw new InvalidDataException("SDK lock is stale or modified. Review project sdk plan and lock again.");
         }
 
-        await Console.Out.WriteLineAsync("SDK lock SHA-256: " + Digest(actual));
+        if (args[0] == "workflow")
+        {
+            await WriteManagedWorkflowAsync(root, actual, ct);
+        }
+        else
+        {
+            await Console.Out.WriteLineAsync("SDK lock SHA-256: " + Digest(actual));
+        }
         return 0;
     }
 
-    internal static async Task InitializeAsync(string root, bool library, CancellationToken ct)
+    internal static async Task InitializeAsync(string root, bool library, string? environmentLock, CancellationToken ct)
     {
         string sdk = library ? "Native.Library" : "Native.Application";
+        string settings = environmentLock is null ? "{}" :
+            "{\"toolchain\":{\"profile\":\"linux-clang\",\"policy\":\"ManagedOnly\",\"generator\":\"Ninja Multi-Config\"," +
+            "\"target\":{\"os\":\"linux\",\"architecture\":\"x64\"},\"environmentLockSha256\":\"" + environmentLock + "\"}}";
         string manifest = "{\n  \"schemaVersion\": 1,\n  \"sdk\": \"" + sdk + "\",\n  \"sdkVersion\": \"" + Version +
-                          "\",\n  \"policyFiles\": [],\n  \"settings\": {}\n}\n";
+                          "\",\n  \"policyFiles\": [],\n  \"settings\": " + settings + "\n}\n";
         await File.WriteAllTextAsync(Path.Combine(root, Manifest), manifest, ct);
         _ = Directory.CreateDirectory(Path.Combine(root, Prefix));
         foreach (string module in Modules)
@@ -170,6 +183,19 @@ internal static class ProjectSdkResolution
             writer.WriteNumber("cxxStandard", policy.CxxStandard);
             writer.WriteBoolean("cxxExtensions", policy.CxxExtensions);
             writer.WriteBoolean("warningsAsErrors", policy.WarningsAsErrors);
+            if (policy.Toolchain is { } toolchain)
+            {
+                writer.WriteStartObject("toolchain");
+                writer.WriteString("profile", "linux-clang");
+                writer.WriteString("policy", "ManagedOnly");
+                writer.WriteString("generator", toolchain.Generator);
+                writer.WriteStartObject("target");
+                writer.WriteString("os", "linux");
+                writer.WriteString("architecture", "x64");
+                writer.WriteEndObject();
+                writer.WriteString("environmentLockSha256", toolchain.EnvironmentLockSha256);
+                writer.WriteEndObject();
+            }
             writer.WriteEndObject();
             writer.WriteEndObject();
         }
@@ -192,13 +218,54 @@ internal static class ProjectSdkResolution
 
     private static Policy Overlay(Policy inherited, JsonElement settings)
     {
-        CheckObject(settings, "cxxStandard", "cxxExtensions", "warningsAsErrors");
+        CheckObject(settings, "cxxStandard", "cxxExtensions", "warningsAsErrors", "toolchain");
         int standard = settings.TryGetProperty("cxxStandard", out JsonElement s) ? s.GetInt32() : inherited.CxxStandard;
         return standard is not (17 or 20 or 23)
             ? throw new InvalidDataException("cxxStandard must be 17, 20 or 23.")
             : new(standard,
             settings.TryGetProperty("cxxExtensions", out JsonElement e) ? e.GetBoolean() : inherited.CxxExtensions,
-            settings.TryGetProperty("warningsAsErrors", out JsonElement w) ? w.GetBoolean() : inherited.WarningsAsErrors);
+            settings.TryGetProperty("warningsAsErrors", out JsonElement w) ? w.GetBoolean() : inherited.WarningsAsErrors,
+            settings.TryGetProperty("toolchain", out JsonElement toolchain) ? ReadToolchain(toolchain) : inherited.Toolchain);
+    }
+
+    private static ToolchainPolicy ReadToolchain(JsonElement element)
+    {
+        CheckObject(element, "profile", "policy", "generator", "target", "environmentLockSha256");
+        JsonElement target = element.GetProperty("target");
+        CheckObject(target, "os", "architecture");
+        string? generator = element.GetProperty("generator").GetString();
+        string? digest = element.GetProperty("environmentLockSha256").GetString();
+        return element.GetProperty("profile").GetString() == "linux-clang" &&
+               element.GetProperty("policy").GetString() == "ManagedOnly" &&
+               target.GetProperty("os").GetString() == "linux" && target.GetProperty("architecture").GetString() == "x64" &&
+               generator is "Ninja" or "Ninja Multi-Config" && digest is { Length: 64 } && digest.All(char.IsAsciiHexDigitLower)
+            ? new(generator, digest)
+            : throw new InvalidDataException("Project toolchain requires linux-clang, ManagedOnly, Linux x64, Ninja and an approved environment lock.");
+    }
+
+    private static async Task WriteManagedWorkflowAsync(string root, byte[] sdkLock, CancellationToken ct)
+    {
+        using JsonDocument document = JsonDocument.Parse(sdkLock);
+        if (!document.RootElement.GetProperty("effective").TryGetProperty("toolchain", out JsonElement selected))
+        {
+            throw new InvalidDataException("The project SDK lock does not declare a toolchain.");
+        }
+        ToolchainPolicy toolchain = ReadToolchain(selected);
+        JsonObject workflow = JsonNode.Parse(await File.ReadAllBytesAsync(CheckedPath(root, "workflow.json"), ct))!.AsObject();
+        JsonObject context = workflow["contexts"]!["project"]!.AsObject();
+        _ = context.Remove("configurePreset");
+        context["buildDirectory"] = "out/build/managed-linux";
+        context["configuration"] = "Release";
+        context["generator"] = toolchain.Generator;
+        context["toolchain"] = new JsonObject
+        {
+            ["environmentProfileId"] = "linux-managed-clang",
+            ["generator"] = toolchain.Generator,
+            ["hostArchitecture"] = "x64",
+            ["targetArchitecture"] = "x64",
+            ["environmentLockSha256"] = toolchain.EnvironmentLockSha256
+        };
+        await Console.Out.WriteLineAsync(workflow.ToJsonString());
     }
 
     private static void CheckObject(JsonElement element, params string[] allowed)

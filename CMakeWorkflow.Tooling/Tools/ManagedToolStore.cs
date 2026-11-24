@@ -55,7 +55,15 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
     internal static string ToolPath(string store, ManagedToolRelease release, string tool) =>
         tool is "sysroot" or "vcpkg-registry" ? Location(store, release) : Executable(Location(store, release), tool);
 
-    private static bool UsesXz(ManagedToolRelease release) => release.Id is "llvm" or "sysroot";
+    private static ComponentArchive Format(ManagedToolRelease release) =>
+        ManagedComponentCatalog.Find(release.Id, release.Version)?.Format ?? release.Id switch
+        {
+            "llvm" or "sysroot" => ComponentArchive.TarXz,
+            "vcpkg" => ComponentArchive.RawExecutable,
+            _ => release.TarRoot is null ? ComponentArchive.ZipExecutable : ComponentArchive.TarGzip
+        };
+
+    private static bool UsesXz(ManagedToolRelease release) => Format(release) == ComponentArchive.TarXz;
 
     internal static async Task<bool> IsInstalledAsync(string store, ManagedToolRelease release, CancellationToken ct)
     {
@@ -118,7 +126,11 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
             if (release.Id == "llvm")
             {
                 ManagedLinuxSdk.RequireHostAbi();
-                ManagedToolRelease sdk = ToolCatalog.SysrootRelease;
+                ComponentRequirement? requirement = ManagedComponentCatalog.Find(release.Id, release.Version)?
+                    .Requires.SingleOrDefault(item => item.Id == "sysroot");
+                ManagedToolRelease sdk = requirement is null ? ToolCatalog.SysrootRelease :
+                    ManagedComponentCatalog.Find(requirement.Id, requirement.Version)?.Release ??
+                    throw new InvalidDataException("The compiler's required sysroot is unavailable in the catalog.");
                 if (!await IsInstalledAsync(store, sdk, ct))
                 {
                     throw new InvalidDataException("The pinned Linux SDK must be installed before LLVM. Apply linux-clang.");
@@ -210,13 +222,14 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
     private static async Task ExtractAsync(ManagedToolRelease release, string archive, string root, CancellationToken ct)
     {
         await using FileStream input = File.OpenRead(archive);
-        if (release.Id == "vcpkg")
+        ComponentArchive format = Format(release);
+        if (format == ComponentArchive.RawExecutable)
         {
             await WriteFileAsync(root, "bin/vcpkg", input, input.Length, true, ct);
             return;
         }
 
-        if (release.TarRoot is null)
+        if (format == ComponentArchive.ZipExecutable)
         {
             using ZipArchive zip = new(input, ZipArchiveMode.Read, leaveOpen: false);
             if (zip.Entries.Count != 1 || zip.Entries[0].FullName != "ninja" ||
@@ -231,7 +244,7 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
             return;
         }
 
-        if (UsesXz(release))
+        if (format == ComponentArchive.TarXz)
         {
             string expanded = archive + ".tar";
             await ExpandXzAsync(archive, expanded, ct);

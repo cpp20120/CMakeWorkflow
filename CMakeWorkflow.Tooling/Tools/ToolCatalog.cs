@@ -13,16 +13,7 @@ public static class ToolCatalog
     internal static ManagedToolRelease VcpkgRelease => ManagedReleases.VcpkgRelease;
     internal const string VcpkgCommit = ManagedReleases.VcpkgCommit;
 
-    internal static ManagedToolRelease? ManagedRelease(string tool) => tool switch
-    {
-        "cmake" or "ctest" or "cpack" => CMakeRelease,
-        "ninja" => NinjaRelease,
-        "clang" or "clang++" or "ld.lld" => LlvmRelease,
-        "sysroot" => SysrootRelease,
-        "vcpkg" => VcpkgRelease,
-        "vcpkg-registry" => VcpkgRegistry,
-        _ => null
-    };
+    internal static ManagedToolRelease? ManagedRelease(string tool) => ManagedComponentCatalog.DefaultForTool(tool);
 
     public static IReadOnlyList<ToolProfile> AllProfiles => Profiles.Values.OrderBy(x => x.Id,
         StringComparer.Ordinal).ToArray();

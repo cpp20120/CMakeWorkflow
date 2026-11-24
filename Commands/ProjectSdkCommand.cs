@@ -8,7 +8,7 @@ internal static class ProjectSdkCommand
 {
     private const string ResourcePrefix = "CMakeWorkflow.ProjectSdk.v1.";
     private const string Usage = "project new <library|application> NAME DIRECTORY [--environment-lock SHA256] | " +
-                                 "project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256] | project sdk <list|plan|lock|verify>";
+                                 "project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256] | project sdk <list|plan|lock|verify|workflow>";
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
     {
@@ -81,7 +81,7 @@ internal static class ProjectSdkCommand
                 await WriteAsync(staging, "src/main.cpp", "main.cpp", name, buildTarget, environmentLock, ct);
             }
 
-            await ProjectSdkResolution.InitializeAsync(staging, library, ct);
+            await ProjectSdkResolution.InitializeAsync(staging, library, environmentLock, ct);
             await File.WriteAllTextAsync(Path.Combine(staging, ".gitignore"), "/out/\n/CMakeUserPresets.json\n", ct);
             ct.ThrowIfCancellationRequested();
             Directory.Move(staging, destination);

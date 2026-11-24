@@ -20,6 +20,9 @@ public static class ManagedEnvironmentLocks
     }
 
     public static async Task VerifyAsync(string digest, CancellationToken ct)
+        => _ = await ReadAsync(digest, ct);
+
+    internal static async Task<ToolchainEnvironmentLock?> ReadAsync(string digest, CancellationToken ct)
     {
         RequireDigest(digest);
         string path = ManifestPath(digest);
@@ -28,16 +31,24 @@ public static class ManagedEnvironmentLocks
             throw new InvalidDataException($"Environment lock {digest} is missing. Install it using tooling lock --write.");
         }
 
-        byte[] expected = Serialize();
-        if (Hash(expected) != digest || new FileInfo(path).Length != expected.Length ||
-            !(await File.ReadAllBytesAsync(path, ct)).AsSpan().SequenceEqual(expected))
+        if (new FileInfo(path).Length > 128 * 1024)
         {
-            throw new InvalidDataException("The environment lock differs from this CLI's pinned Linux toolchain.");
+            throw new InvalidDataException("The toolchain environment lock exceeds its size limit.");
         }
+        byte[] expected = Serialize();
+        byte[] actual = await File.ReadAllBytesAsync(path, ct);
+        return Hash(actual) != digest
+            ? throw new InvalidDataException("The environment lock differs from this CLI's pinned Linux toolchain or its approved SHA-256.")
+            : Hash(expected) == digest ? null : ToolchainEnvironment.Validate(actual);
     }
 
     internal static async Task WriteAsync(byte[] bytes, string digest, CancellationToken ct)
     {
+        RequireDigest(digest);
+        if (Hash(bytes) != digest)
+        {
+            throw new InvalidDataException("Cannot publish an environment lock under a different digest.");
+        }
         string path = ManifestPath(digest);
         ManagedToolStore.EnsureDirectory(Path.GetDirectoryName(path)!);
         string temporary = path + "." + Guid.NewGuid().ToString("N");

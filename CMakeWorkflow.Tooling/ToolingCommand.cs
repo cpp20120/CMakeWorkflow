@@ -21,6 +21,12 @@ public static class ToolingCommand
                 return await VisualStudioSetupCommand.ExecuteAsync(args[1..], ct);
             }
 
+            if (args[0] is "catalog" or "installed" or "resolve" or "verify" ||
+                (args[0] == "lock" && args.Length > 1 && args[1] != "--write"))
+            {
+                return await ToolchainEnvironmentCommand.ExecuteAsync(args, ct);
+            }
+
             if (args[0] == "lock")
             {
                 return await ManagedEnvironmentCommand.LockAsync(args[1..], ct);
@@ -38,6 +44,7 @@ public static class ToolingCommand
             }
 
             List<string> profiles = [];
+            List<ComponentRequirement> versions = [];
             PackageManagerKind manager = PackageManagerKind.Auto;
             bool fallback = true;
             ToolResolutionPolicy? policy = null;
@@ -57,6 +64,8 @@ public static class ToolingCommand
                         policy = ParsePolicy(args[++i]); break;
                     case "--plan-sha" when i + 1 < args.Length:
                         approval = args[++i]; break;
+                    case "--version" when i + 1 < args.Length:
+                        versions.Add(ToolchainEnvironmentCommand.ParseVersion(args[++i])); break;
                     case "--no-fallback": fallback = false; break;
                     case "--profile":
                         if (i + 1 >= args.Length || args[i + 1].StartsWith('-'))
@@ -88,7 +97,7 @@ public static class ToolingCommand
 
             if (action == "list")
             {
-                if (profiles.Count > 0)
+                if (profiles.Count > 0 || versions.Count > 0)
                 {
                     throw new ArgumentException("tooling list does not accept profiles.");
                 }
@@ -111,7 +120,24 @@ public static class ToolingCommand
                 return 0;
             }
 
-            ToolingService service = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller());
+            ToolchainEnvironmentLock? selectedEnvironment = null;
+            if (versions.Count > 0)
+            {
+                if (policy != ToolResolutionPolicy.ManagedOnly || !profiles.SequenceEqual([ToolchainEnvironment.Profile]))
+                {
+                    throw new ArgumentException("Exact component versions require --profile linux-clang --tool-policy ManagedOnly.");
+                }
+                (ToolchainEnvironmentLock? resolved, ToolchainDiagnostic? error) = ToolchainEnvironment.Resolve(
+                    ToolchainEnvironment.Native("Ninja Multi-Config", [.. versions]) with { Host = ToolchainEnvironment.ExecutionHost() },
+                    ManagedComponentCatalog.Components);
+                selectedEnvironment = resolved ?? throw new InvalidOperationException(error!.Message);
+            }
+
+            ToolingService service = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller())
+            {
+                FindManagedRelease = tool => selectedEnvironment is null ? ToolCatalog.ManagedRelease(tool) :
+                    ToolchainEnvironment.ReleaseForTool(selectedEnvironment, tool)
+            };
             ToolingPlan plan = await service.PlanAsync(profiles, manager, fallback, installDirectory, ct, resolutionPolicy: policy);
             if (action is "doctor" or "plan" || dryRun)
             {
@@ -268,5 +294,5 @@ public static class ToolingCommand
     };
 
     private const string Usage =
-        "tooling <list|doctor|plan|setup|lock|vcpkg|vs> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]";
+        "tooling <list|doctor|plan|setup|catalog|installed|resolve|lock|verify|vcpkg|vs> [--profile NAME] [--json] [--tool-policy AllowSystem|ManagedOnly] [--version COMPONENT=VERSION]";
 }

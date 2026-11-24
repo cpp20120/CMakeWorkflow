@@ -6,6 +6,26 @@
   "properties": {
     "cxxStandard": { "enum": [17, 20, 23] },
     "cxxExtensions": { "type": "boolean" },
-    "warningsAsErrors": { "type": "boolean" }
+    "warningsAsErrors": { "type": "boolean" },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "policy", "generator", "target", "environmentLockSha256"],
+      "properties": {
+        "profile": { "const": "linux-clang" },
+        "policy": { "const": "ManagedOnly" },
+        "generator": { "enum": ["Ninja", "Ninja Multi-Config"] },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["os", "architecture"],
+          "properties": {
+            "os": { "const": "linux" },
+            "architecture": { "const": "x64" }
+          }
+        },
+        "environmentLockSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
   }
 }

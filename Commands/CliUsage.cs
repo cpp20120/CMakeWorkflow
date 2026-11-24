@@ -7,7 +7,7 @@ internal static class CliUsage
         Console.Error.WriteLine(
         "Usage: CMakeWorkflow project new <library|application> NAME DIRECTORY [--environment-lock SHA256]\n" +
         "       CMakeWorkflow project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256]\n" +
-        "       CMakeWorkflow project sdk <list|plan|lock|verify> [DIRECTORY] [--plan-sha SHA256]\n" +
+        "       CMakeWorkflow project sdk <list|plan|lock|verify|workflow> [DIRECTORY] [--plan-sha SHA256]\n" +
         "Usage: CMakeWorkflow remote <start|find|status|inspect|events|report|artifacts|download|cancel> --destination USER@HOST --endpoint REMOTE_SOCKET --workspace REMOTE_DIR ...\n" +
         "       CMakeWorkflow experiment <plan|deps|run|report|compare|download> (use experiment help for options)\n" +
         "       CMakeWorkflow remote stash --operation ID --store LOCAL_CAS (use remote help for transport options)\n" +
@@ -17,6 +17,7 @@ internal static class CliUsage
         "Usage: CMakeWorkflow env <doctor|plan|setup> REQUIREMENTS.json [--json] [--yes --plan-sha SHA256] [--allow-system-changes]\n" +
         "Usage: CMakeWorkflow tooling <list|doctor|plan|setup> [profile...] [--profile NAME] [--json] [--pm auto|none|apt|pacman|dnf|brew|winget] [--install-dir PATH] [--no-fallback] [--tool-policy AllowSystem|ManagedOnly] [--plan-sha SHA] [--dry-run] [--yes]\n" +
         "       CMakeWorkflow tooling lock [--write] | tooling vcpkg plan PROJECT | tooling vcpkg install PROJECT --yes --plan-sha SHA\n" +
+        "       CMakeWorkflow tooling catalog | installed | resolve --profile NAME | lock --profile NAME [--approve-sha SHA] | verify --environment-lock SHA\n" +
         "Usage: CMakeWorkflow dagflow mutation run --suite NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz seed --layer NAME [--source-dir DIR]\n" +
         "       CMakeWorkflow dagflow fuzz run --build-dir DIR --layer NAME [--duration SECONDS] [--corpus DIR] [--replay-only]\n" +

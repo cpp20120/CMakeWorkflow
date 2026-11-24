@@ -76,6 +76,12 @@ jobs:
         run: dotnet CMakeWorkflow.Campaigns.Tests/bin/Release/net10.0/CMakeWorkflow.Campaigns.Tests.dll
       - name: Generic CMake integration
         run: dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll bin/Release/net10.0/${{ matrix.executable }}
+      - name: Project SDK P0 and P1
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash tests/infrastructure/project-sdk/run-tests.sh "$PWD/bin/Release/net10.0/${{ matrix.executable }}"
+          bash tests/infrastructure/project-sdk/run-p1-tests.sh "$PWD/bin/Release/net10.0/${{ matrix.executable }}"
       - name: Build isolated recovery fault-injection CLI
         run: dotnet publish CMakeWorkflow.csproj -c Release -p:PublishAot=false -p:RecoveryFaultInjection=true --artifacts-path out/recovery-artifacts -o out/recovery-cli
       - name: Recovery faults and manual reconciliation
@@ -137,6 +143,30 @@ jobs:
       - name: Publish NativeAOT CLI and Host
         shell: pwsh
         run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:Version=$env:SDK_VERSION -p:TreatWarningsAsErrors=true
+      - name: NativeAOT toolchain catalog
+        shell: pwsh
+        run: |
+          $catalog = & out/native/${{ matrix.executable }} tooling catalog | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $catalog.schemaVersion -ne 1 -or $catalog.components.Count -lt 6) {
+            throw "Toolchain catalog failed"
+          }
+          if ($IsWindows) {
+            $inventory = & out/native/${{ matrix.executable }} tooling installed | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $inventory.schemaVersion -ne 1 -or
+                @($inventory.components | Where-Object { $_.origin -eq 'system' }).Count -eq 0) {
+              throw "Installed Windows toolchain discovery failed"
+            }
+          }
+      - name: NativeAOT Project SDK P0 and P1
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash tests/infrastructure/project-sdk/run-tests.sh "$PWD/out/native/${{ matrix.executable }}"
+          bash tests/infrastructure/project-sdk/run-p1-tests.sh "$PWD/out/native/${{ matrix.executable }}"
+      - name: NativeAOT toolchain resolution without provisioning
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash tests/infrastructure/toolchain-p2/run-tests.sh "$PWD/out/native/${{ matrix.executable }}"
       - name: Publish and exercise NativeAOT historical scheduling
         shell: pwsh
         run: |

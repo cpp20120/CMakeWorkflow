@@ -98,6 +98,10 @@ See [project schema](../../schemas/project-sdk/project.v1.schema.json) and
 
 ## Bind a managed toolchain (Linux x86-64)
 
+See [Toolchain management](toolchain-management.md) for v2 locks,
+`settings.toolchain` and `project sdk workflow`. The following uses the
+original v1 lock workflow.
+
 ```sh
 CMakeWorkflow project tooling plan
 CMakeWorkflow project tooling setup --yes --plan-sha PLAN_SHA256
@@ -129,7 +133,7 @@ operation. This change does not add a new tool store, registry or resolver.
 ## Next slices
 
 1. Add adoption and upgrade plans, additional installed SDK versions, recipe
-   composition and explicit project toolchain requirements.
+   composition and additional toolchain profiles.
 2. Expand the SDK catalog to runtime/Qt/interop and add target-scoped quality
    policies and separate compiler/platform configuration axes.
 3. Generalize managed release catalogs, inventory and lock lifecycle; add

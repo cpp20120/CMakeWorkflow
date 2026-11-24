@@ -24,6 +24,7 @@ Directory.CreateDirectory(root);
 try
 {
     await VisualStudioSetupTests.RunAsync();
+    await ToolchainEnvironmentTests.RunAsync(root, CancellationToken.None);
 
     // The native probe is explicitly opt-in; CI exercises only the ordinary user logger.
     if (OperatingSystem.IsWindows())

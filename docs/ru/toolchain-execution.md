@@ -1,5 +1,7 @@
 # Привязка Windows toolchain к исполнению workflow
 
+[Каталог тулчейнов, разрешение и environment locks](toolchain-management.md)
+
 В `contexts.<имя>.toolchain` можно явно указать candidate IDs из
 `toolchains/discover`. В `target/prepare` поле называется `toolchain`, а в
 `profile/prepare` у каждого варианта — `variants[].toolchain`.
