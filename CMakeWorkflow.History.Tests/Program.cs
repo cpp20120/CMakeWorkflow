@@ -856,6 +856,31 @@ try
         string IdOf(string dir) => store.Runs(50, null, null, null, null, null)
             .Single(x => x.Directory == dir).Id;
 
+        HistoryDetail baseline = store.Show(IdOf(statisticalBase));
+        HistoryDetail originalCandidate = store.Show(IdOf(statisticalSlow));
+        HistoryDetail differentBuild = originalCandidate with
+        {
+            Measurements = [.. originalCandidate.Measurements.Where(row => row.Variant == "main").Select(row =>
+                row with { Environment = "candidate-build", Variant = "alternate" })]
+        };
+        string baselineEnvironment = baseline.Measurements.First(row => row.Variant == "main").Environment!;
+        CMakeWorkflow.Contracts.History.HistoryComparisonSelection explicitComparison = new("process_wall_time")
+        {
+            BaselineVariant = "main",
+            CandidateVariant = "alternate",
+            BaselineEnvironment = baselineEnvironment,
+            CandidateEnvironment = "candidate-build",
+            AllowDifferentBuildEnvironments = true
+        };
+        Check(CMakeWorkflow.History.Analysis.HistoryComparison.CompareSelected(baseline, differentBuild, explicitComparison)
+            .Single().Status == "intentional", "explicit different build comparison");
+        Check(CMakeWorkflow.History.Analysis.HistoryComparison.CompareSelected(baseline, differentBuild,
+            explicitComparison with { CandidateEnvironment = "unexpected" }).Single().Status == "incompatible",
+            "unexpected environment rejected");
+        Check(CMakeWorkflow.History.Analysis.HistoryComparison.CompareSelected(baseline,
+            differentBuild with { Run = differentBuild.Run with { HostId = "another-host" } }, explicitComparison)
+            .Single().Status == "incompatible", "explicit builds do not permit a Host mismatch");
+
         async Task<JsonDocument> DetectJson(string baseline, string candidate,
             params string[] extra)
         {

@@ -135,6 +135,9 @@ internal partial interface IClientRpc
     [JsonRpcMethod("history/detect")]
     Task<HistoryDetectionReport> HistoryDetectAsync(HistoryDetectQuery request, CancellationToken ct);
 
+    [JsonRpcMethod("history/operationRuns")]
+    Task<OperationHistoryRuns> HistoryOperationRunsAsync(OpIdRequest request, CancellationToken ct);
+
     [JsonRpcMethod("history/indexStatus")]
     Task<HistoryIndexStatus> HistoryIndexStatusAsync(OpIdRequest request, CancellationToken ct);
 

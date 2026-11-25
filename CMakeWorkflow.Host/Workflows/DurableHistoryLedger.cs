@@ -21,6 +21,12 @@ public sealed partial class DurableAcceptanceStore
               diagnostic_code TEXT,
               attempt_id TEXT
             );
+            CREATE TABLE IF NOT EXISTS workflow_history_runs (
+              operation_id TEXT NOT NULL REFERENCES workflow_history_intents(operation_id),
+              run_id TEXT NOT NULL,
+              source_hash TEXT NOT NULL,
+              PRIMARY KEY(operation_id,run_id)
+            );
             """;
         _ = schema.ExecuteNonQuery();
 
@@ -153,9 +159,12 @@ public sealed partial class DurableAcceptanceStore
         return command.ExecuteNonQuery() == 1 ? attemptId : null;
     }
 
-    internal bool CompleteHistoryIndex(string operationId, string attemptId, string? diagnosticCode = null)
+    internal bool CompleteHistoryIndex(string operationId, string attemptId, string? diagnosticCode = null,
+        IReadOnlyList<IndexedRunIdentity>? runs = null)
     {
+        using SqliteTransaction tx = connection.BeginTransaction();
         using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = tx;
         command.CommandText = """
             UPDATE workflow_history_intents
             SET state=$next,attempt_id=NULL,updated_at=$now,diagnostic_code=$diagnostic
@@ -167,7 +176,43 @@ public sealed partial class DurableAcceptanceStore
         _ = command.Parameters.AddWithValue("$next", diagnosticCode is null ? "Indexed" : "Failed");
         _ = command.Parameters.AddWithValue("$now", HistoryTimestamp());
         _ = command.Parameters.AddWithValue("$diagnostic", (object?)diagnosticCode ?? DBNull.Value);
-        return command.ExecuteNonQuery() == 1;
+        if (command.ExecuteNonQuery() != 1)
+        {
+            return false;
+        }
+        foreach (IndexedRunIdentity run in runs ?? [])
+        {
+            using SqliteCommand insert = connection.CreateCommand();
+            insert.Transaction = tx;
+            insert.CommandText = """
+                INSERT INTO workflow_history_runs(operation_id,run_id,source_hash) VALUES ($id,$run,$hash);
+                """;
+            _ = insert.Parameters.AddWithValue("$id", operationId);
+            _ = insert.Parameters.AddWithValue("$run", run.RunId);
+            _ = insert.Parameters.AddWithValue("$hash", run.SourceHash);
+            _ = insert.ExecuteNonQuery();
+        }
+        tx.Commit();
+        return true;
+    }
+
+    internal IReadOnlyList<IndexedRunIdentity> IndexedHistoryRuns(string operationId)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workflow_history_runs';";
+        if (command.ExecuteScalar() is null)
+        {
+            return [];
+        }
+        command.CommandText = "SELECT run_id,source_hash FROM workflow_history_runs WHERE operation_id=$id ORDER BY run_id;";
+        _ = command.Parameters.AddWithValue("$id", operationId);
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<IndexedRunIdentity> runs = [];
+        while (reader.Read())
+        {
+            runs.Add(new(reader.GetString(0), reader.GetString(1)));
+        }
+        return runs.AsReadOnly();
     }
 
     private bool HasHistoryIntents()

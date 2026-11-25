@@ -13,7 +13,6 @@ kit=$("$cli" kit plan linux-gcc --project "$local_project" | jq -er .kitLockSha2
 "$cli" kit lock linux-gcc --project "$local_project" --plan-sha "$kit"
 configuration=$("$cli" restore --project "$local_project" --kit linux-gcc --plan --json | jq -er .configurationLockSha256)
 "$cli" restore --project "$local_project" --kit linux-gcc --configuration-plan-sha "$configuration"
-"$consumer" --kit-stage "$local_project" linux-gcc
 docker cp "$local_project" "$container:$remote_project"
 docker exec "$container" chown -R cmwf:cmwf "$remote_project"
 docker exec --user cmwf "$container" /opt/cmwf/CMakeWorkflow kit use linux-clang --project "$remote_project"

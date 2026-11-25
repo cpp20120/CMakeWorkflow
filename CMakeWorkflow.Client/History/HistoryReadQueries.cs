@@ -1,3 +1,5 @@
+using CMakeWorkflow.Contracts.History;
+
 namespace CMakeWorkflow.Client.History;
 
 // Paths belong to the initialized Host workspace (also for SSH clients).
@@ -14,9 +16,15 @@ public sealed record HistoryRunsPageQuery(string DatabasePath, int Limit = 50,
 public sealed record HistoryShowQuery(string DatabasePath, string RunId);
 
 public sealed record HistoryMetricsQuery(string DatabasePath, string? RunId = null, string? Metric = null,
-    string? Variant = null, string? Scenario = null);
+    string? Variant = null, string? Scenario = null)
+{
+    public string? Environment { get; init; }
+}
 
-public sealed record HistoryCompareQuery(string DatabasePath, string BaselineRunId, string CandidateRunId);
+public sealed record HistoryCompareQuery(string DatabasePath, string BaselineRunId, string CandidateRunId)
+{
+    public HistoryComparisonSelection? Selection { get; init; }
+}
 
 public sealed record HistoryDetectQuery(string DatabasePath, string BaselineRunId, string CandidateRunId,
     string Metric, string Direction, double MinimumEffectPercent,

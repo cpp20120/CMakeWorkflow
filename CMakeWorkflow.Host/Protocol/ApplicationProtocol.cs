@@ -157,6 +157,9 @@ public partial interface IHostRpc
     [JsonRpcMethod("runs/get")]
     Task<WorkflowReportSnapshot> RunGetAsync(RunGetRequest request, CancellationToken cancellationToken);
 
+    [JsonRpcMethod("history/operationRuns")]
+    Task<OperationHistoryRuns> HistoryOperationRunsAsync(HistoryOperationRequest request, CancellationToken cancellationToken);
+
     [JsonRpcMethod("history/indexStatus")]
     Task<HistoryIndexStatus> HistoryIndexStatusAsync(HistoryOperationRequest request, CancellationToken cancellationToken);
 

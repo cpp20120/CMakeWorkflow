@@ -82,6 +82,21 @@ is distinct from the cancellation-intent revision. See [process recovery](en/pro
 Code that previously constructed the two Client wire requests must use the public operation-handle methods instead.
 Calls to `ExecuteResumeAsync()` must now supply the observed admission revision; the previous default argument is removed.
 
+## Programmable engineering and History
+
+| API | Role |
+| --- | --- |
+| `Developer.EngineeringProject` | Discovers SDK projects and exposes Kit, profile and inspection APIs. |
+| `Developer.ReviewedEngineeringWorkflow` | Rechecks reviewed evidence, materializes a Scripting manifest, delivers exact reviewed bytes and performs Host preflight. |
+| `HistoryService.WaitForIndexAsync`, `GetOperationRunsAsync`, `QueryOperationAsync` | Observe indexing, retrieve committed run identities and query measurements by operation. |
+| `HistoryService.EnumerateRunPagesAsync` | Read a bounded number of typed History pages with an opaque cursor. |
+| `WorkflowOperation.WaitForHistoryAsync`, `GetMeasurementsAsync` | Read History for an existing durable operation handle. |
+| `HistoryComparisonSelection` | Match explicit series and expected build environments in `HistoryCompareQuery`. |
+| `PerformanceAnalysis.Summarize`, `HistorySampleSummary` | Group measurements and calculate shared descriptive statistics. |
+| `RegressionPolicy`, `RegressionDecision`, `RegressionGate` | Evaluate and aggregate deterministic CI decisions from existing History evidence. |
+
+See the [engineering and analysis guide](en/programmable-engineering.md).
+
 ## Reading the signatures
 
 Signatures retain parameter defaults, nullable annotations, generic constraints and base types. Referenced types are

@@ -1,5 +1,7 @@
 # Engineering Kits
 
+[Programmable Kit campaigns and History gates](programmable-engineering.md).
+
 An engineering Kit selects a toolchain and platform for a project. Select a configuration profile separately to choose build type, linkage, optimization, instrumentation and testing. The execution placement is the Host connection and workspace.
 
 | Built-in Kit | Compiler | Generator | Execution host and target |

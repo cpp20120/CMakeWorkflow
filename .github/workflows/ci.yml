@@ -245,6 +245,13 @@ jobs:
         if: runner.os == 'Linux'
         shell: pwsh
         run: ./scripts/ci-native-smoke.ps1 -Cli out/native/${{ matrix.executable }} -Consumer out/scripting-aot/CMakeWorkflow.Scripting.AotSmoke -LogDirectory out/smoke-logs/scripting
+      - name: Programmable Engineering Kit campaign and History gates
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash tests/infrastructure/engineering-kits/campaign-test.sh "$PWD/out/native/CMakeWorkflow"
+      - name: Durable workflow History receipts and recovery
+        if: runner.os == 'Linux'
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll --durable-workflow-wire-tests
       - name: Workflow manifest preparation wire validation
         run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll --manifest-preparation-wire-tests
       - name: File-based workflow CLI and external fragment package

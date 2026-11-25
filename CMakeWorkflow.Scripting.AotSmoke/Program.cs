@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Protocol;
+using CMakeWorkflow.Client.History;
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Scripting;
@@ -10,6 +12,7 @@ using CMakeWorkflow.Scripting;
 Check(!JsonSerializer.IsReflectionEnabledByDefault, "reflection disabled");
 TestComposition();
 TestScopes();
+PerformanceSmoke.Run();
 Console.WriteLine("PASS scripting composition, immutable snapshots, and JSON digest");
 
 if (args is ["--self-test"])
@@ -154,7 +157,8 @@ static async Task TestHostAsync(string endpoint, string workspace, CancellationT
     ContextRef context = workflow.Context("native", "build", spec => spec.ConfigurePreset = "smoke");
     NodeRef configure = workflow.Configure("configure", context);
     TargetBuildRef build = workflow.Build("build", context, "worker", [configure]);
-    WorkflowManifest manifest = workflow.Compose([workflow.CTest("test", context, [build]), build, configure]);
+    WorkflowManifest manifest = workflow.Compose([
+        workflow.CTest("test", context, [build]), workflow.Run("timing_native_001", build), build, configure]);
     string[] saved = await Task.WhenAll(manifest.SaveAsync(workspace, ct), manifest.SaveAsync(workspace, ct));
     string path = saved[0];
     byte[] written = await File.ReadAllBytesAsync(path, ct);
@@ -167,7 +171,8 @@ static async Task TestHostAsync(string endpoint, string workspace, CancellationT
           "nodes": [
             { "id": "configure", "kind": "configure", "context": "native" },
             { "id": "build", "kind": "build", "context": "native", "target": "worker", "dependsOn": ["configure"] },
-            { "id": "test", "kind": "ctest", "context": "native", "dependsOn": ["build"] }
+            { "id": "test", "kind": "ctest", "context": "native", "dependsOn": ["build"] },
+            { "id": "timing_native_001", "kind": "run", "from": "build" }
           ]
         }
         """u8.ToArray();
@@ -195,9 +200,13 @@ static async Task TestHostAsync(string endpoint, string workspace, CancellationT
         await RefusedAsync(() => manifest.PrepareAsync(client.Workflows, results, "alias", ct),
             (CMakeWorkflowRpcRefusalException error) => error.Code == "path_not_allowed");
     }
-    WorkflowPreflightResult preflight = await client.Workflows.PreflightAsync(prepared[0], 1, ct);
+    WorkflowPreflightResult preflight = await client.Workflows.PreflightAsync(
+        manifest.AtHost(prepared[0].Manifest, prepared[0].ResultsDirectory) with
+        {
+            HistoryPolicy = new(HistoryPolicyMode.Default)
+        }, ct);
     WorkflowPreflightResult equivalent = await client.Workflows.PreflightAsync(new(legacy, Digest(authored), 1, results), ct);
-    Check(preflight.Valid && equivalent.Valid && preflight.Nodes.Count == 3 &&
+    Check(preflight.Valid && equivalent.Valid && preflight.Nodes.Count == 4 &&
         PlanRows(preflight).SequenceEqual(PlanRows(equivalent)), "JSON and C# equivalent Host plans: " +
         string.Join(", ", preflight.Nodes.SelectMany(node => node.Diagnostics).Select(d => d.Message)));
     string requestId = "scripting-smoke-" + Guid.NewGuid().ToString("N");
@@ -222,8 +231,29 @@ static async Task TestHostAsync(string endpoint, string workspace, CancellationT
     OperationSnapshot done = await operation.WaitForCompletionAsync(ct: ct);
     OperationReportSnapshot report = await operation.GetReportAsync(ct);
     Check(done.State == "succeeded" && report.Report.GetProperty("nodes").EnumerateArray().Count(node =>
-        node.GetProperty("status").GetString() == "succeeded") == 3,
+        node.GetProperty("status").GetString() == "succeeded") == 4,
         "actual configure/build/CTest: " + report.Report.GetRawText());
+
+    HistoryIndexStatus status = await operation.WaitForHistoryAsync(ct: ct);
+    OperationHistoryRuns indexed = await reconnected.History.GetOperationRunsAsync(operation.OperationId, ct);
+    Check(status.State == HistoryIndexState.Indexed && indexed.Runs.Count == 1, "package-only indexed run receipt");
+    IReadOnlyList<HistoryMeasurement> measurements = await reconnected.Operations.GetHandle(operation.OperationId)
+        .GetMeasurementsAsync("process_wall_time", ct: ct);
+    Check(measurements.Count != 0 && measurements.All(row => row.RunId == indexed.Runs[0].RunId),
+        "package-only operation measurements");
+    string runId = indexed.Runs.Single().RunId;
+    List<HistoryDifference> compared = await reconnected.History.CompareAsync(new(indexed.DatabasePath, runId, runId)
+    {
+        Selection = new("process_wall_time") { BaselineVariant = "native", CandidateVariant = "native" }
+    }, ct);
+    Check(compared is [{ Metric: "process_wall_time", RunsSucceeded: true }], "package-only selected comparison");
+    int pages = 0;
+    await foreach (HistoryRunPage page in reconnected.History.EnumerateRunPagesAsync(new(indexed.DatabasePath, 1), 1, ct))
+    {
+        Check(page.Items.Single().Id == indexed.Runs.Single().RunId, "bounded page");
+        pages++;
+    }
+    Check(pages == 1, "page budget");
 
     NodeRef cached = workflow.Run("cache", build, options: node =>
     {

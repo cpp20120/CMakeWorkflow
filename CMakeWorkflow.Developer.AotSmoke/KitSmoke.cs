@@ -4,6 +4,7 @@ using CMakeWorkflow.Client.Transport;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Developer;
+using CMakeWorkflow.Scripting;
 
 internal static class KitSmoke
 {
@@ -38,7 +39,32 @@ internal static class KitSmoke
             Check((await DeveloperLifecycle.VerifyConfigurationAsync(root, new(), ct)).Lock.Sha256 == legacy, "v1 evidence");
             Check((await DeveloperLifecycle.VerifySdkAsync(root, ct)).Sha256 == sdk, "SDK evidence");
 
+            WorkflowManifest snapshot = await ReviewedEngineeringWorkflow.MaterializeAsync(operation, plan, ct);
+            Check(snapshot.Sha256 == plan.ManifestSha256 &&
+                snapshot.CopyBytes().AsSpan().SequenceEqual(plan.ManifestJson.Span), "exact Scripting snapshot");
+            string configurationPath = Path.Combine(root, configuration.Lock.Path);
+            byte[] approved = await File.ReadAllBytesAsync(configurationPath, ct);
+            try
+            {
+                await File.AppendAllTextAsync(configurationPath, "\n", ct);
+                try
+                {
+                    _ = await ReviewedEngineeringWorkflow.MaterializeAsync(operation, plan, ct);
+                    throw new InvalidOperationException("Changed configuration evidence was accepted.");
+                }
+                catch (InvalidDataException) { }
+            }
+            finally
+            {
+                await File.WriteAllBytesAsync(configurationPath, approved, ct);
+            }
+
             await using LocalDeveloperHost host = await LocalDeveloperHost.OpenAsync(root, ct);
+            PreparedWorkflow prepared = await ReviewedEngineeringWorkflow.PrepareAsync(host.Client, operation, plan,
+                "out/preflight-only", ct: ct);
+            Check(prepared.ManifestSha256 == plan.ManifestSha256 &&
+                (await ReviewedEngineeringWorkflow.PreflightAsync(host.Client, prepared, ct: ct)).Valid,
+                "reviewed Kit manifest survives changing active selection");
             WorkflowOperation run = await DeveloperLifecycle.ExecuteOperationAsync(host.Client,
                 new(operation, plan.ManifestSha256, "kit-smoke")
                 {
@@ -62,7 +88,8 @@ internal static class KitSmoke
 
     internal static async Task RunRemoteAsync(string local, string remote, string requestId, CancellationToken ct)
     {
-        DeveloperOperationPlan plan = await DeveloperLifecycle.PlanOperationAsync(Test(local, "linux-gcc"), ct);
+        DeveloperOperationRequest request = Test(local, "linux-gcc");
+        DeveloperOperationPlan plan = await DeveloperLifecycle.PlanOperationAsync(request, ct);
         static string Required(string suffix) => Environment.GetEnvironmentVariable("CMWF_SSHNET_" + suffix) ??
             throw new InvalidOperationException("Missing SSH fixture setting " + suffix);
         SshNetHostOptions connection = new(Required("HOST"), Required("USER"), Required("KEY"), Required("PIN"),
@@ -72,11 +99,11 @@ internal static class KitSmoke
             RemoteExecutable = Required("EXE")
         };
         await using CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(connection, ct);
-        WorkflowOperation operation = await DeveloperLifecycle.ExecuteStagedOperationAsync(client, plan,
-            new(remote + "/" + plan.ManifestName, remote + "/out/" + requestId, requestId)
-            {
-                HistoryPolicy = new(HistoryPolicyMode.Disabled)
-            }, ct);
+        PreparedWorkflow staged = await ReviewedEngineeringWorkflow.PrepareAsync(client, request, plan,
+            remote + "/out/" + requestId, ct: ct);
+        WorkflowPreflightResult preflight = await ReviewedEngineeringWorkflow.PreflightAsync(client, staged,
+            new(HistoryPolicyMode.Disabled), ct: ct);
+        WorkflowOperation operation = await client.Workflows.StartAsync(preflight.CreateStartOptions(requestId), ct);
         OperationSnapshot snapshot = await operation.WaitForCompletionAsync(ct: ct);
         Check(snapshot.State == "succeeded", "remote build and test");
         OperationReportSnapshot report = await operation.GetReportAsync(ct);

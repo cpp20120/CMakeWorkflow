@@ -2,6 +2,7 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.History.Storage;
+using CMakeWorkflow.History.Models;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
@@ -94,6 +95,7 @@ internal static class DurableHistoryIndexer
 
         DurableAcceptanceStore.Finalization finalization = ledger.GetFinalization(operationId)
             ?? throw new InvalidOperationException("history_finalization_missing");
+        HistoryImportResult imported;
         try
         {
             string database = AuthorizeDatabase(paths, status.DatabasePath!);
@@ -115,7 +117,7 @@ internal static class DurableHistoryIndexer
 
             ct.ThrowIfCancellationRequested();
             using HistoryStore history = new(database);
-            _ = await history.ImportFinalizedWorkflowAsync(run, finalization.ReportSha256, file =>
+            imported = await history.ImportFinalizedWorkflowAsync(run, finalization.ReportSha256, file =>
             {
                 ct.ThrowIfCancellationRequested();
                 _ = paths.Require(file);
@@ -142,7 +144,7 @@ internal static class DurableHistoryIndexer
         // Keep acknowledgement outside the import catch. If it fails after
         // the History commit, the next owner re-imports the same verified run.
         afterCommit?.Invoke();
-        _ = ledger.CompleteHistoryIndex(operationId, attemptId);
+        _ = ledger.CompleteHistoryIndex(operationId, attemptId, runs: imported.RunIdentities);
         return ledger.GetHistoryIndexStatus(operationId);
     }
 

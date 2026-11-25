@@ -32,7 +32,7 @@ public sealed partial class DoctorSession
         "profile/prepare", "profileReplay/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "profile/renderHistorical", "operations/find", "operations/get", "operations/list", "operations/cancel",
         "workflow/start", "workflow/nodeSelection", "workflow/compilerCacheProfile", "workflow/actionCache", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
-        "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "operations/artifacts/timestampText", "history/import", "history/indexStatus", "history/retryIndex", "workflow/historyPolicy", "history/runs", "history/show", "history/metrics", "history/query",
+        "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "operations/artifacts/timestampText", "history/import", "history/indexStatus", "history/operationRuns", "history/environmentFilter", "history/selectedCompare", "history/retryIndex", "workflow/historyPolicy", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "history/runsPage", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
         "dagflow/weakMemory/run", "dagflow/fuzz/seed", "dagflow/fuzz/run", "dagflow/fuzz/triage", "dagflow/fuzz/merge"
@@ -448,6 +448,35 @@ public sealed partial class DoctorSession
             (paths, ct) => WorkflowQueries.ReportAsync(paths.Require(request.RunDirectory), ct, paths.Read),
             cancellationToken);
 
+    public Task<OperationHistoryRuns> HistoryOperationRunsAsync(HistoryOperationRequest request,
+        CancellationToken cancellationToken) =>
+        ReadAsync(request, async (paths, ct) =>
+        {
+            using DurableAcceptanceStore store = DurableHistoryIndexer.OpenReadOnly(paths);
+            HistoryIndexStatus status = store.GetHistoryIndexStatus(request.OperationId);
+            if (status is not { State: HistoryIndexState.Indexed, DatabasePath: { } database })
+            {
+                throw new ApplicationRefusal("history_not_indexed", "The operation has no completed History index.");
+            }
+
+            IReadOnlyList<IndexedRunIdentity> runs = store.IndexedHistoryRuns(request.OperationId);
+            if (runs.Count == 0)
+            {
+                throw new ApplicationRefusal("history_mapping_unavailable", "This operation predates indexed run receipts.");
+            }
+
+            _ = await OperationArtifactReader.ReportAsync(paths, request.OperationId, ct);
+            string checkedDatabase = paths.Database(database);
+            if (!WorkflowPlanner.PathComparer.Equals(checkedDatabase, database))
+            {
+                throw new ApplicationRefusal("history_database_changed", "The admitted History database path changed.");
+            }
+            using HistoryStore history = new(checkedDatabase, readOnly: true);
+            return runs.Any(run => !history.ContainsIndexedRun(run.RunId, run.SourceHash))
+                ? throw new ApplicationRefusal("history_run_changed", "An indexed run is missing or its source identity changed.")
+                : new OperationHistoryRuns(1, request.OperationId, database, runs);
+        }, cancellationToken);
+
     public Task<HistoryIndexStatus> HistoryIndexStatusAsync(HistoryOperationRequest request,
         CancellationToken cancellationToken) =>
         ReadAsync(request, (paths, _) =>
@@ -551,10 +580,10 @@ public sealed partial class DoctorSession
             using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
             if (request.RunId is not null)
             {
-                _ = Detail(db, request.RunId, paths, ct);
+                _ = db.GetRun(request.RunId, path => paths.Require(path));
             }
 
-            return Task.FromResult(db.Metrics(request.RunId, request.Metric, request.Variant, request.Scenario,
+            return Task.FromResult(db.Metrics(request.RunId, request.Metric, request.Variant, request.Scenario, request.Environment,
                 paths.Contains, MeasurementLimit, ct));
         }, cancellationToken);
 
@@ -563,8 +592,16 @@ public sealed partial class DoctorSession
         ReadAsync(request, (paths, ct) =>
         {
             using HistoryStore db = new(paths.Database(request.DatabasePath), readOnly: true);
-            return Task.FromResult(HistoryComparison.Compare(Detail(db, request.BaselineRunId, paths, ct),
-                Detail(db, request.CandidateRunId, paths, ct)));
+            return Task.FromResult(request.Selection is { } selection
+                ? HistoryComparison.CompareSelected(SelectedDetail(request.BaselineRunId, selection.BaselineVariant),
+                    SelectedDetail(request.CandidateRunId, selection.CandidateVariant), selection)
+                : HistoryComparison.Compare(Detail(db, request.BaselineRunId, paths, ct),
+                    Detail(db, request.CandidateRunId, paths, ct)));
+
+            HistoryDetail SelectedDetail(string id, string? variant) => new(
+                db.GetRun(id, path => paths.Require(path)), [],
+                db.Metrics(id, request.Selection!.Metric, variant, request.Selection.Scenario,
+                    paths.Contains, MeasurementLimit, ct), []);
         }, cancellationToken);
 
     public Task<HistoryDetectionReport> HistoryDetectAsync(HistoryDetectRequest request,

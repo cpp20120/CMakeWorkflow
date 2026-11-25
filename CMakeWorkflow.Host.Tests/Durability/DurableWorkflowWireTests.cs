@@ -377,19 +377,14 @@ internal static class DurableWorkflowWireTests
         await using CMakeWorkflowClient second = await CMakeWorkflowClient.ConnectAsync(new(endpoint, workspace), ct);
         _ = await Task.WhenAll(sdk.History.RetryIndexAsync(accepted.OperationId, ct),
             second.History.RetryIndexAsync(accepted.OperationId, ct));
-        HistoryIndexStatus indexed;
-        do
-        {
-            indexed = await sdk.History.GetIndexStatusAsync(accepted.OperationId, ct);
-            if (indexed.State == HistoryIndexState.Indexed)
-            {
-                break;
-            }
-
-            Check(indexed.State is HistoryIndexState.Indexing or HistoryIndexState.Pending,
-                "Unexpected History recovery state: " + indexed.State);
-            await Task.Delay(30, ct);
-        } while (true);
+        HistoryIndexStatus indexed = await sdk.History.WaitForIndexAsync(accepted.OperationId, ct: ct);
+        OperationHistoryRuns receipt = await sdk.History.GetOperationRunsAsync(accepted.OperationId, ct);
+        OperationHistoryRuns secondReceipt = await second.History.GetOperationRunsAsync(accepted.OperationId, ct);
+        Check(indexed.State == HistoryIndexState.Indexed && receipt.Runs.Count == 1 &&
+            secondReceipt.Runs.SequenceEqual(receipt.Runs) && receipt.DatabasePath == database,
+            "History receipts did not survive restart and reconnect.");
+        Check((await sdk.History.QueryOperationAsync(accepted.OperationId, environment: "absent-environment", ct: ct)).Count == 0,
+            "History did not apply the environment filter.");
         while ((await sdk.History.GetIndexStatusAsync(waiting.OperationId, ct)).State != HistoryIndexState.Indexed)
         {
             await Task.Delay(30, ct);
@@ -408,10 +403,32 @@ internal static class DurableWorkflowWireTests
               (await File.ReadAllLinesAsync(marker, ct)).Count(line => line == "started") == dispatches,
             "Restoring the exact final report did not permit index-only recovery.");
 
+        using (CancellationTokenSource observer = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            observer.CancelAfter(TimeSpan.FromMilliseconds(100));
+            try
+            {
+                _ = await sdk.History.WaitForIndexAsync(unfinished.OperationId, ct: observer.Token);
+                throw new UnreachableException("Waiting for an unfinished operation unexpectedly completed.");
+            }
+            catch (OperationCanceledException) when (observer.IsCancellationRequested && !ct.IsCancellationRequested) { }
+        }
+        await File.AppendAllTextAsync(reportPath, " ", ct);
+        try
+        {
+            _ = await sdk.History.GetOperationRunsAsync(atomicAccepted.OperationId, ct);
+            throw new UnreachableException("History lookup accepted a substituted report.");
+        }
+        catch (CMakeWorkflowRpcRefusalException error) when (error.Code == "report_changed") { }
+        finally
+        {
+            await File.WriteAllBytesAsync(reportPath, finalReport, ct);
+        }
+
         Check((await sdk.History.GetIndexStatusAsync(unfinished.OperationId, ct)).State ==
               HistoryIndexState.AwaitingFinalization, "An unfinished operation was indexed after restart.");
         string legacyOperation = (await sdk.Operations.FindAsync("wire-client-id", ct)).OperationId;
-        Check((await sdk.History.GetIndexStatusAsync(legacyOperation, ct)).State == HistoryIndexState.Disabled &&
+        Check((await sdk.History.WaitForIndexAsync(legacyOperation, ct: ct)).State == HistoryIndexState.Disabled &&
               !File.Exists(Path.Combine(workspace, ".cmakeworkflow", "history.sqlite")),
             "A legacy request created a default History database.");
 

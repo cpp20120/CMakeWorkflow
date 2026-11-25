@@ -19,6 +19,13 @@ public static partial class DeveloperLifecycle
     public static async Task<string> PublishOperationManifestAsync(DeveloperOperationRequest request, DeveloperOperationPlan reviewed,
         CancellationToken ct = default)
     {
+        DeveloperOperationPlan current = await ReviewOperationAgainAsync(request, reviewed, ct);
+        return await PublishReviewedManifestAsync(current, reviewed.ManifestSha256, ct);
+    }
+
+    internal static async Task<DeveloperOperationPlan> ReviewOperationAgainAsync(DeveloperOperationRequest request,
+        DeveloperOperationPlan reviewed, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(reviewed);
         if (request.Configuration.Kit is { } explicitKit && explicitKit != reviewed.SelectedKit?.Id)
@@ -31,7 +38,7 @@ public static partial class DeveloperLifecycle
                 Configuration = request.Configuration with { Kit = reviewed.SelectedKit?.Id }
             }, useActive: false, ct);
         return WorkflowPathEquals(current.ProjectDirectory, reviewed.ProjectDirectory)
-            ? await PublishReviewedManifestAsync(current, reviewed.ManifestSha256, ct)
+            ? current
             : throw new InvalidDataException("The reviewed operation belongs to a different project.");
     }
 

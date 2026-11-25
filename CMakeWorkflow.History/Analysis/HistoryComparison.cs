@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using CMakeWorkflow.History.Models;
+using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.History.Storage;
 
 namespace CMakeWorkflow.History.Analysis;
@@ -27,19 +28,43 @@ public static class HistoryComparison
             : throw new InvalidDataException("Benchmark comparison requires successful workflow reports.");
     }
 
-    private static HistoryStats Stats(List<double> values)
+    private static HistoryStats Stats(IEnumerable<double> values)
     {
-        double[] sorted = [.. values.Order()];
-        double mean = sorted.Average();
-        double median = sorted.Length % 2 == 0
-            ? (sorted[(sorted.Length / 2) - 1] + sorted[sorted.Length / 2]) / 2
-            : sorted[sorted.Length / 2];
-        return new(sorted.Length, median, sorted[0], sorted[^1], mean,
-            Math.Sqrt(sorted.Sum(x => (x - mean) * (x - mean)) / sorted.Length));
+        HistorySampleSummary summary = HistorySampleSummary.Calculate(values)!;
+        return new(summary.Count, summary.Median, summary.Min, summary.Max, summary.Mean, summary.StandardDeviation);
+    }
+
+    [SuppressMessage("Design", "CA1002", Justification = "Selected comparisons return the existing owned Host comparison row payload.")]
+    public static List<HistoryDifference> CompareSelected(HistoryDetail baseline, HistoryDetail candidate,
+        HistoryComparisonSelection selection)
+    {
+        ArgumentNullException.ThrowIfNull(baseline);
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(selection);
+        ArgumentException.ThrowIfNullOrWhiteSpace(selection.Metric);
+        bool invalid = (selection.BaselineVariant is null) != (selection.CandidateVariant is null) ||
+            (selection.AllowDifferentBuildEnvironments &&
+             (string.IsNullOrWhiteSpace(selection.BaselineEnvironment) ||
+              string.IsNullOrWhiteSpace(selection.CandidateEnvironment)));
+        return invalid
+            ? throw new ArgumentException("Select both variants when remapping, and pin both environment identities to allow a difference.", nameof(selection))
+            : CompareCore(SelectSeries(baseline, selection.BaselineVariant),
+                SelectSeries(candidate, selection.CandidateVariant), selection);
+
+        HistoryDetail SelectSeries(HistoryDetail detail, string? variant) => detail with
+        {
+            Measurements = [.. detail.Measurements.Where(row => row.Metric == selection.Metric &&
+                (variant is null || row.Variant == variant) && (selection.Scenario is null || row.Scenario == selection.Scenario))
+                .Select(row => variant is null ? row : row with { Variant = selection.BaselineVariant })]
+        };
     }
 
     [SuppressMessage("Design", "CA1002", Justification = "Produces the owned comparison-row list consumed by HistoryCommand.Compare and the Host history/compare response; this is an implementation result, not a Client SDK signature.")]
     public static List<HistoryDifference> Compare(HistoryDetail baseline, HistoryDetail candidate)
+        => CompareCore(baseline, candidate, null);
+
+    private static List<HistoryDifference> CompareCore(HistoryDetail baseline, HistoryDetail candidate,
+        HistoryComparisonSelection? selection)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(candidate);
@@ -131,10 +156,18 @@ public static class HistoryComparison
                 status = "unverified";
                 reason = "Build configuration or toolchain identity is not recorded.";
             }
-            else if (left[0].Environment != right[0].Environment)
+            else if ((selection?.BaselineEnvironment is { } expectedBaseline && left[0].Environment != expectedBaseline) ||
+                     (selection?.CandidateEnvironment is { } expectedCandidate && right[0].Environment != expectedCandidate))
             {
                 status = "incompatible";
-                reason = "Recorded build or environment characteristics differ.";
+                reason = "A recorded build environment differs from its expected identity.";
+            }
+            else if (left[0].Environment != right[0].Environment)
+            {
+                status = selection?.AllowDifferentBuildEnvironments == true ? "intentional" : "incompatible";
+                reason = status == "intentional"
+                    ? "Explicitly allowed build environments differ. Descriptive comparison only."
+                    : "Recorded build or environment characteristics differ.";
             }
 
             if (status is "compatible" or "unverified")
@@ -154,18 +187,27 @@ public static class HistoryComparison
                 }
             }
 
-            HistoryStats? ls = left is null ? null : Stats([.. left.Select(x => x.Value)]);
-            HistoryStats? rs = right is null ? null : Stats([.. right.Select(x => x.Value)]);
+            HistoryStats? ls = left is null ? null : Stats(left.Select(x => x.Value));
+            HistoryStats? rs = right is null ? null : Stats(right.Select(x => x.Value));
             if (status == "compatible")
             {
                 reason =
                     "Recorded characteristics match; frequencies and background load are not attested. Descriptive comparison only.";
             }
 
-            double? change = status == "compatible" ? rs!.Median - ls!.Median : null;
+            double? change = status is "compatible" or "intentional" ? rs!.Median - ls!.Median : null;
             rows.Add(new(representative.Metric, unit, representative.Variant,
                 representative.Scenario, method, status, reason, ls, rs, change,
-                change is not null && ls!.Median != 0 ? change / ls.Median * 100 : null));
+                change is not null && ls!.Median != 0 ? change / ls.Median * 100 : null)
+            {
+                BaselineRunId = baseline.Run.Id,
+                CandidateRunId = candidate.Run.Id,
+                BaselineVariant = selection?.BaselineVariant ?? representative.Variant,
+                CandidateVariant = selection?.CandidateVariant ?? representative.Variant,
+                BaselineEnvironment = left?[0].Environment,
+                CandidateEnvironment = right?[0].Environment,
+                RunsSucceeded = baseline.Run.Status == "succeeded" && candidate.Run.Status == "succeeded"
+            });
         }
 
         return rows;

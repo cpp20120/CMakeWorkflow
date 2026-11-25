@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Contracts.History;
 
@@ -22,6 +23,57 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     {
         client.RequireCapability("history/retryIndex");
         return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryRetryIndexAsync(new(operationId), ct));
+    }
+
+    /// <summary>Polls independent indexing state until disabled, indexed or failed. Cancel or apply a token deadline to stop waiting.</summary>
+    public async Task<HistoryIndexStatus> WaitForIndexAsync(string operationId, TimeSpan? pollInterval = null,
+        CancellationToken ct = default)
+    {
+        TimeSpan delay = pollInterval ?? TimeSpan.FromMilliseconds(300);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(delay, TimeSpan.Zero);
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            HistoryIndexStatus status = await GetIndexStatusAsync(operationId, ct);
+            if (status.State is HistoryIndexState.Disabled or HistoryIndexState.Indexed or HistoryIndexState.Failed)
+            {
+                return status;
+            }
+            await Task.Delay(delay, ct);
+        }
+    }
+
+    /// <summary>Reads committed run identities for an indexed operation.</summary>
+    public Task<OperationHistoryRuns> GetOperationRunsAsync(string operationId, CancellationToken ct = default)
+    {
+        client.RequireCapability("history/operationRuns");
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryOperationRunsAsync(new(operationId), ct));
+    }
+
+    /// <summary>Returns bounded, complete measurements from the indexed runs of one operation.</summary>
+    /// <remarks>These reads are not a database snapshot. A changed import receipt causes rejection.</remarks>
+    public async Task<IReadOnlyList<HistoryMeasurement>> QueryOperationAsync(string operationId,
+        string? metric = null, string? variant = null, string? scenario = null, string? environment = null,
+        CancellationToken ct = default)
+    {
+        const int limit = 50000;
+        OperationHistoryRuns receipt = await GetOperationRunsAsync(operationId, ct);
+        List<HistoryMeasurement> measurements = [];
+        foreach (IndexedRunIdentity identity in receipt.Runs)
+        {
+            List<HistoryMeasurement> rows = await MetricsAsync(
+                new(receipt.DatabasePath, identity.RunId, metric, variant, scenario) { Environment = environment }, ct);
+            if (rows.Count > limit - measurements.Count)
+            {
+                throw new InvalidDataException($"Operation measurement limit {limit} exceeded; narrow the query.");
+            }
+            measurements.AddRange(rows);
+        }
+        OperationHistoryRuns current = await GetOperationRunsAsync(operationId, ct);
+        return current.DatabasePath == receipt.DatabasePath && current.Runs.SequenceEqual(receipt.Runs)
+            ? measurements.AsReadOnly()
+            : throw new InvalidDataException("The indexed run identities changed during the measurement query.");
     }
 
     /// <summary>Imports Host run evidence into the history database.</summary>
@@ -53,6 +105,29 @@ public sealed class HistoryService(CMakeWorkflowClient client)
         return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryRunsPageAsync(query, ct));
     }
 
+    /// <summary>Enumerates at most the requested number of keyset pages. Cursor and filters are forwarded unchanged.</summary>
+    public async IAsyncEnumerable<HistoryRunPage> EnumerateRunPagesAsync(HistoryRunsPageQuery query, int maxPages,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPages, 1);
+        for (int page = 0; page < maxPages; page++)
+        {
+            ct.ThrowIfCancellationRequested();
+            HistoryRunPage result = await RunsPageAsync(query, ct);
+            string? next = result.NextCursor is { } cursor && cursor == query.Cursor
+                ? throw new InvalidDataException("The Host returned a non-progressing History cursor.")
+                : result.NextCursor;
+
+            yield return result;
+            if (next is null)
+            {
+                yield break;
+            }
+            query = query with { Cursor = next };
+        }
+    }
+
     /// <summary>Reads one imported run and its detail.</summary>
     /// <remarks>
     /// Does not start or cancel workflow execution; cancellation affects only this query.
@@ -71,6 +146,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     public Task<List<HistoryMeasurement>> MetricsAsync(HistoryMetricsQuery query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
+        RequireEnvironmentFilter(query);
         client.RequireCapability("history/metrics");
         return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryMetricsAsync(query, ct));
     }
@@ -82,6 +158,7 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     public Task<List<HistoryMeasurement>> QueryAsync(HistoryMetricsQuery query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
+        RequireEnvironmentFilter(query);
         client.RequireCapability("history/query");
         return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryQueryAsync(query, ct));
     }
@@ -93,6 +170,10 @@ public sealed class HistoryService(CMakeWorkflowClient client)
     public Task<List<HistoryDifference>> CompareAsync(HistoryCompareQuery query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (query.Selection is not null)
+        {
+            client.RequireCapability("history/selectedCompare");
+        }
         client.RequireCapability("history/compare");
         return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryCompareAsync(query, ct));
     }
@@ -106,5 +187,13 @@ public sealed class HistoryService(CMakeWorkflowClient client)
         ArgumentNullException.ThrowIfNull(query);
         client.RequireCapability("history/detect");
         return RpcRefusals.TranslateAsync(() => client.Proxy.HistoryDetectAsync(query, ct));
+    }
+
+    private void RequireEnvironmentFilter(HistoryMetricsQuery query)
+    {
+        if (query.Environment is not null)
+        {
+            client.RequireCapability("history/environmentFilter");
+        }
     }
 }

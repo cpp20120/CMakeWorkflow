@@ -249,7 +249,17 @@ public sealed class HistoryStore : IDisposable
             ?? throw new InvalidDataException("Finalized workflow is not importable.");
         ct.ThrowIfCancellationRequested();
         (int imported, int unchanged) = WriteRuns([parsed]);
-        return new(1, imported, unchanged, 0);
+        return new(1, imported, unchanged, 0) { RunIdentities = [new(parsed.Run.Id, parsed.Run.SourceHash)] };
+    }
+
+    /// <summary>Checks the indexed source identity against the committed import receipt.</summary>
+    public bool ContainsIndexedRun(string runId, string sourceHash)
+    {
+        using SqliteCommand command = db.CreateCommand();
+        command.CommandText = "SELECT 1 FROM runs WHERE id=$id AND source_hash=$hash";
+        _ = command.Parameters.AddWithValue("$id", runId);
+        _ = command.Parameters.AddWithValue("$hash", sourceHash);
+        return command.ExecuteScalar() is not null;
     }
 
     private (int Imported, int Unchanged) WriteRuns(IReadOnlyList<ParsedRun> parsedRuns)
@@ -559,6 +569,14 @@ public sealed class HistoryStore : IDisposable
     public HistoryDetail Show(string id, Action<string>? validateDirectory = null,
         int maxMeasurements = int.MaxValue, Func<string, bool>? artifactAllowed = null, CancellationToken ct = default)
     {
+        HistoryRun run = GetRun(id, validateDirectory);
+        return new(run, Nodes(id), Metrics(id, null, null, null, maxRows: maxMeasurements, ct: ct),
+            Artifacts(id, artifactAllowed));
+    }
+
+    /// <summary>Reads a run's identity and metadata without materializing its measurements.</summary>
+    public HistoryRun GetRun(string id, Action<string>? validateDirectory = null)
+    {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText =
             "SELECT id,directory,format,workflow,manifest_hash,started_at,finished_at,status,revision,source_hash,host_id,environment_fingerprint,environment_json,build_environment_json,source_snapshot_id FROM runs WHERE id=$p0";
@@ -570,9 +588,7 @@ public sealed class HistoryStore : IDisposable
         }
 
         validateDirectory?.Invoke(r.GetString(1));
-        HistoryRun run = Run(r);
-        return new(run, Nodes(id), Metrics(id, null, null, null, maxRows: maxMeasurements, ct: ct),
-            Artifacts(id, artifactAllowed));
+        return Run(r);
     }
 
     private List<HistoryNode> Nodes(string id)
@@ -594,17 +610,22 @@ public sealed class HistoryStore : IDisposable
 
     [SuppressMessage("Design", "CA1002", Justification = "Materializes SQLite rows into an owned List for History result DTOs and Host response construction; the reader is disposed before the list escapes.")]
     public List<HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario,
-        Func<string, bool>? includeDirectory = null, int maxRows = int.MaxValue, CancellationToken ct = default)
+        Func<string, bool>? includeDirectory = null, int maxRows = int.MaxValue, CancellationToken ct = default) =>
+        Metrics(run, metric, variant, scenario, null, includeDirectory, maxRows, ct);
+
+    [SuppressMessage("Design", "CA1002", Justification = "The History query owns its materialized row list, which is the existing Host RPC payload type.")]
+    public List<HistoryMeasurement> Metrics(string? run, string? metric, string? variant, string? scenario,
+        string? environment, Func<string, bool>? includeDirectory, int maxRows, CancellationToken ct)
     {
         using SqliteCommand cmd = db.CreateCommand();
         cmd.CommandText = """
                           SELECT run_id,node_id,metric,unit,value,variant,scenario,source,method,sample_index,workload,environment,direction,benchmark_trial,
                             (SELECT directory FROM runs WHERE id=measurements.run_id)
                           FROM measurements WHERE ($p0 IS NULL OR run_id=$p0) AND ($p1 IS NULL OR metric=$p1)
-                            AND ($p2 IS NULL OR variant=$p2) AND ($p3 IS NULL OR scenario=$p3)
+                            AND ($p2 IS NULL OR variant=$p2) AND ($p3 IS NULL OR scenario=$p3) AND ($p4 IS NULL OR environment=$p4)
                           ORDER BY metric,unit,method,variant,scenario,run_id,sample_index,node_id
                           """;
-        object?[] values = [run, metric, variant, scenario];
+        object?[] values = [run, metric, variant, scenario, environment];
         for (int i = 0; i < values.Length; i++)
         {
             _ = cmd.Parameters.AddWithValue("$p" + i, values[i] ?? DBNull.Value);

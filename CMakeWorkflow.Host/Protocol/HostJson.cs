@@ -114,6 +114,7 @@ namespace CMakeWorkflow.Host.Protocol;
 [JsonSerializable(typeof(RunGetRequest))]
 [JsonSerializable(typeof(HistoryPolicy))]
 [JsonSerializable(typeof(HistoryIndexStatus))]
+[JsonSerializable(typeof(OperationHistoryRuns))]
 [JsonSerializable(typeof(HistoryOperationRequest))]
 [JsonSerializable(typeof(HistoryImportRequest))]
 [JsonSerializable(typeof(HistoryImportResult))]

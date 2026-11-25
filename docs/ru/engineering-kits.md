@@ -1,5 +1,7 @@
 # Engineering Kits
 
+[Кампании Kit и проверки регрессий из C#](programmable-engineering.md).
+
 Kit задаёт требования к инструментам и платформе. Профиль конфигурации независимо задаёт Debug или Release, линковку, оптимизацию и инструментирование. Конкретный Host и workspace задаются подключением Client SDK.
 
 В Linux x64 доступны managed Clang с Ninja (`linux-clang`) и Ninja Multi-Config (`linux-clang-multi`), системный GCC (`linux-gcc`) и системный Clang (`linux-system-clang`). Для системных Kit Host проверяет семейство, версию и целевую платформу компилятора. Qt и Vulkan используют существующие проверки системных зависимостей. `windows-msvc` использует MSVC и Windows SDK на Windows x64, а `macos-appleclang` — AppleClang и macOS SDK на ARM64.

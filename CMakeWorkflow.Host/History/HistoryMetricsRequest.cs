@@ -5,4 +5,7 @@ public sealed record HistoryMetricsRequest(
     string? RunId = null,
     string? Metric = null,
     string? Variant = null,
-    string? Scenario = null);
+    string? Scenario = null)
+{
+    public string? Environment { get; init; }
+}

@@ -13,6 +13,15 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
     /// <summary>Durable Host operation identifier; meaningful within the initialized workspace.</summary>
     public string OperationId { get; } = operationId;
 
+    /// <summary>Waits for History independently of execution. Cancellation stops observation only.</summary>
+    public Task<CMakeWorkflow.Contracts.History.HistoryIndexStatus> WaitForHistoryAsync(TimeSpan? pollInterval = null,
+        CancellationToken ct = default) => client.History.WaitForIndexAsync(OperationId, pollInterval, ct);
+
+    /// <summary>Reads measurements from this operation's verified indexed runs.</summary>
+    public Task<IReadOnlyList<CMakeWorkflow.Client.History.HistoryMeasurement>> GetMeasurementsAsync(
+        string? metric = null, string? variant = null, string? scenario = null, string? environment = null,
+        CancellationToken ct = default) => client.History.QueryOperationAsync(OperationId, metric, variant, scenario, environment, ct);
+
     /// <summary>Reads durable operation state; does not wait for completion.</summary>
     public Task<OperationSnapshot> GetSnapshotAsync(CancellationToken ct = default) =>
         client.Operations.GetAsync(OperationId, ct);

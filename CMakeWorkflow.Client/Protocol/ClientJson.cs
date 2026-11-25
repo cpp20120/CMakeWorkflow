@@ -77,6 +77,7 @@ namespace CMakeWorkflow.Client.Protocol;
 [JsonSerializable(typeof(CampaignResult))]
 [JsonSerializable(typeof(HistoryPolicy))]
 [JsonSerializable(typeof(HistoryIndexStatus))]
+[JsonSerializable(typeof(OperationHistoryRuns))]
 [JsonSerializable(typeof(ImportHistoryOptions))]
 [JsonSerializable(typeof(ImportHistoryResult))]
 [JsonSerializable(typeof(HistoryRunsPageQuery))]
