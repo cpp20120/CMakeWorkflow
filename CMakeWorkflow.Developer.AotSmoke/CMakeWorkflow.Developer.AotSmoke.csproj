@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <PublishAot>true</PublishAot>
+        <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../CMakeWorkflow.Developer/CMakeWorkflow.Developer.csproj"/>
+    </ItemGroup>
+    <Target Name="ValidateDeveloperAssemblyReferences" AfterTargets="ResolveReferences">
+        <Error Condition="'%(ReferencePath.Filename)' == 'CMakeWorkflow'" Text="The developer API and its consumer must not reference the CLI assembly."/>
+    </Target>
+</Project>

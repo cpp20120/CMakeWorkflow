@@ -191,6 +191,16 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./tests/infrastructure/sdk-ecosystem/windows.ps1 -Cli out/native/${{ matrix.executable }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Developer Lifecycle with independent NativeAOT consumer
+        shell: bash
+        run: |
+          dotnet publish CMakeWorkflow.Developer.AotSmoke/CMakeWorkflow.Developer.AotSmoke.csproj -c Release -r ${{ matrix.rid }} -o out/developer-aot -p:TreatWarningsAsErrors=true
+          suffix=""
+          if [[ "$RUNNER_OS" == Windows ]]; then suffix=".exe"; fi
+          bash tests/infrastructure/developer-lifecycle/run-tests.sh "$PWD/out/native/${{ matrix.executable }}" "$PWD/out/developer-aot/CMakeWorkflow.Developer.AotSmoke${suffix}"
       - name: Publish and exercise NativeAOT historical scheduling
         shell: pwsh
         run: |

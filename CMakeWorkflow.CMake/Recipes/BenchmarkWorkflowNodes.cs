@@ -9,26 +9,29 @@ namespace CMakeWorkflow.CMake.Recipes;
 internal static class BenchmarkWorkflowNodes
 {
     internal static void Add(List<WorkflowNode> nodes, string target, int repeats, IReadOnlyList<string> arguments,
-        double timeoutSeconds, BenchmarkMetrics? metrics, bool managed)
+        double timeoutSeconds, BenchmarkMetrics? metrics, bool managed, string context = "benchmark",
+        string prefix = "", BenchmarkTrial? trial = null)
     {
+        string build = prefix + "build";
         nodes.Add(new()
         {
-            Id = "build",
+            Id = build,
             Kind = "build",
-            Context = "benchmark",
+            Context = context,
             Target = target,
-            DependsOn = managed ? ["configure"] : []
+            DependsOn = managed ? [prefix + "configure"] : []
         });
         for (int repeat = 1; repeat <= repeats; repeat++)
         {
             nodes.Add(new WorkflowNode
             {
-                Id = $"timing_{repeat:D3}",
+                Id = $"{prefix}timing_{repeat:D3}",
                 Kind = "run",
-                From = "build",
-                DependsOn = [repeat == 1 ? "build" : $"timing_{repeat - 1:D3}"],
+                From = build,
+                DependsOn = [repeat == 1 ? build : $"{prefix}timing_{repeat - 1:D3}"],
                 Arguments = [.. arguments],
                 Metrics = metrics,
+                BenchmarkTrial = trial,
                 TimeoutSeconds = timeoutSeconds,
                 Resources = ["measurement-host"]
             });

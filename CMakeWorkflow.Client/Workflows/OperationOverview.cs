@@ -26,6 +26,11 @@ public sealed record OperationOverview(
 List<OperationNodeView> Nodes)
 {
     public string? SourceSnapshotId { get; init; }
+
+    /// <summary>Whether this Host coordinator owns active work for the operation, if observed.</summary>
+    /// <remarks>False does not establish quiescence on another Host or prove that no external execution happened.</remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsScheduledOnHost { get; init; }
 }
 
 /// <summary>Verified terminal node evidence; fields may be unavailable for nodes that never executed.</summary>

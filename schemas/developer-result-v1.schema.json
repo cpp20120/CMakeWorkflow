@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow Developer CLI result v1",
+  "type": "object",
+  "required": ["schemaVersion", "status"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": { "enum": ["created", "planned", "inspected", "action-required", "needs-attention", "succeeded", "failed", "canceled"] },
+    "projectDirectory": { "type": "string" },
+    "sdk": { "type": "string" },
+    "sdkVersion": { "type": "string" },
+    "sdkLockSha256": { "$ref": "#/$defs/sha256" },
+    "configurationLockSha256": { "$ref": "#/$defs/optionalSha256" },
+    "vcpkgPlanSha256": { "$ref": "#/$defs/optionalSha256" },
+    "manifestSha256": { "$ref": "#/$defs/sha256" },
+    "manifestName": { "type": "string" },
+    "manifest": { "type": "object" },
+    "configuration": { "type": "object" },
+    "requestId": { "type": "string" },
+    "operationId": { "type": "string" },
+    "runDirectory": { "type": ["string", "null"] },
+    "reportSha256": { "$ref": "#/$defs/optionalSha256" },
+    "history": { "type": "object" },
+    "nodes": { "type": "array", "items": { "type": "object" } },
+    "error": { "type": ["string", "null"] },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "remediation": { "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "optionalSha256": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+  }
+}

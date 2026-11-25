@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.Host/CMakeWorkflow.Host.csproj"/>
+        <EmbeddedResource Include="../ProjectSdk/v1/*" LogicalName="CMakeWorkflow.ProjectSdk.v1.%(Filename)%(Extension)"/>
+        <EmbeddedResource Include="../ProjectSdk/config-v1/*" LogicalName="CMakeWorkflow.ProjectSdk.config-v1.%(Filename)%(Extension)"/>
+    </ItemGroup>
+    <Target Name="ValidateDeveloperAssemblyReferences" AfterTargets="ResolveReferences">
+        <Error Condition="'%(ReferencePath.Filename)' == 'CMakeWorkflow'" Text="The developer API and its consumer must not reference the CLI assembly."/>
+    </Target>
+</Project>

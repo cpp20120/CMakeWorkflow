@@ -392,8 +392,17 @@ public sealed partial class DoctorSession
 
     public Task<OperationOverview> OperationOverviewAsync(OperationGetRequest request,
         CancellationToken cancellationToken) =>
-        ReadAsync(request, (paths, ct) => OperationOverviewReader.ReadAsync(paths, request.OperationId, ct),
-            cancellationToken);
+        ReadAsync(request, async (paths, ct) =>
+        {
+            OperationOverview overview = await OperationOverviewReader.ReadAsync(paths, request.OperationId, ct);
+            bool? scheduled = durableExecutions?.IsActive(overview.Operation.WorkspaceId, request.OperationId);
+            if (scheduled == false && !overview.IsFinalized)
+            {
+                // Finalization can commit before the background task leaves the coordinator.
+                overview = await OperationOverviewReader.ReadAsync(paths, request.OperationId, ct);
+            }
+            return overview with { IsScheduledOnHost = scheduled };
+        }, cancellationToken);
 
     public Task<WorkflowReportSnapshot> OperationReportAsync(OperationGetRequest request,
         CancellationToken cancellationToken) =>

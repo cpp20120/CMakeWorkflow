@@ -15,6 +15,11 @@ List<OperationNodeView> Nodes)
 {
     // Admission-ledger identity, available even before report finalization.
     public string? SourceSnapshotId { get; init; }
+
+    /// <summary>Whether this Host coordinator owns active work for the operation, if observed.</summary>
+    /// <remarks>False does not establish quiescence on another Host or prove that no external execution happened.</remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsScheduledOnHost { get; init; }
 }
 
 public sealed record OperationNodeView(

@@ -206,7 +206,7 @@ public static class ProfileWorkflowBuilder
         return new WorkflowDocument { SchemaVersion = 2, Contexts = contexts, Nodes = nodes };
     }
 
-    private static WorkflowNode ProfileNode(string id, string buildId, string after,
+    internal static WorkflowNode ProfileNode(string id, string buildId, string after,
         IReadOnlyList<string> arguments, double seconds, string timeout, string backend, string mode) =>
         new()
         {

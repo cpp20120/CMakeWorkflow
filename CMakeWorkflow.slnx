@@ -12,6 +12,8 @@
     <Project Path="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
     <Project Path="CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
     <Project Path="CMakeWorkflow.Client.AotSmoke/CMakeWorkflow.Client.AotSmoke.csproj"/>
+    <Project Path="CMakeWorkflow.Developer/CMakeWorkflow.Developer.csproj"/>
+    <Project Path="CMakeWorkflow.Developer.AotSmoke/CMakeWorkflow.Developer.AotSmoke.csproj"/>
     <Project Path="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
     <Project Path="CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
     <Project Path="CMakeWorkflow.Contracts.Tests/CMakeWorkflow.Contracts.Tests.csproj"/>

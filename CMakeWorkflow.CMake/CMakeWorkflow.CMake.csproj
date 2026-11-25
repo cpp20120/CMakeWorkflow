@@ -8,6 +8,7 @@
     </PropertyGroup>
     <ItemGroup>
         <InternalsVisibleTo Include="CMakeWorkflow"/>
+        <InternalsVisibleTo Include="CMakeWorkflow.Developer"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Host.Tests"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Host"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Profiling"/>

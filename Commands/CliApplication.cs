@@ -24,7 +24,10 @@ internal static class CliApplication
         ["tooling", .. string[] tail] => ToolingCommand.ExecuteAsync(tail, ct),
         ["setup", .. string[] tail] => ToolingCommand.ExecuteAsync(["setup", .. tail], ct),
         ["dagflow", "profile", .. string[] tail] => ProfileCliCommand.ExecuteAsync(tail, ct),
-        ["profile", .. string[] tail] => ProfileCliCommand.ExecuteAsync(tail, ct),
+        ["profile", string subcommand, .. string[] tail] when !subcommand.StartsWith('-') && subcommand != "help" =>
+            ProfileCliCommand.ExecuteAsync([subcommand, .. tail], ct),
+        ["new" or "restore" or "inspect" or "doctor" or "configure" or "build" or "test" or "run" or "benchmark" or "profile" or "pack", .. string[] tail] =>
+            DeveloperCommand.ExecuteAsync(args[0], tail, ct),
         ["dagflow", .. string[] tail] => CampaignCommand.ExecuteAsync(tail, ct),
         ["mutation" or "weak-memory" or "fuzz", ..] => CampaignCommand.ExecuteAsync(args, ct),
         ["context", "inspect", string directory] => InspectContextAsync(directory, ct),

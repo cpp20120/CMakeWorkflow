@@ -11,11 +11,10 @@
     <ItemGroup>
         <Compile Include="Program.cs"/>
         <Compile Include="Commands/CliApplication.cs"/>
+        <Compile Include="Commands/DeveloperCommand.cs"/>
         <Compile Include="Commands/ProjectSdkCommand.cs"/>
         <Compile Include="Commands/ProjectSdkResolution.cs"/>
         <Compile Include="Commands/ProjectConfigurationCommand.cs"/>
-        <EmbeddedResource Include="ProjectSdk/v1/*" LogicalName="CMakeWorkflow.ProjectSdk.v1.%(Filename)%(Extension)"/>
-        <EmbeddedResource Include="ProjectSdk/config-v1/*" LogicalName="CMakeWorkflow.ProjectSdk.config-v1.%(Filename)%(Extension)"/>
         <Compile Include="Commands/CliErrors.cs"/>
         <Compile Include="Commands/CliHistory.cs"/>
         <Compile Include="Commands/CliUsage.cs"/>
@@ -38,6 +37,7 @@
         <EmbeddedResource Include="Commands/WorkflowReport.html" LogicalName="CMakeWorkflow.WorkflowReport.html"/>
         <EmbeddedResource Include="Commands/ReportProfile.js" LogicalName="CMakeWorkflow.ReportProfile.js"/>
         <EmbeddedResource Include="Commands/ReportCharts.js" LogicalName="CMakeWorkflow.ReportCharts.js"/>
+        <ProjectReference Include="CMakeWorkflow.Developer/CMakeWorkflow.Developer.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>

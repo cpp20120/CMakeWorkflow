@@ -4,32 +4,32 @@ using System.Text.Json.Serialization;
 
 namespace CMakeWorkflow.CMake.Build;
 
-internal sealed record SdkReference(string Id, string Version)
+public sealed record SdkReference(string Id, string Version)
 {
     public override string ToString() => Id + "/" + Version;
 }
 
-internal sealed record SdkFile(string Path, string Resource);
-internal sealed record SdkDefaults(int? CxxStandard, bool? CxxExtensions, bool? WarningsAsErrors);
-internal sealed record SdkCapabilities(string[] Linkage, bool Testing, bool Sanitizers, bool Packaging,
-    bool Benchmarking, bool Profiling, string[] ExecutionModes);
-internal sealed record SdkRequirement(string Kind, string Name, string? MinimumVersion, string Admission);
-internal sealed record SdkDescriptor(string Id, string Version, string? Alias, SdkReference? Extends,
-    string Status, string ProjectKind, string Payload, string[] Languages, SdkDefaults Defaults, SdkCapabilities Capabilities,
-    SdkRequirement[] Requirements, SdkFile[] Modules, SdkFile[] Scaffold, string? VariantTemplate, string BuildTarget,
-    string[] Recipes)
+public sealed record SdkFile(string Path, string Resource);
+public sealed record SdkDefaults(int? CxxStandard, bool? CxxExtensions, bool? WarningsAsErrors);
+public sealed record SdkCapabilities(IReadOnlyList<string> Linkage, bool Testing, bool Sanitizers, bool Packaging,
+    bool Benchmarking, bool Profiling, IReadOnlyList<string> ExecutionModes);
+public sealed record SdkRequirement(string Kind, string Name, string? MinimumVersion, string Admission);
+public sealed record SdkDescriptor(string Id, string Version, string? Alias, SdkReference? Extends,
+    string Status, string ProjectKind, string Payload, IReadOnlyList<string> Languages, SdkDefaults Defaults, SdkCapabilities Capabilities,
+    IReadOnlyList<SdkRequirement> Requirements, IReadOnlyList<SdkFile> Modules, IReadOnlyList<SdkFile> Scaffold, string? VariantTemplate, string BuildTarget,
+    IReadOnlyList<string> Recipes)
 {
     internal bool Legacy => Payload == "legacy-v1";
 }
 
-internal sealed record SdkCatalogDocument(int SchemaVersion, SdkDescriptor[] Sdks);
+public sealed record SdkCatalogDocument(int SchemaVersion, IReadOnlyList<SdkDescriptor> Sdks);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, WriteIndented = true,
     RespectRequiredConstructorParameters = true)]
 [JsonSerializable(typeof(SdkCatalogDocument))]
 [JsonSerializable(typeof(SdkDescriptor))]
-internal sealed partial class ProjectSdkCatalogJson : JsonSerializerContext;
+public sealed partial class ProjectSdkCatalogJson : JsonSerializerContext;
 
 internal static class ProjectSdkCatalog
 {
@@ -99,7 +99,7 @@ internal static class ProjectSdkCatalog
         using JsonDocument syntax = JsonDocument.Parse(bytes);
         RejectDuplicateProperties(syntax.RootElement);
         SdkCatalogDocument? catalog = JsonSerializer.Deserialize(bytes, ProjectSdkCatalogJson.Default.SdkCatalogDocument);
-        if (catalog is not { SchemaVersion: 1, Sdks.Length: > 0 })
+        if (catalog is not { SchemaVersion: 1, Sdks.Count: > 0 })
         {
             throw new InvalidDataException("Unsupported SDK catalog.");
         }
@@ -148,7 +148,7 @@ internal static class ProjectSdkCatalog
             sdk.Recipes is null || sdk.Capabilities.ExecutionModes is null || sdk.Capabilities.Linkage is null ||
             sdk.Capabilities.ExecutionModes.Any(mode => mode is not ("ambient" or "linux-managed-clang")) ||
             sdk.Capabilities.Linkage.Any(linkage => linkage is not ("static" or "shared")) ||
-            (sdk.Status == "available" && (sdk.Scaffold.Length == 0 || sdk.Capabilities.ExecutionModes.Length == 0)))
+            (sdk.Status == "available" && (sdk.Scaffold.Count == 0 || sdk.Capabilities.ExecutionModes.Count == 0)))
         {
             throw new InvalidDataException("Invalid SDK descriptor or capability: " + sdk.Id);
         }

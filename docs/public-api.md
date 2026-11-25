@@ -20,6 +20,10 @@ committed API compatibility baseline are not currently present in the repository
 consumer scenarios, but does not run an API compatibility diff against a previous package. Tagged release version
 validation alone does not establish that compatibility.
 
+## Developer Lifecycle API
+
+`CMakeWorkflow.Developer` is a public project-reference API for lifecycle preparation and dispatch. It exposes SDK and configuration planning, lock approvals, project scaffolding, durable workflow publication and execution through `CMakeWorkflow.Client`. The independent `CMakeWorkflow.Developer.AotSmoke` consumer validates this boundary without the CLI project. The current Client and Contracts package distribution is unchanged. See the [Developer Lifecycle reference](en/developer-lifecycle.md).
+
 ## Implementation assemblies and other external contracts
 
 | Assembly | Responsibility; external integration path |
