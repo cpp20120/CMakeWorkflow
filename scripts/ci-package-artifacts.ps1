@@ -28,12 +28,14 @@ foreach ($binary in @((Join-Path $NativeDirectory "CMakeWorkflow$suffix"),
 }
 $clientPackages = @(Get-ChildItem -LiteralPath $PackageDirectory -Filter 'CMakeWorkflow.Client.*.nupkg' -File)
 $contractsPackages = @(Get-ChildItem -LiteralPath $PackageDirectory -Filter 'CMakeWorkflow.Contracts.*.nupkg' -File)
-if ($clientPackages.Count -ne 1 -or $contractsPackages.Count -ne 1)
+$scriptingPackages = @(Get-ChildItem -LiteralPath $PackageDirectory -Filter 'CMakeWorkflow.Scripting.*.nupkg' -File)
+if ($clientPackages.Count -ne 1 -or $contractsPackages.Count -ne 1 -or $scriptingPackages.Count -ne 1)
 {
-    throw 'Expected exactly one Client package and one Contracts package.'
+    throw 'Expected one NuGet package each for Client, Contracts and Scripting.'
 }
 $clientPackage = $clientPackages[0]
 $contractsPackage = $contractsPackages[0]
+$scriptingPackage = $scriptingPackages[0]
 
 # upload-artifact ZIPs lose Unix executable bits; tar preserves them. Include the
 # complete publish outputs, including platform runtime dependencies and symbols.
@@ -51,8 +53,10 @@ if ($LASTEXITCODE -ne 0)
 }
 $package = Join-Path $output $clientPackage.Name
 $contracts = Join-Path $output $contractsPackage.Name
+$scripting = Join-Path $output $scriptingPackage.Name
 Copy-Item -LiteralPath $clientPackage.FullName -Destination $package
 Copy-Item -LiteralPath $contractsPackage.FullName -Destination $contracts
+Copy-Item -LiteralPath $scriptingPackage.FullName -Destination $scripting
 $metadata = Join-Path $output 'build.json'
 @{
     rid = $Rid
@@ -61,8 +65,9 @@ $metadata = Join-Path $output 'build.json'
     runAttempt = $env:GITHUB_RUN_ATTEMPT
     sdkPackage = $clientPackage.Name
     contractsPackage = $contractsPackage.Name
+    scriptingPackage = $scriptingPackage.Name
 } | ConvertTo-Json | Set-Content -LiteralPath $metadata -Encoding utf8
-$checksums = foreach ($path in @($nativeArchive, $consumerArchive, $package, $contracts, $metadata))
+$checksums = foreach ($path in @($nativeArchive, $consumerArchive, $package, $contracts, $scripting, $metadata))
 {
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $([IO.Path]::GetFileName($path) )"

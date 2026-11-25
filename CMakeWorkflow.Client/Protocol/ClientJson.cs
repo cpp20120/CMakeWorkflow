@@ -14,6 +14,8 @@ using CMakeWorkflow.Contracts.Workflows;
 namespace CMakeWorkflow.Client.Protocol;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(WorkflowManifestPreparation))]
+[JsonSerializable(typeof(WorkflowManifestPreparationReceipt))]
 [JsonSerializable(typeof(ExperimentStageRequest))]
 [JsonSerializable(typeof(ExperimentDependencyRequest))]
 [JsonSerializable(typeof(ExperimentDependencyResult))]

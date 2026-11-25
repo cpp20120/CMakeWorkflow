@@ -1,5 +1,7 @@
 # Workflow authoring and provisioning API (P3)
 
+For LINQ and typed node references over this contract, see [C# workflow authoring](scripting.md).
+
 P3 adds a read-only `workflow/preflight` Host RPC and typed public .NET SDK
 entry points. The existing `workflow/plan`, recipe preparation, durable start,
 Doctor and Fix wire protocols remain backwards-compatible.

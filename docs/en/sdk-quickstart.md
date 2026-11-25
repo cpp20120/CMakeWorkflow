@@ -1,5 +1,7 @@
 # Use CMakeWorkflow from a separate .NET application
 
+For C# workflow composition, see the [Scripting package](scripting.md).
+
 Put the matching `CMakeWorkflow.Client` and `CMakeWorkflow.Contracts` packages from a release in a local NuGet feed.
 The client package brings in Contracts, StreamJsonRpc and SSH.NET through NuGet. Run the CMakeWorkflow Host
 executable on the machine that owns the workspace.

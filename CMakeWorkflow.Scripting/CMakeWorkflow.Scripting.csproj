@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Composable C# authoring for durable CMakeWorkflow manifests.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CMakeWorkflow.Developer"/>
+    <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
+    <ProjectReference Include="../CMakeWorkflow.Client/CMakeWorkflow.Client.csproj"/>
+  </ItemGroup>
+  <Target Name="ValidateAuthoringDependencies" BeforeTargets="ResolveProjectReferences">
+    <ItemGroup>
+      <InvalidAuthoringReference Include="@(ProjectReference)"
+        Condition="'%(Filename)' != 'CMakeWorkflow.Client' and '%(Filename)' != 'CMakeWorkflow.Contracts'"/>
+    </ItemGroup>
+    <Error Condition="'@(InvalidAuthoringReference)' != ''"
+      Text="Authoring may reference only Contracts and Client: @(InvalidAuthoringReference)"/>
+  </Target>
+</Project>

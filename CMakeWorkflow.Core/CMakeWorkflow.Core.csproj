@@ -20,6 +20,7 @@
     <InternalsVisibleTo Include="CMakeWorkflow.Host.Tests" />
     <InternalsVisibleTo Include="CMakeWorkflow.Host" />
     <InternalsVisibleTo Include="CMakeWorkflow" />
+    <InternalsVisibleTo Include="CMakeWorkflow.Developer" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CommandResult.cs" />

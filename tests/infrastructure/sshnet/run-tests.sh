@@ -118,6 +118,10 @@ mkdir "$test_peer"
 cp -a CMakeWorkflow.Host.Tests/bin/Release/net10.0/. "$test_peer"
 docker cp "$test_peer" "$container:/opt/cmwf-test-peer"
 docker exec "$container" chmod -R a+rX /opt/cmwf-test-peer
+echo '=== Real sshd / SSH.NET: file-based workflow, interrupted manifest transfer and lost start response ==='
+timeout --signal=TERM --kill-after=5s 240s bash tests/infrastructure/scripting/ssh-test.sh \
+  "$tmp/publish/CMakeWorkflow" "$tmp" "$container"
+
 docker exec -i "$container" sh -c 'cat > /opt/cmwf-experiment-bridge && chmod 0755 /opt/cmwf-experiment-bridge' <<'BRIDGE'
 #!/bin/sh
 marker=/home/cmwf/workspace/lost-experiment-operation

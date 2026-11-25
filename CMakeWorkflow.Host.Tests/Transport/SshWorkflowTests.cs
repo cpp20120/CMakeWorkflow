@@ -1,3 +1,4 @@
+using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Workflows;
 using StreamJsonRpc;
 using static CMakeWorkflow.Host.Tests.Transport.SshTransportTests;
@@ -67,8 +68,9 @@ internal static class SshWorkflowTests
             await using CMakeWorkflowClient other = await second.ConnectAsync(ct);
             WorkflowOperation retry = await other.Workflows.StartAsync(fixture.Request, ct);
             Check(retry.OperationId == id, "Concurrent client duplicated durable acceptance.");
-            _ = await RejectAsync<RemoteInvocationException>(() => other.Workflows.StartAsync(
-                fixture.Request with { Jobs = 2 }, ct));
+            CMakeWorkflowRpcRefusalException conflict = await RejectAsync<CMakeWorkflowRpcRefusalException>(
+                () => other.Workflows.StartAsync(fixture.Request with { Jobs = 2 }, ct));
+            Check(conflict.Code == "request_id_conflict", "Expected typed request identity conflict.");
         }
         first.AssertExited();
         second.AssertExited();

@@ -10,7 +10,7 @@ namespace CMakeWorkflow.Host.Workflows;
 /// Every descendant is resolved under a held directory handle, without following
 /// symlinks/junctions. A pathname check followed by File.Open would be racy.
 /// </summary>
-internal static class OperationArtifactFile
+internal static partial class OperationArtifactFile
 {
     /// <summary>Opens a seekable workspace descendant without following descendant symlinks or reparse points.</summary>
     /// <remarks>
@@ -180,7 +180,7 @@ internal static class OperationArtifactFile
         }
     }
 
-    private static SafeFileHandle OpenWindowsChild(SafeFileHandle parent, string part, bool directory)
+    private static SafeFileHandle OpenWindowsChild(SafeFileHandle parent, string part, bool directory, uint share = 7)
     {
         // A relative OBJECT_ATTRIBUTES RootDirectory binds this lookup to the
         // opened ancestor, so swapping the named ancestor cannot redirect it.
@@ -188,7 +188,6 @@ internal static class OperationArtifactFile
         const uint objectCaseInsensitive = 0x40, objectDontReparse = 0x1000;
         // FILE_TRAVERSE is requested only for directory components, not data files.
         uint access = 1u | 0x80u | 0x00100000u | (directory ? 0x20u : 0u);
-        const uint shareAll = 1 | 2 | 4;
         const uint openExisting = 1; // FILE_OPEN (NT create disposition)
         const uint synchronous = 0x20, openReparsePoint = 0x00200000;
         nint data = Marshal.StringToHGlobalUni(part);
@@ -213,7 +212,7 @@ internal static class OperationArtifactFile
             // omit FILE_SYNCHRONOUS_IO_NONALERT so payload reads can use overlapped I/O.
             uint options = openReparsePoint | (directory ? synchronous : 0u);
             int status = NtCreateFile(out SafeFileHandle? handle, access, ref attrs, out _, IntPtr.Zero,
-                0, shareAll, openExisting, options, IntPtr.Zero, 0);
+                0, share, openExisting, options, IntPtr.Zero, 0);
             if (status < 0)
             {
                 handle?.Dispose();

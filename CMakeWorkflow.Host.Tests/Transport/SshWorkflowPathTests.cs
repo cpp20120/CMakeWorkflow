@@ -1,3 +1,4 @@
+using CMakeWorkflow.Client.Protocol;
 using StreamJsonRpc;
 using static CMakeWorkflow.Host.Tests.Transport.SshTransportTests;
 using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
@@ -31,8 +32,9 @@ internal static class SshWorkflowPathTests
                     fixture.Request with { ResultsDirectory = results }, ct));
             }
 
-            _ = await RejectAsync<RemoteInvocationException>(() => client.Workflows.StartAsync(
-                fixture.Request with { ManifestSha256 = new string('0', 64) }, ct));
+            CMakeWorkflowRpcRefusalException stale = await RejectAsync<CMakeWorkflowRpcRefusalException>(
+                () => client.Workflows.StartAsync(fixture.Request with { ManifestSha256 = new string('0', 64) }, ct));
+            Check(stale.Code == "stale_manifest", "Expected typed manifest digest refusal.");
             _ = await RejectAsync<RemoteInvocationException>(() => client.Operations.FindAsync(fixture.Request.ClientRequestId, ct));
             Check(fixture.Effects().Length == 0, "Rejected path or hash dispatched work.");
         }

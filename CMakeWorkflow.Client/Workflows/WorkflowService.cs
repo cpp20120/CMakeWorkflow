@@ -22,6 +22,35 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
         return RpcRefusals.TranslateAsync(() => client.Proxy.StageExperimentAsync(request, ct));
     }
 
+    /// <summary>Delivers a bounded immutable manifest through the connected Host transport.</summary>
+    /// <remarks>Use an existing workspace-relative base. Identical preparations reuse the same content-addressed path.
+    /// The receipt is suitable for preflight. It does not admit execution or reserve a results directory.</remarks>
+    public async Task<PreparedWorkflow> PrepareManifestAsync(ReadOnlyMemory<byte> manifest, string sha256,
+        string hostResultsDirectory, string manifestBase = ".", CancellationToken ct = default)
+    {
+        client.RequireCapability("workflow/prepareManifest");
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostResultsDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestBase);
+        if (manifest.Length is <= 0 or > WorkflowManifestPreparation.MaximumBytes ||
+            sha256 is not { Length: 64 } || !sha256.All(Uri.IsHexDigit))
+        {
+            throw new ArgumentException("Expected up to 1 MiB of manifest bytes and their SHA-256 digest.");
+        }
+
+        byte[] bytes = manifest.ToArray();
+        string digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+        if (!digest.Equals(sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Manifest SHA-256 differs from its declared digest.");
+        }
+        WorkflowManifestPreparationReceipt receipt = await RpcRefusals.TranslateAsync(() =>
+            client.Proxy.PrepareManifestAsync(new(manifestBase, hostResultsDirectory, digest, bytes), ct));
+        return receipt.SchemaVersion == 1 && receipt.ManifestSha256 == digest &&
+            !string.IsNullOrWhiteSpace(receipt.Manifest) && !string.IsNullOrWhiteSpace(receipt.ResultsDirectory)
+            ? new(receipt.SchemaVersion, receipt.Manifest, receipt.ManifestSha256, receipt.ResultsDirectory)
+            : throw new InvalidDataException("Invalid Host manifest preparation receipt.");
+    }
+
     /// <summary>Submits a workflow through durable Host admission.</summary>
     /// <remarks>
     /// Save ClientRequestId before calling. Identical request identities reuse acceptance; changed parameters under the same ID conflict.

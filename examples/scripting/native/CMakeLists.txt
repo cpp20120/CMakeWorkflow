@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.26)
+project(ScriptingExample LANGUAGES CXX)
+add_executable(worker main.cpp)
+enable_testing()
+add_test(NAME worker_smoke COMMAND worker)

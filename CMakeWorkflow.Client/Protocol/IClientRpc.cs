@@ -153,6 +153,9 @@ internal partial interface IClientRpc
     [JsonRpcMethod("workflow/start")]
     Task<OperationSnapshot> StartAsync(StartWorkflowOptions request, CancellationToken ct);
 
+    [JsonRpcMethod("workflow/prepareManifest")]
+    Task<WorkflowManifestPreparationReceipt> PrepareManifestAsync(WorkflowManifestPreparation request, CancellationToken ct);
+
     [JsonRpcMethod("workflow/preflight")]
     Task<WorkflowPreflightResult> PreflightAsync(WorkflowPreflightOptions request, CancellationToken ct);
 

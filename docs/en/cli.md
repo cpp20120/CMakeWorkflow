@@ -86,6 +86,13 @@ A benchmark matrix recipe axis can declare a `role` of `workers`, `shards`, `arr
 variant as baseline, and execution order as `benchmarkTrial`. Older results derive axes from arguments.
 Facet axes are held fixed within each chart.
 
+## C# workflow scripts
+
+Use `script compose FILE.cs` to write a manifest, `script plan FILE.cs` to review Host preflight, and
+`script run FILE.cs --approve` to authorize durable execution. Add `--` before arguments for the C# file.
+Every mode runs trusted controller-side C# through .NET SDK 10 or later. The
+[script reference](scripting.md#script-cli) describes local and SSH options and lost-response recovery.
+
 ## Remote Git experiments
 
 Use `experiment plan`, `experiment run --plan ID --approve` and

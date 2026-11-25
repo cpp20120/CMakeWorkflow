@@ -223,13 +223,33 @@ jobs:
           $executable = if ($IsWindows) { 'CMakeWorkflow.Profiling.AotSmoke.exe' } else { 'CMakeWorkflow.Profiling.AotSmoke' }
           & (Join-Path out/profiling-aot $executable)
           if ($LASTEXITCODE -ne 0) { throw "Profiling NativeAOT smoke failed: $LASTEXITCODE" }
-      - name: Pack NuGet contracts and client SDK
+      - name: Pack NuGet contracts, client SDK and scripting SDK
         shell: pwsh
         run: |
           dotnet pack CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj -c Release -p:Version=$env:SDK_VERSION -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
           if ($LASTEXITCODE -ne 0) { throw "Contracts pack failed: $LASTEXITCODE" }
           dotnet pack CMakeWorkflow.Client/CMakeWorkflow.Client.csproj -c Release -p:Version=$env:SDK_VERSION -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
           if ($LASTEXITCODE -ne 0) { throw "Client pack failed: $LASTEXITCODE" }
+          dotnet pack CMakeWorkflow.Scripting/CMakeWorkflow.Scripting.csproj -c Release -p:Version=$env:SDK_VERSION -p:PackageVersion=$env:SDK_VERSION -p:TreatWarningsAsErrors=true -o out/sdk-packages
+          if ($LASTEXITCODE -ne 0) { throw "Scripting pack failed: $LASTEXITCODE" }
+      - name: NativeAOT workflow authoring from NuGet
+        shell: pwsh
+        run: |
+          $packages = (Resolve-Path out/sdk-packages).Path
+          dotnet publish CMakeWorkflow.Scripting.AotSmoke/CMakeWorkflow.Scripting.AotSmoke.csproj -c Release -r ${{ matrix.rid }} -p:ScriptingPackageVersion=$env:SDK_VERSION "-p:RestoreAdditionalProjectSources=$packages" -p:TreatWarningsAsErrors=true --artifacts-path out/scripting-smoke-artifacts -o out/scripting-aot
+          if ($LASTEXITCODE -ne 0) { throw "Scripting NativeAOT publish failed: $LASTEXITCODE" }
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          & "out/scripting-aot/CMakeWorkflow.Scripting.AotSmoke$suffix" --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Scripting composition smoke failed: $LASTEXITCODE" }
+      - name: Execute an authored native DAG through Host
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: ./scripts/ci-native-smoke.ps1 -Cli out/native/${{ matrix.executable }} -Consumer out/scripting-aot/CMakeWorkflow.Scripting.AotSmoke -LogDirectory out/smoke-logs/scripting
+      - name: Workflow manifest preparation wire validation
+        run: dotnet CMakeWorkflow.Host.Tests/bin/Release/net10.0/CMakeWorkflow.Host.Tests.dll --manifest-preparation-wire-tests
+      - name: File-based workflow CLI and external fragment package
+        shell: pwsh
+        run: ./tests/infrastructure/scripting/run-tests.ps1 -Cli out/native/${{ matrix.executable }} -Feed out/sdk-packages -Version $env:SDK_VERSION
       - name: Publish NativeAOT consumer from NuGet
         shell: pwsh
         run: |
@@ -348,7 +368,7 @@ jobs:
             if [[ "$rid" == linux-x64 ]]; then linux_source="$source"; fi
           done
           version="${GITHUB_REF_NAME#v}"
-          for id in CMakeWorkflow.Client CMakeWorkflow.Contracts; do
+          for id in CMakeWorkflow.Client CMakeWorkflow.Contracts CMakeWorkflow.Scripting; do
             package="$linux_source/${id}.${version}.nupkg"
             test -f "$package"
             cp "$package" out/release-assets/

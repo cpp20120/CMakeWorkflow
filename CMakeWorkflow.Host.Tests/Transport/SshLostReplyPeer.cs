@@ -8,7 +8,7 @@ namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshLostReplyPeer
 {
-    internal static async Task RunAsync(string endpoint, string marker)
+    internal static async Task RunAsync(string endpoint, string marker, bool interruptPrepare)
     {
         using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
         CancellationToken ct = deadline.Token;
@@ -21,9 +21,16 @@ internal static class SshLostReplyPeer
             using JsonDocument json = JsonDocument.Parse(Body);
             string? method = json.RootElement.GetProperty("method").GetString();
             SshTransportTests.Check(request == 0 ? method == "initialize" :
-                method is "experiment/sourceChunk" or "experiment/stage" or "experiment/dependencies" or "workflow/preflight" or "workflow/start",
+                method is "experiment/sourceChunk" or "experiment/stage" or "experiment/dependencies" or "workflow/prepareManifest" or "workflow/preflight" or "workflow/start",
                 "Unexpected RPC in lost-reply fixture.");
             await host.WriteAsync(Header, ct);
+            if (interruptPrepare && method == "workflow/prepareManifest")
+            {
+                await host.WriteAsync(Body.AsMemory(0, Body.Length - 1), ct);
+                await host.FlushAsync(ct);
+                await File.WriteAllTextAsync(marker, "prepare interrupted", ct);
+                return;
+            }
             await host.WriteAsync(Body, ct);
             await host.FlushAsync(ct);
             (byte[] Header, byte[] Body) response = await ReadFrameAsync(host, ct);

@@ -2,12 +2,13 @@
 
 ## SDK boundary
 
-The current SDK distribution and external-consumer validation cover two assemblies:
+The current SDK distribution and external-consumer validation cover the following assemblies:
 
 | Assembly | External role |
 | --- | --- |
 | `CMakeWorkflow.Client` | Client connection, local/SSH transport options, service facades, durable operation handles, SDK request/result models and errors. |
 | `CMakeWorkflow.Contracts` | Shared workflow and recipe DTOs, workflow authoring builders and node references. |
+| `CMakeWorkflow.Scripting` | [LINQ composition and manifest materialization](en/scripting.md) over Contracts and Client. |
 
 This boundary is evidenced by the [package and package-only NativeAOT consumer steps](../.github/workflows/ci.yml),
 [distribution packaging](../scripts/ci-package-artifacts.ps1) and
@@ -23,6 +24,8 @@ validation alone does not establish that compatibility.
 ## Developer Lifecycle API
 
 `CMakeWorkflow.Developer` is a public project-reference API for lifecycle preparation and dispatch. It exposes SDK and configuration planning, lock approvals, project scaffolding, durable workflow publication and execution through `CMakeWorkflow.Client`. The independent `CMakeWorkflow.Developer.AotSmoke` consumer validates this boundary without the CLI project. The current Client and Contracts package distribution is unchanged. See the [Developer Lifecycle reference](en/developer-lifecycle.md).
+
+`WorkflowScriptCompiler.ComposeAsync` in Developer launches the installed .NET SDK and verifies the invocation response. Callers own their output streams. See [script authoring](en/scripting.md#script-cli).
 
 Engineering Kit contracts are in `CMakeWorkflow.Contracts.Kits`. Catalog, selection and approval operations and the Kit-aware lifecycle entry points are in `CMakeWorkflow.Developer`. See the [Engineering Kits reference](en/engineering-kits.md).
 
@@ -96,9 +99,24 @@ Release assembly metadata.
 
 | Assembly | Publicly accessible source types | Member entries |
 | --- | ---: | ---: |
-| [CMakeWorkflow.Client](#cmakeworkflowclient) | 113 | 125 |
-| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 26 | 95 |
-| **Total** | **139** | **220** |
+| [CMakeWorkflow.Client](#cmakeworkflowclient) | 113 | 126 |
+| [CMakeWorkflow.Contracts](#cmakeworkflowcontracts) | 29 | 96 |
+| [CMakeWorkflow.Scripting](#cmakeworkflowscripting) | 8 | 29 |
+| **Total** | **150** | **251** |
+
+## CMakeWorkflow.Scripting
+
+| Public type | Source | Members |
+| --- | --- | --- |
+| `Workflow` | [Workflow.cs](../CMakeWorkflow.Scripting/Workflow.cs) | `Name`, `Define`, `Scope`, `Context`, `Inspect`, `Configure`, `Build`, `Invoke`, `CTest`, `Run`, `Profile`, `ProfileSnapshot`, `Compose` |
+| `ContextRef`, `NodeRef`, `TargetBuildRef` | [WorkflowReferences.cs](../CMakeWorkflow.Scripting/WorkflowReferences.cs) | `Id` on context and node references; `TargetBuildRef` inherits from `NodeRef` |
+| `WorkflowManifest` | [WorkflowManifest.cs](../CMakeWorkflow.Scripting/WorkflowManifest.cs) | `Name`, `Sha256`, `FileName`, `CopyBytes`, `ToDefinition`, `SaveAsync`, `PrepareAsync`, `AtHost` |
+| `WorkflowScript` | [WorkflowScript.cs](../CMakeWorkflow.Scripting/WorkflowScript.cs) | `ExportAsync` |
+| `WorkflowScope` | [WorkflowScope.cs](../CMakeWorkflow.Scripting/WorkflowScope.cs) | `Workflow`, `InstanceId`, `Id`, `Scope` |
+| `WorkflowBenchmarks` | [WorkflowBenchmarks.cs](../CMakeWorkflow.Scripting/WorkflowBenchmarks.cs) | `Benchmark` |
+
+The [Scripting guide](en/scripting.md) documents deterministic ordering and the boundary between preparation and
+durable Host submission.
 
 ## CMakeWorkflow.Client
 
@@ -1463,6 +1481,8 @@ public sealed record WorkflowPreflightResult(int SchemaVersion, string Manifest,
 
 #### `WorkflowService`
 
+`PrepareManifestAsync(ReadOnlyMemory<byte>, string, string, string, CancellationToken)` publishes exact bytes on the connected Host for preflight.
+
 Workflow planning and admission facade borrowing the client connection.
 
 Paths are Host filesystem paths and are sent unchanged, including over SSH. Calls do not automatically reconnect or
@@ -1909,6 +1929,16 @@ Source [WorkflowVariantBinding.cs](../CMakeWorkflow.Contracts/Workflows/Workflow
 ```csharp
 public sealed record WorkflowVariantBinding(string Id, string LockSha256);
 ```
+
+#### `WorkflowManifestPreparation` and `WorkflowManifestPreparationReceipt`
+
+Bounded manifest delivery request and immutable Host receipt.
+[WorkflowManifestPreparation.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowManifestPreparation.cs)
+
+#### `WorkflowDefinitionJson`
+
+Source-generated serialization metadata for the workflow manifest and its DTOs.
+[WorkflowDefinitionJson.cs](../CMakeWorkflow.Contracts/Workflows/WorkflowDefinitionJson.cs)
 
 #### `WorkflowDocument`
 

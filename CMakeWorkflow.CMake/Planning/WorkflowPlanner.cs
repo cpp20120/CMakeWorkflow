@@ -35,7 +35,7 @@ public static class WorkflowPlanner
         readGuard?.Invoke(file);
         ct.ThrowIfCancellationRequested();
         byte[] bytes = snapshot;
-        WorkflowDocument document = JsonSerializer.Deserialize(bytes, Serialization.WorkflowJson.Default.WorkflowDocument)
+        WorkflowDocument document = JsonSerializer.Deserialize(bytes, WorkflowDefinitionJson.Default.WorkflowDocument)
                        ?? throw new ArgumentException("Empty workflow document.");
         if (document.SchemaVersion is not (1 or 2))
         {

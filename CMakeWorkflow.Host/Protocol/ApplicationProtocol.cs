@@ -1,4 +1,5 @@
 using CMakeWorkflow.Contracts.History;
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
@@ -16,6 +17,9 @@ namespace CMakeWorkflow.Host.Protocol;
 
 public partial interface IHostRpc
 {
+    [JsonRpcMethod("workflow/prepareManifest")]
+    Task<WorkflowManifestPreparationReceipt> PrepareManifestAsync(WorkflowManifestPreparation request, CancellationToken ct);
+
     [JsonRpcMethod("workflow/preflight")]
     Task<WorkflowPreflightResult> WorkflowPreflightAsync(WorkflowPreflightRequest request,
         CancellationToken cancellationToken);

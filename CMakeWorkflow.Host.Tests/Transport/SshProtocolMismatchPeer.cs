@@ -5,7 +5,7 @@ namespace CMakeWorkflow.Host.Tests.Transport;
 
 internal static class SshProtocolMismatchPeer
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(string? workspace)
     {
         using Stream input = Console.OpenStandardInput();
         using Stream output = Console.OpenStandardOutput();
@@ -30,8 +30,11 @@ internal static class SshProtocolMismatchPeer
         byte[] body = new byte[length];
         await input.ReadExactlyAsync(body);
         using JsonDocument request = JsonDocument.Parse(body);
+        string version = workspace is null ? "99" : "1";
+        string directory = JsonEncodedText.Encode(workspace ?? "/").ToString();
         byte[] response = Encoding.UTF8.GetBytes("{\"jsonrpc\":\"2.0\",\"id\":" + request.RootElement.GetProperty("id").GetRawText()
-            + ",\"result\":{\"protocolVersion\":99,\"processId\":1,\"workspaceDirectory\":\"/\",\"capabilities\":[],\"profiles\":[]}}");
+            + ",\"result\":{\"protocolVersion\":" + version + ",\"processId\":1,\"workspaceDirectory\":\"" + directory +
+              "\",\"capabilities\":[],\"profiles\":[]}}");
         await output.WriteAsync(Encoding.ASCII.GetBytes($"Content-Length: {response.Length}\r\n\r\n"));
         await output.WriteAsync(response);
         await output.FlushAsync();

@@ -69,7 +69,9 @@ internal static class RemoteCommand
             return 0;
         }
 
-        string action = args[0];
+        string action = args[0] is "script"
+            ? throw new ArgumentException($"Unknown remote command 'script'.\n{Usage}")
+            : args[0];
         (string[] options, HistoryPolicy? historyPolicy) = action == "start"
             ? CliHistory.Parse(args[1..]) : (args[1..], null);
         bool historyDefault = action == "start" && options.Contains("--history-default", StringComparer.Ordinal);
@@ -91,30 +93,7 @@ internal static class RemoteCommand
         }
         // Reject malformed input before spawning SSH or accepting any workflow.
         Validate(action, values);
-        TimeSpan timeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600));
-        string transport = Get(values, "--transport") ?? "openssh";
-        // All transports connect to the same durable Host and identical RPC surface.
-        // No auto-reconnect or retry of an uncertain workflow/start response.
-        await using CMakeWorkflowClient client = transport == "local"
-            ? await CMakeWorkflowClient.ConnectAsync(new(Require(values, "--endpoint"), Require(values, "--workspace")), ct)
-            : transport == "sshnet"
-            ? await CMakeWorkflowClient.ConnectSshNetAsync(new SshNetHostOptions(
-                Require(values, "--host"), Require(values, "--user"),
-                Require(values, "--key-file"), Require(values, "--host-key-sha256"),
-                Require(values, "--endpoint"), Require(values, "--workspace"))
-            {
-                Port = (int)Number(values, "--port", 22, 1, 65535),
-                RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
-                ConnectionTimeout = timeout
-            }, ct)
-            : await CMakeWorkflowClient.ConnectSshAsync(new SshHostOptions(
-                Require(values, "--destination"), Require(values, "--endpoint"),
-                Require(values, "--workspace"))
-            {
-                SshExecutable = Get(values, "--ssh-executable") ?? "ssh",
-                RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
-                ConnectionTimeout = timeout
-            }, ct);
+        await using CMakeWorkflowClient client = await ConnectAsync(values, ct);
         switch (action)
         {
             case "start":
@@ -195,9 +174,37 @@ internal static class RemoteCommand
         }
     }
 
-    private static (Dictionary<string, string> Options, List<string> Only) Parse(string action, string[] args)
+    internal static Task<CMakeWorkflowClient> ConnectAsync(Dictionary<string, string> values, CancellationToken ct)
     {
-        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "stash" or "cancel" or "history-status" or "history-retry"))
+        TimeSpan timeout = TimeSpan.FromSeconds(Number(values, "--connect-timeout-seconds", 15, 1, 3600));
+        string transport = Get(values, "--transport") ?? "openssh";
+        // All transports connect to the same durable Host and identical RPC surface.
+        // No auto-reconnect or retry of an uncertain workflow/start response.
+        return transport == "local"
+            ? CMakeWorkflowClient.ConnectAsync(new(Require(values, "--endpoint"), Require(values, "--workspace")), ct)
+            : transport == "sshnet"
+            ? CMakeWorkflowClient.ConnectSshNetAsync(new SshNetHostOptions(
+                Require(values, "--host"), Require(values, "--user"),
+                Require(values, "--key-file"), Require(values, "--host-key-sha256"),
+                Require(values, "--endpoint"), Require(values, "--workspace"))
+            {
+                Port = (int)Number(values, "--port", 22, 1, 65535),
+                RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
+                ConnectionTimeout = timeout
+            }, ct)
+            : CMakeWorkflowClient.ConnectSshAsync(new SshHostOptions(
+                Require(values, "--destination"), Require(values, "--endpoint"),
+                Require(values, "--workspace"))
+            {
+                SshExecutable = Get(values, "--ssh-executable") ?? "ssh",
+                RemoteExecutable = Get(values, "--remote-executable") ?? "cmakeworkflow",
+                ConnectionTimeout = timeout
+            }, ct);
+    }
+
+    internal static (Dictionary<string, string> Options, List<string> Only) Parse(string action, string[] args)
+    {
+        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "stash" or "cancel" or "history-status" or "history-retry" or "script"))
         {
             throw new ArgumentException($"Unknown remote command '{action}'.\n{Usage}");
         }
@@ -212,7 +219,7 @@ internal static class RemoteCommand
                 throw new ArgumentException($"Remote CLI expects --option VALUE pairs.\n{Usage}");
             }
 
-            if (action == "start" && args[i] == "--only")
+            if (action is "start" or "script" && args[i] == "--only")
             {
                 string node = args[i + 1];
                 if (only.Count >= 1000 || string.IsNullOrWhiteSpace(node) || node.Any(char.IsControl))
@@ -232,11 +239,12 @@ internal static class RemoteCommand
         return (options, only);
     }
 
-    private static void Validate(string action, Dictionary<string, string> values)
+    internal static void Validate(string action, Dictionary<string, string> values)
     {
         string[] actionFlags = action switch
         {
             "start" => ["--request-id", "--manifest", "--manifest-sha256", "--results-dir", "--jobs"],
+            "script" => ["--request-id", "--manifest-base", "--results-dir", "--jobs", "--timeout-seconds"],
             "find" => ["--request-id"],
             "status" or "inspect" or "report" or "artifacts" or "history-status" or "history-retry" => ["--operation"],
             "events" => ["--operation", "--after", "--limit"],
@@ -316,6 +324,7 @@ internal static class RemoteCommand
                 _ = Number(values, "--jobs", 1, 1, 4096);
                 break;
             case "find": _ = Require(values, "--request-id"); break;
+            case "script": break;
             default: _ = Require(values, "--operation"); break;
         }
         if (action == "events")
@@ -345,10 +354,10 @@ internal static class RemoteCommand
             ? value
             : throw new ArgumentException($"Missing required remote option {key}.");
 
-    private static string? Get(Dictionary<string, string> values, string key) =>
+    internal static string? Get(Dictionary<string, string> values, string key) =>
         values.GetValueOrDefault(key);
 
-    private static long Number(Dictionary<string, string> values, string key, long fallback, long minimum, long maximum)
+    internal static long Number(Dictionary<string, string> values, string key, long fallback, long minimum, long maximum)
     {
         return !values.TryGetValue(key, out string? raw)
             ? fallback

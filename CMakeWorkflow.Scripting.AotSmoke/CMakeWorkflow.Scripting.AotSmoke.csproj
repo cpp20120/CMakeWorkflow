@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <PublishAot>true</PublishAot>
+        <IsAotCompatible>true</IsAotCompatible>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(ScriptingPackageVersion)' == ''">
+        <ProjectReference Include="../CMakeWorkflow.Scripting/CMakeWorkflow.Scripting.csproj"/>
+    </ItemGroup>
+    <ItemGroup Condition="'$(ScriptingPackageVersion)' != ''">
+        <PackageReference Include="CMakeWorkflow.Scripting" Version="$(ScriptingPackageVersion)"/>
+    </ItemGroup>
+    <Target Name="RequirePackageOnlyConsumer" BeforeTargets="ResolveProjectReferences"
+            Condition="'$(ScriptingPackageVersion)' != ''">
+        <Error Condition="'@(ProjectReference)' != ''" Text="Packaged scripting SDK smoke must not use ProjectReference: @(ProjectReference)"/>
+    </Target>
+</Project>

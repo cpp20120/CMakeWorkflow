@@ -223,6 +223,12 @@ if (args.Length > 0 && args[0] == "--execution-engine-tests")
     return;
 }
 
+if (args is ["--manifest-preparation-wire-tests"])
+{
+    await ManifestPreparationWireTests.RunAsync();
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--workflow-dag-tests")
 {
     await WorkflowDagTests.RunAsync();
@@ -266,7 +272,7 @@ if (args.Length > 0 && args[0] == "--ssh-workflow-tests")
 
 if (args.Length > 0 && args[0] == "--ssh-drop-start-worker")
 {
-    await SshLostReplyPeer.RunAsync(args[1], args[2]);
+    await SshLostReplyPeer.RunAsync(args[1], args[2], args.Length > 3 && args[3] == "interrupt-prepare");
     return;
 }
 
@@ -336,7 +342,7 @@ if (args.Length > 0 && args[0] == "--ssh-peer")
 }
 if (args.Length > 0 && args[0] == "--ssh-mismatch-peer")
 {
-    await SshProtocolMismatchPeer.RunAsync();
+    await SshProtocolMismatchPeer.RunAsync(args.Length > 1 ? args[1] : null);
     return;
 }
 

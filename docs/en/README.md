@@ -17,6 +17,7 @@ then use an existing CMake build directory.
 | Guide                                                 | What you will find                                                        |
 |-------------------------------------------------------|---------------------------------------------------------------------------|
 | [Architecture](architecture.md)                       | Components, process boundaries, scheduler and provenance guarantees       |
+| [C# workflow authoring](scripting.md)                | LINQ composition, manifests and durable dispatch from .NET                |
 | [Workflow manifests](workflows.md)                    | Contexts, node types, dependencies, resources and examples                |
 | [Pipelines v1 planning foundation](pipelines.md)      | Experimental cross-domain DAG contract and pure planner; no execution yet |
 | [Typed recipes](recipes.md)                           | Benchmark generation, independent recipe versions and Host preparation    |

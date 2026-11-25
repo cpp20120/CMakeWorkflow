@@ -56,6 +56,7 @@ try
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.Environment['CMAKEWORKFLOW_ARTIFACT_CAS'] = Join-Path $directory 'cas'
     if ($InFlight)
     {
         $gateRoot = [IO.Directory]::CreateDirectory((Join-Path $workspace 'rpc-inflight')).FullName

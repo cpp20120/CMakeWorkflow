@@ -12,6 +12,7 @@ tree.
 | Раздел                                                        | О чём                                                       |
 |---------------------------------------------------------------|-------------------------------------------------------------|
 | [Архитектура](../architecture.md)                             | Границы CMake и runner, процессы, leases, provenance        |
+| [Описание workflow в C#](scripting.md)                       | LINQ, манифесты и durable-запуск из .NET                    |
 | [Манифесты workflow](../workflows.md)                         | `contexts`, `nodes`, зависимости, ресурсы и `schemaVersion` |
 | [Типизированные рецепты](recipes.md)                          | Генерация Benchmark, версии рецептов и Host preparation     |
 | [CLI](../cli.md)                                              | Команды, ключи, коды возврата                               |

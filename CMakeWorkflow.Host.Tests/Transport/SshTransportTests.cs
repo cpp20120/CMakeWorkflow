@@ -64,6 +64,16 @@ internal static class SshTransportTests
         Exception protocol = await RejectAsync<Exception>(() => CMakeWorkflowClient.ConnectSshAsync(options with { SshExecutable = mismatch }, ct));
         Check(protocol.ToString().Contains("Unsupported Host protocol", StringComparison.Ordinal), "Protocol mismatch not detected.");
 
+        string legacy = files.Script("legacy-ssh", "exec dotnet " + SshTestPrograms.Quote(typeof(SshTransportTests).Assembly.Location)
+            + " --ssh-mismatch-peer " + SshTestPrograms.Quote(files.Root));
+        await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshAsync(options with { SshExecutable = legacy }, ct))
+        {
+            NotSupportedException unsupported = await RejectAsync<NotSupportedException>(
+                () => client.Workflows.PrepareManifestAsync(ReadOnlyMemory<byte>.Empty, "", files.Root, ct: ct));
+            Check(unsupported.Message.Contains("workflow/prepareManifest", StringComparison.Ordinal),
+                "Manifest delivery did not check the Host capability.");
+        }
+
         await SshLifecycleTests.RunAsync();
         Console.WriteLine("SSH: invalid paths, missing executables, early exit, malformed/truncated framing, protocol mismatch, timeout and cancellation passed.");
     }

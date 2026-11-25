@@ -23,6 +23,8 @@ using CMakeWorkflow.Tooling.VisualStudio;
 
 namespace CMakeWorkflow.Host.Protocol;
 
+[JsonSerializable(typeof(WorkflowManifestPreparation))]
+[JsonSerializable(typeof(WorkflowManifestPreparationReceipt))]
 [JsonSerializable(typeof(ExperimentStageRequest))]
 [JsonSerializable(typeof(ExperimentDependencyRequest))]
 [JsonSerializable(typeof(ExperimentDependencyResult))]
