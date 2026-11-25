@@ -26,14 +26,23 @@ public sealed class WindowsWorkflowToolchainProvider : IWorkflowToolchainProvide
             throw new NotSupportedException("Executable toolchain binding currently supports x64 -> x64 only.");
         }
 
+        bool requireMsvc = binding.EnvironmentProfileId == "windows-msvc";
+        if (requireMsvc && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.X64)
+        {
+            throw new PlatformNotSupportedException("The MSVC Kit requires a Windows x64 Host.");
+        }
         ToolchainInventory inventory = await WindowsToolchains.DiscoverAsync(ct);
         ToolchainResolution selected = WindowsToolchains.Resolve(inventory, new ToolchainSelection(
             binding.CMakeCandidateId, binding.NinjaCandidateId, binding.CompilerCandidateId,
-            binding.SdkCandidateId, binding.EnvironmentProfileId, binding.Generator));
+            binding.SdkCandidateId, requireMsvc ? null : binding.EnvironmentProfileId, binding.Generator));
         if (selected.Status != "resolved" || selected.CMake is null || selected.Compiler is null)
         {
             throw new InvalidOperationException("Cannot activate requested toolchain: " +
                                                 string.Join("; ", selected.Diagnostics));
+        }
+        if (requireMsvc && (selected.Compiler.Flavor != "msvc" || selected.Sdk is null || selected.EnvironmentProfileId is null))
+        {
+            throw new InvalidOperationException("The MSVC Kit requires an MSVC toolset, Windows SDK and VS developer environment.");
         }
         // This execution adapter supports Ninja. VS generators also need an
         // instance/architecture-specific project-system binding, not just PATH.
@@ -124,7 +133,12 @@ public sealed class WindowsWorkflowToolchainProvider : IWorkflowToolchainProvide
                 .Select(x => x.Key.ToUpperInvariant() + "=" + x.Value)));
         string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintText)));
         return new(selected.CMake.Path, selected.Ninja?.Path, selected.Compiler.Path,
-            selected.Sdk?.Path, selected.EnvironmentProfileId, binding.Generator,
-            fingerprint, variables);
+            selected.Sdk?.Path, requireMsvc ? binding.EnvironmentProfileId : selected.EnvironmentProfileId, binding.Generator,
+            fingerprint, variables)
+        {
+            RequireConfiguredFingerprint = requireMsvc,
+            CCompiler = requireMsvc ? selected.Compiler.Path : null,
+            CTest = requireMsvc ? Path.Combine(Path.GetDirectoryName(selected.CMake.Path)!, "ctest.exe") : null
+        };
     }
 }

@@ -25,10 +25,11 @@ public static partial class DeveloperLifecycle
         {
             throw new InvalidDataException("The explicit Kit differs from the reviewed plan.");
         }
-        DeveloperOperationPlan current = await PlanOperationCoreAsync(request with
-        {
-            Configuration = request.Configuration with { Kit = reviewed.SelectedKit?.Id }
-        }, useActive: false, ct);
+        DeveloperOperationPlan current = reviewed.KitMatrix.Count != 0 ? await PlanKitMatrixAsync(request, ct) :
+            await PlanOperationCoreAsync(request with
+            {
+                Configuration = request.Configuration with { Kit = reviewed.SelectedKit?.Id }
+            }, useActive: false, ct);
         return WorkflowPathEquals(current.ProjectDirectory, reviewed.ProjectDirectory)
             ? await PublishReviewedManifestAsync(current, reviewed.ManifestSha256, ct)
             : throw new InvalidDataException("The reviewed operation belongs to a different project.");
@@ -143,7 +144,7 @@ public static partial class DeveloperLifecycle
             HistoryPolicy = execution.HistoryPolicy,
             SourceSnapshotId = execution.SourceSnapshotId
         };
-        return plan.KitLockSha256 is not null && execution.SourceSnapshotId is null ? StartReviewedAsync(client, start, ct) :
+        return (plan.KitLockSha256 is not null || plan.KitMatrix.Count != 0) && execution.SourceSnapshotId is null ? StartReviewedAsync(client, start, ct) :
             client.Workflows.StartAsync(start, ct);
     }
 }

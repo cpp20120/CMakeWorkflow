@@ -75,7 +75,7 @@ internal static class DeveloperCommand
             {
                 "test" => new[] { "--target", "--filter", "--label" },
                 "build" or "run" => ["--target"],
-                "benchmark" => ["--target", "--repeats"],
+                "benchmark" => ["--target", "--repeats", "--kit-matrix"],
                 "profile" => ["--target", "--backend", "--mode"],
                 _ => []
             }]
@@ -124,6 +124,7 @@ internal static class DeveloperCommand
         {
             Configuration = selection,
             Target = values.GetValueOrDefault("--target"),
+            KitMatrix = values.GetValueOrDefault("--kit-matrix")?.Split(',', StringSplitOptions.TrimEntries) ?? [],
             Arguments = separator < 0 ? [] : args[(separator + 1)..],
             TestRegex = values.GetValueOrDefault("--filter"),
             LabelRegex = values.GetValueOrDefault("--label"),
@@ -189,6 +190,7 @@ internal static class DeveloperCommand
                 writer.WriteString("configurationLockSha256", plan.ConfigurationLock.Sha256);
                 writer.WriteString("kitId", plan.SelectedKit?.Id);
                 writer.WriteString("kitLockSha256", plan.KitLockSha256);
+                WriteKitMatrix(writer, plan);
                 writer.WriteString("runDirectory", overview.RunDirectory);
                 writer.WriteString("reportSha256", overview.ReportSha256);
                 writer.WriteString("error", error);
@@ -293,10 +295,29 @@ internal static class DeveloperCommand
             writer.WriteString("configurationLockSha256", plan.ConfigurationLock.Sha256);
             writer.WriteString("kitId", plan.SelectedKit?.Id);
             writer.WriteString("kitLockSha256", plan.KitLockSha256);
+            WriteKitMatrix(writer, plan);
             writer.WritePropertyName("manifest");
             writer.WriteRawValue(plan.ManifestJson.Span);
         })
         : Console.Out.WriteLineAsync(plan.ManifestSha256 + Environment.NewLine + Encoding.UTF8.GetString(plan.ManifestJson.Span));
+
+    private static void WriteKitMatrix(Utf8JsonWriter writer, DeveloperOperationPlan plan)
+    {
+        if (plan.KitMatrix.Count == 0)
+        {
+            return;
+        }
+        writer.WriteStartArray("kitMatrix");
+        foreach (DeveloperKitMatrixEntry branch in plan.KitMatrix)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("kitId", branch.KitId);
+            writer.WriteString("kitLockSha256", branch.KitLockSha256);
+            writer.WriteString("configurationLockSha256", branch.ConfigurationLock.Sha256);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+    }
 
     internal static async Task WriteJsonAsync(string status, Action<Utf8JsonWriter> properties)
     {
@@ -350,7 +371,7 @@ internal static class DeveloperCommand
             "build" => " [--target NAME]",
             "test" => " [--target NAME] [--filter REGEX] [--label REGEX]",
             "run" => " [--target NAME] [-- PROGRAM_ARGS...]",
-            "benchmark" => " [--target NAME] [--repeats N] [-- PROGRAM_ARGS...]",
+            "benchmark" => " [--target NAME] [--repeats N] [--kit-matrix ID,ID] [-- PROGRAM_ARGS...]",
             "profile" => " [--target NAME] [--backend auto|perf|etw|instruments] [--mode MODE] [-- PROGRAM_ARGS...]",
             _ => ""
         })

@@ -1,3 +1,4 @@
+using CMakeWorkflow.Contracts.Kits;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.Client;
@@ -74,10 +75,11 @@ public static partial class DeveloperLifecycle
                     diagnostics.Add(new(DeveloperDiagnosticCode.KitLockApprovalRequired, "The Kit lock requires approval.",
                         $"kit lock {selectedKit.Id} --plan-sha {kit.Lock.Sha256}"));
                 }
-                if (File.Exists(BuildVariantConfiguration.CheckedPath(project.Directory, "vcpkg.json")))
+                if (kit.Environment.Provider != KitProvider.ManagedClang &&
+                    File.Exists(BuildVariantConfiguration.CheckedPath(project.Directory, "vcpkg.json")))
                 {
                     diagnostics.Add(new(DeveloperDiagnosticCode.KitDependencyUnsupported,
-                        "Use an explicit workflow with a verified vcpkg receipt for this project."));
+                        "Select a managed Linux Clang Kit for vcpkg receipt binding."));
                 }
             }
             if (kit is null || (kit.Approved && !diagnostics.Exists(item => item.Code == DeveloperDiagnosticCode.KitDependencyUnsupported)))
@@ -139,12 +141,6 @@ public static partial class DeveloperLifecycle
     private static async Task<ToolingPlan?> InspectLocalToolsAsync(string root, SdkDescriptor sdk, ConfigurationPlan configuration,
         EngineeringKitPlan? kit, List<DeveloperDiagnostic> diagnostics, CancellationToken ct)
     {
-        if (kit is not null && (!OperatingSystem.IsLinux() ||
-            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.X64))
-        {
-            diagnostics.Add(new(DeveloperDiagnosticCode.ToolingUnavailable, "The Kit requires a Linux x64 execution Host."));
-            return null;
-        }
         string? environment = configuration.Variants[0].EnvironmentLockSha256;
         ToolchainEnvironmentLock? exactEnvironment = null;
         if (environment is not null)
@@ -170,6 +166,11 @@ public static partial class DeveloperLifecycle
             {
                 diagnostics.Add(new(DeveloperDiagnosticCode.ToolingUnavailable, error.Message));
             }
+        }
+        if (kit?.Environment.Provider is KitProvider.Msvc or KitProvider.AppleClang)
+        {
+            // These Kit providers discover tools outside PATH through VS or Xcode.
+            return null;
         }
         ToolingService service = new(new SystemToolingRuntime(root), new VerifiedCMakeInstaller())
         {

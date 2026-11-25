@@ -635,6 +635,14 @@ internal static class CMakeWorkflowNodeExecutor
                 ]);
             }
 
+            if (toolchain.EnvironmentProfileId == "macos-appleclang")
+            {
+                result.Arguments.AddRange([
+                    "-DCMAKE_OSX_SYSROOT:PATH=" + toolchain.Sdk,
+                    "-DCMAKE_OSX_ARCHITECTURES:STRING=arm64"
+                ]);
+            }
+
             if (toolchain.Vcpkg is { } vcpkg)
             {
                 result.Arguments.AddRange([
@@ -647,6 +655,11 @@ internal static class CMakeWorkflowNodeExecutor
                     "-DVCPKG_MANIFEST_MODE:BOOL=ON",
                     "-DVCPKG_MANIFEST_INSTALL:BOOL=OFF"
                 ]);
+                if (vcpkg.NativeKit)
+                {
+                    string hook = await NativeVcpkgProjectHook.PrepareAsync(request.BuildDirectory, ct);
+                    result.Arguments.Add("-DCMAKE_PROJECT_INCLUDE:FILEPATH=" + hook);
+                }
             }
 
             if (toolchain.RequireConfiguredFingerprint)

@@ -201,12 +201,20 @@ jobs:
           suffix=""
           if [[ "$RUNNER_OS" == Windows ]]; then suffix=".exe"; fi
           bash tests/infrastructure/developer-lifecycle/run-tests.sh "$PWD/out/native/${{ matrix.executable }}" "$PWD/out/developer-aot/CMakeWorkflow.Developer.AotSmoke${suffix}"
-      - name: Engineering Kits NativeAOT acceptance with GCC and Clang
+      - name: Engineering Kits NativeAOT acceptance on Linux
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          bash tests/infrastructure/engineering-kits/run-tests.sh "$PWD/out/native/CMakeWorkflow" "$PWD/out/developer-aot/CMakeWorkflow.Developer.AotSmoke"
+          bash tests/infrastructure/engineering-kits/managed-test.sh "$PWD/out/native/CMakeWorkflow" "$PWD/out/developer-aot/CMakeWorkflow.Developer.AotSmoke"
           bash tests/infrastructure/engineering-kits/recovery-test.sh "$PWD/out/recovery-cli/CMakeWorkflow" "$PWD/out/developer-aot/CMakeWorkflow.Developer.AotSmoke"
+      - name: Engineering Kit NativeAOT acceptance with AppleClang
+        if: runner.os == 'macOS'
+        shell: bash
+        run: out/developer-aot/CMakeWorkflow.Developer.AotSmoke --kit-exercise macos-appleclang
+      - name: Engineering Kit NativeAOT acceptance with MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: out/developer-aot/CMakeWorkflow.Developer.AotSmoke.exe --kit-exercise windows-msvc
       - name: Publish and exercise NativeAOT historical scheduling
         shell: pwsh
         run: |

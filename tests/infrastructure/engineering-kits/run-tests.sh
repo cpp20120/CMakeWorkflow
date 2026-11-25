@@ -34,7 +34,19 @@ for kit in linux-gcc linux-system-clang "${@:3}"; do
     run=$(jq -er .runDirectory "$tmp/$kit.bench.json")
     jq -e --arg kit "$kit_sha" 'any(.nodes[]; .kitLockSha256 == $kit) and any(.nodes[]; .metrics != null)' "$run/run.json"
     "$consumer" --kit-exercise "$kit"
+    if [[ "$kit" == linux-clang || "$kit" == linux-clang-multi ]]; then
+        "$cli" pack --project "$project" --kit "$kit" --no-history
+        build=$(jq -er '.manifest.contexts.release.buildDirectory' "$tmp/$kit.plan.json")
+        test -s "$project/$build/cmwf-package.zip"
+    fi
 done
+
+"$cli" benchmark --project "$project" --kit-matrix linux-gcc,linux-system-clang --repeats 2 --jobs 2 --plan --json > "$tmp/matrix-plan.json"
+jq -e '(.kitMatrix | length == 2) and ([.manifest.nodes[] | select(.kind == "run") | .benchmarkTrial.axes[] | select(.name == "kit") | .value] | unique | length == 2)' "$tmp/matrix-plan.json"
+"$cli" benchmark --project "$project" --kit-matrix linux-gcc,linux-system-clang --repeats 2 --jobs 2 --json > "$tmp/matrix.json"
+matrix_run=$(jq -er 'select(.status == "succeeded" and .history.state == "indexed").runDirectory' "$tmp/matrix.json")
+jq -e '([.toolchains[].environmentProfileId] | unique | length == 2) and ([.nodes[] | select(.kind == "run" and .status == "succeeded")] | length == 4)' "$matrix_run/run.json"
+if "$cli" benchmark --project "$project" --kit-matrix linux-gcc,windows-msvc --plan; then exit 1; fi
 
 first=$(jq -er '.manifest.contexts.release.buildDirectory' "$tmp/linux-gcc.plan.json")
 second=$(jq -er '.manifest.contexts.release.buildDirectory' "$tmp/linux-system-clang.plan.json")
@@ -57,7 +69,8 @@ jq '.contexts.release.toolchain.environmentProfileId = "linux-ambient-clang"' "$
 if "$cli" workflow plan "$project/mismatched.json" > "$tmp/mismatched.log" 2>&1; then exit 1; fi
 grep -F variant-context-mismatch "$tmp/mismatched.log"
 
-"$cli" kit show linux-gcc --project "$project" | jq '{schemaVersion:1,kits:[.kit|.id="custom-gcc"]}' > "$project/cmwf.kits.json"
+"$cli" kit show linux-gcc --project "$project" | jq '{schemaVersion:1,kits:[.kit|.id="custom-gcc"]}' > "$tmp/custom-kit.json"
+cp "$tmp/custom-kit.json" "$project/cmwf.kits.json"
 original=$("$cli" kit plan custom-gcc --project "$project" | jq -er .kitLockSha256)
 jq '.kits[0].displayName = "Renamed custom GCC"' "$project/cmwf.kits.json" > "$tmp/catalog.json"
 cp "$tmp/catalog.json" "$project/cmwf.kits.json"

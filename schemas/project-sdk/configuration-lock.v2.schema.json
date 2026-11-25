@@ -153,31 +153,39 @@
             "hostOs": {
               "enum": [
                 "linux",
-                "native"
+                "native",
+                "windows",
+                "macos"
               ]
             },
             "hostArchitecture": {
               "enum": [
                 "x64",
-                "native"
+                "native",
+                "arm64"
               ]
             },
             "targetOs": {
               "enum": [
                 "linux",
-                "native"
+                "native",
+                "windows",
+                "macos"
               ]
             },
             "targetArchitecture": {
               "enum": [
                 "x64",
-                "native"
+                "native",
+                "arm64"
               ]
             },
             "abi": {
               "enum": [
                 "gnu",
-                "ambient"
+                "ambient",
+                "msvc",
+                "darwin"
               ]
             },
             "generator": {
@@ -200,6 +208,9 @@
         },
         "kit": {
           "$ref": "engineering-kit-lock.v1.schema.json"
+        },
+        "vcpkgProjectSha256": {
+          "$ref": "#/$defs/digest"
         }
       }
     },

@@ -80,6 +80,7 @@ public sealed record DeveloperOperationRequest(ProjectLocation Location, Develop
 {
     public ConfigurationSelection Configuration { get; init; } = new();
     public string? Target { get; init; }
+    public IReadOnlyList<string> KitMatrix { get; init; } = [];
     public IReadOnlyList<string> Arguments { get; init; } = [];
     public string? TestRegex { get; init; }
     public string? LabelRegex { get; init; }
@@ -88,11 +89,14 @@ public sealed record DeveloperOperationRequest(ProjectLocation Location, Develop
     public string? ProfileMode { get; init; }
 }
 
+public sealed record DeveloperKitMatrixEntry(string KitId, string KitLockSha256, ProjectLockPlan ConfigurationLock);
+
 public sealed record DeveloperOperationPlan(string ProjectDirectory, DeveloperOperationKind Kind, string ManifestName,
     string ManifestSha256, ReadOnlyMemory<byte> ManifestJson, ProjectLockPlan ConfigurationLock, IReadOnlyList<ProjectVariant> Variants)
 {
     public SelectedEngineeringKit? SelectedKit { get; init; }
     public string? KitLockSha256 { get; init; }
+    public IReadOnlyList<DeveloperKitMatrixEntry> KitMatrix { get; init; } = [];
     public string SdkId { get; init; } = "";
     public string SdkVersion { get; init; } = "";
 }

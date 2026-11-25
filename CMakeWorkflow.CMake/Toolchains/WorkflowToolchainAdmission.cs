@@ -51,6 +51,10 @@ public static class WorkflowToolchainAdmission
                 throw new InvalidOperationException("The vcpkg dependency plan belongs to a different project directory.");
             }
 
+            if (resolved.Vcpkg is { } packages && tree.Any(node => node.VariantBinding?.KitLockSha256 is not null))
+            {
+                resolved = resolved with { Vcpkg = packages with { NativeKit = true } };
+            }
             selected.Add(tree.Key, resolved);
         }
 
@@ -110,7 +114,7 @@ public static class WorkflowToolchainAdmission
         {
             if (selected?.RequireConfiguredFingerprint != true || fingerprint != selected.Fingerprint ||
                 !properties.TryGetValue("CMAKE_COMMAND", out string? cmake) ||
-                !WorkflowPlanner.PathComparer.Equals(cmake, selected.CMake))
+                !EqualPath(cmake, selected.CMake))
             {
                 throw new InvalidOperationException(
                     "Configured CMake tree has a different toolchain identity. Use the original binding or a new build tree.");
@@ -131,6 +135,13 @@ public static class WorkflowToolchainAdmission
             throw new InvalidOperationException("Configured Linux SDK, linker or target differs from the managed selection.");
         }
 
+        if (selected.EnvironmentProfileId == "macos-appleclang" &&
+            (properties.GetValueOrDefault("CMAKE_OSX_SYSROOT") != selected.Sdk ||
+             properties.GetValueOrDefault("CMAKE_OSX_ARCHITECTURES") != "arm64"))
+        {
+            throw new InvalidOperationException("Configured macOS SDK or architecture differs from the AppleClang Kit.");
+        }
+
         if (selected.Vcpkg is { } vcpkg &&
             (properties.GetValueOrDefault("VCPKG_INSTALLED_DIR") != vcpkg.InstalledDirectory ||
              properties.GetValueOrDefault("VCPKG_TARGET_TRIPLET") != vcpkg.Triplet ||
@@ -141,6 +152,13 @@ public static class WorkflowToolchainAdmission
              properties.GetValueOrDefault("VCPKG_MANIFEST_INSTALL") != "OFF"))
         {
             throw new InvalidOperationException("Configured vcpkg package selection differs from the approved project dependencies.");
+        }
+
+        if (selected.Vcpkg is { NativeKit: true } &&
+            (!properties.TryGetValue("CMAKE_PROJECT_INCLUDE", out string? hook) ||
+             !EqualPath(hook, NativeVcpkgProjectHook.Verify(buildDirectory))))
+        {
+            throw new InvalidOperationException("Configured native vcpkg project hook differs from the admitted Kit.");
         }
 
         if (properties.TryGetValue("CMAKE_GENERATOR", out string? generator) && generator != selected.Generator)

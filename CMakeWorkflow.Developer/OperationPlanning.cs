@@ -9,8 +9,11 @@ namespace CMakeWorkflow.Developer;
 
 public static partial class DeveloperLifecycle
 {
-    public static Task<DeveloperOperationPlan> PlanOperationAsync(DeveloperOperationRequest request, CancellationToken ct = default) =>
-        PlanOperationCoreAsync(request, useActive: true, ct);
+    public static Task<DeveloperOperationPlan> PlanOperationAsync(DeveloperOperationRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.KitMatrix.Count != 0 ? PlanKitMatrixAsync(request, ct) : PlanOperationCoreAsync(request, useActive: true, ct);
+    }
 
     private static async Task<DeveloperOperationPlan> PlanOperationCoreAsync(DeveloperOperationRequest request, bool useActive, CancellationToken ct)
     {
@@ -24,12 +27,15 @@ public static partial class DeveloperLifecycle
         SelectedEngineeringKit? selectedKit = request.Configuration.Kit is not null || useActive
             ? await GetSelectedKitAsync(project.Directory, request.Configuration.Kit, ct) : null;
         ConfigurationSelection selection = request.Configuration with { Kit = selectedKit?.Id };
-        if (selectedKit is not null && request.ProfileBackend is "etw" or "instruments")
-        {
-            throw new InvalidDataException("incompatible-kit-profiler: Linux Kits require perf.");
-        }
-
         (VariantLock evidence, ConfigurationPlan configuration) = await VerifyConfigurationEvidenceAsync(project.Directory, selection, ct);
+        if (evidence.Variants[0].Kit is { } kit && request.ProfileBackend is not (null or "auto"))
+        {
+            string backend = kit.ExecutionHost.Os switch { "windows" => "etw", "macos" => "instruments", _ => "perf" };
+            if (request.ProfileBackend != backend)
+            {
+                throw new InvalidDataException("incompatible-kit-profiler: the selected Kit requires " + backend + ".");
+            }
+        }
         byte[] sdkLock = await ProjectSdkResolution.ReadVerifiedAsync(project.Directory, ct);
         if (BuildVariantConfiguration.Hash(sdkLock) != evidence.SdkSha256)
         {

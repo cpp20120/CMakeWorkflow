@@ -15,7 +15,9 @@ internal static class KitSmoke
         DirectoryInfo parent = Directory.CreateTempSubdirectory("cmwf-kit-");
         try
         {
-            string root = (await DeveloperLifecycle.CreateProjectAsync(new("runtime", "KitSample", Path.Combine(parent.FullName, "project")), ct)).Directory;
+            string path = OperatingSystem.IsMacOS() && parent.FullName.StartsWith("/var/", StringComparison.Ordinal)
+                ? "/private" + parent.FullName : parent.FullName;
+            string root = (await DeveloperLifecycle.CreateProjectAsync(new("runtime", "KitSample", Path.Combine(path, "project")), ct)).Directory;
             string sdk = (await DeveloperLifecycle.VerifySdkAsync(root, ct)).Sha256;
             string legacy = (await DeveloperLifecycle.VerifyConfigurationAsync(root, new(), ct)).Lock.Sha256;
             Check((await DeveloperLifecycle.ListKitsAsync(root, ct)).Any(kit => kit.Id == id), "catalog");

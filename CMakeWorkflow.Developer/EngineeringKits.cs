@@ -52,7 +52,9 @@ public static partial class DeveloperLifecycle
             BuiltIn("linux-clang", "Managed Linux Clang", KitProvider.ManagedClang, "Ninja"),
             BuiltIn("linux-clang-multi", "Managed Linux Clang Multi-Config", KitProvider.ManagedClang, "Ninja Multi-Config"),
             BuiltIn("linux-gcc", "Linux system GCC", KitProvider.AmbientGcc, "Ninja"),
-            BuiltIn("linux-system-clang", "Linux system Clang", KitProvider.AmbientClang, "Ninja")
+            BuiltIn("linux-system-clang", "Linux system Clang", KitProvider.AmbientClang, "Ninja"),
+            BuiltIn("windows-msvc", "Windows MSVC", KitProvider.Msvc, "Ninja"),
+            BuiltIn("macos-appleclang", "macOS AppleClang", KitProvider.AppleClang, "Ninja")
         })
         {
             kits.Add(definition.Id, definition);
@@ -216,8 +218,11 @@ public static partial class DeveloperLifecycle
         return (hash, $"tooling lock --profile linux-clang --generator \"{definition.CMake.Generator}\"{versions} --approve-sha {hash}");
     }
 
-    private static EngineeringKitDefinition BuiltIn(string id, string name, KitProvider provider, string generator) =>
-        new(1, id, name, "cmake", provider, new("linux", "x64"), new("linux", "x64", "gnu"), new(generator));
+    private static EngineeringKitDefinition BuiltIn(string id, string name, KitProvider provider, string generator)
+    {
+        (string os, string architecture, string abi) = EngineeringKitEvidence.Platform(provider);
+        return new(1, id, name, "cmake", provider, new(os, architecture), new(os, architecture, abi), new(generator));
+    }
 
     private static bool ValidKitId(string value) => value.Length is > 0 and <= 48 && char.IsAsciiLetterLower(value[0]) &&
         value.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-');

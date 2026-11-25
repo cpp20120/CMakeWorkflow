@@ -21,6 +21,7 @@
     "kits": { "type": "array", "items": { "type": "object" } },
     "kitLock": { "type": "object" },
     "kitApproved": { "type": "boolean" },
+    "kitMatrix": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "type": "object", "required": ["kitId", "kitLockSha256", "configurationLockSha256"], "properties": { "kitId": { "type": "string" }, "kitLockSha256": { "$ref": "#/$defs/sha256" }, "configurationLockSha256": { "$ref": "#/$defs/sha256" } } } },
     "vcpkgPlanSha256": { "$ref": "#/$defs/optionalSha256" },
     "manifestSha256": { "$ref": "#/$defs/sha256" },
     "manifestName": { "type": "string" },

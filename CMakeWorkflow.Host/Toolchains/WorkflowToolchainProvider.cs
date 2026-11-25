@@ -32,11 +32,93 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             "linux-managed-clang" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
             _ when binding.EnvironmentLockSha256 is not null || binding.VcpkgProjectSha256 is not null =>
                 throw new InvalidOperationException("Linux environment and vcpkg digests require linux-managed-clang."),
+            "macos-appleclang" => ResolveAppleClangAsync(binding, ct),
             "linux-ambient-gcc" or "linux-ambient-clang" => ResolveLinuxAsync(binding, ToolResolutionPolicy.AllowSystem, ct),
             "linux-managed-tools-system-compiler" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
             "linux-allow-system-tools" => ResolveLinuxAsync(binding, ToolResolutionPolicy.AllowSystem, ct),
             _ => new WindowsWorkflowToolchainProvider().ResolveAsync(binding, ct)
         };
+    }
+
+    private static async Task<WorkflowToolchainRuntime> ResolveAppleClangAsync(WorkflowToolchainBinding binding, CancellationToken ct)
+    {
+        if (!OperatingSystem.IsMacOS() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+        {
+            throw new PlatformNotSupportedException("The AppleClang Kit requires a macOS ARM64 Host.");
+        }
+        if (binding.HostArchitecture != "arm64" || binding.TargetArchitecture != "arm64" ||
+            binding.Generator is not ("Ninja" or "Ninja Multi-Config") ||
+            binding.CMakeCandidateId is not null || binding.NinjaCandidateId is not null ||
+            binding.CompilerCandidateId is not null || binding.SdkCandidateId is not null)
+        {
+            throw new InvalidDataException("The AppleClang Kit requires native ARM64 and host-discovered Ninja and Xcode tools.");
+        }
+
+        ToolingService tooling = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller());
+        ToolingPlan plan = await tooling.PlanAsync(["cmake-ninja"], PackageManagerKind.None, false, null, ct);
+        if (!plan.Ready)
+        {
+            throw new InvalidOperationException("The AppleClang Kit requires CMake, CTest and Ninja on the Host.");
+        }
+        string cmake = AppleExecutable(plan, "cmake");
+        string ctest = AppleExecutable(plan, "ctest");
+        string ninja = AppleExecutable(plan, "ninja");
+        string cc = await ReadAppleToolAsync(["--sdk", "macosx", "--find", "clang"], ct);
+        string cxx = await ReadAppleToolAsync(["--sdk", "macosx", "--find", "clang++"], ct);
+        string sdk = await ReadAppleToolAsync(["--sdk", "macosx", "--show-sdk-path"], ct);
+        if (!Path.IsPathFullyQualified(cc) || !File.Exists(cc) || !Path.IsPathFullyQualified(cxx) || !File.Exists(cxx) ||
+            !Path.IsPathFullyQualified(sdk) || !Directory.Exists(sdk))
+        {
+            throw new InvalidOperationException("xcrun did not resolve a usable AppleClang compiler and macOS SDK.");
+        }
+        sdk = new DirectoryInfo(sdk).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? sdk;
+        Dictionary<string, string> variables = CreateEnvironment(cmake, ninja, cc, cxx, binding.Generator);
+        variables["SDKROOT"] = sdk;
+        variables["MACOSX_DEPLOYMENT_TARGET"] = Environment.GetEnvironmentVariable("MACOSX_DEPLOYMENT_TARGET") ?? "";
+        Dictionary<string, string?> environment = variables.ToDictionary(pair => pair.Key, pair => (string?)pair.Value, StringComparer.Ordinal);
+        List<string> identity = [binding.Generator, sdk, await ReadAppleToolAsync(["--sdk", "macosx", "--show-sdk-version"], ct)];
+        string settings = Path.Combine(sdk, "SDKSettings.json");
+        if (File.Exists(settings))
+        {
+            identity.Add(await CommandExecution.Sha256Async(settings, ct));
+        }
+        foreach (string compiler in new[] { cc, cxx })
+        {
+            CommandResult version = await CommandExecution.RunAsync(compiler, ["--version"], "", TimeSpan.FromSeconds(15), environment, ct);
+            if (version.ExitCode != 0 || version.Stdout is not { } output ||
+                !output.StartsWith("Apple clang version ", StringComparison.Ordinal) ||
+                !output.Contains("Target: arm64-apple-", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The selected compiler is not native ARM64 AppleClang.");
+            }
+            identity.Add(output);
+        }
+        foreach (string tool in new[] { cc, cxx, cmake, ctest, ninja })
+        {
+            identity.Add(tool);
+            identity.Add(await CommandExecution.Sha256Async(tool, ct));
+        }
+        identity.AddRange(variables.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => pair.Key + "=" + pair.Value));
+        string fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', identity))));
+        return new(cmake, ninja, cxx, sdk, binding.EnvironmentProfileId, binding.Generator, fingerprint, variables)
+        {
+            CCompiler = cc,
+            CTest = ctest,
+            RequireConfiguredFingerprint = true
+        };
+    }
+
+    private static string AppleExecutable(ToolingPlan plan, string id)
+    {
+        FileInfo command = new(plan.Tools.Single(tool => tool.Id == id).Command!);
+        return command.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? command.FullName;
+    }
+
+    private static async Task<string> ReadAppleToolAsync(string[] args, CancellationToken ct)
+    {
+        CommandResult result = await CommandExecution.RunAsync("/usr/bin/xcrun", args, "", TimeSpan.FromSeconds(15), null, ct);
+        return result.ExitCode == 0 && result.Stdout is { } output && !string.IsNullOrWhiteSpace(output)
+            ? output.Trim() : throw new InvalidOperationException("xcrun could not resolve AppleClang and the macOS SDK.");
     }
 
     private async Task<WorkflowToolchainRuntime> ResolveLinuxAsync(WorkflowToolchainBinding binding,

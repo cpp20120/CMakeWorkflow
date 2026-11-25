@@ -1,3 +1,5 @@
+using CMakeWorkflow.Tooling.Tools;
+using CMakeWorkflow.Contracts.Kits;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -39,7 +41,6 @@ internal static class ProjectConfiguration
             {
                 throw new InvalidDataException($"kit-lock-unavailable: run kit lock {kitId} --plan-sha {kitPlan.Lock.Sha256}.");
             }
-            EngineeringKitEvidence.RequireSupportedDependencies(root);
             environment = EngineeringKitEvidence.Compose(kitPlan.Environment, environment, descriptor);
         }
         SortedDictionary<string, string> inputs = new(StringComparer.Ordinal) { [BuildVariantConfiguration.SdkLock] = sdkIdentity };
@@ -113,6 +114,8 @@ internal static class ProjectConfiguration
         {
             throw new InvalidDataException("duplicate-configuration-kit-input");
         }
+        string? dependencyDigest = kitPlan is null ? null :
+            await ReadKitDependenciesAsync(root, kitPlan.Environment, inputs, ct);
         VariantLock plan = kitPlan is null ? new(1, BuildVariantConfiguration.Version, sdkIdentity, kind, inputs, []) :
             new VariantLock(2, BuildVariantConfiguration.KitVersion, sdkIdentity, kind, inputs, [])
             {
@@ -131,14 +134,44 @@ internal static class ProjectConfiguration
             {
                 throw new InvalidDataException(candidate.Name + ": " + error.Message, error);
             }
-            string id = BuildVariantConfiguration.Identity(plan, effective.Settings, environment);
+            string id = BuildVariantConfiguration.Identity(plan, effective.Settings, environment, dependencyDigest);
             if (!ids.Add(id))
             {
                 throw new InvalidDataException("duplicate-variant: " + candidate.Name + " resolves to a previously selected configuration.");
             }
-            variants.Add(new(candidate.Name, id, effective.Settings, environment, effective.Origins) { Kit = kitPlan?.Environment });
+            variants.Add(new(candidate.Name, id, effective.Settings, environment, effective.Origins)
+            {
+                Kit = kitPlan?.Environment,
+                VcpkgProjectSha256 = dependencyDigest
+            });
         }
         return plan with { Variants = [.. variants] };
+    }
+
+    private static async Task<string?> ReadKitDependenciesAsync(string root, EngineeringKitLock kit,
+        SortedDictionary<string, string> inputs, CancellationToken ct)
+    {
+        const string manifest = "vcpkg.json";
+        const string configuration = "vcpkg-configuration.json";
+        if (!File.Exists(BuildVariantConfiguration.CheckedPath(root, manifest)))
+        {
+            return null;
+        }
+        if (kit.Provider != KitProvider.ManagedClang)
+        {
+            throw new InvalidDataException("unsupported-kit-dependencies: vcpkg requires a managed Linux Clang Kit.");
+        }
+
+        VcpkgProjectPlan plan = await VcpkgProjects.PlanAsync(root, ct);
+        _ = await ReadEvidenceAsync(root, manifest, inputs, ct);
+        if (File.Exists(BuildVariantConfiguration.CheckedPath(root, configuration)))
+        {
+            _ = await ReadEvidenceAsync(root, configuration, inputs, ct);
+        }
+        return inputs.GetValueOrDefault(manifest) == plan.ManifestSha256 &&
+            inputs.GetValueOrDefault(configuration) == plan.ConfigurationSha256
+            ? BuildVariantConfiguration.Hash(VcpkgProjects.Serialize(plan))
+            : throw new InvalidDataException("The vcpkg project plan changed during configuration evaluation.");
     }
 
     private static JsonElement ReadManifest(JsonDocument document)

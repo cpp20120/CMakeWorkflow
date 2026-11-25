@@ -44,8 +44,15 @@ public sealed partial class DoctorSession
         _ = await CompilerCacheProfile.ResolveAsync(loaded, ct);
         if (loaded.Nodes.Any(node => node.VariantBinding?.KitLockSha256 is not null))
         {
-            IReadOnlyDictionary<string, WorkflowToolchainRuntime> tools = await WorkflowToolchainAdmission.ResolveAsync(
-                loaded, new WorkflowToolchainProvider(), ct);
+            IReadOnlyDictionary<string, WorkflowToolchainRuntime> tools;
+            try
+            {
+                tools = await WorkflowToolchainAdmission.ResolveAsync(loaded, new WorkflowToolchainProvider(), ct);
+            }
+            catch (PlatformNotSupportedException error)
+            {
+                throw new ApplicationRefusal("unsupported_kit_host", error.Message);
+            }
             foreach ((string tree, WorkflowToolchainRuntime runtime) in tools)
             {
                 WorkflowToolchainAdmission.ValidateBuildTree(tree, runtime);

@@ -3,7 +3,7 @@ namespace CMakeWorkflow.Contracts.Kits;
 /// <summary>Execution or target platform requirements independent of placement.</summary>
 public sealed record KitPlatform(string Os, string Architecture, string? Abi = null);
 
-public enum KitProvider { ManagedClang, AmbientGcc, AmbientClang }
+public enum KitProvider { ManagedClang, AmbientGcc, AmbientClang, Msvc, AppleClang }
 
 public sealed record KitComponent(string Id, string Version);
 

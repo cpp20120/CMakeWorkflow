@@ -23,7 +23,9 @@
       "enum": [
         "ManagedClang",
         "AmbientGcc",
-        "AmbientClang"
+        "AmbientClang",
+        "Msvc",
+        "AppleClang"
       ]
     },
     "executionHost": {
@@ -35,10 +37,17 @@
       "additionalProperties": false,
       "properties": {
         "os": {
-          "const": "linux"
+          "enum": [
+            "linux",
+            "windows",
+            "macos"
+          ]
         },
         "architecture": {
-          "const": "x64"
+          "enum": [
+            "x64",
+            "arm64"
+          ]
         },
         "abi": {
           "type": "null"
@@ -55,13 +64,24 @@
       "additionalProperties": false,
       "properties": {
         "os": {
-          "const": "linux"
+          "enum": [
+            "linux",
+            "windows",
+            "macos"
+          ]
         },
         "architecture": {
-          "const": "x64"
+          "enum": [
+            "x64",
+            "arm64"
+          ]
         },
         "abi": {
-          "const": "gnu"
+          "enum": [
+            "gnu",
+            "msvc",
+            "darwin"
+          ]
         }
       }
     },
@@ -108,5 +128,123 @@
         "type": "null"
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "enum": [
+              "ManagedClang",
+              "AmbientClang",
+              "AmbientGcc"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "executionHost": {
+            "properties": {
+              "os": {
+                "const": "linux"
+              },
+              "architecture": {
+                "const": "x64"
+              }
+            }
+          },
+          "target": {
+            "properties": {
+              "os": {
+                "const": "linux"
+              },
+              "architecture": {
+                "const": "x64"
+              },
+              "abi": {
+                "const": "gnu"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "enum": [
+              "Msvc"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "executionHost": {
+            "properties": {
+              "os": {
+                "const": "windows"
+              },
+              "architecture": {
+                "const": "x64"
+              }
+            }
+          },
+          "target": {
+            "properties": {
+              "os": {
+                "const": "windows"
+              },
+              "architecture": {
+                "const": "x64"
+              },
+              "abi": {
+                "const": "msvc"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "enum": [
+              "AppleClang"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "executionHost": {
+            "properties": {
+              "os": {
+                "const": "macos"
+              },
+              "architecture": {
+                "const": "arm64"
+              }
+            }
+          },
+          "target": {
+            "properties": {
+              "os": {
+                "const": "macos"
+              },
+              "architecture": {
+                "const": "arm64"
+              },
+              "abi": {
+                "const": "darwin"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

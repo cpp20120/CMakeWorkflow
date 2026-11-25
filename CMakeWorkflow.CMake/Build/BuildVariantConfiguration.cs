@@ -25,13 +25,20 @@ internal sealed record VariantEnvironment(string HostOs, string HostArchitecture
     string TargetArchitecture, string Abi, string Generator, string? EnvironmentLockSha256);
 
 internal sealed record VariantIdentity(string EvaluatorVersion, string SdkSha256, string ProjectType,
-    IReadOnlyDictionary<string, string> Inputs, VariantSettings Effective, VariantEnvironment Environment);
+    IReadOnlyDictionary<string, string> Inputs, VariantSettings Effective, VariantEnvironment Environment)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VcpkgProjectSha256 { get; init; }
+}
 
 internal sealed record EvaluatedVariant(string Name, string Id, VariantSettings Effective, VariantEnvironment Environment,
     IReadOnlyDictionary<string, string> Origins)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineeringKitLock? Kit { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VcpkgProjectSha256 { get; init; }
 }
 
 internal sealed record VariantLock(int SchemaVersion, string EvaluatorVersion, string SdkSha256, string ProjectType,
@@ -62,9 +69,13 @@ internal static class BuildVariantConfiguration
 
     internal static string LockPath(string digest) => Store + "/" + digest + "/lock.json";
 
-    internal static string Identity(VariantLock plan, VariantSettings settings, VariantEnvironment environment) =>
+    internal static string Identity(VariantLock plan, VariantSettings settings, VariantEnvironment environment,
+        string? dependencyDigest = null) =>
         Hash(JsonSerializer.SerializeToUtf8Bytes(new VariantIdentity(plan.EvaluatorVersion, plan.SdkSha256,
-            plan.ProjectType, plan.Inputs, settings, environment), VariantJson.Default.VariantIdentity));
+            plan.ProjectType, plan.Inputs, settings, environment)
+        {
+            VcpkgProjectSha256 = dependencyDigest
+        }, VariantJson.Default.VariantIdentity));
 
     internal static string BuildDirectory(EvaluatedVariant variant) =>
         "out/build/" + variant.Effective.Configuration + "-" + variant.Id;
@@ -76,7 +87,7 @@ internal static class BuildVariantConfiguration
         { EnvironmentLockSha256 = digest } : null;
 
     internal static WorkflowToolchainBinding? Toolchain(EvaluatedVariant variant) =>
-        variant.Kit is { } kit ? EngineeringKitEvidence.Toolchain(kit) : Toolchain(variant.Environment);
+        variant.Kit is { } kit ? EngineeringKitEvidence.Toolchain(kit, variant.VcpkgProjectSha256) : Toolchain(variant.Environment);
 
     internal static VariantEnvironment SdkEnvironment(JsonElement effective) =>
         effective.TryGetProperty("toolchain", out JsonElement toolchain)
@@ -137,7 +148,8 @@ internal static class BuildVariantConfiguration
         }
 
         if (settings.Instrumentation == VariantInstrumentation.Thread ||
-            ((!ambient || !sdk.Capabilities.Sanitizers) && settings.Instrumentation != VariantInstrumentation.None))
+            ((!ambient || !sdk.Capabilities.Sanitizers || (kit is not null && kit.Provider != KitProvider.AmbientGcc)) &&
+              settings.Instrumentation != VariantInstrumentation.None))
         {
             throw new InvalidDataException("unsupported-instrumentation: the selected profile has no admitted sanitizer runtime.");
         }
@@ -225,7 +237,7 @@ internal static class BuildVariantConfiguration
         EvaluatedVariant selected = plan.Variants.SingleOrDefault(item => item?.Id == binding.Id)
             ?? throw new InvalidDataException("unknown-variant: ID is absent from approved configuration lock.");
         if (selected.Effective is null || selected.Environment is null ||
-            Identity(plan, selected.Effective, selected.Environment) != binding.Id)
+            Identity(plan, selected.Effective, selected.Environment, selected.VcpkgProjectSha256) != binding.Id)
         {
             throw new InvalidDataException("variant-identity-changed: configuration evidence does not match its ID.");
         }
@@ -252,7 +264,7 @@ internal static class BuildVariantConfiguration
         if (plan.KitLockSha256 is { } kitDigest)
         {
             EngineeringKitLock kit = await EngineeringKitEvidence.ReadAsync(source, kitDigest, ct, readGuard);
-            EngineeringKitEvidence.RequireSupportedDependencies(source, readGuard);
+            EngineeringKitEvidence.VerifyDependencies(source, kit, selected.VcpkgProjectSha256, plan.Inputs, readGuard);
             RequireKitProjectEvidence(plan, policy);
             if (plan.Inputs.GetValueOrDefault(EngineeringKitEvidence.PathFor(kitDigest)) != kitDigest ||
                 selected.Kit != kit || selected.Environment != EngineeringKitEvidence.Compose(kit, sdkEnvironment, sdk))
@@ -260,7 +272,7 @@ internal static class BuildVariantConfiguration
                 throw new InvalidDataException("configuration-kit-environment-mismatch");
             }
         }
-        else if (selected.Kit is not null || selected.Environment != sdkEnvironment)
+        else if (selected.Kit is not null || selected.VcpkgProjectSha256 is not null || selected.Environment != sdkEnvironment)
         {
             throw new InvalidDataException("configuration-sdk-environment-mismatch");
         }

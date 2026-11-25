@@ -8,8 +8,10 @@ An engineering Kit selects a toolchain and platform for a project. Select a conf
 | `linux-clang-multi` | Managed Clang, LLD and sysroot | Ninja Multi-Config | Linux x64, GNU x64 |
 | `linux-gcc` | System GCC and G++ | Ninja | Linux x64, GNU x64 |
 | `linux-system-clang` | System Clang and Clang++ | Ninja | Linux x64, GNU x64 |
+| `windows-msvc` | MSVC and Windows SDK selected on the Host | Ninja | Windows x64, MSVC x64 |
+| `macos-appleclang` | AppleClang and macOS SDK selected by Xcode | Ninja | macOS ARM64, Darwin ARM64 |
 
-Ambient Kits resolve and verify compiler family, version and architecture on the Host. Their fingerprints include the selected executables and relevant environment. System libraries and SDKs remain host-dependent. Qt and Graphics use ambient Qt/Vulkan dependencies and their existing CMake checks. Windows MSVC, AppleClang, cross and embedded Kit providers are outside this capability matrix. The existing no-Kit commands continue to work on their supported platforms.
+Ambient Kits resolve and verify compiler family, version and architecture on the Host. Their fingerprints include the selected executables and relevant environment. System libraries and SDKs remain host-dependent. Qt and Graphics use ambient Qt/Vulkan dependencies and their existing CMake checks. Cross and embedded Kit providers are outside this capability matrix. The existing no-Kit commands continue to work on their supported platforms.
 
 ## Select and approve
 
@@ -37,7 +39,7 @@ cmakeworkflow pack
 
 All project operations accept `--kit ID`, which takes precedence over the project-local active selection. `kit current` shows that selection, and `kit clear` restores the no-Kit default. Selection and clearing affect only the active state. `kit plan` resolves requirements, `kit verify` reviews the current definition and checks the approved lock, and `kit doctor` inspects local prerequisites. Use `--project DIRECTORY` to select a project explicitly and `--json` for structured CLI output.
 
-Project definitions in `cmwf.kits.json` follow the [catalog schema](../../schemas/project-sdk/engineering-kits.v1.schema.json). IDs are lower-case and unique. Built-in IDs are reserved. Custom definitions choose a supported provider and generator and may pin exact managed component versions. User-level catalog discovery and a multi-Kit matrix are deferred. Run separate benchmark operations with the same profiles and inputs to compare Kits.
+Project definitions in `cmwf.kits.json` follow the [catalog schema](../../schemas/project-sdk/engineering-kits.v1.schema.json). IDs are lower-case and unique. Built-in IDs are reserved. Custom definitions choose a supported provider and generator and may pin exact managed component versions. User-level catalog discovery is deferred. Use `benchmark --kit-matrix ID,ID` to compare two to eight distinct Kits on one execution platform. Approve each Kit and configuration separately. The operation records the Kit and configuration axes and serializes measurements.
 
 ## Evidence and execution
 
@@ -45,7 +47,7 @@ The Developer API resolves Kit definitions and publishes approved Kit locks unde
 
 `PlanOperationAsync` returns the reviewed selection and exact manifest digest. Supply that plan in `DeveloperExecutionRequest.ReviewedPlan` when submitting after an active selection change. On a remote Host, stage the source, SDK lock and inputs, Kit and configuration lock directories, and digest-addressed manifest together. Use `PublishOperationManifestAsync(request, reviewedPlan)` to prepare the manifest and `ExecuteStagedOperationAsync` with the explicit Host manifest/workspace paths and an existing Client SDK SSH connection. Tool installations and environment locks belong to the execution Host.
 
-Keep the admission ID and the original manifest, configuration and Kit generation for recovery. Resume uses admitted evidence through existing Host reconciliation APIs. Kit switches change neither prior evidence nor its build tree. Missing or modified evidence causes verification to fail. vcpkg projects currently require the existing explicit workflow and receipt binding for execution.
+Keep the admission ID and the original manifest, configuration and Kit generation for recovery. Resume uses admitted evidence through existing Host reconciliation APIs. Kit switches change neither prior evidence nor its build tree. Missing or modified evidence causes verification to fail. For vcpkg projects, use a managed Linux Clang Kit and approve the installation plan emitted by `restore --plan` with `tooling vcpkg install . --yes --plan-sha DIGEST`. Generated workflows bind that receipt automatically. The Host verifies the project path, declarations, toolchain releases and installed tree before dispatch. Existing local vcpkg receipts are tied to the execution workspace path. Use the existing snapshot-based experiment flow for portable remote dependency receipts.
 
 ## Benchmark comparisons
 

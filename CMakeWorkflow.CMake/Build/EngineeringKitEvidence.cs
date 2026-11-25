@@ -39,27 +39,26 @@ internal static class EngineeringKitEvidence
         return kit;
     }
 
-    internal static void RequireSupportedDependencies(string root, Action<string>? readGuard = null)
+    internal static void VerifyDependencies(string root, EngineeringKitLock kit, string? digest,
+        IReadOnlyDictionary<string, string> inputs, Action<string>? readGuard = null)
     {
-        string manifest = BuildVariantConfiguration.CheckedPath(root, "vcpkg.json");
-        if (File.Exists(manifest))
+        bool manifest = File.Exists(BuildVariantConfiguration.CheckedPath(root, "vcpkg.json", readGuard));
+        bool config = File.Exists(BuildVariantConfiguration.CheckedPath(root, "vcpkg-configuration.json", readGuard));
+        if (manifest != (digest is not null) || (manifest &&
+            (kit.Provider != KitProvider.ManagedClang || !BuildVariantConfiguration.IsDigest(digest) ||
+             !inputs.ContainsKey("vcpkg.json") || config != inputs.ContainsKey("vcpkg-configuration.json"))))
         {
-            readGuard?.Invoke(manifest);
-            throw new InvalidDataException("unsupported-kit-dependencies: use an explicit workflow with a verified vcpkg receipt.");
+            throw new InvalidDataException("kit-vcpkg-evidence-mismatch: managed Linux Kits require approved dependency evidence.");
         }
     }
 
     internal static void Validate(EngineeringKitLock kit)
     {
-        if (kit is not
-            {
-                SchemaVersion: 1, Backend: "cmake",
-                ExecutionHost: { Os: "linux", Architecture: "x64", Abi: null },
-                Target: { Os: "linux", Architecture: "x64", Abi: "gnu" },
-                CMake.Generator: "Ninja" or "Ninja Multi-Config"
-            } || !Enum.IsDefined(kit.Provider))
+        (string os, string architecture, string abi) = Platform(kit.Provider);
+        if (kit is not { SchemaVersion: 1, Backend: "cmake", CMake.Generator: "Ninja" or "Ninja Multi-Config" } ||
+            kit.ExecutionHost != new KitPlatform(os, architecture) || kit.Target != new KitPlatform(os, architecture, abi))
         {
-            throw new InvalidDataException("unsupported-kit: requires a native Linux x64 GNU target and Ninja.");
+            throw new InvalidDataException("unsupported-kit: provider, native host, target and generator do not match.");
         }
 
         bool managed = kit.Provider == KitProvider.ManagedClang;
@@ -81,16 +80,27 @@ internal static class EngineeringKitEvidence
             throw new InvalidDataException("incompatible-sdk-kit: the selected Kit does not satisfy SDK constraints.");
     }
 
-    internal static WorkflowToolchainBinding Toolchain(EngineeringKitLock kit) => new(
+    internal static (string Os, string Architecture, string Abi) Platform(KitProvider provider) => provider switch
+    {
+        KitProvider.ManagedClang or KitProvider.AmbientGcc or KitProvider.AmbientClang => ("linux", "x64", "gnu"),
+        KitProvider.Msvc => ("windows", "x64", "msvc"),
+        KitProvider.AppleClang => ("macos", "arm64", "darwin"),
+        _ => throw new InvalidDataException("unsupported-kit-provider")
+    };
+
+    internal static WorkflowToolchainBinding Toolchain(EngineeringKitLock kit, string? dependencyDigest = null) => new(
         EnvironmentProfileId: kit.Provider switch
         {
             KitProvider.ManagedClang => "linux-managed-clang",
             KitProvider.AmbientGcc => "linux-ambient-gcc",
             KitProvider.AmbientClang => "linux-ambient-clang",
+            KitProvider.Msvc => "windows-msvc",
+            KitProvider.AppleClang => "macos-appleclang",
             _ => throw new InvalidDataException("unsupported-kit-provider")
         },
         Generator: kit.CMake.Generator, HostArchitecture: kit.ExecutionHost.Architecture, TargetArchitecture: kit.Target.Architecture)
     {
-        EnvironmentLockSha256 = kit.EnvironmentLockSha256
+        EnvironmentLockSha256 = kit.EnvironmentLockSha256,
+        VcpkgProjectSha256 = dependencyDigest
     };
 }
