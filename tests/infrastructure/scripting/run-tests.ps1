@@ -114,3 +114,6 @@ return 0;
     [Environment]::SetEnvironmentVariable('RestoreAdditionalProjectSources', $previousSources)
     $root.Delete($true)
 }
+
+# Expected CLI failures leave LASTEXITCODE nonzero. Return the suite's result.
+exit 0
