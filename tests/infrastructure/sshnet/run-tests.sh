@@ -99,6 +99,12 @@ for scenario in handshake workflow persistent experiment-stage; do
     --sshnet-live-lifecycle-tests "$scenario"
 done
 
+echo '=== Real sshd / SSH.NET: Engineering Kit staged evidence ==='
+dotnet build CMakeWorkflow.Developer.AotSmoke/CMakeWorkflow.Developer.AotSmoke.csproj -c Release -m:2 -nr:false
+timeout --signal=TERM --kill-after=5s 150s bash tests/infrastructure/engineering-kits/ssh-test.sh \
+  "$tmp/publish/CMakeWorkflow" "$repo_root/CMakeWorkflow.Developer.AotSmoke/bin/Release/net10.0/CMakeWorkflow.Developer.AotSmoke" \
+  "$container" "$tmp"
+
 echo '=== Real sshd / SSH.NET: F2 provisioning ==='
 timeout --signal=TERM --kill-after=5s 150s dotnet "$suite" --sshnet-provision-live-tests
 

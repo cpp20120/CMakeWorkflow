@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow project engineering Kits v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kits"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "kits": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "backend",
+          "provider",
+          "executionHost",
+          "target",
+          "cmake",
+          "id",
+          "displayName"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 1
+          },
+          "backend": {
+            "const": "cmake"
+          },
+          "provider": {
+            "enum": [
+              "ManagedClang",
+              "AmbientGcc",
+              "AmbientClang"
+            ]
+          },
+          "executionHost": {
+            "type": "object",
+            "required": [
+              "os",
+              "architecture"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "os": {
+                "const": "linux"
+              },
+              "architecture": {
+                "const": "x64"
+              },
+              "abi": {
+                "type": "null"
+              }
+            }
+          },
+          "target": {
+            "type": "object",
+            "required": [
+              "os",
+              "architecture",
+              "abi"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "os": {
+                "const": "linux"
+              },
+              "architecture": {
+                "const": "x64"
+              },
+              "abi": {
+                "const": "gnu"
+              }
+            }
+          },
+          "cmake": {
+            "type": "object",
+            "required": [
+              "generator"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "generator": {
+                "enum": [
+                  "Ninja",
+                  "Ninja Multi-Config"
+                ]
+              }
+            }
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,47}$"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "components": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version"
+              ],
+              "properties": {
+                "id": {
+                  "enum": [
+                    "cmake",
+                    "llvm",
+                    "ninja",
+                    "sysroot"
+                  ]
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,80}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

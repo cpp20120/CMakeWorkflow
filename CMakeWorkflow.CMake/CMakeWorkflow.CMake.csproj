@@ -18,6 +18,7 @@
         <Compile Include="Artifacts/*.cs"/>
         <Compile Include="Build/*.cs"/>
         <EmbeddedResource Include="../ProjectSdk/ecosystem-v1/*" LogicalName="CMakeWorkflow.ProjectSdk.ecosystem-v1.%(Filename)%(Extension)"/>
+        <EmbeddedResource Include="../ProjectSdk/config-v1/Variant.cmake" LogicalName="CMakeWorkflow.Configuration.Variant.v1"/>
         <Compile Include="Execution/*.cs"/>
         <Compile Include="Planning/*.cs"/>
         <Compile Include="Recipes/*.cs"/>

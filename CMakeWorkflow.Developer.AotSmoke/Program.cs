@@ -4,6 +4,28 @@ using CMakeWorkflow.Developer;
 
 using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(4));
 CancellationToken ct = timeout.Token;
+switch (args)
+{
+    case ["--kit-exercise", string id]:
+        await KitSmoke.ExerciseAsync(id, ct);
+        return;
+    case ["--kit-plan", string root, string id]:
+        await Console.Out.WriteLineAsync((await DeveloperLifecycle.PlanOperationAsync(KitSmoke.Test(root, id), ct)).ManifestSha256);
+        return;
+    case ["--kit-stage", string root, string id]:
+        DeveloperOperationRequest request = KitSmoke.Test(root, id);
+        DeveloperOperationPlan reviewed = await DeveloperLifecycle.PlanOperationAsync(request, ct);
+        await Console.Out.WriteLineAsync(await DeveloperLifecycle.PublishOperationManifestAsync(request, reviewed, ct));
+        return;
+    case ["--kit-remote", string local, string remote, string requestId]:
+        await KitSmoke.RunRemoteAsync(local, remote, requestId, ct);
+        return;
+    case ["--kit-recover", string project, string operationId]:
+        await KitSmoke.RecoverAsync(project, operationId, ct);
+        return;
+    default:
+        break;
+}
 if (args is ["--plan", string directory])
 {
     DeveloperOperationPlan matching = await DeveloperLifecycle.PlanOperationAsync(

@@ -11,9 +11,9 @@ namespace CMakeWorkflow.Commands;
 
 internal static class DeveloperCommand
 {
-    private const string SelectionHelp = "[--project DIRECTORY] [--profile NAME|--matrix] [--variant ID] [--overrides FILE] [--json]";
+    private const string SelectionHelp = "[--project DIRECTORY] [--kit ID] [--profile NAME|--matrix] [--variant ID] [--overrides FILE] [--json]";
     private const string ExecutionHelp = " [--plan] [--jobs N] [--results-dir DIRECTORY] [--history-db PATH|--no-history]";
-    private static readonly string[] SelectionOptions = ["--project", "--profile", "--matrix", "--variant", "--overrides", "--json"];
+    private static readonly string[] SelectionOptions = ["--project", "--kit", "--profile", "--matrix", "--variant", "--overrides", "--json"];
 
     internal static async Task<int> ExecuteAsync(string command, string[] args, CancellationToken ct)
     {
@@ -89,6 +89,7 @@ internal static class DeveloperCommand
         ProjectLocation location = new(Directory.GetCurrentDirectory()) { ProjectDirectory = values.GetValueOrDefault("--project") };
         ConfigurationSelection selection = new()
         {
+            Kit = values.GetValueOrDefault("--kit"),
             Profile = values.GetValueOrDefault("--profile"),
             Matrix = values.ContainsKey("--matrix"),
             Variant = values.GetValueOrDefault("--variant"),
@@ -101,7 +102,7 @@ internal static class DeveloperCommand
             RestoreRequest restore = new(location)
             {
                 Configuration = selection,
-                ProbeLocalTools = command is "restore" or "doctor",
+                ProbeLocalTools = command == "doctor" || (command == "restore" && !plan),
                 SdkApprovalSha256 = values.GetValueOrDefault("--sdk-plan-sha"),
                 ConfigurationApprovalSha256 = values.GetValueOrDefault("--configuration-plan-sha")
             };
@@ -157,6 +158,7 @@ internal static class DeveloperCommand
         {
             Jobs = jobs,
             HistoryPolicy = history,
+            ReviewedPlan = plan,
             ResultsDirectory = values.GetValueOrDefault("--results-dir")
         }, ct);
         await Console.Error.WriteLineAsync("Operation ID " + execution.OperationId);
@@ -185,6 +187,8 @@ internal static class DeveloperCommand
                 writer.WriteString("projectDirectory", plan.ProjectDirectory);
                 writer.WriteString("manifestSha256", plan.ManifestSha256);
                 writer.WriteString("configurationLockSha256", plan.ConfigurationLock.Sha256);
+                writer.WriteString("kitId", plan.SelectedKit?.Id);
+                writer.WriteString("kitLockSha256", plan.KitLockSha256);
                 writer.WriteString("runDirectory", overview.RunDirectory);
                 writer.WriteString("reportSha256", overview.ReportSha256);
                 writer.WriteString("error", error);
@@ -218,12 +222,13 @@ internal static class DeveloperCommand
         return status switch { "succeeded" when historyStatus.State != HistoryIndexState.Failed => 0, "canceled" => 130, _ => 1 };
     }
 
-    private static async Task<int> WriteInspectionAsync(ProjectInspection inspection, bool json, bool requireLocks)
+    internal static async Task<int> WriteInspectionAsync(ProjectInspection inspection, bool json, bool requireLocks)
     {
         bool approval = inspection.Diagnostics.Any(diagnostic => diagnostic.Code is DeveloperDiagnosticCode.SdkLockApprovalRequired
             or DeveloperDiagnosticCode.ConfigurationLockApprovalRequired or DeveloperDiagnosticCode.ConfigurationUnavailable
             or DeveloperDiagnosticCode.ToolingUnavailable or DeveloperDiagnosticCode.EnvironmentLockUnavailable
-            or DeveloperDiagnosticCode.DependencyPlanApprovalRequired);
+            or DeveloperDiagnosticCode.DependencyPlanApprovalRequired or DeveloperDiagnosticCode.KitLockApprovalRequired
+            or DeveloperDiagnosticCode.KitDependencyUnsupported);
         if (json)
         {
             await WriteJsonAsync(approval ? "action-required" : "inspected", writer =>
@@ -233,6 +238,12 @@ internal static class DeveloperCommand
                 writer.WriteString("sdkVersion", inspection.Sdk.Version);
                 writer.WriteString("sdkLockSha256", inspection.SdkLock.Sha256);
                 writer.WriteString("configurationLockSha256", inspection.Configuration?.Lock.Sha256);
+                writer.WriteString("kitId", inspection.SelectedKit?.Id);
+                writer.WriteString("kitOrigin", inspection.SelectedKit?.Origin.ToString());
+                if (inspection.Kit is { } kit)
+                {
+                    KitCommand.WritePlan(writer, kit);
+                }
                 if (inspection.Configuration is { } configuration)
                 {
                     writer.WritePropertyName("configuration");
@@ -247,6 +258,14 @@ internal static class DeveloperCommand
         {
             await Console.Out.WriteLineAsync(inspection.Project.Directory);
             await Console.Out.WriteLineAsync(inspection.Sdk.Id + "/" + inspection.Sdk.Version);
+            if (inspection.Kit is { } kit)
+            {
+                await Console.Out.WriteLineAsync($"{kit.Definition.Id}  {kit.Lock.Sha256}  {kit.Environment.CMake.Generator}");
+                if (kit.EnvironmentApprovalCommand is { } command)
+                {
+                    await Console.Out.WriteLineAsync(command);
+                }
+            }
             foreach (ProjectVariant variant in inspection.Configuration?.Variants ?? [])
             {
                 await Console.Out.WriteLineAsync(variant.Name + " " + variant.Id + " " + variant.BuildDirectory);
@@ -272,12 +291,14 @@ internal static class DeveloperCommand
             writer.WriteString("manifestName", plan.ManifestName);
             writer.WriteString("manifestSha256", plan.ManifestSha256);
             writer.WriteString("configurationLockSha256", plan.ConfigurationLock.Sha256);
+            writer.WriteString("kitId", plan.SelectedKit?.Id);
+            writer.WriteString("kitLockSha256", plan.KitLockSha256);
             writer.WritePropertyName("manifest");
             writer.WriteRawValue(plan.ManifestJson.Span);
         })
         : Console.Out.WriteLineAsync(plan.ManifestSha256 + Environment.NewLine + Encoding.UTF8.GetString(plan.ManifestJson.Span));
 
-    private static async Task WriteJsonAsync(string status, Action<Utf8JsonWriter> properties)
+    internal static async Task WriteJsonAsync(string status, Action<Utf8JsonWriter> properties)
     {
         using MemoryStream output = new();
         using (Utf8JsonWriter writer = new(output))
@@ -296,7 +317,7 @@ internal static class DeveloperCommand
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int number) && number > 0 ? number :
         throw new ArgumentException(option + " must be a positive integer.");
 
-    private static Dictionary<string, string?> Parse(string[] args, string[] allowed)
+    internal static Dictionary<string, string?> Parse(string[] args, string[] allowed)
     {
         Dictionary<string, string?> values = new(StringComparer.Ordinal);
         for (int i = 0; i < args.Length; i++)

@@ -9,7 +9,10 @@ namespace CMakeWorkflow.Developer;
 
 public static partial class DeveloperLifecycle
 {
-    public static async Task<DeveloperOperationPlan> PlanOperationAsync(DeveloperOperationRequest request, CancellationToken ct = default)
+    public static Task<DeveloperOperationPlan> PlanOperationAsync(DeveloperOperationRequest request, CancellationToken ct = default) =>
+        PlanOperationCoreAsync(request, useActive: true, ct);
+
+    private static async Task<DeveloperOperationPlan> PlanOperationCoreAsync(DeveloperOperationRequest request, bool useActive, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateOperation(request);
@@ -18,7 +21,15 @@ public static partial class DeveloperLifecycle
         {
             throw new InvalidDataException("This project has no variant configuration. Use its CMake presets or workflow commands.");
         }
-        (VariantLock evidence, ConfigurationPlan configuration) = await VerifyConfigurationEvidenceAsync(project.Directory, request.Configuration, ct);
+        SelectedEngineeringKit? selectedKit = request.Configuration.Kit is not null || useActive
+            ? await GetSelectedKitAsync(project.Directory, request.Configuration.Kit, ct) : null;
+        ConfigurationSelection selection = request.Configuration with { Kit = selectedKit?.Id };
+        if (selectedKit is not null && request.ProfileBackend is "etw" or "instruments")
+        {
+            throw new InvalidDataException("incompatible-kit-profiler: Linux Kits require perf.");
+        }
+
+        (VariantLock evidence, ConfigurationPlan configuration) = await VerifyConfigurationEvidenceAsync(project.Directory, selection, ct);
         byte[] sdkLock = await ProjectSdkResolution.ReadVerifiedAsync(project.Directory, ct);
         if (BuildVariantConfiguration.Hash(sdkLock) != evidence.SdkSha256)
         {
@@ -35,6 +46,8 @@ public static partial class DeveloperLifecycle
         string manifestName = ".cmwf-developer-" + request.Kind.ToString() + "-" + digest + ".json";
         return new(project.Directory, request.Kind, manifestName, digest, bytes, configuration.Lock, Array.AsReadOnly(variants))
         {
+            SelectedKit = selectedKit,
+            KitLockSha256 = evidence.KitLockSha256,
             SdkId = sdk.Id,
             SdkVersion = sdk.Version
         };

@@ -63,6 +63,7 @@ internal static class CMakeWorkflowNodeExecutor
             EnvironmentOverrideHash = EnvironmentProvenance.FingerprintOverrides(definition.Environment),
             ToolchainFingerprint = toolchain?.Fingerprint,
             BuildVariantId = node.VariantBinding?.Id,
+            KitLockSha256 = node.VariantBinding?.KitLockSha256,
             CompilerCacheFingerprint = compilerCache?.Fingerprint,
             StartedAt = DateTimeOffset.UtcNow,
             Status = "running",

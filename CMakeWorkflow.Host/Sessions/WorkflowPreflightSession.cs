@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Host.Toolchains;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.History;
 using CMakeWorkflow.Host.Workflows;
@@ -40,6 +42,15 @@ public sealed partial class DoctorSession
         string[] selection = WorkflowNodeSelection.Normalize(request.Only);
         WorkflowPlan loaded = await WorkflowPlanner.LoadSnapshotAsync(manifest, bytes, selection, null, ct, paths.Read);
         _ = await CompilerCacheProfile.ResolveAsync(loaded, ct);
+        if (loaded.Nodes.Any(node => node.VariantBinding?.KitLockSha256 is not null))
+        {
+            IReadOnlyDictionary<string, WorkflowToolchainRuntime> tools = await WorkflowToolchainAdmission.ResolveAsync(
+                loaded, new WorkflowToolchainProvider(), ct);
+            foreach ((string tree, WorkflowToolchainRuntime runtime) in tools)
+            {
+                WorkflowToolchainAdmission.ValidateBuildTree(tree, runtime);
+            }
+        }
         WorkflowPlanView plan = WorkflowQueries.PlanView(loaded);
         return new WorkflowPreflightResult(1, manifest, digest, request.Jobs, results, plan.Valid,
             [.. plan.Nodes.Select(node => new WorkflowPreflightNode(node.Id, node.Kind, node.Target,

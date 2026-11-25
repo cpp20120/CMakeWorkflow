@@ -30,7 +30,18 @@ internal static class ProjectConfiguration
         string sdkIdentity = BuildVariantConfiguration.Hash(sdk);
         string kind = sdkDocument.RootElement.GetProperty("sdk").GetString()!;
         SdkDescriptor descriptor = ProjectSdkCatalog.Resolve(kind, sdkDocument.RootElement.GetProperty("sdkVersion").GetString());
-        VariantEnvironment environment = ReadEnvironment(sdkDocument.RootElement.GetProperty("effective"));
+        VariantEnvironment environment = BuildVariantConfiguration.SdkEnvironment(sdkDocument.RootElement.GetProperty("effective"));
+        EngineeringKitPlan? kitPlan = null;
+        if (selection.Kit is { } kitId)
+        {
+            kitPlan = await DeveloperLifecycle.PlanKitCoreAsync(root, kitId, sdkDocument.RootElement, ct);
+            if (!kitPlan.Approved)
+            {
+                throw new InvalidDataException($"kit-lock-unavailable: run kit lock {kitId} --plan-sha {kitPlan.Lock.Sha256}.");
+            }
+            EngineeringKitEvidence.RequireSupportedDependencies(root);
+            environment = EngineeringKitEvidence.Compose(kitPlan.Environment, environment, descriptor);
+        }
         SortedDictionary<string, string> inputs = new(StringComparer.Ordinal) { [BuildVariantConfiguration.SdkLock] = sdkIdentity };
         foreach (string collection in new[] { "inputs", "modules" })
         {
@@ -98,7 +109,15 @@ internal static class ProjectConfiguration
 
         using JsonDocument? overrides = selection.Overrides is null ? null :
             JsonDocument.Parse(await ReadEvidenceAsync(root, selection.Overrides, inputs, ct));
-        VariantLock plan = new(1, BuildVariantConfiguration.Version, sdkIdentity, kind, inputs, []);
+        if (kitPlan is not null && !inputs.TryAdd(kitPlan.Lock.Path, kitPlan.Lock.Sha256))
+        {
+            throw new InvalidDataException("duplicate-configuration-kit-input");
+        }
+        VariantLock plan = kitPlan is null ? new(1, BuildVariantConfiguration.Version, sdkIdentity, kind, inputs, []) :
+            new VariantLock(2, BuildVariantConfiguration.KitVersion, sdkIdentity, kind, inputs, [])
+            {
+                KitLockSha256 = kitPlan.Lock.Sha256
+            };
         HashSet<string> ids = new(StringComparer.Ordinal);
         List<EvaluatedVariant> variants = [];
         foreach (VariantCandidate candidate in candidates)
@@ -106,7 +125,7 @@ internal static class ProjectConfiguration
             Layer effective = overrides is null ? candidate.Policy : Overlay(candidate.Policy, overrides.RootElement, "override:" + selection.Overrides);
             try
             {
-                BuildVariantConfiguration.Validate(effective.Settings, environment, descriptor);
+                BuildVariantConfiguration.Validate(effective.Settings, environment, descriptor, kitPlan?.Environment);
             }
             catch (InvalidDataException error)
             {
@@ -117,16 +136,10 @@ internal static class ProjectConfiguration
             {
                 throw new InvalidDataException("duplicate-variant: " + candidate.Name + " resolves to a previously selected configuration.");
             }
-            variants.Add(new(candidate.Name, id, effective.Settings, environment, effective.Origins));
+            variants.Add(new(candidate.Name, id, effective.Settings, environment, effective.Origins) { Kit = kitPlan?.Environment });
         }
         return plan with { Variants = [.. variants] };
     }
-
-    private static VariantEnvironment ReadEnvironment(JsonElement effective) =>
-        effective.TryGetProperty("toolchain", out JsonElement toolchain)
-            ? new("linux", "x64", "linux", "x64", "gnu", toolchain.GetProperty("generator").GetString()!,
-                toolchain.GetProperty("environmentLockSha256").GetString()!)
-            : new("native", "native", "native", "native", "ambient", "Ninja", null);
 
     private static JsonElement ReadManifest(JsonDocument document)
     {
@@ -272,8 +285,8 @@ internal static class ProjectConfiguration
                 Mode = "managed",
                 Configuration = variant.Effective.Configuration.ToString(),
                 Generator = variant.Environment.Generator,
-                Toolchain = BuildVariantConfiguration.Toolchain(variant.Environment),
-                BuildVariant = new(variant.Id, digest)
+                Toolchain = BuildVariantConfiguration.Toolchain(variant),
+                BuildVariant = new(variant.Id, digest) { KitLockSha256 = plan.KitLockSha256 }
             });
             document.Nodes.Add(new() { Id = context + "-configure", Kind = "configure", Context = context });
             document.Nodes.Add(new() { Id = context + "-build", Kind = "invoke", Context = context, Target = "all", DependsOn = [context + "-configure"] });
@@ -320,9 +333,12 @@ internal static class ProjectConfiguration
         return bytes;
     }
 
-    internal static async Task PublishAsync(string root, string digest, byte[] bytes, CancellationToken ct)
+    internal static Task PublishAsync(string root, string digest, byte[] bytes, CancellationToken ct) =>
+        PublishEvidenceAsync(root, BuildVariantConfiguration.LockPath(digest), bytes, ct);
+
+    internal static async Task PublishEvidenceAsync(string root, string relative, byte[] bytes, CancellationToken ct)
     {
-        string finalFile = BuildVariantConfiguration.CheckedPath(root, BuildVariantConfiguration.LockPath(digest));
+        string finalFile = BuildVariantConfiguration.CheckedPath(root, relative);
         string store = Path.GetDirectoryName(Path.GetDirectoryName(finalFile))!;
         _ = Directory.CreateDirectory(store);
         string staging = Path.Combine(store, ".staging-" + Guid.NewGuid().ToString("N"));

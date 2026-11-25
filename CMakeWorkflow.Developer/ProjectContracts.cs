@@ -24,6 +24,7 @@ public sealed record CreatedProject(string Directory);
 
 public sealed record ConfigurationSelection
 {
+    public string? Kit { get; init; }
     public string? Profile { get; init; }
     public bool Matrix { get; init; }
     public string? Overrides { get; init; }
@@ -35,11 +36,16 @@ public sealed record ProjectLockPlan(string Sha256, string Path, ReadOnlyMemory<
 public sealed record ProjectVariant(string Name, string Id, string BuildDirectory, string Configuration,
     string Generator, string? EnvironmentLockSha256, bool Testing);
 
-public sealed record ConfigurationPlan(ProjectLockPlan Lock, IReadOnlyList<ProjectVariant> Variants);
+public sealed record ConfigurationPlan(ProjectLockPlan Lock, IReadOnlyList<ProjectVariant> Variants)
+{
+    public string? KitLockSha256 { get; init; }
+}
 
 public enum DeveloperDiagnosticCode
 {
     SdkLockApprovalRequired,
+    KitLockApprovalRequired,
+    KitDependencyUnsupported,
     ConfigurationLockApprovalRequired,
     ConfigurationUnavailable,
     ExternalDependencyUnverified,
@@ -54,6 +60,8 @@ public sealed record DeveloperDiagnostic(DeveloperDiagnosticCode Code, string Me
 public sealed record ProjectInspection(DiscoveredProject Project, SdkDescriptor Sdk, ProjectLockPlan SdkLock,
     ConfigurationPlan? Configuration, IReadOnlyList<DeveloperDiagnostic> Diagnostics)
 {
+    public SelectedEngineeringKit? SelectedKit { get; init; }
+    public EngineeringKitPlan? Kit { get; init; }
     public ToolingPlan? LocalTooling { get; init; }
     public ProjectLockPlan? VcpkgPlan { get; init; }
 }
@@ -83,12 +91,16 @@ public sealed record DeveloperOperationRequest(ProjectLocation Location, Develop
 public sealed record DeveloperOperationPlan(string ProjectDirectory, DeveloperOperationKind Kind, string ManifestName,
     string ManifestSha256, ReadOnlyMemory<byte> ManifestJson, ProjectLockPlan ConfigurationLock, IReadOnlyList<ProjectVariant> Variants)
 {
+    public SelectedEngineeringKit? SelectedKit { get; init; }
+    public string? KitLockSha256 { get; init; }
     public string SdkId { get; init; } = "";
     public string SdkVersion { get; init; } = "";
 }
 
 public sealed record DeveloperExecutionRequest(DeveloperOperationRequest Operation, string ManifestSha256, string ClientRequestId)
 {
+    /// <summary>When supplied, reuse the reviewed selection even if the active project Kit has changed.</summary>
+    public DeveloperOperationPlan? ReviewedPlan { get; init; }
     public int Jobs { get; init; } = 1;
     /// <summary>Parent results directory on the local workspace. Each request gets its own durable child directory.</summary>
     public string? ResultsDirectory { get; init; }

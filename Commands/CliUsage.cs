@@ -6,6 +6,7 @@ internal static class CliUsage
     {
         Console.Error.WriteLine(
         "Usage: CMakeWorkflow <new|restore|configure|build|test|run|benchmark|profile|pack|doctor|inspect> [--help]\n" +
+        "       CMakeWorkflow kit <list|show|current|use|clear|plan|lock|verify|doctor> [--help]\n" +
         "Usage: CMakeWorkflow project new SDK NAME DIRECTORY [--sdk-version VERSION] [--variants] [--environment-lock SHA256]\n" +
         "       CMakeWorkflow project config <list|plan|lock|verify|workflow> DIRECTORY [--profile NAME|--matrix] [--overrides FILE] [--plan-sha SHA256] [--variant ID]\n" +
         "       CMakeWorkflow project tooling <plan|doctor|setup> [--json] [--yes --plan-sha SHA256]\n" +

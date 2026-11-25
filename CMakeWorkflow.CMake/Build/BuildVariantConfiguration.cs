@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Contracts.Kits;
 
 namespace CMakeWorkflow.CMake.Build;
 
@@ -27,10 +28,18 @@ internal sealed record VariantIdentity(string EvaluatorVersion, string SdkSha256
     IReadOnlyDictionary<string, string> Inputs, VariantSettings Effective, VariantEnvironment Environment);
 
 internal sealed record EvaluatedVariant(string Name, string Id, VariantSettings Effective, VariantEnvironment Environment,
-    IReadOnlyDictionary<string, string> Origins);
+    IReadOnlyDictionary<string, string> Origins)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineeringKitLock? Kit { get; init; }
+}
 
 internal sealed record VariantLock(int SchemaVersion, string EvaluatorVersion, string SdkSha256, string ProjectType,
-    IReadOnlyDictionary<string, string> Inputs, EvaluatedVariant[] Variants);
+    IReadOnlyDictionary<string, string> Inputs, EvaluatedVariant[] Variants)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? KitLockSha256 { get; init; }
+}
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true,
     UseStringEnumConverter = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
@@ -41,6 +50,7 @@ internal sealed partial class VariantJson : JsonSerializerContext;
 internal static class BuildVariantConfiguration
 {
     internal const string Version = "1.0.0";
+    internal const string KitVersion = "2.0.0";
     internal const string Store = "cmwf-config";
     internal const string Module = "cmake/cmwf-config/v1/Variant.cmake";
     internal const string SdkLock = "cmwf.sdk.lock.json";
@@ -65,16 +75,25 @@ internal static class BuildVariantConfiguration
             TargetArchitecture: environment.TargetArchitecture)
         { EnvironmentLockSha256 = digest } : null;
 
+    internal static WorkflowToolchainBinding? Toolchain(EvaluatedVariant variant) =>
+        variant.Kit is { } kit ? EngineeringKitEvidence.Toolchain(kit) : Toolchain(variant.Environment);
+
+    internal static VariantEnvironment SdkEnvironment(JsonElement effective) =>
+        effective.TryGetProperty("toolchain", out JsonElement toolchain)
+            ? new("linux", "x64", "linux", "x64", "gnu", toolchain.GetProperty("generator").GetString()!,
+                toolchain.GetProperty("environmentLockSha256").GetString()!)
+            : new("native", "native", "native", "native", "ambient", "Ninja", null);
+
     internal static void MatchContext(EvaluatedVariant variant, WorkflowToolchainBinding? toolchain, string? configuration, string? generator)
     {
-        if (toolchain != Toolchain(variant.Environment) || generator != variant.Environment.Generator ||
+        if (toolchain != Toolchain(variant) || generator != variant.Environment.Generator ||
             configuration != variant.Effective.Configuration.ToString())
         {
             throw new InvalidDataException("variant-context-mismatch: configuration, generator or toolchain differs from the lock.");
         }
     }
 
-    internal static void Validate(VariantSettings settings, VariantEnvironment environment, SdkDescriptor sdk)
+    internal static void Validate(VariantSettings settings, VariantEnvironment environment, SdkDescriptor sdk, EngineeringKitLock? kit = null)
     {
         if (!Enum.IsDefined(settings.Configuration) || !Enum.IsDefined(settings.Linkage) ||
             !Enum.IsDefined(settings.Optimization) || !Enum.IsDefined(settings.DebugInformation) ||
@@ -100,7 +119,7 @@ internal static class BuildVariantConfiguration
         {
             throw new InvalidDataException("unsupported-sdk-environment: " + sdk.Id);
         }
-        bool supported = ambient
+        bool supported = kit is not null || (ambient
             ? environment is
             {
                 HostOs: "native", HostArchitecture: "native", TargetOs: "native",
@@ -111,7 +130,7 @@ internal static class BuildVariantConfiguration
               {
                   HostOs: "linux", HostArchitecture: "x64", TargetOs: "linux",
                   TargetArchitecture: "x64", Abi: "gnu", Generator: "Ninja" or "Ninja Multi-Config"
-              };
+              });
         if (!supported)
         {
             throw new InvalidDataException("incompatible-environment: target, ABI or generator differs from the selected environment.");
@@ -192,7 +211,10 @@ internal static class BuildVariantConfiguration
         }
 
         VariantLock? plan = JsonSerializer.Deserialize(bytes, VariantJson.Default.VariantLock);
-        if (plan is not { SchemaVersion: 1, EvaluatorVersion: Version, Inputs.Count: > 0 and <= 144, Variants.Length: > 0 and <= 32 } ||
+        if (plan is not { Inputs.Count: > 0 and <= 145, Variants.Length: > 0 and <= 32 } ||
+            (plan is not { SchemaVersion: 1, EvaluatorVersion: Version, KitLockSha256: null, Inputs.Count: <= 144 } &&
+             plan is not { SchemaVersion: 2, EvaluatorVersion: KitVersion, KitLockSha256: not null }) ||
+            plan.KitLockSha256 != binding.KitLockSha256 ||
             !IsDigest(plan.SdkSha256) || !plan.Inputs.ContainsKey(Module) ||
             plan.Inputs.GetValueOrDefault(SdkLock) != plan.SdkSha256 ||
             !bytes.AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(plan, VariantJson.Default.VariantLock)))
@@ -226,15 +248,23 @@ internal static class BuildVariantConfiguration
         {
             throw new InvalidDataException("configuration-sdk-evidence-mismatch: descriptor or shipped module differs.");
         }
-        JsonElement effective = policy.GetProperty("effective");
-        string? environmentDigest = effective.TryGetProperty("toolchain", out JsonElement toolchain)
-            ? toolchain.GetProperty("environmentLockSha256").GetString() : null;
-        if (environmentDigest != selected.Environment.EnvironmentLockSha256 ||
-            (environmentDigest is not null && toolchain.GetProperty("generator").GetString() != selected.Environment.Generator))
+        VariantEnvironment sdkEnvironment = SdkEnvironment(policy.GetProperty("effective"));
+        if (plan.KitLockSha256 is { } kitDigest)
+        {
+            EngineeringKitLock kit = await EngineeringKitEvidence.ReadAsync(source, kitDigest, ct, readGuard);
+            EngineeringKitEvidence.RequireSupportedDependencies(source, readGuard);
+            RequireKitProjectEvidence(plan, policy);
+            if (plan.Inputs.GetValueOrDefault(EngineeringKitEvidence.PathFor(kitDigest)) != kitDigest ||
+                selected.Kit != kit || selected.Environment != EngineeringKitEvidence.Compose(kit, sdkEnvironment, sdk))
+            {
+                throw new InvalidDataException("configuration-kit-environment-mismatch");
+            }
+        }
+        else if (selected.Kit is not null || selected.Environment != sdkEnvironment)
         {
             throw new InvalidDataException("configuration-sdk-environment-mismatch");
         }
-        Validate(selected.Effective, selected.Environment, sdk);
+        Validate(selected.Effective, selected.Environment, sdk, selected.Kit);
         foreach ((string path, string digest) in plan.Inputs)
         {
             if (Hash(await ReadBoundedAsync(CheckedPath(source, path, readGuard), ct)) != digest)
@@ -244,6 +274,28 @@ internal static class BuildVariantConfiguration
         }
 
         return selected;
+    }
+
+    private static void RequireKitProjectEvidence(VariantLock plan, JsonElement policy)
+    {
+        using Stream module = typeof(BuildVariantConfiguration).Assembly.GetManifestResourceStream("CMakeWorkflow.Configuration.Variant.v1")
+            ?? throw new InvalidOperationException("The built-in variant module is unavailable.");
+        using StreamReader reader = new(module);
+        string hash = Hash(System.Text.Encoding.UTF8.GetBytes(reader.ReadToEnd().ReplaceLineEndings("\n")));
+        if (plan.Inputs.GetValueOrDefault(Module) != hash || !plan.Inputs.ContainsKey("cmwf.config.json") ||
+            !plan.Inputs.ContainsKey("cmwf.project.json"))
+        {
+            throw new InvalidDataException("configuration-kit-project-evidence-mismatch");
+        }
+
+        foreach (string collection in new[] { "inputs", "modules" })
+        {
+            if (policy.GetProperty(collection).EnumerateObject().Any(
+                input => plan.Inputs.GetValueOrDefault(input.Name) != input.Value.GetString()))
+            {
+                throw new InvalidDataException("configuration-kit-sdk-input-mismatch");
+            }
+        }
     }
 
     internal static string[] CacheArguments(EvaluatedVariant variant)

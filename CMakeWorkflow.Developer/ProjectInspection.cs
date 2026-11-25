@@ -52,6 +52,8 @@ public static partial class DeveloperLifecycle
         SdkDescriptor sdk = CopySdk(ProjectSdkResolution.Descriptor(sdkDocument.RootElement));
         List<DeveloperDiagnostic> diagnostics = [];
         ConfigurationPlan? configuration = null;
+        EngineeringKitPlan? kit = null;
+        SelectedEngineeringKit? selectedKit = await GetSelectedKitAsync(project.Directory, request.Configuration.Kit, ct);
         if (!await HasLockAsync(project.Directory, sdkPlan, ct))
         {
             diagnostics.Add(new(DeveloperDiagnosticCode.SdkLockApprovalRequired,
@@ -64,18 +66,38 @@ public static partial class DeveloperLifecycle
         }
         else
         {
-            configuration = await PlanConfigurationAsync(project.Directory, request.Configuration, ct);
-            if (request.Configuration.Variant is { } selector)
+            if (selectedKit is not null)
             {
-                ProjectVariant[] selected = [.. configuration.Variants.Where(variant => variant.Name == selector || variant.Id == selector)];
-                configuration = selected.Length != 0 ? configuration with { Variants = Array.AsReadOnly(selected) } :
-                    throw new InvalidDataException("unknown-workflow-variant: " + selector);
+                kit = await PlanKitCoreAsync(project.Directory, selectedKit.Id, sdkDocument.RootElement, ct);
+                if (!kit.Approved)
+                {
+                    diagnostics.Add(new(DeveloperDiagnosticCode.KitLockApprovalRequired, "The Kit lock requires approval.",
+                        $"kit lock {selectedKit.Id} --plan-sha {kit.Lock.Sha256}"));
+                }
+                if (File.Exists(BuildVariantConfiguration.CheckedPath(project.Directory, "vcpkg.json")))
+                {
+                    diagnostics.Add(new(DeveloperDiagnosticCode.KitDependencyUnsupported,
+                        "Use an explicit workflow with a verified vcpkg receipt for this project."));
+                }
             }
-            if (!await HasLockAsync(project.Directory, configuration.Lock, ct))
+            if (kit is null || (kit.Approved && !diagnostics.Exists(item => item.Code == DeveloperDiagnosticCode.KitDependencyUnsupported)))
             {
-                diagnostics.Add(new(DeveloperDiagnosticCode.ConfigurationLockApprovalRequired,
-                    "The selected configuration lock is missing or modified.",
-                    "restore --configuration-plan-sha " + configuration.Lock.Sha256));
+                configuration = await PlanConfigurationAsync(project.Directory, request.Configuration with { Kit = selectedKit?.Id }, ct);
+            }
+            if (configuration is not null)
+            {
+                if (request.Configuration.Variant is { } selector)
+                {
+                    ProjectVariant[] selected = [.. configuration.Variants.Where(variant => variant.Name == selector || variant.Id == selector)];
+                    configuration = selected.Length != 0 ? configuration with { Variants = Array.AsReadOnly(selected) } :
+                        throw new InvalidDataException("unknown-workflow-variant: " + selector);
+                }
+                if (!await HasLockAsync(project.Directory, configuration.Lock, ct))
+                {
+                    diagnostics.Add(new(DeveloperDiagnosticCode.ConfigurationLockApprovalRequired,
+                        "The selected configuration lock is missing or modified.",
+                        "restore --configuration-plan-sha " + configuration.Lock.Sha256));
+                }
             }
         }
 
@@ -88,14 +110,14 @@ public static partial class DeveloperLifecycle
         ToolingPlan? tooling = null;
         if (request.ProbeLocalTools && configuration is not null)
         {
-            tooling = await InspectLocalToolsAsync(project.Directory, sdk, configuration, diagnostics, ct);
+            tooling = await InspectLocalToolsAsync(project.Directory, sdk, configuration, kit, diagnostics, ct);
         }
         else
         {
             diagnostics.Add(new(DeveloperDiagnosticCode.HostEnvironmentUnverified,
                 "Execution-host tools and environment are checked by Host admission and configure."));
         }
-        return new(project, sdk, sdkPlan, configuration, diagnostics.AsReadOnly()) { LocalTooling = tooling, VcpkgPlan = dependencies };
+        return new(project, sdk, sdkPlan, configuration, diagnostics.AsReadOnly()) { LocalTooling = tooling, VcpkgPlan = dependencies, Kit = kit, SelectedKit = selectedKit };
     }
 
     /// <summary>Probes the initialized Host using only the selected SDK and environment policy.</summary>
@@ -114,23 +136,46 @@ public static partial class DeveloperLifecycle
     private static string[] ToolProfiles(SdkDescriptor sdk, bool managed) =>
         sdk.Capabilities.Packaging ? [managed ? "linux-clang" : "native", "packaging"] : [managed ? "linux-clang" : "native"];
 
-    private static async Task<ToolingPlan> InspectLocalToolsAsync(string root, SdkDescriptor sdk, ConfigurationPlan configuration,
-        List<DeveloperDiagnostic> diagnostics, CancellationToken ct)
+    private static async Task<ToolingPlan?> InspectLocalToolsAsync(string root, SdkDescriptor sdk, ConfigurationPlan configuration,
+        EngineeringKitPlan? kit, List<DeveloperDiagnostic> diagnostics, CancellationToken ct)
     {
+        if (kit is not null && (!OperatingSystem.IsLinux() ||
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.X64))
+        {
+            diagnostics.Add(new(DeveloperDiagnosticCode.ToolingUnavailable, "The Kit requires a Linux x64 execution Host."));
+            return null;
+        }
         string? environment = configuration.Variants[0].EnvironmentLockSha256;
+        ToolchainEnvironmentLock? exactEnvironment = null;
         if (environment is not null)
         {
             try
             {
-                await ManagedEnvironmentLocks.VerifyAsync(environment, ct);
+                exactEnvironment = await ManagedEnvironmentLocks.ReadAsync(environment, ct);
             }
             catch (InvalidDataException error)
             {
                 diagnostics.Add(new(DeveloperDiagnosticCode.EnvironmentLockUnavailable, error.Message,
-                    "tooling verify --environment-lock " + environment));
+                    kit?.EnvironmentApprovalCommand ?? ("tooling verify --environment-lock " + environment)));
             }
         }
-        ToolingService service = new(new SystemToolingRuntime(root), new VerifiedCMakeInstaller());
+        if (kit is not null && !diagnostics.Exists(item => item.Code == DeveloperDiagnosticCode.EnvironmentLockUnavailable))
+        {
+            try
+            {
+                _ = await new CMakeWorkflow.Host.Toolchains.WorkflowToolchainProvider().ResolveAsync(
+                    EngineeringKitEvidence.Toolchain(kit.Environment), ct);
+            }
+            catch (Exception error) when (error is InvalidOperationException or InvalidDataException or PlatformNotSupportedException)
+            {
+                diagnostics.Add(new(DeveloperDiagnosticCode.ToolingUnavailable, error.Message));
+            }
+        }
+        ToolingService service = new(new SystemToolingRuntime(root), new VerifiedCMakeInstaller())
+        {
+            FindManagedRelease = tool => exactEnvironment is null ? ToolCatalog.ManagedRelease(tool) :
+                ToolchainEnvironment.ReleaseForTool(exactEnvironment, tool)
+        };
         ToolingPlan plan = await service.PlanAsync(ToolProfiles(sdk, environment is not null), PackageManagerKind.None,
             allowFallback: false, installDirectory: null, ct: ct,
             resolutionPolicy: environment is null ? null : ToolResolutionPolicy.ManagedOnly);
@@ -182,7 +227,9 @@ public static partial class DeveloperLifecycle
         }
         if (request.ConfigurationApprovalSha256 is { } configuration)
         {
-            _ = await LockConfigurationAsync(project.Directory, request.Configuration, configuration, ct);
+            SelectedEngineeringKit? kit = await GetSelectedKitAsync(project.Directory, request.Configuration.Kit, ct);
+            _ = await LockConfigurationAsync(project.Directory, request.Configuration with { Kit = kit?.Id }, configuration, ct);
+            request = request with { Configuration = request.Configuration with { Kit = kit?.Id } };
         }
         return await PlanRestoreAsync(request, ct);
     }

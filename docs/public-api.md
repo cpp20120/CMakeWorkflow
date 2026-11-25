@@ -24,6 +24,8 @@ validation alone does not establish that compatibility.
 
 `CMakeWorkflow.Developer` is a public project-reference API for lifecycle preparation and dispatch. It exposes SDK and configuration planning, lock approvals, project scaffolding, durable workflow publication and execution through `CMakeWorkflow.Client`. The independent `CMakeWorkflow.Developer.AotSmoke` consumer validates this boundary without the CLI project. The current Client and Contracts package distribution is unchanged. See the [Developer Lifecycle reference](en/developer-lifecycle.md).
 
+Engineering Kit contracts are in `CMakeWorkflow.Contracts.Kits`. Catalog, selection and approval operations and the Kit-aware lifecycle entry points are in `CMakeWorkflow.Developer`. See the [Engineering Kits reference](en/engineering-kits.md).
+
 ## Implementation assemblies and other external contracts
 
 | Assembly | Responsibility; external integration path |

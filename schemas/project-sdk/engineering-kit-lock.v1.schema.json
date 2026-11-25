@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMakeWorkflow engineering Kit lock v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "backend",
+    "provider",
+    "executionHost",
+    "target",
+    "cmake",
+    "environmentLockSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "backend": {
+      "const": "cmake"
+    },
+    "provider": {
+      "enum": [
+        "ManagedClang",
+        "AmbientGcc",
+        "AmbientClang"
+      ]
+    },
+    "executionHost": {
+      "type": "object",
+      "required": [
+        "os",
+        "architecture"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "os": {
+          "const": "linux"
+        },
+        "architecture": {
+          "const": "x64"
+        },
+        "abi": {
+          "type": "null"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "os",
+        "architecture",
+        "abi"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "os": {
+          "const": "linux"
+        },
+        "architecture": {
+          "const": "x64"
+        },
+        "abi": {
+          "const": "gnu"
+        }
+      }
+    },
+    "cmake": {
+      "type": "object",
+      "required": [
+        "generator"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "generator": {
+          "enum": [
+            "Ninja",
+            "Ninja Multi-Config"
+          ]
+        }
+      }
+    },
+    "environmentLockSha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "if": {
+    "properties": {
+      "provider": {
+        "const": "ManagedClang"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "environmentLockSha256": {
+        "type": "string"
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "environmentLockSha256": {
+        "type": "null"
+      }
+    }
+  }
+}

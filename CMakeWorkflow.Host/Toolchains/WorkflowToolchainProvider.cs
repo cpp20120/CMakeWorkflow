@@ -32,6 +32,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             "linux-managed-clang" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
             _ when binding.EnvironmentLockSha256 is not null || binding.VcpkgProjectSha256 is not null =>
                 throw new InvalidOperationException("Linux environment and vcpkg digests require linux-managed-clang."),
+            "linux-ambient-gcc" or "linux-ambient-clang" => ResolveLinuxAsync(binding, ToolResolutionPolicy.AllowSystem, ct),
             "linux-managed-tools-system-compiler" => ResolveLinuxAsync(binding, ToolResolutionPolicy.ManagedOnly, ct),
             "linux-allow-system-tools" => ResolveLinuxAsync(binding, ToolResolutionPolicy.AllowSystem, ct),
             _ => new WindowsWorkflowToolchainProvider().ResolveAsync(binding, ct)
@@ -46,6 +47,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             throw new PlatformNotSupportedException("The managed tools execution profile requires Linux x86-64.");
         }
 
+        bool explicitAmbient = binding.EnvironmentProfileId is "linux-ambient-gcc" or "linux-ambient-clang";
         bool managedCompiler = binding.EnvironmentProfileId == "linux-managed-clang";
         if (binding.HostArchitecture != "x64" || binding.TargetArchitecture != "x64" ||
             binding.Generator is not ("Ninja" or "Ninja Multi-Config") ||
@@ -75,7 +77,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         };
         string profile = managedCompiler ? "linux-clang" : "cmake-ninja";
         ToolingPlan plan = await tooling.PlanAsync([profile], PackageManagerKind.None, false, null, ct,
-            resolutionPolicy: policy);
+            resolutionPolicy: explicitAmbient ? null : policy);
         if (!plan.Ready)
         {
             string pending = string.Join(", ", plan.Tools.Where(tool => !tool.Installed).Select(tool => tool.DisplayName));
@@ -100,10 +102,13 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             throw new InvalidOperationException("The selected compiler or SDK differs from the requested managed digest.");
         }
 
+        bool gcc = binding.EnvironmentProfileId == "linux-ambient-gcc";
+        string cName = explicitAmbient ? gcc ? "gcc" : "clang" : "cc";
+        string cxxName = explicitAmbient ? gcc ? "g++" : "clang++" : "c++";
         string cc = managedCompiler ? plan.Tools.Single(t => t.Id == "clang").Command! :
-            runtime.Resolve("cc", "") ?? throw new InvalidOperationException("The execution profile requires an installed cc.");
-        string cxx = clang?.Command ?? runtime.Resolve("c++", "") ??
-            throw new InvalidOperationException("The execution profile requires an installed c++.");
+            runtime.Resolve(cName, "") ?? throw new InvalidOperationException("The execution profile requires an installed " + cName + ".");
+        string cxx = clang?.Command ?? runtime.Resolve(cxxName, "") ??
+            throw new InvalidOperationException("The execution profile requires an installed " + cxxName + ".");
         Dictionary<string, string> environment = CreateEnvironment(cmake.Command!, ninja.Command!, cc, cxx, binding.Generator);
         LinuxCompilerConfiguration? compiler = null;
         string triple = managedCompiler ? ManagedLinuxSdk.TargetTriple : await ReadTargetAsync(cxx, environment, ct);
@@ -119,13 +124,15 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             throw new InvalidOperationException("The host C and C++ compilers report different target triples.");
         }
 
+        string? ambientVersion = explicitAmbient ? await VerifyAmbientCompilerAsync(
+            cc, cxx, gcc, triple, environment, ct) : null;
         ManagedVcpkgInstallation? packages = binding.VcpkgProjectSha256 is { } dependencyPlan
             ? await VcpkgProjects.ResolveAsync(dependencyPlan, snapshotId, snapshotRoot, ct) : null;
         LinuxToolchainIdentity linux = new(await IdentifyAsync(cmake, ct), await IdentifyAsync(ctest, ct),
             await IdentifyAsync(ninja, ct), cc, await CommandExecution.Sha256Async(cc, ct),
             await CommandExecution.Sha256Async(cxx, ct), triple)
         {
-            CompilerVersion = clang?.Version,
+            CompilerVersion = clang?.Version ?? ambientVersion,
             CompilerArtifactSha256 = clang?.Sha256,
             SdkArtifactSha256 = sdk?.Sha256,
             Linker = linker is null ? null : await IdentifyAsync(linker, ct),
@@ -238,6 +245,35 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
         {
             environment[key] = "/dev/null";
         }
+    }
+
+    private static async Task<string> VerifyAmbientCompilerAsync(string cc, string cxx, bool gcc, string triple,
+        Dictionary<string, string> environment, CancellationToken ct)
+    {
+        if (!triple.EndsWith("-gnu", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Ambient Linux Kits require a GNU ABI compiler.");
+        }
+
+        string? version = null;
+        Dictionary<string, string?> variables = environment.ToDictionary(pair => pair.Key, pair => (string?)pair.Value, StringComparer.Ordinal);
+        foreach ((string compiler, string language) in new[] { (cc, "c"), (cxx, "c++") })
+        {
+            CommandResult macros = await CommandExecution.RunAsync(compiler, ["-dM", "-E", "-x", language, "/dev/null"],
+                "", TimeSpan.FromSeconds(15), variables, ct);
+            string[] lines = (macros.Stdout ?? "").Split('\n');
+            bool clang = lines.Any(line => line.StartsWith("#define __clang__ ", StringComparison.Ordinal));
+            bool gnu = lines.Any(line => line.StartsWith("#define __GNUC__ ", StringComparison.Ordinal));
+            string header = gcc ? "#define __VERSION__ " : "#define __clang_version__ ";
+            string? observed = lines.FirstOrDefault(line => line.StartsWith(header, StringComparison.Ordinal))?[header.Length..].Trim();
+            if (macros.ExitCode != 0 || (gcc ? clang || !gnu : !clang) || string.IsNullOrWhiteSpace(observed) ||
+                (version is not null && version != observed))
+            {
+                throw new InvalidOperationException("The selected C and C++ compilers do not match the Kit compiler family and version.");
+            }
+            version = observed;
+        }
+        return version!;
     }
 
     private static async Task<string> ReadTargetAsync(string compiler, Dictionary<string, string> environment,

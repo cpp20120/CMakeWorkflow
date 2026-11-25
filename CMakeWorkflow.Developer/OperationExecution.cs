@@ -12,6 +12,33 @@ public static partial class DeveloperLifecycle
         CancellationToken ct = default)
     {
         DeveloperOperationPlan current = await PlanOperationAsync(request, ct);
+        return await PublishReviewedManifestAsync(current, manifestSha256, ct);
+    }
+
+    /// <summary>Publishes a reviewed plan using its snapshotted selection.</summary>
+    public static async Task<string> PublishOperationManifestAsync(DeveloperOperationRequest request, DeveloperOperationPlan reviewed,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(reviewed);
+        if (request.Configuration.Kit is { } explicitKit && explicitKit != reviewed.SelectedKit?.Id)
+        {
+            throw new InvalidDataException("The explicit Kit differs from the reviewed plan.");
+        }
+        DeveloperOperationPlan current = await PlanOperationCoreAsync(request with
+        {
+            Configuration = request.Configuration with { Kit = reviewed.SelectedKit?.Id }
+        }, useActive: false, ct);
+        return WorkflowPathEquals(current.ProjectDirectory, reviewed.ProjectDirectory)
+            ? await PublishReviewedManifestAsync(current, reviewed.ManifestSha256, ct)
+            : throw new InvalidDataException("The reviewed operation belongs to a different project.");
+    }
+
+    private static bool WorkflowPathEquals(string first, string second) =>
+        string.Equals(first, second, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static async Task<string> PublishReviewedManifestAsync(DeveloperOperationPlan current, string manifestSha256, CancellationToken ct)
+    {
         if (current.ManifestSha256 != manifestSha256)
         {
             throw new InvalidDataException("The operation changed after planning. Review the new plan.");
@@ -74,11 +101,25 @@ public static partial class DeveloperLifecycle
         string resultsDirectory = Path.Combine(resultsRoot, "developer-" +
             BuildVariantConfiguration.Hash(Encoding.UTF8.GetBytes(request.ClientRequestId)));
         DeveloperOperationRequest pinned = request.Operation with { Location = new(project.Directory) { ProjectDirectory = project.Directory } };
-        string manifest = await PublishOperationManifestAsync(pinned, request.ManifestSha256, ct);
+        if (request.ReviewedPlan is { } reviewed && reviewed.ManifestSha256 != request.ManifestSha256)
+        {
+            throw new InvalidDataException("The reviewed plan does not match the requested manifest identity.");
+        }
+        string manifest = request.ReviewedPlan is { } plan ? await PublishOperationManifestAsync(pinned, plan, ct) :
+            await PublishOperationManifestAsync(pinned, request.ManifestSha256, ct);
+        return await StartReviewedAsync(client, new(request.ClientRequestId, manifest,
+            request.ManifestSha256, request.Jobs, resultsDirectory)
+        {
+            HistoryPolicy = request.HistoryPolicy
+        }, ct);
+    }
+
+    private static async Task<WorkflowOperation> StartReviewedAsync(CMakeWorkflowClient client, StartWorkflowOptions start, CancellationToken ct)
+    {
         WorkflowPreflightResult preflight = await client.Workflows.PreflightAsync(
-            new WorkflowPreflightOptions(manifest, request.ManifestSha256, request.Jobs, resultsDirectory)
+            new WorkflowPreflightOptions(start.Manifest, start.ManifestSha256, start.Jobs, start.ResultsDirectory)
             {
-                HistoryPolicy = request.HistoryPolicy
+                HistoryPolicy = start.HistoryPolicy
             }, ct);
         if (!preflight.Valid)
         {
@@ -86,7 +127,7 @@ public static partial class DeveloperLifecycle
                 .Where(diagnostic => diagnostic.Severity == "Error").Select(diagnostic => node.Id + ": " + diagnostic.Message));
             throw new InvalidDataException("Host preflight rejected the workflow. " + string.Join(" | ", errors));
         }
-        return await client.Workflows.StartAsync(preflight.CreateStartOptions(request.ClientRequestId), ct);
+        return await client.Workflows.StartAsync(preflight.CreateStartOptions(start.ClientRequestId), ct);
     }
 
     /// <summary>Admits an already staged manifest on a Host. Host paths are explicit and are sent unchanged.</summary>
@@ -96,11 +137,13 @@ public static partial class DeveloperLifecycle
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(execution);
-        return client.Workflows.StartAsync(new StartWorkflowOptions(execution.ClientRequestId, execution.ManifestPath,
+        StartWorkflowOptions start = new(execution.ClientRequestId, execution.ManifestPath,
             plan.ManifestSha256, execution.Jobs, execution.ResultsDirectory)
         {
             HistoryPolicy = execution.HistoryPolicy,
             SourceSnapshotId = execution.SourceSnapshotId
-        }, ct);
+        };
+        return plan.KitLockSha256 is not null && execution.SourceSnapshotId is null ? StartReviewedAsync(client, start, ct) :
+            client.Workflows.StartAsync(start, ct);
     }
 }

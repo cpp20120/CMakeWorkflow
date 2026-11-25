@@ -97,7 +97,10 @@ public static partial class DeveloperLifecycle
             new ProjectVariant(variant.Name, variant.Id, BuildVariantConfiguration.BuildDirectory(variant),
                 variant.Effective.Configuration.ToString(), variant.Environment.Generator, variant.Environment.EnvironmentLockSha256,
                 variant.Effective.Testing))];
-        return (evidence, new(new(digest, BuildVariantConfiguration.LockPath(digest), bytes), Array.AsReadOnly(variants)));
+        return (evidence, new ConfigurationPlan(new(digest, BuildVariantConfiguration.LockPath(digest), bytes), Array.AsReadOnly(variants))
+        {
+            KitLockSha256 = evidence.KitLockSha256
+        });
     }
 
     private static async Task<(VariantLock Evidence, ConfigurationPlan Plan)> VerifyConfigurationEvidenceAsync(

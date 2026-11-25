@@ -314,6 +314,15 @@ internal static class HistoryReports
             }
         }
 
+        foreach ((string? Build, string? Configuration, string? Kit, string? Toolchain) evidence in nodes.EnumerateArray()
+                     .Select(node => (Str(node, "buildDirectory"), Str(node, "configuration"),
+                         Str(node, "kitLockSha256"), Str(node, "toolchainFingerprint")))
+                     .Where(entry => entry.Item3 is not null && entry.Item4 is not null).Distinct())
+        {
+            string key = evidence.Build + "\u001f" + evidence.Configuration;
+            builds[key] = Hash(Encoding.UTF8.GetBytes(builds.GetValueOrDefault(key) + "\n" + evidence.Kit + "\n" + evidence.Toolchain));
+        }
+
         if (!includeSupplemental)
         {
             SetMeasurementEnvironments(run, builds, overrides);
