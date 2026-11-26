@@ -1,3 +1,5 @@
+using CMakeWorkflow.CMake.Quality;
+using CMakeWorkflow.Tooling.Tools;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using CMakeWorkflow.CMake.Artifacts;
@@ -82,16 +84,21 @@ internal static class CMakeWorkflowNodeExecutor
             return await ExecuteProfileSnapshotAsync(node, result, extension, output, timer, deadline.Token, ct);
         }
 
+        if (definition.Kind == "format_check")
+        {
+            return await ExecuteFormatCheckAsync(node, result, output, timer, deadline.Token, ct);
+        }
+
         WorkflowActionCache? actionCache = null;
         try
         {
             EvaluatedVariant? variant = node.VariantBinding is { } binding
-                ? await BuildVariantConfiguration.LoadAsync(node.Requested.SourceDirectory!, binding, deadline.Token, node.VariantReadGuard)
+                ? await BuildVariantConfiguration.LoadAsync(node.Requested.SourceDirectory!, binding, deadline.Token, node.ReadGuard)
                 : null;
             if (variant is not null)
             {
                 string tree = BuildVariantConfiguration.CheckedPath(node.Requested.SourceDirectory!,
-                    BuildVariantConfiguration.BuildDirectory(variant), node.VariantReadGuard);
+                    BuildVariantConfiguration.BuildDirectory(variant), node.ReadGuard);
                 BuildVariantConfiguration.VerifyTree(tree, variant, required: definition.Kind != "configure");
                 if (definition.Kind != "configure" && node.Observed.ManagedConfigure?.BuildVariantId != variant.Id)
                 {
@@ -499,6 +506,53 @@ internal static class CMakeWorkflowNodeExecutor
 
     // Snapshot replay is a buildless extension node. Hash checks bracket the
     // external capture and the runner persists its running intent before entry.
+    private static async Task<NodeResult> ExecuteFormatCheckAsync(PlannedNode node, NodeResult result, string output,
+        Stopwatch timer, CancellationToken deadline, CancellationToken ct)
+    {
+        List<string> arguments = node.Definition.Arguments;
+        FormatRequest request = new(node.WorkingDirectory)
+        {
+            Languages = arguments.FirstOrDefault() switch
+            {
+                "cmake" => FormatLanguage.CMake,
+                "cpp" => FormatLanguage.Cpp,
+                _ => FormatLanguage.All
+            },
+            ToolPolicy = arguments.Count == 2 ? ToolResolutionPolicy.ManagedOnly : ToolResolutionPolicy.AllowSystem,
+            Jobs = 1,
+            ReadGuard = node.ReadGuard
+        };
+        try
+        {
+            FormatResult report = await SourceFormatting.RunAsync(request, deadline);
+            await using (FileStream log = new(Path.Combine(output, result.Stdout!), FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            {
+                await System.Text.Json.JsonSerializer.SerializeAsync(log, report, FormatReportJson.Default.FormatResult, CancellationToken.None);
+            }
+            result.Stderr = null;
+            result.ExitCode = report.Status == FormatStatus.Cancelled && !ct.IsCancellationRequested ? 2 : report.ExitCode;
+            result.Status = result.ExitCode switch
+            {
+                0 => "succeeded",
+                130 => "canceled",
+                _ => "failed"
+            };
+            if (result.ExitCode != 0)
+            {
+                result.Error = report.Status == FormatStatus.Cancelled && !ct.IsCancellationRequested
+                    ? "Formatting check timed out." : $"Formatting check: {report.Status}.";
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            result.Status = "failed";
+            result.Error = error.Message;
+        }
+        result.FinishedAt = DateTimeOffset.UtcNow;
+        result.DurationSeconds = timer.Elapsed.TotalSeconds;
+        return result;
+    }
+
     private static async Task<NodeResult> ExecuteProfileSnapshotAsync(PlannedNode node, NodeResult result,
         IWorkflowOperationExecutor? extension, string output, Stopwatch timer,
         CancellationToken deadline, CancellationToken cancellationToken)

@@ -113,3 +113,5 @@ For the source-build CLI, pass `dotnet bin/Release/net10.0/CMakeWorkflow.dll` as
 The first `workflow resume` exits with code 4 and records `outcome_unknown`. The script prints the
 saved report and checks that the side-effect log contains exactly one `started` entry.
 See [Recovery](../docs/en/recovery.md) for inspecting and reconciling an actual interrupted run.
+
+- [Formatting gate before configure, build and test](scripting/format/workflow.cs) uses both CMake and C/C++ format checks.

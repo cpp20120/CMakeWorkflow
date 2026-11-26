@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using CMakeWorkflow.IntegrationTests.Support;
 using static CMakeWorkflow.IntegrationTests.Support.TestHarness;
@@ -8,10 +7,6 @@ namespace CMakeWorkflow.IntegrationTests.Execution;
 
 internal static class LifecycleTests
 {
-    [DllImport("libc", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static extern int kill(int pid, int signal);
-
     private static void Rejected(string root, JsonObject doc, string fragment)
     {
         string manifest = Write(Path.Combine(root, "rejected-" + Guid.NewGuid().ToString("N") + ".json"),
@@ -51,7 +46,7 @@ internal static class LifecycleTests
                 Thread.Sleep(30);
             }
 
-            Check(kill(process.Id, 2) == 0 && process.WaitForExit(15000) && process.ExitCode == 130,
+            Check(SendInterrupt(process.Id) && process.WaitForExit(15000) && process.ExitCode == 130,
                 "SIGINT did not cancel the CLI");
             string journal = Directory.EnumerateFiles(results, "run.json", SearchOption.AllDirectories).Single();
             return J(File.ReadAllText(journal));

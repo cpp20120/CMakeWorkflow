@@ -1,0 +1,7 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {"name": "clang-release", "generator": "Ninja", "binaryDir": "${sourceDir}/preset-build",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_CXX_COMPILER": "clang++"}}
+  ]
+}

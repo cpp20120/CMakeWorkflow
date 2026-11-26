@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 
 #if EXPERIMENT_SDK
 namespace CMakeWorkflow.Client.Experiments;
@@ -14,10 +15,16 @@ public
 #endif
 static class CommandExecution
 {
+    public static Task<CommandResult> RunAsync(
+        string executable, IEnumerable<string> arguments, string workingDirectory,
+        TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
+        CancellationToken cancellationToken) =>
+        RunAsync(executable, arguments, workingDirectory, timeout, environment, outputEncoding: null, cancellationToken);
+
     public static async Task<CommandResult> RunAsync(
         string executable, IEnumerable<string> arguments, string workingDirectory,
         TimeSpan timeout, IReadOnlyDictionary<string, string?>? environment,
-        CancellationToken cancellationToken)
+        Encoding? outputEncoding, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -27,7 +34,9 @@ static class CommandExecution
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            StandardOutputEncoding = outputEncoding,
+            StandardErrorEncoding = outputEncoding
         };
         foreach (string argument in arguments)
         {

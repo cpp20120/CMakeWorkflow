@@ -76,6 +76,7 @@ public static class ToolCatalog
             ["cmake", "ctest", "clang", "clang++", "ld.lld", "sysroot", "ninja"]),
         new ToolProfile("vcpkg", "Pinned vcpkg tools and registry checkout",
             ["vcpkg", "vcpkg-registry"]),
+        new ToolProfile("cmakefmt", "Native CMake formatter", ["cmakefmt"]),
         new ToolProfile("ninja", "Ninja generator support", ["ninja"]),
         new ToolProfile("packaging", "CPack native product packaging", ["cpack"]),
         new ToolProfile("profiling", "Native capture backend for this OS",
@@ -124,6 +125,8 @@ public static class ToolCatalog
 
         return new[]
         {
+            new ToolDefinition("cmakefmt", "cmakefmt >= 2.4.0", ["cmakefmt"], ["--version"], new(2, 4, 0),
+                Packages(), ManualHint: "Use tooling plan with --profile cmakefmt --tool-policy ManagedOnly."),
             new ToolDefinition("cmake", "CMake >= 3.26", ["cmake"], ["--version"], new(3, 26),
                 Packages("cmake", "cmake", "cmake", "cmake", "Kitware.CMake"), true),
             new ToolDefinition("ctest", "CTest >= 3.26", ["ctest"], ["--version"], new(3, 26),

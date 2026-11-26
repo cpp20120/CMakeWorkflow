@@ -77,7 +77,7 @@ return 0;
     Invoke-Case 1 'timed out' @('script', 'compose', $failureCase, '--timeout-seconds', '2', '--', 'timeout')
     if ($IsLinux) {
         Invoke-Case 1 'did not write a response' @('script', 'compose', $failureCase, '--', 'replace')
-        python3 tests/infrastructure/scripting/cancel-process.py $cliPath $failureCase
+        dotnet tests/bin/Release/net10.0/CMakeWorkflow.IntegrationTests.dll $cliPath --script-cancellation $failureCase
         if ($LASTEXITCODE -ne 0) { throw 'Controller cancellation or child cleanup failed.' }
         $shim = [IO.Directory]::CreateDirectory((Join-Path $root.FullName 'sdk-shim')).FullName
         $previousPath = $env:PATH

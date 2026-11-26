@@ -73,6 +73,25 @@ internal static class ManagedToolTests
             Check(runtime.Probes == 0 && !Directory.Exists(ManagedToolStore.Location(store, wrongChecksum)),
                 "Unverified bytes executed or published");
 
+            ToolingPlan formatter = await service.PlanAsync(["cmakefmt"], PackageManagerKind.None, false, null, default,
+                resolutionPolicy: ToolResolutionPolicy.ManagedOnly);
+            ManagedToolRelease pinnedFormatter = formatter.Steps.Single().Release ??
+                throw new InvalidOperationException("Missing managed cmakefmt release.");
+            int attempts = downloads.Calls;
+            await RejectAsync<InvalidDataException>(() => storage.InstallAsync(store, pinnedFormatter, runtime, default));
+            Check(downloads.Calls == attempts + 1 && runtime.Probes == 0 &&
+                  !Directory.Exists(ManagedToolStore.Location(store, pinnedFormatter)),
+                "Non-matching cmakefmt archive was executed or published");
+            system.Add("cmakefmt", "cmakefmt 2.3.0");
+            ToolingPlan incompatible = await service.PlanAsync(["cmakefmt"], PackageManagerKind.None, false, null, default,
+                resolutionPolicy: ToolResolutionPolicy.AllowSystem);
+            Check(incompatible.Steps.Single().Release == pinnedFormatter &&
+                  incompatible.Tools.Single().SystemResolution == "incompatible", "Older cmakefmt was accepted");
+            system.Add("cmakefmt", "cmakefmt 2.4.0");
+            ToolingPlan compatible = await service.PlanAsync(["cmakefmt"], PackageManagerKind.None, false, null, default,
+                resolutionPolicy: ToolResolutionPolicy.AllowSystem);
+            Check(compatible.Ready && compatible.Tools.Single().Origin == "system", "Compatible cmakefmt was not selected");
+
             runtime.WrongVersion = true;
             await RejectAsync<InvalidDataException>(() => storage.InstallAsync(store, release, runtime, default));
             runtime.WrongVersion = false;

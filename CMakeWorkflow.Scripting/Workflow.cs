@@ -38,6 +38,28 @@ public sealed class Workflow
     public NodeRef Inspect(string id, ContextRef context, IEnumerable<NodeRef>? after = null, Action<WorkflowNode>? options = null) =>
         Declare(new() { Id = id, Kind = "inspect", Context = ContextId(context) }, context, null, after, options);
 
+    /// <summary>Checks formatting on the execution Host before dependent nodes can run.</summary>
+    public NodeRef FormatCheck(string id, ContextRef context, FormatLanguage language = FormatLanguage.All,
+        IEnumerable<NodeRef>? after = null, bool managedOnly = false)
+    {
+        string name = language switch
+        {
+            FormatLanguage.Cpp => "cpp",
+            FormatLanguage.CMake => "cmake",
+            FormatLanguage.All => "all",
+            _ => throw new ArgumentOutOfRangeException(nameof(language))
+        };
+        return managedOnly && language != FormatLanguage.CMake
+            ? throw new ArgumentException("A managed formatting check supports only CMake.", nameof(managedOnly))
+            : Declare(new()
+            {
+                Id = id,
+                Kind = "format_check",
+                Context = ContextId(context),
+                Arguments = managedOnly ? [name, "managed"] : [name]
+            }, context, null, after, options: null);
+    }
+
     public NodeRef Configure(string id, ContextRef context, IEnumerable<NodeRef>? after = null, Action<WorkflowNode>? options = null) =>
         Declare(new() { Id = id, Kind = "configure", Context = ContextId(context) }, context, null, after, options);
 

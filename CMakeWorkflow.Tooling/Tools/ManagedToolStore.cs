@@ -29,15 +29,23 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
         string root = Path.GetFullPath(string.IsNullOrEmpty(configured)
             ? Path.Combine(home, ".local", "share", "CMakeWorkflow")
             : configured);
+        string temporary = OperatingSystem.IsWindows() ? Path.GetFullPath(Path.GetTempPath()) :
+            OperatingSystem.IsMacOS() ? "/private/tmp" : "/tmp";
+        if (OperatingSystem.IsMacOS() && IsDescendant("/tmp", root))
+        {
+            root = "/private" + root;
+        }
+
         return !root.Any(char.IsControl) && !root.Contains(Path.PathSeparator, StringComparison.Ordinal) &&
                !IsDescendant("/usr", root) && !IsDescendant("/opt", root) && !IsDescendant("/etc", root) &&
-               ((!string.IsNullOrEmpty(home) && IsDescendant(home, root)) || IsDescendant("/tmp", root))
+               ((!string.IsNullOrEmpty(home) && IsDescendant(home, root)) || IsDescendant(temporary, root))
             ? root
             : throw new InvalidOperationException("Managed tool store must be below the user home directory or /tmp.");
     }
 
     private static bool IsDescendant(string parent, string path) =>
-        path.StartsWith(Path.TrimEndingDirectorySeparator(parent) + "/", StringComparison.Ordinal);
+        path.StartsWith(Path.TrimEndingDirectorySeparator(parent) + Path.DirectorySeparatorChar,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     internal static string Executable(string root, string tool) => Path.Combine(root, "bin", tool);
 
@@ -53,7 +61,12 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
     }
 
     internal static string ToolPath(string store, ManagedToolRelease release, string tool) =>
-        tool is "sysroot" or "vcpkg-registry" ? Location(store, release) : Executable(Location(store, release), tool);
+        tool is "sysroot" or "vcpkg-registry" ? Location(store, release) : ReleaseExecutable(Location(store, release), release, tool);
+
+    private static string ReleaseExecutable(string root, ManagedToolRelease release, string tool) =>
+        release.Id == ManagedCMakeFormatter.Id
+            ? Path.Combine(root, release.Platform == "win-x64" ? tool + ".exe" : tool)
+            : Executable(root, tool);
 
     private static ComponentArchive Format(ManagedToolRelease release) =>
         ManagedComponentCatalog.Find(release.Id, release.Version)?.Format ?? release.Id switch
@@ -85,7 +98,7 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
 
     internal async Task InstallAsync(string store, ManagedToolRelease release, IToolingRuntime runtime, CancellationToken ct)
     {
-        if (!OperatingSystem.IsLinux())
+        if (release.Id != ManagedCMakeFormatter.Id && !OperatingSystem.IsLinux())
         {
             throw new PlatformNotSupportedException("Managed tool installation requires Linux.");
         }
@@ -161,7 +174,7 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
             {
                 return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
-            catch (IOException error) when ((error.HResult & 0xffff) == 11)
+            catch (IOException error) when ((error.HResult & 0xffff) is 11 or 32 or 33 or 35)
             {
                 try
                 {
@@ -177,34 +190,24 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
 
     internal static void EnsureDirectory(string path)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            throw new PlatformNotSupportedException("Managed tool installation requires Linux.");
-        }
-
         CheckDirectoryPath(path);
-        _ = Directory.CreateDirectory(path, PrivateDirectory);
+        _ = OperatingSystem.IsWindows() ? Directory.CreateDirectory(path) : Directory.CreateDirectory(path, PrivateDirectory);
         CheckDirectoryPath(path);
     }
 
     internal static void CheckDirectoryPath(string path)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            throw new PlatformNotSupportedException("Managed tool verification requires Linux.");
-        }
-
         for (DirectoryInfo? directory = new(path); directory is not null; directory = directory.Parent)
         {
             RejectLink(directory);
-            if (!directory.Exists)
+            if (!directory.Exists || OperatingSystem.IsWindows())
             {
                 continue;
             }
 
             UnixFileMode mode = File.GetUnixFileMode(directory.FullName);
             if ((mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0 &&
-                (directory.FullName != "/tmp" || (mode & UnixFileMode.StickyBit) == 0))
+                (directory.FullName is not ("/tmp" or "/private/tmp") || (mode & UnixFileMode.StickyBit) == 0))
             {
                 throw new IOException($"Managed tool store path is writable by other users: {directory.FullName}");
             }
@@ -223,6 +226,31 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
     {
         await using FileStream input = File.OpenRead(archive);
         ComponentArchive format = Format(release);
+        if (release.Id == ManagedCMakeFormatter.Id && release.Platform == "win-x64")
+        {
+            using ZipArchive zip = new(input, ZipArchiveMode.Read);
+            string[] files = ["cmakefmt.exe", "LICENSE", "README.md", "_cmakefmt", "cmakefmt.1", "cmakefmt.bash",
+                "cmakefmt.fish", "LICENSES/Apache-2.0.txt", "LICENSES/MIT.txt"];
+            if (zip.Entries.Count != files.Length)
+            {
+                throw new InvalidDataException("Unexpected Windows cmakefmt ZIP layout.");
+            }
+            long remaining = MaxExpandedBytes;
+            foreach (string relative in files)
+            {
+                ZipArchiveEntry entry = zip.GetEntry(release.TarRoot + "/" + relative) ??
+                    throw new InvalidDataException($"Missing ZIP release entry: {relative}.");
+                if (entry.Length > remaining || ((entry.ExternalAttributes >> 16) & 0xf000) is not (0 or 0x8000))
+                {
+                    throw new InvalidDataException("Invalid ZIP release entry.");
+                }
+                remaining -= entry.Length;
+                await using Stream source = await entry.OpenAsync(ct);
+                await WriteFileAsync(root, relative, source, entry.Length, false, ct);
+            }
+            return;
+        }
+
         if (format == ComponentArchive.RawExecutable)
         {
             await WriteFileAsync(root, "bin/vcpkg", input, input.Length, true, ct);
@@ -440,11 +468,6 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
     private static async Task WriteFileAsync(string root, string relative, Stream source, long size, bool executable,
         CancellationToken ct)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            throw new PlatformNotSupportedException("Managed tool installation requires Linux.");
-        }
-
         if (size is < 0 or > MaxExpandedBytes)
         {
             throw new InvalidDataException("Archive entry exceeds extraction bounds.");
@@ -458,8 +481,11 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
             throw new InvalidDataException("Truncated archive entry.");
         }
 
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite |
-            (executable ? UnixFileMode.UserExecute : UnixFileMode.None));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                (executable ? UnixFileMode.UserExecute : UnixFileMode.None));
+        }
     }
 
     private static async Task<long> CopyBoundedAsync(Stream source, Stream output, long size, CancellationToken ct)
@@ -496,11 +522,6 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
     // It is pinned in the catalog independently of the archive digest.
     internal static async Task<string> TreeHashAsync(string root, bool allowLinks, bool excludeGit, CancellationToken ct)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            throw new PlatformNotSupportedException("Managed tool verification requires Linux.");
-        }
-
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         SortedDictionary<string, FileSystemInfo> entries = new(StringComparer.Ordinal);
         Stack<DirectoryInfo> pending = new();
@@ -520,7 +541,7 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
                     throw new InvalidDataException("Managed release has too many entries.");
                 }
 
-                string relative = Path.GetRelativePath(root, entry.FullName);
+                string relative = Path.GetRelativePath(root, entry.FullName).Replace(Path.DirectorySeparatorChar, '/');
                 if (excludeGit && relative == ".git")
                 {
                     continue;
@@ -556,7 +577,7 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
                     throw new InvalidDataException("Managed release exceeds expanded size limit.");
                 }
 
-                UnixFileMode mode = File.GetUnixFileMode(file.FullName);
+                UnixFileMode mode = OperatingSystem.IsWindows() ? UnixFileMode.None : File.GetUnixFileMode(file.FullName);
                 bool execute = (mode & UnixFileMode.UserExecute) != 0;
                 if ((mode & (UnixFileMode.SetUser | UnixFileMode.SetGroup |
                              UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
@@ -606,11 +627,12 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
         {
             "llvm" => ["clang", "clang++", "ld.lld"],
             "cmake" => ["cmake", "ctest", "cpack"],
+            ManagedCMakeFormatter.Id => [ManagedCMakeFormatter.Id],
             _ => ["ninja"]
         };
         foreach (string tool in tools)
         {
-            string executable = Executable(root, tool);
+            string executable = ReleaseExecutable(root, release, tool);
             if (!File.Exists(executable))
             {
                 throw new InvalidDataException($"Managed release lacks bin/{tool}.");
@@ -631,6 +653,11 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
                 throw new InvalidDataException("Managed Clang did not report the pinned Linux target triple.");
             }
 
+            return;
+        }
+
+        if (release.Id == ManagedCMakeFormatter.Id)
+        {
             return;
         }
 

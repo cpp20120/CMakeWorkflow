@@ -57,9 +57,9 @@ public static class WorkflowPlanner
             }
 
             ValidateNode(node);
-            if (node.Kind == "profile_snapshot" && document.SchemaVersion != 2)
+            if (node.Kind is "profile_snapshot" or "format_check" && document.SchemaVersion != 2)
             {
-                throw new ArgumentException($"{node.Id}: profile_snapshot requires schemaVersion 2.");
+                throw new ArgumentException($"{node.Id}: {node.Kind} requires schemaVersion 2.");
             }
             if (node.ActionCache && document.SchemaVersion != 2)
             {
@@ -170,6 +170,31 @@ public static class WorkflowPlanner
                     new RequestedBuildContext(location, Mode: "snapshot"),
                     new ObservedBuildContext { BuildDirectory = location, State = "Snapshot" },
                     snapshotDiagnostics));
+                continue;
+            }
+
+            if (node.Kind == "format_check")
+            {
+                string declared = document.Contexts[node.Context!]?.SourceDirectory ??
+                    throw new ArgumentException($"{node.Id}: format_check requires context.sourceDirectory.");
+                string source = BuildTreeOwnership.CanonicalPath(Path.GetFullPath(declared, directory));
+                string cmakeLists = Path.Combine(source, "CMakeLists.txt");
+                readGuard?.Invoke(source);
+                readGuard?.Invoke(cmakeLists);
+                List<PlanDiagnostic> formatDiagnostics =
+                [
+                    new("Runtime", "Read-only source formatting check. The execution host resolves tools and discovers files at dispatch.")
+                ];
+                if (!File.Exists(cmakeLists))
+                {
+                    formatDiagnostics.Add(new("Error", "Formatting requires an existing source directory with CMakeLists.txt."));
+                }
+                plan.Add(new PlannedNode(node, new CMakeTargetRef(source, "", null), source, dependencies[node.Id],
+                    new RequestedBuildContext(source, SourceDirectory: source, Mode: "observe"),
+                    new ObservedBuildContext { BuildDirectory = source, State = "Source" }, formatDiagnostics)
+                {
+                    ReadGuard = readGuard
+                });
                 continue;
             }
 
@@ -419,11 +444,11 @@ public static class WorkflowPlanner
             {
                 CompilerCacheProfile = compilerCache,
                 VariantBinding = document.Contexts[contextName].BuildVariant,
-                VariantReadGuard = readGuard
+                ReadGuard = readGuard
             });
         }
 
-        foreach (IGrouping<string, PlannedNode> tree in plan.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot"))
+        foreach (IGrouping<string, PlannedNode> tree in plan.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot" or "format_check"))
                      .GroupBy(n => n.Target.BuildDirectory, PathComparer))
         {
             if (tree.Select(n => (n.Requested.Mode, n.Requested.ProvenancePolicy)).Distinct().Count() != 1)
@@ -492,7 +517,7 @@ public static class WorkflowPlanner
 
     private static void ValidateNode(WorkflowNode n)
     {
-        if (n.Kind is not ("inspect" or "configure" or "build" or "invoke" or "run" or "profile" or "profile_snapshot" or "ctest"))
+        if (n.Kind is not ("inspect" or "configure" or "build" or "invoke" or "run" or "profile" or "profile_snapshot" or "ctest" or "format_check"))
         {
             throw new ArgumentException($"{n.Id}: unknown workflow node kind.");
         }
@@ -610,6 +635,14 @@ public static class WorkflowPlanner
             || n.Outputs.Any(x => x is null))
         {
             throw new ArgumentException($"{n.Id}: invalid artifact declarations.");
+        }
+
+        if (n.Kind == "format_check" && (n.Target is not null || n.From is not null ||
+            n.WorkingDirectory is not null || n.Environment.Count != 0 || n.Constraints is not null ||
+            n.Inputs.Count != 0 || n.Outputs.Count != 0 ||
+            n.Arguments is not ([] or ["cpp" or "cmake" or "all"] or ["cmake", "managed"])))
+        {
+            throw new ArgumentException($"{n.Id}: format_check accepts a context and language (cpp, cmake or all). Only cmake supports the optional managed policy.");
         }
 
         if (n.Kind == "inspect" && n.Outputs.Count != 0)

@@ -21,19 +21,29 @@ public static class ManagedLinuxSdk
             throw new PlatformNotSupportedException("Managed Clang and its SDK require Linux x86-64.");
         }
 
-        string? actual;
-        try
-        {
-            actual = Marshal.PtrToStringAnsi(GlibcVersion());
-        }
-        catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
-        {
-            throw new PlatformNotSupportedException("Managed Clang and its SDK require a glibc host.", error);
-        }
+        string actual = ReadGlibcVersion() ??
+            throw new PlatformNotSupportedException("Managed Clang and its SDK require a glibc host.");
 
         if (!Version.TryParse(actual, out Version? version) || version < MinimumGlibc)
         {
-            throw new PlatformNotSupportedException($"Managed Clang requires glibc 2.31 or later. Detected {actual ?? "unknown"}.");
+            throw new PlatformNotSupportedException($"Managed Clang requires glibc 2.31 or later. Detected {actual}.");
+        }
+    }
+
+    internal static string? ReadGlibcVersion()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        try
+        {
+            return Marshal.PtrToStringAnsi(GlibcVersion());
+        }
+        catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
+        {
+            return null;
         }
     }
 

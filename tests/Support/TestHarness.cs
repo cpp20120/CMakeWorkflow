@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
@@ -9,6 +10,44 @@ internal static class TestHarness
     internal static string Cli = "";
     internal static string Root = "";
     private static int runNumber;
+
+    [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static extern int Kill(int pid, int signal);
+
+    internal static bool SendInterrupt(int pid) => Kill(pid, 2) == 0;
+
+    internal static bool IsProcessRunning(int pid)
+    {
+        string stat = FormattableString.Invariant($"/proc/{pid}/stat");
+        try
+        {
+            string contents = File.ReadAllText(stat);
+            return contents[contents.LastIndexOf(')') + 2] is not ('Z' or 'X');
+        }
+        catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    internal static void KillProcessIfRunning(int pid)
+    {
+        if (!IsProcessRunning(pid))
+        {
+            return;
+        }
+
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException)
+        {
+            // It exited between the /proc check and the kill.
+        }
+    }
 
     internal static void Check(bool condition, string message)
     {
@@ -31,11 +70,12 @@ internal static class TestHarness
         Check(report["nodes"]!.AsArray().All(n => S(n?["status"]) == "succeeded"), report.ToJsonString());
 
     internal static CommandResult Command(string executable, IEnumerable<string> args,
-        int expected = 0, int timeoutSeconds = 90, Dictionary<string, string>? environment = null)
+        int expected = 0, int timeoutSeconds = 90, Dictionary<string, string>? environment = null, string? workingDirectory = null)
     {
         ProcessStartInfo info = new(executable)
         {
             UseShellExecute = false,
+            WorkingDirectory = workingDirectory ?? "",
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
@@ -71,10 +111,10 @@ internal static class TestHarness
             throw new UnreachableException($"Timed out: {executable}");
         }
 
-        string output = stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult();
-        Check(process.ExitCode == expected,
-            $"Expected exit {expected}, got {process.ExitCode}: {executable} {string.Join(' ', args)}\n{output}");
-        return new(process.ExitCode, output);
+        CommandResult result = new(process.ExitCode, stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult());
+        Check(result.ExitCode == expected,
+            $"Expected exit {expected}, got {result.ExitCode}: {executable} {string.Join(' ', args)}\n{result.Output}");
+        return result;
     }
 
     internal static string RunCli(params string[] args) => Command(Cli, args).Output;

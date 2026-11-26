@@ -97,6 +97,10 @@ Calls to `ExecuteResumeAsync()` must now supply the observed admission revision;
 
 See the [engineering and analysis guide](en/programmable-engineering.md).
 
+## Local Clang tools
+
+`Developer.ClangTools.RunAsync(ClangToolRequest, Action<ClangToolDiagnostic>?, CancellationToken)` runs local source formatting and compilation-database checks. The diagnostic callback can be called concurrently. Input selection and execution options are documented in the [Clang tools reference](en/clang-tools.md).
+
 ## Reading the signatures
 
 Signatures retain parameter defaults, nullable annotations, generic constraints and base types. Referenced types are
@@ -2069,3 +2073,10 @@ public sealed record WorkflowToolchainBinding(string? CMakeCandidateId = null, s
 }
 ```
 
+
+## Source formatting
+
+- `CMakeWorkflow.CMake.Quality.SourceFormatting.RunAsync(FormatRequest, CancellationToken)` checks, applies or diffs selected files in a local workspace. `FormatRequest` carries mode, languages, file scope, tool policy and execution limits.
+- `CMakeWorkflow.Developer.ClangTools.FormatAsync(FormatRequest, FormatTarget, …)` uses the existing CMake File API target metadata for C/C++ formatting.
+- `CMakeWorkflow.Scripting.Workflow.FormatCheck(id, context, language, after, managedOnly)` declares a schema-v2 workflow gate. Its structured report is a standard workflow stdout artifact.
+- `CMakeWorkflow.Contracts.Workflows.FormatResult`, `FormatFile`, `FormatInvocation`, `FormatToolIdentity` and `FormatReportJson` expose results, selected tool provenance and AOT-safe report deserialization.

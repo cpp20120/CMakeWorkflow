@@ -18,15 +18,15 @@ public sealed partial class ToolingService
             throw new ArgumentException("Managed tooling accepts only package manager 'none' and uses CMAKEWORKFLOW_TOOL_STORE, not --install-dir.");
         }
 
-        if (!ManagedToolStore.Supports(runtime.Platform, ManagedArchitecture))
-        {
-            throw new PlatformNotSupportedException("Managed tooling currently supports Linux x86-64 only.");
-        }
-
         string directory = ManagedToolStore.GetRoot();
         string[] profiles = requestedProfiles.Count == 0 ? ["cmake-ninja"] :
             [.. requestedProfiles.Select(x => ToolCatalog.CanonicalProfileId(x.Trim())).Distinct(StringComparer.Ordinal)];
         IReadOnlyList<ToolDefinition> definitions = ToolCatalog.ResolveProfiles(profiles, runtime.Platform);
+        if (definitions.Any(tool => tool.Id != ManagedCMakeFormatter.Id) &&
+            !ManagedToolStore.Supports(runtime.Platform, ManagedArchitecture))
+        {
+            throw new PlatformNotSupportedException("The selected managed toolchain profiles require Linux x86-64.");
+        }
         if (profiles.Contains("linux-clang", StringComparer.Ordinal))
         {
             ManagedLinuxSdk.RequireHostAbi();
@@ -46,7 +46,9 @@ public sealed partial class ToolingService
             {
                 status = system with { Origin = "system", Resolution = "compatible" };
             }
-            else if (FindManagedRelease(tool.Id) is { } release)
+            else if ((tool.Id == ManagedCMakeFormatter.Id
+                ? ManagedCMakeFormatter.ForHost(runtime.Platform, ManagedArchitecture)
+                : FindManagedRelease(tool.Id)) is { } release)
             {
                 if (!verified.TryGetValue(release, out bool installed))
                 {
@@ -75,7 +77,9 @@ public sealed partial class ToolingService
                 status = new(tool.Id, tool.DisplayName, false, system?.Command, system?.Version,
                     tool.MinimumVersion?.ToString(), sdk
                         ? "A compatible external compiler and Linux SDK are required. Use AllowSystem with an installed compiler or select cmake-ninja."
-                        : system?.Diagnostic ?? "No managed release is available for this tool.")
+                        : tool.Id == ManagedCMakeFormatter.Id
+                            ? "No compatible cmakefmt release for this OS, architecture and Linux ABI. " + system?.Diagnostic
+                            : system?.Diagnostic ?? "No managed release is available for this tool.")
                 {
                     Resolution = sdk ? "external-sdk" : system?.Command is not null ? "incompatible" : "missing"
                 };

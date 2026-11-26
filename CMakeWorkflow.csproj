@@ -12,6 +12,7 @@
         <Compile Include="Program.cs"/>
         <Compile Include="Commands/CliApplication.cs"/>
         <Compile Include="Commands/DeveloperCommand.cs"/>
+        <Compile Include="Commands/ClangCommand.cs"/>
         <Compile Include="Commands/KitCommand.cs"/>
         <Compile Include="Commands/ProjectSdkCommand.cs"/>
         <Compile Include="Commands/ProjectSdkResolution.cs"/>

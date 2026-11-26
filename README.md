@@ -16,6 +16,8 @@ CMake and Ninja manage native builds. CMakeWorkflow coordinates the operations a
 - [Author workflows in C#](docs/en/scripting.md) · [русская версия](docs/ru/scripting.md)
 - [Developer Lifecycle API and CLI](docs/en/developer-lifecycle.md) · [русская версия](docs/ru/developer-lifecycle.md)
 - [Programmable engineering and History](docs/en/programmable-engineering.md) · [русская версия](docs/ru/programmable-engineering.md)
+- [CMake and C/C++ formatting](docs/en/cmake-format.md) · [русская версия](docs/ru/cmake-format.md)
+- [Clang formatting and analysis](docs/en/clang-tools.md) · [русская версия](docs/ru/clang-tools.md)
 - [Engineering Kits](docs/en/engineering-kits.md) · [русская версия](docs/ru/engineering-kits.md)
 - [Project SDK and managed toolchain quickstart](docs/en/project-sdk.md)
 - [Native Runtime, Interop, Qt and Graphics SDKs](docs/en/sdk-ecosystem.md)

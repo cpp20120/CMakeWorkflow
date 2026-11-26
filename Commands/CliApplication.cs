@@ -14,6 +14,7 @@ internal static class CliApplication
     internal static Task<int> ExecuteAsync(string[] args, CancellationToken ct) => args switch
     {
         ["kit", .. string[] tail] => KitCommand.ExecuteAsync(tail, ct),
+        ["format" or "lint" or "analyze", .. string[] tail] => ClangCommand.ExecuteAsync(args[0], tail, ct),
         ["project", .. string[] tail] => ProjectSdkCommand.ExecuteAsync(tail, ct),
         ["experiment", .. string[] tail] => ExperimentCommand.ExecuteAsync(tail, ct),
         ["script", .. string[] tail] => ScriptCommand.ExecuteAsync(tail, ct),

@@ -1,12 +1,28 @@
 using CMakeWorkflow.IntegrationTests.Execution;
 using CMakeWorkflow.IntegrationTests.Protocol;
 using CMakeWorkflow.IntegrationTests.Recipes;
+using CMakeWorkflow.IntegrationTests.Quality;
 using CMakeWorkflow.IntegrationTests.Support;
 
-if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || (args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow" or "--process-boundaries" or "--artifacts")))
+if (Environment.GetEnvironmentVariable(QualityToolProbe.ModeVariable) is { } probe)
 {
-    Console.Error.WriteLine(
-        "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli|--workflow|--process-boundaries]");
+    return QualityToolProbe.Run(probe, args);
+}
+
+if (args is [string cli, "--format-benchmark", string formatter, .. string[] options])
+{
+    return FormatBenchmark.Run(cli, formatter, options);
+}
+
+if (args is [string scriptCli, "--script-cancellation", string script])
+{
+    return await ScriptCancellationTests.RunAsync(scriptCli, script);
+}
+
+if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || (args.Length == 2 && args[1] is not ("--recovery" or "--remote-cli" or "--workflow" or "--process-boundaries" or "--artifacts" or "--clang-tools" or "--format-cancellation")))
+{
+    await Console.Error.WriteLineAsync(
+        "Usage: dotnet run --project tests/CMakeWorkflow.IntegrationTests.csproj -- /path/to/CMakeWorkflow [--recovery|--remote-cli|--workflow|--process-boundaries|--artifacts|--clang-tools|--format-cancellation]");
     return 2;
 }
 
@@ -25,6 +41,16 @@ string historyDatabase = Path.Combine(Path.GetTempPath(),
 Environment.SetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB", historyDatabase);
 try
 {
+    if (args.Length == 2 && args[1] == "--clang-tools")
+    {
+        ClangToolTests.Run();
+        return 0;
+    }
+    if (args.Length == 2 && args[1] == "--format-cancellation")
+    {
+        await FormatCancellationTests.RunAsync();
+        return 0;
+    }
     if (args.Length == 2 && args[1] == "--process-boundaries")
     {
         BoundaryTests.Run();
@@ -74,7 +100,7 @@ try
 #pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
 catch (Exception error)
 {
-    Console.Error.WriteLine(error);
+    await Console.Error.WriteLineAsync(error.ToString());
     return 1;
 }
 #pragma warning restore CA1031

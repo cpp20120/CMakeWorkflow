@@ -4,7 +4,7 @@ using CMakeWorkflow.CMake.Planning;
 
 namespace CMakeWorkflow.CMake.Build;
 
-public static class CMakeInspection
+public static partial class CMakeInspection
 {
     public static async Task<ObservedBuildContext> InspectAsync(string buildDirectory, CancellationToken ct,
         Action<string>? readGuard = null)
@@ -50,12 +50,7 @@ public static class CMakeInspection
         Dictionary<string, string> cache = await ReadObservedCacheAsync(directory, readGuard, ct);
         string reply = Path.Combine(directory, ".cmake", "api", "v1", "reply");
         readGuard?.Invoke(reply);
-        string? indexPath = Directory.Exists(reply)
-            ? Directory.EnumerateFiles(reply, "*.json")
-                .Where(p => Path.GetFileName(p).StartsWith("index-", StringComparison.Ordinal)
-                            || Path.GetFileName(p).StartsWith("error-", StringComparison.Ordinal))
-                .OrderByDescending(p => Path.GetFileName(p)[6..], StringComparer.Ordinal).FirstOrDefault()
-            : null;
+        string? indexPath = LatestIndex(reply);
         if (indexPath is not null)
         {
             result.IndexFile = indexPath;
@@ -421,6 +416,13 @@ public static class CMakeInspection
         return values;
     }
 
+    private static string? LatestIndex(string reply) =>
+        Directory.Exists(reply)
+            ? Directory.EnumerateFiles(reply, "*.json")
+                .Where(p => Path.GetFileName(p).StartsWith("index-", StringComparison.Ordinal)
+                            || Path.GetFileName(p).StartsWith("error-", StringComparison.Ordinal))
+                .OrderByDescending(p => Path.GetFileName(p)[6..], StringComparer.Ordinal).FirstOrDefault()
+            : null;
     private static async Task<JsonDocument?> ReadObjectAsync(string directory, JsonElement objects, string kind,
         int version, Action<string>? readGuard, CancellationToken ct)
     {

@@ -86,6 +86,12 @@ A benchmark matrix recipe axis can declare a `role` of `workers`, `shards`, `arr
 variant as baseline, and execution order as `benchmarkTrial`. Older results derive axes from arguments.
 Facet axes are held fixed within each chart.
 
+## Clang tools
+
+Use `format --check` or `format --apply` for batched formatting, `lint` for clang-tidy and `analyze` for
+the Clang Static Analyzer. Use `--target` to scope the action and `--jobs` to limit concurrency.
+[Clang tools reference](clang-tools.md)
+
 ## C# workflow scripts
 
 Use `script compose FILE.cs` to write a manifest, `script plan FILE.cs` to review Host preflight, and

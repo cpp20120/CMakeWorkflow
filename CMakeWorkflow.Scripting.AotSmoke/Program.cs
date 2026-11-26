@@ -12,6 +12,7 @@ using CMakeWorkflow.Scripting;
 Check(!JsonSerializer.IsReflectionEnabledByDefault, "reflection disabled");
 TestComposition();
 TestScopes();
+TestFormatGate();
 PerformanceSmoke.Run();
 Console.WriteLine("PASS scripting composition, immutable snapshots, and JSON digest");
 
@@ -27,6 +28,23 @@ if (args is not [string endpoint, string root])
 using CancellationTokenSource deadline = new(TimeSpan.FromMinutes(3));
 await TestHostAsync(endpoint, Path.GetFullPath(root), deadline.Token);
 Console.WriteLine("PASS scripting native execution, admission, lookup, cancellation and error propagation");
+
+static void TestFormatGate()
+{
+    Workflow workflow = Workflow.Define("format", ".");
+    ContextRef context = workflow.Context("native", "build");
+    NodeRef cpp = workflow.FormatCheck("cpp", context, FormatLanguage.Cpp);
+    NodeRef cmake = workflow.FormatCheck("cmake", context, FormatLanguage.CMake, managedOnly: true);
+    WorkflowDocument definition = workflow.Compose([workflow.Configure("configure", context, after: [cpp, cmake])]).ToDefinition();
+    WorkflowNode gate = definition.Nodes.Single(node => node.Id == "cmake");
+    Check(gate.Kind == "format_check" && gate.Arguments.SequenceEqual(["cmake", "managed"]), "managed formatting gate");
+    Check(definition.Nodes.Single(node => node.Id == "configure").DependsOn.SequenceEqual(["cpp", "cmake"]), "format gate fan-in");
+
+    FormatResult original = new(FormatStatus.FormattingRequired, [new("CMakeLists.txt", FormatStatus.FormattingRequired)], []);
+    byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(original, FormatReportJson.Default.FormatResult);
+    FormatResult? read = JsonSerializer.Deserialize(bytes, FormatReportJson.Default.FormatResult);
+    Check(read?.ExitCode == 1 && read.Files[0].Path == "CMakeLists.txt", "typed formatting report");
+}
 
 static void TestComposition()
 {

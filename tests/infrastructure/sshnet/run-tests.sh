@@ -122,6 +122,10 @@ echo '=== Real sshd / SSH.NET: file-based workflow, interrupted manifest transfe
 timeout --signal=TERM --kill-after=5s 240s bash tests/infrastructure/scripting/ssh-test.sh \
   "$tmp/publish/CMakeWorkflow" "$tmp" "$container"
 
+echo '=== Real sshd / SSH.NET: managed CMake formatting gate ==='
+timeout --signal=TERM --kill-after=5s 120s bash tests/infrastructure/cmake-format/ssh-test.sh \
+  "$tmp/publish/CMakeWorkflow" "$tmp" "$container"
+
 docker exec -i "$container" sh -c 'cat > /opt/cmwf-experiment-bridge && chmod 0755 /opt/cmwf-experiment-bridge' <<'BRIDGE'
 #!/bin/sh
 marker=/home/cmwf/workspace/lost-experiment-operation

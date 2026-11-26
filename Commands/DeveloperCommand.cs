@@ -338,17 +338,26 @@ internal static class DeveloperCommand
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int number) && number > 0 ? number :
         throw new ArgumentException(option + " must be a positive integer.");
 
-    internal static Dictionary<string, string?> Parse(string[] args, string[] allowed)
+    internal static Dictionary<string, string?> Parse(string[] args, string[] allowed, ICollection<string>? files = null)
     {
         Dictionary<string, string?> values = new(StringComparer.Ordinal);
         for (int i = 0; i < args.Length; i++)
         {
             string option = args[i];
+            if (option == "--file" && files is not null)
+            {
+                if (++i == args.Length || args[i].StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("Missing value for --file.");
+                }
+                files.Add(args[i]);
+                continue;
+            }
             if (!allowed.Contains(option, StringComparer.Ordinal) || !values.TryAdd(option, null))
             {
                 throw new ArgumentException("Unexpected or duplicate option " + option);
             }
-            if (option is "--json" or "--matrix" or "--plan" or "--no-history")
+            if (option is "--json" or "--matrix" or "--plan" or "--no-history" or "--check" or "--apply" or "--diff" or "--changed" or "--staged")
             {
                 continue;
             }

@@ -11,6 +11,8 @@
 - Keep strict Release warnings-as-errors and NativeAOT checks enabled. After API changes, update the relevant inventory;
   verify serialization/recovery behavior when collection or persistence contracts are affected.
 
+Prefer native .NET testing infrastructure over ad hoc Python, Bash, or PowerShell test harnesses. Use the existing test framework for unit and integration tests, BenchmarkDotNet for managed microbenchmarks, and typed C# harnesses for end-to-end measurements. Shell scripts are permitted only as thin entry points or when testing shell-specific behavior. Do not implement assertions, benchmark aggregation, process orchestration, or test lifecycle management in shell scripts without explicit justification.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

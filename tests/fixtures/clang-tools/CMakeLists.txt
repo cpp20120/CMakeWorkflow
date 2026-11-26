@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.26)
+project(ClangToolsSmoke LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(runtime STATIC "runtime one.cpp" "runtime two.cpp" "runtime three.cpp" "runtime.hpp")
+add_library(other STATIC "runtime one.cpp" "other.cpp")
+target_compile_definitions(other PRIVATE WRONG_TARGET)
