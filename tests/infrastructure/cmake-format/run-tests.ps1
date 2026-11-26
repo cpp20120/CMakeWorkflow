@@ -150,3 +150,6 @@ finally {
     $env:CMAKEWORKFLOW_TOOL_STORE = $previousStore
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# Publish the smoke test result rather than the last expected native failure.
+exit 0
