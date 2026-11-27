@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../Capnp.Managed.CodeGen/Capnp.Managed.CodeGen.csproj"/>
+        <None Update="Schema/*.capnp" CopyToOutputDirectory="PreserveNewest"/>
+        <None Include="Generated/*.g.cs" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+    <PropertyGroup Condition="'$(CapnpProtocolBindings)' != ''">
+        <DefineConstants>$(DefineConstants);CAPNP_PROTOCOL_PROOF</DefineConstants>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(CapnpProtocolBindings)' != ''">
+        <Compile Include="$(CapnpProtocolBindings)" Link="GeneratedProtocol.g.cs"/>
+    </ItemGroup>
+</Project>

@@ -7,6 +7,9 @@
     <Folder Name="/tests/">
         <Project Path="tests/CMakeWorkflow.IntegrationTests.csproj"/>
     </Folder>
+    <Project Path="Capnp.Managed/Capnp.Managed.csproj"/>
+    <Project Path="CMakeWorkflow.Binary.Capnp/CMakeWorkflow.Binary.Capnp.csproj"/>
+    <Project Path="CMakeWorkflow.Storage.Documents/CMakeWorkflow.Storage.Documents.csproj"/>
     <Project Path="CMakeWorkflow.Campaigns.Tests/CMakeWorkflow.Campaigns.Tests.csproj"/>
     <Project Path="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>
     <Project Path="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>

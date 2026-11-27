@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using CMakeWorkflow.Binary.Capnp;
 using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Host.Workflows;
 using CMakeWorkflow.Sources;
 
@@ -11,12 +14,12 @@ namespace CMakeWorkflow.Host.Tests.Durability;
 // CMake configure, target dispatch, the Host ledger and fail-closed admission.
 internal static class SourceBindingExecutionTests
 {
-    internal static async Task RunAsync(string parent)
+    internal static async Task RunAsync(string parent, bool binary = false)
     {
         // The caller already creates a unique parent; avoid long Windows paths.
         string workspace = Path.Combine(parent, "w");
         string source = Path.Combine(workspace, "source");
-        string manifest = Path.Combine(workspace, "workflow.json");
+        string manifest = Path.Combine(workspace, binary ? "workflow.capnp" : "workflow.json");
         string output = Path.Combine(workspace, "results");
         string liveBuild = Path.Combine(workspace, "legacy-build");
         _ = Directory.CreateDirectory(source);
@@ -30,7 +33,7 @@ internal static class SourceBindingExecutionTests
         {
             await File.WriteAllTextAsync(Path.Combine(source, "CMakeLists.txt"),
                 "cmake_minimum_required(VERSION 3.26)\nproject(source_binding LANGUAGES CXX)\n" +
-                "add_executable(probe main.cpp)\n");
+                "add_executable(probe main.cpp)\nenable_testing()\nadd_test(NAME probe COMMAND probe)\n");
             string cpp = Path.Combine(source, "main.cpp");
             await File.WriteAllTextAsync(cpp, "#include <cstdio>\nint main(){ std::puts(\"captured\"); return 0; }\n");
             byte[] manifestBytes = Encoding.UTF8.GetBytes("""
@@ -39,30 +42,57 @@ internal static class SourceBindingExecutionTests
                  "nodes":[
                    {"id":"configure","kind":"configure","context":"only"},
                    {"id":"compile","kind":"build","context":"only","target":"probe","dependsOn":["configure"]},
+                   {"id":"inspect","kind":"inspect","context":"only","dependsOn":["configure"]},
+                   {"id":"test","kind":"ctest","context":"only","dependsOn":["compile"]},
                    {"id":"execute","kind":"run","from":"compile","dependsOn":["compile"]}
                  ]}
                 """);
-            await File.WriteAllBytesAsync(manifest, manifestBytes);
+            WorkflowDocument document = JsonSerializer.Deserialize(manifestBytes, WorkflowDefinitionJson.Default.WorkflowDocument)!;
+            byte[] wire = binary
+                ? CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(document)))
+                : manifestBytes;
+            await File.WriteAllBytesAsync(manifest, wire);
             await File.WriteAllTextAsync(Path.Combine(liveBuild, "CMakeCache.txt"),
                 "stale cache must never be adopted\n");
-            string hash = Convert.ToHexString(SHA256.HashData(manifestBytes));
+            string hash = Convert.ToHexString(SHA256.HashData(wire));
             LoreSnapshotStore lore = new(storePath);
             string id = await lore.CaptureAsync(source, ["CMakeLists.txt", "main.cpp"]);
             WorkflowStartRequest request = new("source-bound", manifest, hash, 1, output)
             {
                 SourceSnapshotId = id
             };
+            ExecutionStartRequest binaryRequest = new(BinaryWorkflowSubmission.Domain, "source-bound", manifest, hash, 1, output)
+            {
+                SourceSnapshotId = id
+            };
+            if (binary)
+            {
+                BinaryWorkflowSubmission.InitializeWorkspace(workspace);
+            }
 
             using (DurableAcceptanceStore db = new(workspace))
             {
-                _ = db.Accept(request);
+                if (binary)
+                {
+                    _ = await db.AcceptBinaryAsync(binaryRequest, CancellationToken.None);
+                    await ExpectRefusalAsync(() => db.AcceptBinaryAsync(
+                        binaryRequest with { SourceSnapshotId = new string('0', 64) }, CancellationToken.None),
+                        "Conflicting source snapshot reused durable acceptance.");
+                    File.Delete(manifest);
+                }
+                else
+                {
+                    _ = db.Accept(request);
+                }
             }
             // An accepted request must use immutable Lore bytes, not the files
             // currently present on disk (nor the old preconfigured build tree).
             await File.WriteAllTextAsync(cpp, "#include <cstdio>\nint main(){ std::puts(\"live\"); return 0; }\n");
             using (DurableExecutionCoordinator coordinator = new(CancellationToken.None))
             {
-                OperationReference accepted = coordinator.Start(workspace, request);
+                OperationReference accepted = binary
+                    ? await BinaryWorkflowSubmission.StartAsync(coordinator, workspace, binaryRequest)
+                    : coordinator.Start(workspace, request);
                 if (accepted.State != "accepted_not_dispatched")
                 {
                     throw new UnreachableException("Source request was not durably accepted.");
@@ -78,7 +108,8 @@ internal static class SourceBindingExecutionTests
 
                 if (accepted.State != "succeeded" ||
                     db.GetSourceSnapshotId(accepted.OperationId) != id ||
-                    db.GetDispatchCheckpoint(accepted.OperationId) is null)
+                    db.GetDispatchCheckpoint(accepted.OperationId) is null ||
+                    (binary && db.ReadBinaryInput(accepted.OperationId) is null))
                 {
                     string[] logFiles =
                     [
@@ -142,9 +173,12 @@ internal static class SourceBindingExecutionTests
             await File.WriteAllTextAsync(Path.Combine(isolatedSource, "main.cpp"), "tampered");
             try
             {
-                _ = await WorkflowSourceSnapshotExecution.PlanAsync(
-                    new CMakeWorkflow.Host.Sessions.WorkspaceReadPaths(workspace), operation,
-                    manifest, output, manifestBytes, id, [], CancellationToken.None, resume: true);
+                CMakeWorkflow.Host.Sessions.WorkspaceReadPaths paths = new(workspace);
+                _ = binary
+                    ? await WorkflowSourceSnapshotExecution.PlanAsync(paths, operation, manifest, output, document,
+                        hash, id, [], CancellationToken.None, resume: true)
+                    : await WorkflowSourceSnapshotExecution.PlanAsync(paths, operation, manifest, output,
+                        manifestBytes, id, [], CancellationToken.None, resume: true);
                 throw new UnreachableException("Tampered materialization was accepted on resume.");
             }
             catch (InvalidDataException)
@@ -153,6 +187,23 @@ internal static class SourceBindingExecutionTests
 
             // The source store must fail closed before AuthorizeDispatch.
             string missingOutput = Path.Combine(workspace, "missing-results");
+            if (binary)
+            {
+                await File.WriteAllBytesAsync(manifest, wire);
+                using DurableAcceptanceStore db = new(workspace);
+                await ExpectRefusalAsync(() => db.AcceptBinaryAsync(binaryRequest with
+                {
+                    ClientRequestId = "missing-source",
+                    SourceSnapshotId = new string('0', 64),
+                    ResultsDirectory = missingOutput
+                }, CancellationToken.None), "Missing Lore snapshot reached binary admission.");
+                if (db.Find("missing-source") is not null || Directory.Exists(missingOutput))
+                {
+                    throw new UnreachableException("Missing Lore snapshot left binary execution state.");
+                }
+                Console.WriteLine("Binary Lore admission, selection graph, immutable execution and fail-closed source checks passed.");
+                return;
+            }
             WorkflowStartRequest missing = new("missing-source", manifest, hash, 1, missingOutput)
             {
                 SourceSnapshotId = new string('0', 64)
@@ -187,5 +238,19 @@ internal static class SourceBindingExecutionTests
                 Directory.Delete(workspace, recursive: true);
             }
         }
+    }
+
+    private static async Task ExpectRefusalAsync(Func<Task<AcceptedWorkflow>> action, string failure)
+    {
+        try
+        {
+            _ = await action();
+        }
+        catch (Exception e) when (e is InvalidOperationException or InvalidDataException or FileNotFoundException)
+        {
+            return;
+        }
+
+        throw new UnreachableException(failure);
     }
 }

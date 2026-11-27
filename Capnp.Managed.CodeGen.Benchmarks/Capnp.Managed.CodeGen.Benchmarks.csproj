@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../Capnp.Managed/Capnp.Managed.csproj"/>
+        <PackageReference Include="BenchmarkDotNet" Version="0.15.8"/>
+        <Compile Include="../Capnp.Managed.CodeGen.Tests/Generated/Capnp.Generated.Common.g.cs" Link="Generated/Common.g.cs"/>
+        <Compile Include="../Capnp.Managed.CodeGen.Tests/Generated/Capnp.Generated.Probe.g.cs" Link="Generated/Probe.g.cs"/>
+        <Compile Include="../Capnp.Managed.CodeGen.Tests/Fixture.cs" Link="Fixture.cs"/>
+    </ItemGroup>
+</Project>

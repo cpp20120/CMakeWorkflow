@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <OutputType>Exe</OutputType>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../CMakeWorkflow.Binary.Capnp/CMakeWorkflow.Binary.Capnp.csproj"/>
+        <None Update="Fixtures/*" CopyToOutputDirectory="PreserveNewest"/>
+        <None Include="../CMakeWorkflow.Binary.Capnp/Schema/workflow.capnp" Link="Fixtures/workflow.capnp" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+</Project>

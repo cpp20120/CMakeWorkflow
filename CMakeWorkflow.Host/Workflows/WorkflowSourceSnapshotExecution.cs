@@ -18,7 +18,7 @@ namespace CMakeWorkflow.Host.Workflows;
 /// </remarks>
 internal static class WorkflowSourceSnapshotExecution
 {
-    internal static async Task<WorkflowPlan> PlanAsync(
+    internal static Task<WorkflowPlan> PlanAsync(
         WorkspaceReadPaths paths, string operationId, string originalManifest,
         string resultsDirectory, byte[] acceptedManifest, string sourceSnapshotId, IReadOnlyList<string> only,
         CancellationToken ct, bool resume = false)
@@ -30,50 +30,16 @@ internal static class WorkflowSourceSnapshotExecution
 
         WorkflowDocument document = JsonSerializer.Deserialize(acceptedManifest, WorkflowJson.Default.WorkflowDocument)
             ?? throw new InvalidDataException("Empty accepted workflow manifest.");
-        if (document.Contexts is null || document.Contexts.Count == 0 ||
-            document.Nodes is null || document.Nodes.Count == 0)
-        {
-            throw new InvalidDataException("Source-bound workflow requires contexts and nodes.");
-        }
+        return PlanAsync(paths, operationId, originalManifest, resultsDirectory, document,
+            Convert.ToHexString(SHA256.HashData(acceptedManifest)), sourceSnapshotId, only, ct, resume);
+    }
 
-        // The accepted manifest remains the authority for original source paths.
-        // This mapping must never consult current CMakeCache or source file contents.
-        string manifestBase = Path.GetDirectoryName(originalManifest)!;
-        string? originalSource = null;
-        foreach ((string name, WorkflowContext? context) in document.Contexts)
-        {
-            if (context is null || string.IsNullOrWhiteSpace(context.SourceDirectory) ||
-                string.IsNullOrWhiteSpace(context.BuildDirectory) ||
-                context.Mode is not (null or "managed"))
-            {
-                throw new InvalidOperationException(
-                    $"source_snapshot_requires_managed_context: {name}");
-            }
-
-            string requested = Path.IsPathFullyQualified(context.SourceDirectory)
-                ? context.SourceDirectory : Path.Combine(manifestBase, context.SourceDirectory);
-            string canonical = paths.Require(requested);
-            if (originalSource is not null && !WorkflowPlanner.PathComparer.Equals(originalSource, canonical))
-            {
-                throw new InvalidOperationException("source_snapshot_multiple_source_roots_unsupported");
-            }
-            originalSource = canonical;
-        }
-
-        // Inputs and outputs rooted at the ORIGINAL manifest, custom working directories
-        // and buildless replay cannot be redirected safely without a separate mapping.
-        // Refuse them instead of silently reading the live workspace.
-        foreach (WorkflowNode? node in document.Nodes)
-        {
-            if (node is null || node.Kind == "profile_snapshot" || node.WorkingDirectory is not null ||
-                node.Inputs is null || node.Outputs is null ||
-                node.Inputs.Any(input => input is null || input.Path is not null) ||
-                node.Outputs.Any(output => output is null || output.Root == "manifest"))
-            {
-                throw new InvalidOperationException("source_snapshot_unmapped_manifest_path");
-            }
-        }
-
+    internal static async Task<WorkflowPlan> PlanAsync(
+        WorkspaceReadPaths paths, string operationId, string originalManifest, string resultsDirectory,
+        WorkflowDocument document, string manifestHash, string sourceSnapshotId, IReadOnlyList<string> only,
+        CancellationToken ct, bool resume = false)
+    {
+        _ = ValidateSourceLayout(paths, originalManifest, document);
         // Keep both source and build trees short: CMake/Ninja create deep
         // CMakeFiles/CMakeScratch/TryCompile paths on Windows.
         string operationPath = Path.Combine(paths.WorkspaceDirectory, ".cw", operationId);
@@ -137,7 +103,6 @@ internal static class WorkflowSourceSnapshotExecution
             contextIndex++;
         }
 
-        byte[] rewritten = JsonSerializer.SerializeToUtf8Bytes(document, WorkflowJson.Default.WorkflowDocument);
         // The manifest has been durably snapshotted; do not revalidate live
         // manifest file metadata after acceptance (it may have changed/deleted).
         void GuardPlannedPath(string path)
@@ -147,14 +112,59 @@ internal static class WorkflowSourceSnapshotExecution
                 paths.Read(path);
             }
         }
-        WorkflowPlan plan = await WorkflowPlanner.LoadSnapshotAsync(originalManifest,
-            rewritten, only, null, ct, GuardPlannedPath);
+        WorkflowPlan plan = await WorkflowPlanner.LoadDocumentAsync(originalManifest, document,
+            manifestHash, only, null, ct, GuardPlannedPath);
         await VerifyExistingMaterializationAsync(sourceManifest, materialized, ct);
+        return plan;
+    }
 
-        // Preserve the *accepted* manifest identity, not the transformed in-memory
-        // document's digest. The transformed document is never admitted as new input.
-        string acceptedHash = Convert.ToHexString(SHA256.HashData(acceptedManifest));
-        return plan with { ManifestHash = acceptedHash };
+    internal static string ValidateSourceLayout(WorkspaceReadPaths paths, string manifest, WorkflowDocument document)
+    {
+        if (document.Contexts is null || document.Contexts.Count == 0 ||
+            document.Nodes is null || document.Nodes.Count == 0)
+        {
+            throw new InvalidDataException("Source-bound workflow requires contexts and nodes.");
+        }
+
+        // The accepted manifest remains the authority for original source paths.
+        // This mapping must never consult current CMakeCache or source file contents.
+        string manifestBase = Path.GetDirectoryName(manifest)!;
+        string? originalSource = null;
+        foreach ((string name, WorkflowContext? context) in document.Contexts)
+        {
+            if (context is null || string.IsNullOrWhiteSpace(context.SourceDirectory) ||
+                string.IsNullOrWhiteSpace(context.BuildDirectory) ||
+                context.Mode is not (null or "managed"))
+            {
+                throw new InvalidOperationException(
+                    $"source_snapshot_requires_managed_context: {name}");
+            }
+
+            string requested = Path.IsPathFullyQualified(context.SourceDirectory)
+                ? context.SourceDirectory : Path.Combine(manifestBase, context.SourceDirectory);
+            string canonical = paths.Require(requested);
+            if (originalSource is not null && !WorkflowPlanner.PathComparer.Equals(originalSource, canonical))
+            {
+                throw new InvalidOperationException("source_snapshot_multiple_source_roots_unsupported");
+            }
+            originalSource = canonical;
+        }
+
+        // Inputs and outputs rooted at the ORIGINAL manifest, custom working directories
+        // and buildless replay cannot be redirected safely without a separate mapping.
+        // Refuse them instead of silently reading the live workspace.
+        foreach (WorkflowNode? node in document.Nodes)
+        {
+            if (node is null || node.Kind == "profile_snapshot" || node.WorkingDirectory is not null ||
+                node.Inputs is null || node.Outputs is null ||
+                node.Inputs.Any(input => input is null || input.Path is not null) ||
+                node.Outputs.Any(output => output is null || output.Root == "manifest"))
+            {
+                throw new InvalidOperationException("source_snapshot_unmapped_manifest_path");
+            }
+        }
+
+        return originalSource!;
     }
 
     internal static string SourcePath(string workspace, string operationId) =>

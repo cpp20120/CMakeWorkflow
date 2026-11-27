@@ -7,6 +7,8 @@ namespace CMakeWorkflow.Host.Workflows;
 /// </remarks>
 public sealed class DurableRunnerDispatchGate(string workspace, string operationId)
 {
+    internal StoredPlanAuthorization? PlanAuthorization { get; init; }
+
     /// <summary>Verifies and commits the operation/checkpoint binding before any worker launch.</summary>
     /// <remarks>
     /// Failure prevents the dispatch batch. Successful return proves checkpoint binding, not external process start.
@@ -17,7 +19,7 @@ public sealed class DurableRunnerDispatchGate(string workspace, string operation
     {
         cancellationToken.ThrowIfCancellationRequested();
         using DurableAcceptanceStore store = new(workspace);
-        _ = store.ConfirmRunnerCheckpoint(operationId, runDirectory);
+        _ = store.ConfirmRunnerCheckpoint(operationId, runDirectory, PlanAuthorization);
         return Task.CompletedTask;
     }
 }

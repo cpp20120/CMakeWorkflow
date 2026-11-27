@@ -13,7 +13,7 @@ internal static class ProcessArtifactReader
 
     internal static bool IsProcess(WorkspaceReadPaths paths, string operationId)
     {
-        string db = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+        string db = WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory);
         _ = paths.Require(db);
         if (!File.Exists(db))
         {

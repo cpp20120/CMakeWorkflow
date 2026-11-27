@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CMakeWorkflow.Contracts.Workflows;
 
 /// <summary>One regular file in a bounded, source-only experiment upload.</summary>
@@ -8,6 +10,9 @@ public sealed record ExperimentStageRequest(string ExperimentId, string SourceSn
     string ManifestSha256, string Manifest, IReadOnlyList<ExperimentSourceFile> Files)
 {
     public ExperimentSourceBundle? Bundle { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReadOnlyMemory<byte>? BinaryManifest { get; init; }
 
     public const int MaximumSourceBytes = 8 * 1024 * 1024;
     public const int MaximumFiles = 2048;

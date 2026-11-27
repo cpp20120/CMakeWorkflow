@@ -1,0 +1,71 @@
+<Project>
+    <PropertyGroup>
+        <CapnpExecutable Condition="'$(CapnpExecutable)' == ''">capnp</CapnpExecutable>
+        <CapnpEnableGeneration Condition="'$(CapnpEnableGeneration)' == ''">false</CapnpEnableGeneration>
+        <CapnpSourcePrefix Condition="'$(CapnpSourcePrefix)' == ''">$(MSBuildProjectDirectory)</CapnpSourcePrefix>
+    </PropertyGroup>
+
+    <Target Name="_PrepareCapnp" Condition="'$(CapnpEnableGeneration)' == 'true'">
+        <Error Condition="'@(CapnpSchema)' != '' And !Exists('$(CapnpGeneratorExecutable)')"
+               Text="Set CapnpGeneratorExecutable to the built capnpc-csharp apphost."/>
+        <PropertyGroup>
+            <CapnpGeneratedDirectory Condition="'$(CapnpGeneratedDirectory)' == ''">$(IntermediateOutputPath)capnp</CapnpGeneratedDirectory>
+            <_CapnpOutput>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(CapnpGeneratedDirectory)'))</_CapnpOutput>
+            <_CapnpOptions>$(_CapnpOutput)inputs.txt</_CapnpOptions>
+            <_CapnpStamp>$(_CapnpOutput)complete.txt</_CapnpStamp>
+        </PropertyGroup>
+        <MakeDir Directories="$(_CapnpOutput)"/>
+        <ItemGroup>
+            <_CapnpSearch Include="$(CapnpSourcePrefix);@(CapnpImportDirectory)"/>
+            <_CapnpTool Include="$(CapnpGeneratorExecutable)" Condition="Exists('$(CapnpGeneratorExecutable)')"/>
+            <_CapnpTool Include="$(CapnpExecutable)" Condition="Exists('$(CapnpExecutable)')"/>
+            <_CapnpGeneratorAssembly Include="$([System.IO.Path]::GetDirectoryName('$(CapnpGeneratorExecutable)'))/*.dll"
+                                     Condition="'$(CapnpGeneratorExecutable)' != ''"/>
+            <_CapnpConfiguration Include="$(CapnpExecutable);$(CapnpGeneratorExecutable);$(CapnpSourcePrefix);$(MSBuildThisFileFullPath)"/>
+        </ItemGroup>
+        <CreateItem Include="%(_CapnpSearch.FullPath)/**/*.capnp">
+            <Output TaskParameter="Include" ItemName="_CapnpDependency"/>
+        </CreateItem>
+        <ItemGroup>
+            <_CapnpDependency Include="@(CapnpSchemaDependency)"/>
+            <_CapnpConfiguration Include="@(CapnpSchema->'%(FullPath)');@(_CapnpSearch->'%(FullPath)');@(_CapnpDependency->'%(FullPath)')"/>
+        </ItemGroup>
+        <WriteLinesToFile File="$(_CapnpOptions)" Lines="@(_CapnpConfiguration)" Overwrite="true" WriteOnlyWhenDifferent="true"/>
+        <ReadLinesFromFile File="$(_CapnpStamp)" Condition="Exists('$(_CapnpStamp)')">
+            <Output TaskParameter="Lines" ItemName="_CapnpPriorOutput"/>
+        </ReadLinesFromFile>
+        <ItemGroup>
+            <_CapnpMissing Include="@(_CapnpPriorOutput)" Condition="!Exists('%(Identity)')"/>
+        </ItemGroup>
+        <Delete Files="$(_CapnpStamp)" Condition="'@(_CapnpMissing)' != ''"/>
+    </Target>
+
+    <Target Name="_GenerateCapnp" DependsOnTargets="_PrepareCapnp"
+            Condition="'$(CapnpEnableGeneration)' == 'true' And '$(DesignTimeBuild)' != 'true'"
+            Inputs="$(_CapnpOptions);$(MSBuildThisFileFullPath);@(CapnpSchema);@(_CapnpDependency);@(_CapnpTool);@(_CapnpGeneratorAssembly)"
+            Outputs="$(_CapnpStamp)">
+        <ItemGroup>
+            <_CapnpStale Include="$(_CapnpOutput)Capnp.Generated.*.g.cs"/>
+        </ItemGroup>
+        <Delete Files="@(_CapnpStale);$(_CapnpStamp)"/>
+        <Exec Condition="'@(CapnpSchema)' != ''"
+              Command="&quot;$(CapnpExecutable)&quot; compile -o- --src-prefix=&quot;$(CapnpSourcePrefix)&quot; @(CapnpImportDirectory->'-I&quot;%(FullPath)&quot;', ' ') @(CapnpSchema->'&quot;%(FullPath)&quot;', ' ') &gt; &quot;$(_CapnpOutput)request.bin&quot;"/>
+        <Exec Condition="'@(CapnpSchema)' != ''"
+              WorkingDirectory="$(_CapnpOutput)"
+              Command="&quot;$(CapnpGeneratorExecutable)&quot; &lt; &quot;request.bin&quot;"/>
+        <ItemGroup>
+            <_CapnpWritten Include="$(_CapnpOutput)Capnp.Generated.*.g.cs"/>
+        </ItemGroup>
+        <WriteLinesToFile File="$(_CapnpStamp)" Lines="@(_CapnpWritten)" Overwrite="true"/>
+        <Touch Files="$(_CapnpStamp)" AlwaysCreate="true"/>
+    </Target>
+
+    <Target Name="_IncludeCapnp" BeforeTargets="CoreCompile" DependsOnTargets="_PrepareCapnp;_GenerateCapnp"
+            Condition="'$(CapnpEnableGeneration)' == 'true'">
+        <ItemGroup>
+            <Compile Remove="$(_CapnpOutput)Capnp.Generated.*.g.cs"/>
+            <Compile Include="$(_CapnpOutput)Capnp.Generated.*.g.cs"/>
+            <FileWrites Include="$(_CapnpOutput)Capnp.Generated.*.g.cs;$(_CapnpStamp);$(_CapnpOptions);$(_CapnpOutput)request.bin"/>
+        </ItemGroup>
+    </Target>
+</Project>

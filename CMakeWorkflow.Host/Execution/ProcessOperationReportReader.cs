@@ -27,7 +27,7 @@ internal static class ProcessOperationReportReader
     internal static async Task<(ProcessOperationReport Report, string Directory, string Revision)>
         ReadVerifiedAsync(WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {
-        string path = paths.Database(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite"));
+        string path = paths.Database(WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory));
         if (!File.Exists(path))
         {
             throw new KeyNotFoundException("Unknown operation.");

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Workflows;
@@ -53,9 +54,12 @@ public sealed partial class DoctorSession
             throw new InvalidOperationException("Experiment staging requires a Linux Host.");
         }
 
+        bool binary = request.BinaryManifest.HasValue;
         if (!IsStageHash(request.ExperimentId) || !IsStageHash(request.SourceSnapshotId) ||
             !IsStageHash(request.ManifestSha256) ||
-            request.Manifest is not { Length: > 0 and <= ExperimentStageRequest.MaximumManifestCharacters } ||
+            (binary ? request.Manifest is not { Length: 0 } || request.Bundle is null ||
+                       request.BinaryManifest is not { Length: >= 16 and <= WorkflowManifestPreparation.MaximumBytes }
+                    : request.Manifest is not { Length: > 0 and <= ExperimentStageRequest.MaximumManifestCharacters }) ||
             (request.Bundle is null
                 ? request.Files is not { Count: > 0 and <= ExperimentStageRequest.MaximumFiles }
                 : request.Files is not { Count: 0 } || !IsStageHash(request.Bundle.Sha256) ||
@@ -65,10 +69,35 @@ public sealed partial class DoctorSession
             throw new ArgumentException("Invalid experiment staging identity or bundle size.");
         }
 
-        byte[] manifestBytes = Encoding.UTF8.GetBytes(request.Manifest);
+        byte[] manifestBytes = request.BinaryManifest?.ToArray() ?? Encoding.UTF8.GetBytes(request.Manifest);
         if (Convert.ToHexString(SHA256.HashData(manifestBytes)) != request.ManifestSha256)
         {
             throw new InvalidDataException("Experiment manifest SHA-256 mismatch.");
+        }
+        WorkflowDocument? workflow = null;
+        if (binary)
+        {
+            using DurableAcceptanceStore ledger = new(paths.WorkspaceDirectory, readOnly: true);
+            if (!ledger.UsesDocumentPlans)
+            {
+                throw new InvalidOperationException("native_experiment_requires_fresh_execution_workspace");
+            }
+            workflow = VerifyFrame(manifestBytes, request.ManifestSha256);
+            _ = WorkflowPlanner.ValidateGraph(workflow, []);
+            foreach (WorkflowContext context in workflow.Contexts.Values)
+            {
+                if (context.Toolchain is { EnvironmentProfileId: "linux-managed-clang" } tooling)
+                {
+                    string identity = tooling.EnvironmentLockSha256
+                        ?? throw new InvalidDataException("The native experiment has no approved managed environment lock.");
+                    ToolchainEnvironmentLock locked = await ManagedEnvironmentLocks.ReadBinaryAsync(identity, token);
+                    if (locked.Generator != tooling.Generator || locked.Host.Architecture != tooling.HostArchitecture ||
+                        locked.Target.Architecture != tooling.TargetArchitecture)
+                    {
+                        throw new InvalidDataException("The approved managed environment differs from the native experiment.");
+                    }
+                }
+            }
         }
 
         Dictionary<string, byte[]>? inline = request.Bundle is null ? DecodeFiles(request.Files) : null;
@@ -83,7 +112,8 @@ public sealed partial class DoctorSession
         string root = RequireStagePath(paths, Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "experiments"));
         _ = Directory.CreateDirectory(root);
         string stage = RequireStagePath(paths, Path.Combine(root, request.ExperimentId));
-        string manifest = RequireStagePath(paths, Path.Combine(stage, "workflow.json"));
+        string manifestName = binary ? "workflow.capnp" : "workflow.json";
+        string manifest = RequireStagePath(paths, Path.Combine(stage, manifestName));
         string source = RequireStagePath(paths, Path.Combine(stage, "source"));
         string binding = RequireStagePath(paths, Path.Combine(stage, "source.sha256"));
 
@@ -107,7 +137,7 @@ public sealed partial class DoctorSession
                 _ = Directory.CreateDirectory(staging);
                 await store.MaterializeAsync(captured, Path.Combine(staging, "source"), token);
                 await File.WriteAllTextAsync(Path.Combine(staging, "source.sha256"), captured, token);
-                await File.WriteAllBytesAsync(Path.Combine(staging, "workflow.json"), manifestBytes, token);
+                await File.WriteAllBytesAsync(Path.Combine(staging, manifestName), manifestBytes, token);
                 token.ThrowIfCancellationRequested();
                 try { Directory.Move(staging, stage); }
                 catch (IOException) when (Directory.Exists(stage)) { }
@@ -132,6 +162,10 @@ public sealed partial class DoctorSession
 
         SnapshotManifest snapshot = await store.VerifyAsync(request.SourceSnapshotId, token);
         await WorkflowSourceSnapshotExecution.VerifyExistingMaterializationAsync(snapshot, source, token);
+        if (workflow is not null)
+        {
+            _ = WorkflowSourceSnapshotExecution.ValidateSourceLayout(paths, manifest, workflow);
+        }
         return new ExperimentStageReceipt(manifest, request.ManifestSha256, request.SourceSnapshotId);
     }, ct);
 

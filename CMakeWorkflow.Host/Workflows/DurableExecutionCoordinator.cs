@@ -33,7 +33,31 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         }
 
         using DurableAcceptanceStore store = new(workspace);
-        AcceptedWorkflow accepted = store.Accept(request);
+        return ScheduleWorkflow(workspace, store, store.Accept(request), request);
+    }
+
+    internal async Task<OperationReference> StartBinaryAsync(string workspace, ExecutionStartRequest request, CancellationToken ct)
+    {
+        if (Volatile.Read(ref disposed) != 0 || shutdown.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("host_shutting_down");
+        }
+
+        using DurableAcceptanceStore store = new(workspace);
+        AcceptedWorkflow accepted = await store.AcceptBinaryAsync(request, ct);
+        BinaryWorkflowInput input = store.ReadBinaryInput(accepted.OperationId)
+            ?? throw new InvalidDataException("Missing admitted binary workflow input.");
+        WorkflowStartRequest execution = new(accepted.ClientRequestId, input.ManifestPath, input.Document.Blob.Value,
+            input.Jobs, input.ResultsDirectory)
+        {
+            HistoryPolicy = request.HistoryPolicy
+        };
+        return ScheduleWorkflow(workspace, store, accepted, execution);
+    }
+
+    private OperationReference ScheduleWorkflow(string workspace, DurableAcceptanceStore store, AcceptedWorkflow accepted,
+        WorkflowStartRequest request)
+    {
         OperationReference reference = new(accepted.WorkspaceId, accepted.OperationId,
             accepted.ClientRequestId, "workflow", accepted.State,
             accepted.ManifestSha256, accepted.ManifestBaseDirectory);

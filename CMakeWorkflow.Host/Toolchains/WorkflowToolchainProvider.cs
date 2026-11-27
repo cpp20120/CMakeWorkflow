@@ -210,6 +210,10 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             cc, cxx, gcc, triple, environment, ct) : null;
         ManagedVcpkgInstallation? packages = binding.VcpkgProjectSha256 is { } dependencyPlan
             ? await VcpkgProjects.ResolveAsync(dependencyPlan, snapshotId, snapshotRoot, ct) : null;
+        if (packages?.BinaryReceiptIdentity is not null && packages.EnvironmentSha256 != binding.EnvironmentLockSha256)
+        {
+            throw new InvalidDataException("The native vcpkg receipt binds another managed environment.");
+        }
         LinuxToolchainIdentity linux = new(await IdentifyAsync(cmake, ct), await IdentifyAsync(ctest, ct),
             await IdentifyAsync(ninja, ct), cc, await CommandExecution.Sha256Async(cc, ct),
             await CommandExecution.Sha256Async(cxx, ct), triple)
@@ -238,11 +242,12 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             paths.AddRange([packages.ManifestRoot, packages.InstalledDirectory, packages.VcpkgToolchain, packages.ChainloadToolchain]);
         }
 
-        string fingerprint = Fingerprint(linux, binding, paths, environment);
+        string fingerprint = Fingerprint(linux, binding, paths, environment, packages?.BinaryReceiptIdentity);
         return new(cmake.Command!, ninja.Command, cxx, sdk?.Command, binding.EnvironmentProfileId, binding.Generator, fingerprint,
             environment.ToFrozenDictionary(StringComparer.Ordinal))
         {
             Vcpkg = vcpkg,
+            VcpkgReceiptIdentity = packages?.BinaryReceiptIdentity,
             LinuxCompiler = compiler,
             Linux = linux,
             CCompiler = cc,
@@ -252,7 +257,7 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
     }
 
     private static string Fingerprint(LinuxToolchainIdentity linux, WorkflowToolchainBinding binding,
-        IEnumerable<string> executables, IReadOnlyDictionary<string, string> environment)
+        IEnumerable<string> executables, IReadOnlyDictionary<string, string> environment, string? binaryReceipt)
     {
         using MemoryStream identity = new();
         using (BinaryWriter writer = new(identity, Encoding.UTF8, leaveOpen: true))
@@ -269,6 +274,14 @@ public sealed class WorkflowToolchainProvider : IWorkflowToolchainProvider
             {
                 writer.Write(key);
                 writer.Write(value);
+            }
+
+            // Preserve every legacy key. Native vcpkg installations also bind the verified
+            // receipt used for this toolchain, even when its package tree is unchanged.
+            if (binaryReceipt is not null)
+            {
+                writer.Write("cmwf-native-vcpkg-receipt-v1");
+                writer.Write(binaryReceipt);
             }
         }
 

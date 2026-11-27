@@ -6,9 +6,11 @@ using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.CMake.Toolchains;
+using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Toolchains;
 using CMakeWorkflow.Profiling.Workflows;
+using CMakeWorkflow.Storage.Documents;
 
 namespace CMakeWorkflow.Host.Workflows;
 
@@ -57,13 +59,9 @@ public static class DurableWorkflowExecutor
             throw new InvalidDataException("source_snapshot_resume_binding_mismatch");
         }
         string manifest = paths.Require(saved.Workflow);
-        byte[] manifestBytes = store.GetSnapshot(operationId);
-        IReadOnlyList<string> selection = store.GetWorkflowSelection(operationId);
-        WorkflowPlan plan = sourceId is null
-            ? await WorkflowPlanner.LoadSnapshotAsync(manifest, manifestBytes,
-                selection, null, cancellationToken, paths.Read)
-            : await WorkflowSourceSnapshotExecution.PlanAsync(paths, operationId, manifest,
-                output, manifestBytes, sourceId, selection, cancellationToken, resume: true);
+        BinaryWorkflowInput? binary = store.ReadBinaryInput(operationId);
+        WorkflowPlan plan = await LoadPlanAsync(paths, store, accepted, binary, manifest, output, sourceId,
+            cancellationToken, resume: true);
         if (!string.Equals(plan.ManifestHash, accepted.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Resume snapshot mismatch.");
@@ -78,11 +76,17 @@ public static class DurableWorkflowExecutor
         }
 
         WorkflowToolchainAdmission.RequireSameIdentity(saved.Toolchains, toolchains);
-        CompilerCacheProfile.RequireSameIdentity(plan, saved,
-            await CompilerCacheProfile.ResolveAsync(plan, cancellationToken));
+        Dictionary<string, CompilerCacheProfile> cache = await CompilerCacheProfile.ResolveAsync(plan, cancellationToken);
+        CompilerCacheProfile.RequireSameIdentity(plan, saved, cache);
+        (StoredPlanAuthorization? planAuthorization, DocumentSession? storedPlan) = binary is null
+            ? (null, null)
+            : await store.VerifyExecutionPlanAsync(operationId,
+                BinaryDispatchBinding.Encode(accepted, binary, plan, toolchains, cache, sourceId, store.UsesDocumentPlans),
+                cancellationToken);
+        using DocumentSession? planLease = storedPlan;
         // Permanent claim occurs before any runner mutation or external dispatch.
         _ = store.ClaimResumeAttempt(operationId, output, Convert.ToHexString(SHA256.HashData(checkpoint)));
-        DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId);
+        DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId) { PlanAuthorization = planAuthorization };
         int code = await WorkflowRunner.RunAsync(plan, 1, output, cancellationToken,
             extension: new ProfileWorkflowExecutor(), resume: true,
             beforeExternalDispatch: gate.ConfirmAsync, toolchains: toolchains,
@@ -148,25 +152,20 @@ public static class DurableWorkflowExecutor
             throw new InvalidOperationException("operation_request_mismatch");
         }
 
-        byte[] snapshot = store.GetSnapshot(operationId);
+        BinaryWorkflowInput? binary = store.ReadBinaryInput(operationId);
+        if (binary is not null && binary.Jobs != jobs)
+        {
+            throw new InvalidDataException("Execution parallelism differs from binary admission.");
+        }
+
         string? sourceId = store.GetSourceSnapshotId(operationId);
-        WorkflowPlan plan = sourceId is null
-            ? await WorkflowPlanner.LoadSnapshotAsync(manifest, snapshot,
-                store.GetWorkflowSelection(operationId), null, cancellationToken, paths.Read)
-            : await WorkflowSourceSnapshotExecution.PlanAsync(paths, operationId, manifest,
-                output, snapshot, sourceId, store.GetWorkflowSelection(operationId), cancellationToken);
+        WorkflowPlan plan = await LoadPlanAsync(paths, store, existing, binary, manifest, output, sourceId, cancellationToken);
         if (!string.Equals(plan.ManifestHash, existing.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Immutable snapshot hash changed.");
         }
 
-        string[] errors = [.. plan.Nodes.SelectMany(n => n.Diagnostics
-            .Where(d => d.Severity == "Error")
-            .Select(d => $"{n.Definition.Id}: {d.Message}"))];
-        if (errors.Length != 0)
-        {
-            throw new InvalidOperationException("workflow_preflight_rejected: " + string.Join(" | ", errors));
-        }
+        DurableAcceptanceStore.RequireDispatchablePlan(plan);
 
         if (Directory.Exists(output) && File.Exists(Path.Combine(output, "run.json")))
         {
@@ -185,13 +184,17 @@ public static class DurableWorkflowExecutor
         store.ReserveResultsDirectory(operationId, output);
         // From here onward, a crash must NOT permit a second implicit invocation.
         // The runner's write-ahead checkpoint is the next durable boundary.
-        _ = store.AuthorizeDispatch(operationId);
+        byte[]? binding = binary is null ? null : BinaryDispatchBinding.Encode(existing, binary, plan, toolchains,
+            await CompilerCacheProfile.ResolveAsync(plan, cancellationToken), sourceId, store.UsesDocumentPlans);
+        StoredPlanAuthorization? planAuthorization = binding is null ? null
+            : await store.PublishExecutionPlanAsync(operationId, binding, cancellationToken);
+        _ = store.AuthorizeDispatch(operationId, binary, binding, planAuthorization);
         if (faultBarrier is not null)
         {
             await faultBarrier("authorized", cancellationToken);
         }
 
-        DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId);
+        DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId) { PlanAuthorization = planAuthorization };
         int exitCode = await WorkflowRunner.RunAsync(plan, jobs, output, cancellationToken,
             extension: new ProfileWorkflowExecutor(), toolchains: toolchains,
             sourceSnapshotId: sourceId,
@@ -211,4 +214,34 @@ public static class DurableWorkflowExecutor
 
         return exitCode;
     }
+
+    private static async Task<WorkflowPlan> LoadPlanAsync(WorkspaceReadPaths paths, DurableAcceptanceStore store,
+        AcceptedWorkflow accepted, BinaryWorkflowInput? binary, string manifest, string output, string? sourceId,
+        CancellationToken ct, bool resume = false)
+    {
+        IReadOnlyList<string> selection = store.GetWorkflowSelection(accepted.OperationId);
+        if (binary is null)
+        {
+            byte[] snapshot = store.GetSnapshot(accepted.OperationId);
+            return sourceId is null
+                ? await WorkflowPlanner.LoadSnapshotAsync(manifest, snapshot, selection, null, ct, paths.Read)
+                : await WorkflowSourceSnapshotExecution.PlanAsync(paths, accepted.OperationId, manifest, output,
+                    snapshot, sourceId, selection, ct, resume);
+        }
+
+        if (!WorkflowPlanner.PathComparer.Equals(manifest, binary.ManifestPath) ||
+            !WorkflowPlanner.PathComparer.Equals(output, binary.ResultsDirectory) ||
+            !string.Equals(accepted.ManifestSha256, binary.Document.Blob.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Binary execution context differs from its admitted input.");
+        }
+
+        using DocumentSession session = await BinaryWorkflowSubmission.OpenVerifiedAsync(store, binary.Document, ct);
+        WorkflowDocument document = session.Materialize();
+        return sourceId is null
+            ? await WorkflowPlanner.LoadDocumentAsync(manifest, document, accepted.ManifestSha256, selection, null, ct, paths.Read)
+            : await WorkflowSourceSnapshotExecution.PlanAsync(paths, accepted.OperationId, manifest, output,
+                document, accepted.ManifestSha256, sourceId, selection, ct, resume);
+    }
+
 }

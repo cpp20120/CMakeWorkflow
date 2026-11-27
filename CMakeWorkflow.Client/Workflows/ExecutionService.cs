@@ -29,6 +29,11 @@ public sealed class ExecutionService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(options);
         client.RequireCapability("execution/start");
+        if (options.Domain == "cmake-capnp-v1")
+        {
+            client.RequireCapability("execution/cmake-capnp-v1");
+        }
+
         if (string.IsNullOrWhiteSpace(options.ClientRequestId))
         {
             throw new ArgumentException("A durable ClientRequestId is required.");

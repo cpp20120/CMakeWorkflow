@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Client.Transport;
 using CMakeWorkflow.Client.Workflows;
+using BinaryWorkflowSubmission = CMakeWorkflow.Host.Workflows.BinaryWorkflowSubmission;
 using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
 namespace CMakeWorkflow.Commands;
@@ -34,6 +35,7 @@ internal static class RemoteCommand
         Commands:
           provision plan|apply  (SSH.NET user-scoped Host installation; see remote provision help)
           start     --request-id ID --manifest REMOTE_FILE --manifest-sha256 SHA256 --results-dir REMOTE_DIR [--jobs N] [--only NODE]... [--history-db REMOTE_FILE | --history-default | --no-history]
+          start-binary --request-id ID --frame LOCAL_FILE --results-dir REMOTE_DIR [--manifest-base REMOTE_DIR] [--source-snapshot ID] [--jobs N] [--only NODE]... [--history-db REMOTE_FILE | --history-default | --no-history]
           find      --request-id ID
           status    --operation ID
           inspect   --operation ID   (recovery revision/checkpoint)
@@ -50,7 +52,7 @@ internal static class RemoteCommand
         Default transport: OpenSSH, --destination USER@HOST [--ssh-executable PATH]
         SSH.NET transport: --transport sshnet --host HOST --user USER --key-file LOCAL_PRIVATE_KEY
           --host-key-sha256 SHA256:PIN [--port 22] (no ssh-agent or ~/.ssh/config)
-        All paths except --output, --store and --key-file refer to the REMOTE filesystem.
+        All paths except --output, --store, --key-file and --frame refer to the REMOTE filesystem.
         The Host must already be running.
         On a lost start response use 'find' with the SAME request ID; do not silently start again.
         No command reconnects or retries a failed RPC automatically.
@@ -72,9 +74,10 @@ internal static class RemoteCommand
         string action = args[0] is "script"
             ? throw new ArgumentException($"Unknown remote command 'script'.\n{Usage}")
             : args[0];
-        (string[] options, HistoryPolicy? historyPolicy) = action == "start"
+        bool isStart = action is "start" or "start-binary";
+        (string[] options, HistoryPolicy? historyPolicy) = isStart
             ? CliHistory.Parse(args[1..]) : (args[1..], null);
-        bool historyDefault = action == "start" && options.Contains("--history-default", StringComparer.Ordinal);
+        bool historyDefault = isStart && options.Contains("--history-default", StringComparer.Ordinal);
         if (historyDefault && historyPolicy is not null)
         {
             throw new ArgumentException("--history-default cannot be combined with --history-db or --no-history.");
@@ -109,6 +112,31 @@ internal static class RemoteCommand
                         HistoryPolicy = historyPolicy
                     }, ct);
                     Print(new RemoteStartReceipt(operation.OperationId, Require(values, "--request-id")),
+                        RemoteCliJson.Default.RemoteStartReceipt);
+                    return 0;
+                }
+            case "start-binary":
+                {
+                    string requestId = Require(values, "--request-id");
+                    await using FileStream frame = File.OpenRead(Require(values, "--frame"));
+                    if (frame.Length is < 16 or > CMakeWorkflow.Contracts.Workflows.WorkflowManifestPreparation.MaximumBytes)
+                    {
+                        throw new InvalidDataException("Expected a binary workflow frame of at most 1 MiB.");
+                    }
+                    byte[] bytes = new byte[(int)frame.Length];
+                    await frame.ReadExactlyAsync(bytes, ct);
+                    PreparedWorkflow prepared = await client.Workflows.PrepareBinaryManifestAsync(bytes,
+                        Require(values, "--results-dir"), values.GetValueOrDefault("--manifest-base", "."), ct);
+                    WorkflowOperation operation = await client.Executions.StartAsync(new(
+                        BinaryWorkflowSubmission.Domain, requestId, prepared.Manifest,
+                        prepared.ManifestSha256, (int)Number(values, "--jobs", 1, 1, 4096),
+                        prepared.ResultsDirectory)
+                    {
+                        Only = only.Count == 0 ? null : only,
+                        HistoryPolicy = historyPolicy,
+                        SourceSnapshotId = values.GetValueOrDefault("--source-snapshot")
+                    }, ct);
+                    Print(new RemoteStartReceipt(operation.OperationId, requestId),
                         RemoteCliJson.Default.RemoteStartReceipt);
                     return 0;
                 }
@@ -204,7 +232,7 @@ internal static class RemoteCommand
 
     internal static (Dictionary<string, string> Options, List<string> Only) Parse(string action, string[] args)
     {
-        if (action is not ("start" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "stash" or "cancel" or "history-status" or "history-retry" or "script"))
+        if (action is not ("start" or "start-binary" or "find" or "status" or "inspect" or "events" or "report" or "artifacts" or "download" or "stash" or "cancel" or "history-status" or "history-retry" or "script"))
         {
             throw new ArgumentException($"Unknown remote command '{action}'.\n{Usage}");
         }
@@ -219,7 +247,7 @@ internal static class RemoteCommand
                 throw new ArgumentException($"Remote CLI expects --option VALUE pairs.\n{Usage}");
             }
 
-            if (action is "start" or "script" && args[i] == "--only")
+            if (action is "start" or "start-binary" or "script" && args[i] == "--only")
             {
                 string node = args[i + 1];
                 if (only.Count >= 1000 || string.IsNullOrWhiteSpace(node) || node.Any(char.IsControl))
@@ -244,6 +272,7 @@ internal static class RemoteCommand
         string[] actionFlags = action switch
         {
             "start" => ["--request-id", "--manifest", "--manifest-sha256", "--results-dir", "--jobs"],
+            "start-binary" => ["--request-id", "--frame", "--manifest-base", "--results-dir", "--jobs", "--source-snapshot"],
             "script" => ["--request-id", "--manifest-base", "--results-dir", "--jobs", "--timeout-seconds"],
             "find" => ["--request-id"],
             "status" or "inspect" or "report" or "artifacts" or "history-status" or "history-retry" => ["--operation"],
@@ -322,6 +351,17 @@ internal static class RemoteCommand
                 }
 
                 _ = Number(values, "--jobs", 1, 1, 4096);
+                break;
+            case "start-binary":
+                _ = Require(values, "--request-id");
+                _ = Require(values, "--frame");
+                _ = Require(values, "--results-dir");
+                _ = Number(values, "--jobs", 1, 1, 4096);
+                if (values.TryGetValue("--source-snapshot", out string? snapshot) &&
+                    (snapshot.Length != 64 || !snapshot.All(Uri.IsHexDigit)))
+                {
+                    throw new ArgumentException("--source-snapshot must contain exactly 64 hexadecimal characters.");
+                }
                 break;
             case "find": _ = Require(values, "--request-id"); break;
             case "script": break;

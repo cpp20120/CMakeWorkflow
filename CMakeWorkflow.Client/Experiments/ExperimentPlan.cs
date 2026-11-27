@@ -63,17 +63,42 @@ internal sealed record ExperimentPlan(int SchemaVersion, string Repository, stri
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DependencyPlanSha256 { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReadOnlyMemory<byte>? BinaryManifest { get; init; }
+
+    internal string ManifestName => BinaryManifest.HasValue ? "workflow.capnp" : "workflow.json";
+
     internal static async Task<ExperimentPlan> ReadAsync(string path, string id, CancellationToken ct)
     {
         byte[] bytes = await File.ReadAllBytesAsync(path, ct);
-        if (Hash(bytes) != id)
+        bool binary = Approval(bytes, binary: true) == id;
+        if (!binary && Hash(bytes) != id)
         {
-            throw new InvalidDataException("Stored experiment plan does not match its approved SHA-256.");
+            throw new InvalidDataException("Stored experiment plan does not match its approved identity.");
         }
+
         ExperimentPlan? plan = JsonSerializer.Deserialize(bytes, ExperimentPlanJson.Default.ExperimentPlan);
-        return plan is { SchemaVersion: 1, Bundle: null } or { SchemaVersion: 2, Bundle: not null }
-            ? plan : throw new InvalidDataException("Unsupported experiment plan.");
+        bool supported = plan is { SchemaVersion: 1, Bundle: null, BinaryManifest: null }
+            or { SchemaVersion: 2, Bundle: not null, BinaryManifest: null }
+            or { SchemaVersion: 3, Bundle: not null, BinaryManifest.Length: > 0, Manifest.Length: 0, Files.Count: 0 };
+        return binary == (plan?.SchemaVersion == 3) && supported
+            ? plan! : throw new InvalidDataException("Unsupported experiment plan.");
     }
 
     internal static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes));
+
+    internal static string Approval(ReadOnlySpan<byte> bytes, bool binary) => binary
+        ? NativeIdentity("cmwf-experiment-approval-v1\n"u8, bytes).ToUpperInvariant()
+        : Hash(bytes);
+
+    internal static string NativeDependencyIdentity(ReadOnlySpan<byte> bytes) =>
+        NativeIdentity("cmwf-vcpkg-dependency-plan-v1\n"u8, bytes);
+
+    private static string NativeIdentity(ReadOnlySpan<byte> domain, ReadOnlySpan<byte> bytes)
+    {
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(domain);
+        hash.AppendData(bytes);
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
+    }
 }

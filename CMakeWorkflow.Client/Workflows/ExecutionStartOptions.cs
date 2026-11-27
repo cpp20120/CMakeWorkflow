@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using CMakeWorkflow.Contracts.History;
+
 namespace CMakeWorkflow.Client.Workflows;
 
 // Paths and hashes are for the Host filesystem, not the local Client machine.
@@ -13,4 +16,15 @@ namespace CMakeWorkflow.Client.Workflows;
 /// <param name="Jobs">Maximum concurrently admitted workflow nodes; at least 1.</param>
 /// <param name="ResultsDirectory">Absolute Host results directory in the workspace; durable ownership is retained across interruption.</param>
 public sealed record ExecutionStartOptions(string Domain, string ClientRequestId,
-    string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory);
+    string Manifest, string ManifestSha256, int Jobs, string ResultsDirectory)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Only { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HistoryPolicy? HistoryPolicy { get; init; }
+
+    /// <summary>Optional verified Lore source snapshot identity on the execution host.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceSnapshotId { get; init; }
+}

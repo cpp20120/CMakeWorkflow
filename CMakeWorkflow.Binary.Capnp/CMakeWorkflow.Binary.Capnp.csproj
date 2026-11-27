@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="CMakeWorkflow.Storage.Documents"/>
+        <ProjectReference Include="../Capnp.Managed/Capnp.Managed.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.Contracts/CMakeWorkflow.Contracts.csproj"/>
+    </ItemGroup>
+</Project>

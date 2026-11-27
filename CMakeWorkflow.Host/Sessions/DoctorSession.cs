@@ -75,7 +75,8 @@ public sealed partial class DoctorSession(
         ];
         if (OperatingSystem.IsLinux())
         {
-            capabilities = [.. capabilities, "experiment/stage", "experiment/sourceChunk", "experiment/resources", "experiment/dependencies"];
+            capabilities = [.. capabilities, "experiment/stage", "experiment/sourceChunk", "experiment/resources",
+                "experiment/dependencies", "experiment/binary-v1"];
         }
 
         if (OperatingSystem.IsWindows())

@@ -2,6 +2,7 @@ using CMakeWorkflow.Client.Protocol;
 using CMakeWorkflow.Client.Experiments;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Sources;
+using CMakeWorkflow.Binary.Capnp;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,13 +19,13 @@ namespace CMakeWorkflow.Host.Tests.Transport;
 /// Each test uses the production SDK, a second independently authenticated SSH
 /// connection for observation, and the installed remote CMakeWorkflow binary.
 /// </summary>
-internal static class SshNetLiveLifecycleTests
+internal static partial class SshNetLiveLifecycleTests
 {
     internal static async Task RunAsync(string? scenario)
     {
-        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage" or "experiment-sdk"))
+        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage" or "experiment-sdk" or "binary-recovery" or "binary-experiment"))
         {
-            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent|experiment-stage|experiment-sdk].");
+            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent|experiment-stage|experiment-sdk|binary-recovery|binary-experiment].");
         }
 
         static string Required(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
@@ -39,7 +40,7 @@ internal static class SshNetLiveLifecycleTests
             ConnectionTimeout = TimeSpan.FromSeconds(12)
         };
 
-        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(2));
+        using CancellationTokenSource timeout = new(scenario == "binary-experiment" ? TimeSpan.FromMinutes(12) : TimeSpan.FromMinutes(2));
         // The probe is independent from the channel controlled by LaunchSshNetAsync.
         // It also verifies the *same* pinned host identity, instead of bypassing SSH security.
         using Probe probe = new(options);
@@ -69,8 +70,138 @@ internal static class SshNetLiveLifecycleTests
         {
             await ExperimentSdkAsync(options, Required("CMWF_SSHNET_PLAN"), Required("CMWF_SSHNET_PLAN_ID"), timeout.Token);
         }
+        if (scenario == "binary-recovery")
+        {
+            await BinaryRecoveryAsync(probe, options, Required("CMWF_SSHNET_FAULT_EXE"), timeout.Token);
+        }
+
+        if (scenario == "binary-experiment")
+        {
+            await BinaryExperimentAsync(probe, options, Required("CMWF_SSHNET_CONTROLLER_EXE"),
+                Required("CMWF_SSHNET_FAULT_EXE"), Required("CMWF_SSHNET_TOOL_STORE"), timeout.Token);
+        }
 
         Console.WriteLine("PASS SSH.NET live lifecycle: " + (scenario ?? "handshake, workflow"));
+    }
+
+    private static async Task BinaryRecoveryAsync(Probe probe, SshNetLaunchOptions options,
+        string faultExecutable, CancellationToken ct)
+    {
+        string workspace = options.Workspace + "/bin-" + Guid.NewGuid().ToString("N")[..8];
+        string endpoint = workspace + "/host.sock";
+        string marker = workspace + "/fault";
+        string source = workspace + "/src";
+        string build = workspace + "/build";
+        string effects = source + "/effects";
+        string remote = Quote(options.RemoteExecutable);
+        _ = probe.Run("mkdir -m 700 -- " + Quote(workspace) + " && mkdir -- " + Quote(source));
+        int pid = 0;
+        try
+        {
+            probe.UploadText(source + "/CMakeLists.txt", """
+                cmake_minimum_required(VERSION 3.26)
+                project(native_ssh NONE)
+                add_custom_target(a COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/a.cmake")
+                add_custom_target(b COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/b.cmake")
+                """);
+            probe.UploadText(source + "/a.cmake", "file(APPEND \"${CMAKE_CURRENT_LIST_DIR}/effects\" \"a\\n\")\n");
+            probe.UploadText(source + "/b.cmake", """
+                file(APPEND "${CMAKE_CURRENT_LIST_DIR}/effects" "b\n")
+                file(WRITE "${CMAKE_CURRENT_LIST_DIR}/../results/effect.txt" "recovered")
+                """);
+            string query = build + "/.cmake/api/v1/query";
+            _ = probe.Run("mkdir -p -- " + Quote(query) + " && touch -- " + Quote(query + "/codemodel-v2") +
+                " && cmake -S " + Quote(source) + " -B " + Quote(build) + " -G Ninja -DCMAKE_BUILD_TYPE=Debug" +
+                " && " + remote + " workflow init-binary " + Quote(workspace));
+
+            WorkflowDocument workflow = new()
+            {
+                SchemaVersion = 2,
+                Contexts = { ["tree"] = new() { BuildDirectory = "build", Mode = "adopt" } },
+                Nodes =
+                [
+                    new() { Id = "a", Kind = "invoke", Context = "tree", Target = "a" },
+                    new()
+                    {
+                        Id = "b", Kind = "invoke", Context = "tree", Target = "b", DependsOn = ["a"],
+                        Outputs = [new() { Name = "effect", Root = "run", Path = "effect.txt" }]
+                    }
+                ]
+            };
+            byte[] frame = CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(workflow)));
+            SshNetHostOptions persistent = new(options.Host, options.Username, options.PrivateKeyPath,
+                options.HostKeySha256, endpoint, workspace)
+            {
+                RemoteExecutable = options.RemoteExecutable,
+                Port = options.Port
+            };
+            pid = StartPersistentHost(probe, workspace, endpoint, faultExecutable,
+                "CMAKEWORKFLOW_TEST_FAULT=after-checkpoint CMAKEWORKFLOW_TEST_NODE=b CMAKEWORKFLOW_TEST_MARKER=" + Quote(marker));
+            string operationId;
+            PreparedWorkflow staged;
+            await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(persistent, ct))
+            {
+                staged = await client.Workflows.PrepareBinaryManifestAsync(frame, "results", ct: ct);
+                WorkflowOperation operation = await client.Executions.StartAsync(new("cmake-capnp-v1",
+                    "binary-ssh-recovery", staged.Manifest, staged.ManifestSha256, 1, staged.ResultsDirectory), ct);
+                operationId = operation.OperationId;
+            }
+
+            Check(probe.Alive(pid), "Closing the binary submission channel stopped the Host.");
+            await using (CMakeWorkflowClient client = await CMakeWorkflowClient.ConnectSshNetAsync(persistent, ct))
+            {
+                Check(await client.Workflows.PrepareBinaryManifestAsync(frame, "results", ct: ct) == staged,
+                    "Verified binary stage changed after reconnect.");
+                Check((await client.Operations.FindAsync("binary-ssh-recovery", ct)).OperationId == operationId,
+                    "Reconnection did not find the accepted operation.");
+            }
+
+            _ = probe.Run("i=0; until test -f " + Quote(marker) +
+                "; do i=$((i+1)); test \"$i\" -lt 100 || exit 1; sleep .1; done");
+            Check(probe.Read(effects) == "a\n", "Fault occurred outside the B pre-launch boundary.");
+            _ = probe.Run("kill -KILL " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            await probe.WaitForExitAsync(pid, ct);
+            pid = 0;
+            _ = probe.Run("rm -- " + Quote(staged.Manifest) + " " + Quote(endpoint));
+            pid = StartPersistentHost(probe, workspace, endpoint, options.RemoteExecutable, "");
+
+            await using CMakeWorkflowClient recovered = await CMakeWorkflowClient.ConnectSshNetAsync(persistent, ct);
+            Check(recovered.Host.ProcessId == pid, "Reconnection did not reach the restarted Host.");
+            Check((await recovered.Operations.FindAsync("binary-ssh-recovery", ct)).OperationId == operationId,
+                "The restarted Host lost durable acceptance.");
+            WorkflowOperation handle = recovered.Operations.GetHandle(operationId);
+            RecoverySnapshot checkpoint = await handle.InspectRecoveryAsync(ct);
+            RecoverySnapshot reconciled = await handle.ReconcileBinaryRetryAsync(checkpoint.Revision, "b",
+                checkpoint.CheckpointSha256 ?? throw new InvalidDataException("Missing checkpoint."),
+                "Verified B stopped at the injected pre-launch boundary.", confirmedQuiescent: true, ct);
+            RecoverySnapshot admitted = await handle.AdmitResumeAsync(reconciled.Revision, confirmedQuiescent: true, ct);
+            _ = await handle.ExecuteResumeAsync(admitted.Revision, ct);
+            Check((await handle.WaitForCompletionAsync(ct: ct)).State == "succeeded",
+                "The restarted Host did not complete the binary workflow.");
+            Check(probe.Read(effects) == "a\nb\n" &&
+                (await handle.ListArtifactsAsync(ct)).Artifacts.Any(artifact => artifact.RelativePath == "effect.txt"),
+                "Recovery repeated an effect or lost an output artifact.");
+        }
+        finally
+        {
+            if (probe.Alive(pid))
+            {
+                _ = probe.Run("kill -TERM " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                await probe.WaitForExitAsync(pid, ct);
+            }
+            _ = probe.Run("rm -rf -- " + Quote(workspace));
+        }
+
+    }
+
+    private static int StartPersistentHost(Probe probe, string workspace, string endpoint, string executable,
+        string environment)
+    {
+        string result = probe.Run("nohup env " + environment + " " + Quote(executable) + " host serve --endpoint " +
+            Quote(endpoint) + " >" + Quote(workspace + "/host.log") + " 2>&1 </dev/null & pid=$!; " +
+            "i=0; until test -S " + Quote(endpoint) + "; do i=$((i+1)); test \"$i\" -lt 100 || " +
+            "{ cat " + Quote(workspace + "/host.log") + " >&2; exit 1; }; sleep .1; done; echo \"$pid\"");
+        return int.Parse(result, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static async Task PersistentAsync(Probe probe, SshNetLaunchOptions options, CancellationToken ct)
@@ -403,10 +534,10 @@ internal static class SshNetLiveLifecycleTests
             }
         }
 
-        internal string Run(string shell)
+        internal string Run(string shell, TimeSpan? timeout = null)
         {
             using SshCommand command = client.CreateCommand(shell);
-            command.CommandTimeout = TimeSpan.FromSeconds(15);
+            command.CommandTimeout = timeout ?? TimeSpan.FromSeconds(15);
             string output = command.Execute();
             return command.ExitStatus != 0
                 ? throw new IOException("Remote test command failed (exit " + command.ExitStatus + "): " +
@@ -415,6 +546,8 @@ internal static class SshNetLiveLifecycleTests
         }
 
         internal string Read(string path) => Run("cat -- " + Quote(path));
+
+        internal bool Exists(string path) => Run("test ! -f " + Quote(path) + " || printf present") == "present";
 
         internal void UploadText(string path, string text) => Upload(path, Encoding.UTF8.GetBytes(text));
 

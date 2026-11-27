@@ -14,12 +14,15 @@ public sealed record ManagedVcpkgInstallation(string ManifestRoot, string Instal
     string ChainloadToolchain, string Triplet, string PackageTreeSha256)
 {
     public string? DownloadTreeSha256 { get; init; }
+    internal string? EnvironmentSha256 { get; init; }
+    internal string? BinaryReceiptIdentity { get; init; }
 }
 
 public static class VcpkgProjects
 {
     internal const string Triplet = VcpkgProjectPlanning.Triplet;
     private const string ReceiptName = "receipt.json";
+    private const string NativeReceiptName = "receipt.capnp";
 
     internal static byte[] Serialize(VcpkgProjectPlan plan) => VcpkgProjectPlanning.Serialize(plan);
     internal static Task<VcpkgProjectPlan> PlanAsync(string project, CancellationToken ct) =>
@@ -30,7 +33,14 @@ public static class VcpkgProjects
     internal static Task InstallAsync(VcpkgProjectPlan plan, string digest, CancellationToken ct) =>
         InstallAsync(plan, digest, plan.Directory, ct);
 
-    internal static async Task InstallAsync(VcpkgProjectPlan plan, string digest, string sourceRoot, CancellationToken ct)
+    internal static Task InstallAsync(VcpkgProjectPlan plan, string digest, string sourceRoot, CancellationToken ct) =>
+        InstallAsync(plan, digest, sourceRoot, binary: false, ct);
+
+    internal static Task InstallBinaryAsync(VcpkgProjectPlan plan, string digest, string sourceRoot, CancellationToken ct) =>
+        InstallAsync(plan, digest, sourceRoot, binary: true, ct);
+
+    private static async Task InstallAsync(VcpkgProjectPlan plan, string digest, string sourceRoot, bool binary,
+        CancellationToken ct)
     {
         ManagedEnvironmentLocks.RequireDigest(digest);
         string store = ManagedToolStore.GetRoot();
@@ -39,26 +49,35 @@ public static class VcpkgProjects
         string lockPath = Path.Combine(paths, "vcpkg-" + digest + ".lock");
         ManagedToolStore.RejectLink(new FileInfo(lockPath));
         await using FileStream lease = await ManagedToolStore.LockAsync(lockPath, ct);
-        if (plan != await VcpkgProjectPlanning.ReadProjectAsync(sourceRoot, plan.Commit, plan.SourceSnapshotId, ct) || ManagedEnvironmentLocks.Hash(Serialize(plan)) != digest)
+        if (plan != await RecheckPlanAsync(plan, sourceRoot, binary, ct) || PlanIdentity(plan, binary) != digest)
         {
             throw new InvalidDataException("The vcpkg project plan changed after approval.");
         }
 
         string candidate = InstallationPath(store, digest);
         ManagedToolStore.CheckDirectoryPath(candidate);
-        if (File.Exists(Path.Combine(candidate, ReceiptName)))
+        string receiptName = binary ? NativeReceiptName : ReceiptName;
+        if (File.Exists(Path.Combine(candidate, receiptName)))
         {
             _ = await ResolveAsync(digest, plan.SourceSnapshotId, sourceRoot, ct);
             return;
         }
 
-        ToolingPlan tools = await new ToolingService(new SystemToolingRuntime(), new VerifiedCMakeInstaller())
-            .PlanAsync(["linux-clang", "vcpkg"], PackageManagerKind.None, false, null, ct,
-                resolutionPolicy: ToolResolutionPolicy.ManagedOnly);
-        if (plan.SchemaVersion == 2)
+        ToolingService tooling = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller());
+        if (binary)
+        {
+            ToolchainEnvironmentLock locked = await ManagedEnvironmentLocks.ReadBinaryAsync(plan.EnvironmentSha256, ct);
+            tooling = new(new SystemToolingRuntime(), new VerifiedCMakeInstaller())
+            {
+                FindManagedRelease = tool => ToolchainEnvironment.ReleaseForTool(locked, tool) ?? ToolCatalog.ManagedRelease(tool)
+            };
+        }
+        else if (plan.SchemaVersion == 2)
         {
             await ManagedEnvironmentLocks.VerifyAsync(plan.EnvironmentSha256, ct);
         }
+        ToolingPlan tools = await tooling.PlanAsync(["linux-clang", "vcpkg"], PackageManagerKind.None, false, null, ct,
+            resolutionPolicy: ToolResolutionPolicy.ManagedOnly);
         if (!tools.Ready)
         {
             throw new InvalidOperationException("Install the linux-clang and vcpkg profiles with explicit tooling setup approval first.");
@@ -111,7 +130,7 @@ public static class VcpkgProjects
                     : "vcpkg manifest installation failed:\n" + result.Output + "\n" + result.Error);
             }
 
-            if (plan != await VcpkgProjectPlanning.ReadProjectAsync(sourceRoot, plan.Commit, plan.SourceSnapshotId, ct))
+            if (plan != await RecheckPlanAsync(plan, sourceRoot, binary, ct))
             {
                 throw new InvalidDataException("The vcpkg manifest changed while dependencies were being installed.");
             }
@@ -125,15 +144,23 @@ public static class VcpkgProjects
                     ? await ManagedToolStore.TreeHashAsync(downloads, allowLinks: false, excludeGit: false, ct)
                     : null
             };
-            byte[] receipt = JsonSerializer.SerializeToUtf8Bytes(evidence, ManagedEnvironmentJson.Default.VcpkgProjectReceipt);
-            if (plan.SchemaVersion == 2)
+            byte[] receipt = binary ? BinaryVcpkgDocuments.EncodeReceipt(evidence)
+                : JsonSerializer.SerializeToUtf8Bytes(evidence, ManagedEnvironmentJson.Default.VcpkgProjectReceipt);
+            if (binary || plan.SchemaVersion == 2)
             {
-                receipt = await PinReceiptAsync(store, digest, evidence, receipt, ct);
+                receipt = await PinReceiptAsync(store, digest, evidence, receipt, binary, ct);
             }
-            string temporary = Path.Combine(candidate, "receipt.partial");
-            await File.WriteAllBytesAsync(temporary, receipt, ct);
-            ct.ThrowIfCancellationRequested();
-            File.Move(temporary, Path.Combine(candidate, ReceiptName));
+            if (binary)
+            {
+                await ManagedToolchainWire.PublishAsync(Path.Combine(candidate, receiptName), receipt, ct);
+            }
+            else
+            {
+                string temporary = Path.Combine(candidate, "receipt.partial");
+                await File.WriteAllBytesAsync(temporary, receipt, ct);
+                ct.ThrowIfCancellationRequested();
+                File.Move(temporary, Path.Combine(candidate, receiptName));
+            }
         }
         catch
         {
@@ -142,31 +169,48 @@ public static class VcpkgProjects
         }
     }
 
+    private static string PlanIdentity(VcpkgProjectPlan plan, bool binary) => binary
+        ? BinaryVcpkgPlan.Identity(BinaryVcpkgPlan.Encode(plan))
+        : ManagedEnvironmentLocks.Hash(Serialize(plan));
+
+    private static async Task<VcpkgProjectPlan> RecheckPlanAsync(VcpkgProjectPlan plan, string sourceRoot, bool binary,
+        CancellationToken ct)
+    {
+        VcpkgProjectPlan current = await VcpkgProjectPlanning.ReadProjectAsync(sourceRoot, plan.Commit, plan.SourceSnapshotId, ct);
+        return binary ? current with { EnvironmentSha256 = plan.EnvironmentSha256 } : current;
+    }
+
     // Kept outside the install directory so retrying an incomplete or removed install
     // cannot silently publish a different package tree under an accepted workflow digest.
     private static async Task<byte[]> PinReceiptAsync(string store, string digest, VcpkgProjectReceipt evidence,
-        byte[] receipt, CancellationToken ct)
+        byte[] receipt, bool binary, CancellationToken ct)
     {
-        string path = ReceiptPinPath(store, digest);
+        string path = ReceiptPinPath(store, digest, binary);
         if (!File.Exists(path))
         {
-            string partial = path + ".partial";
-            ManagedToolStore.RejectLink(new FileInfo(partial));
-            await File.WriteAllBytesAsync(partial, receipt, ct);
-            File.Move(partial, path);
+            if (binary)
+            {
+                await ManagedToolchainWire.PublishAsync(path, receipt, ct);
+            }
+            else
+            {
+                string partial = path + ".partial";
+                ManagedToolStore.RejectLink(new FileInfo(partial));
+                await File.WriteAllBytesAsync(partial, receipt, ct);
+                File.Move(partial, path);
+            }
         }
         byte[] pinned = await VcpkgProjectPlanning.ReadManifestAsync(path, ct);
-        VcpkgProjectReceipt original = JsonSerializer.Deserialize(pinned, ManagedEnvironmentJson.Default.VcpkgProjectReceipt)
-            ?? throw new InvalidDataException("Invalid pinned vcpkg receipt.");
+        VcpkgProjectReceipt original = DecodeReceipt(pinned, binary);
         return original with { DownloadTreeSha256 = null } == evidence with { DownloadTreeSha256 = null }
             ? pinned : throw new InvalidDataException("Reinstall changed the approved vcpkg package or toolchain tree. Restore the approved installation.");
     }
 
-    private static string ReceiptPinPath(string store, string digest)
+    private static string ReceiptPinPath(string store, string digest, bool binary)
     {
         string directory = Path.Combine(store, "locks");
         ManagedToolStore.CheckDirectoryPath(directory);
-        return Path.Combine(directory, "vcpkg-" + digest + ".receipt.json");
+        return Path.Combine(directory, "vcpkg-" + digest + (binary ? ".receipt.capnp" : ".receipt.json"));
     }
 
     private static async Task VerifyReceiptPinAsync(string path, byte[] receipt, CancellationToken ct)
@@ -180,8 +224,8 @@ public static class VcpkgProjects
     internal static async Task<string> VerifySnapshotInstallationAsync(string digest, string snapshotId,
         string sourceRoot, CancellationToken ct)
     {
-        _ = await ResolveAsync(digest, snapshotId, sourceRoot, ct);
-        return ManagedEnvironmentLocks.Hash(ManagedEnvironmentLocks.Serialize());
+        ManagedVcpkgInstallation installation = await ResolveAsync(digest, snapshotId, sourceRoot, ct);
+        return installation.EnvironmentSha256 ?? throw new InvalidDataException("The vcpkg installation has no environment binding.");
     }
 
     public static Task<ManagedVcpkgInstallation> ResolveAsync(string digest, CancellationToken ct) =>
@@ -194,7 +238,10 @@ public static class VcpkgProjects
         string store = ManagedToolStore.GetRoot();
         string path = InstallationPath(store, digest);
         ManagedToolStore.CheckDirectoryPath(path);
-        string receiptPath = Path.Combine(path, ReceiptName);
+        string native = Path.Combine(path, NativeReceiptName);
+        ManagedToolStore.RejectLink(new FileInfo(native));
+        bool binary = File.Exists(native);
+        string receiptPath = binary ? native : Path.Combine(path, ReceiptName);
         if (!File.Exists(receiptPath))
         {
             throw new InvalidDataException($"vcpkg project installation {digest} is missing. " +
@@ -203,25 +250,31 @@ public static class VcpkgProjects
         }
 
         byte[] bytes = await VcpkgProjectPlanning.ReadManifestAsync(receiptPath, ct);
-        VcpkgProjectReceipt receipt = JsonSerializer.Deserialize(bytes, ManagedEnvironmentJson.Default.VcpkgProjectReceipt)
-            ?? throw new InvalidDataException("Invalid vcpkg project receipt.");
+        VcpkgProjectReceipt receipt = DecodeReceipt(bytes, binary);
         VcpkgProjectPlan plan = receipt.Plan;
         string root = sourceRoot ?? plan.Directory;
-        if (ManagedEnvironmentLocks.Hash(Serialize(plan)) != digest ||
+        if (PlanIdentity(plan, binary) != digest ||
             plan.SourceSnapshotId != snapshotId ||
             (snapshotId is not null && sourceRoot is null) ||
-            plan != await VcpkgProjectPlanning.ReadProjectAsync(root, plan.Commit, snapshotId, ct))
+            plan != await RecheckPlanAsync(plan, root, binary, ct))
         {
             throw new InvalidDataException("The vcpkg project manifest, registry, or toolchain identity changed. Review a new dependency plan.");
         }
 
-        if (snapshotId is not null)
+        if (binary || snapshotId is not null)
         {
-            await VerifyReceiptPinAsync(ReceiptPinPath(store, digest), bytes, ct);
-            await ManagedEnvironmentLocks.VerifyAsync(plan.EnvironmentSha256, ct);
+            await VerifyReceiptPinAsync(ReceiptPinPath(store, digest, binary), bytes, ct);
+            if (binary)
+            {
+                _ = await ManagedEnvironmentLocks.ReadBinaryAsync(plan.EnvironmentSha256, ct);
+            }
+            else
+            {
+                await ManagedEnvironmentLocks.VerifyAsync(plan.EnvironmentSha256, ct);
+            }
         }
         if (!await ManagedToolStore.IsInstalledAsync(store, ToolCatalog.VcpkgRegistry, ct) ||
-            (snapshotId is not null && !await ManagedToolStore.IsInstalledAsync(store, ToolCatalog.VcpkgRelease, ct)))
+            ((binary || snapshotId is not null) && !await ManagedToolStore.IsInstalledAsync(store, ToolCatalog.VcpkgRelease, ct)))
         {
             throw new InvalidDataException("The approved vcpkg registry checkout is missing.");
         }
@@ -235,10 +288,18 @@ public static class VcpkgProjects
                 Path.Combine(ManagedToolStore.Location(store, ToolCatalog.VcpkgRegistry), "scripts", "buildsystems", "vcpkg.cmake"),
                 chainload, Triplet, tree)
             {
-                DownloadTreeSha256 = receipt.DownloadTreeSha256
+                DownloadTreeSha256 = receipt.DownloadTreeSha256,
+                EnvironmentSha256 = plan.EnvironmentSha256,
+                BinaryReceiptIdentity = binary
+                    ? ManagedToolchainWire.Identity("cmwf-vcpkg-provisioning-receipt-v1\n"u8, bytes) : null
             }
             : throw new InvalidDataException("The installed vcpkg project files failed SHA-256 verification.");
     }
+
+    private static VcpkgProjectReceipt DecodeReceipt(byte[] bytes, bool binary) =>
+        binary ? BinaryVcpkgDocuments.DecodeReceipt(bytes)
+            : JsonSerializer.Deserialize(bytes, ManagedEnvironmentJson.Default.VcpkgProjectReceipt)
+                ?? throw new InvalidDataException("Invalid vcpkg project receipt.");
 
     private static async Task<string> StageManifestAsync(VcpkgProjectPlan plan, string sourceRoot, string candidate, CancellationToken ct)
     {

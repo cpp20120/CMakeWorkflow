@@ -116,6 +116,19 @@ public sealed class WorkflowOperation(CMakeWorkflowClient client, string operati
         bool confirmedQuiescent, CancellationToken ct = default) =>
         client.Proxy.ReconcileAsync(new(OperationId, revision, decision, note, confirmedQuiescent), ct);
 
+    /// <summary>Records an operator-confirmed retry decision for one interrupted native binary node.</summary>
+    /// <remarks>Pass the exact bound checkpoint hash. This does not admit resume or dispatch the node.</remarks>
+    public Task<RecoverySnapshot> ReconcileBinaryRetryAsync(long revision, string nodeId, string checkpointSha256, string note,
+        bool confirmedQuiescent, CancellationToken ct = default)
+    {
+        client.RequireCapability("execution/cmake-capnp-v1");
+        return client.Proxy.ReconcileAsync(new(OperationId, revision, "needs_attention", note, confirmedQuiescent)
+        {
+            RetryBinaryNode = nodeId,
+            ExpectedCheckpointSha256 = checkpointSha256
+        }, ct);
+    }
+
     /// <summary>Admits recovery of an inactive reconciled operation without launching workers.</summary>
     /// <remarks>
     /// Requires needs_attention, no terminal result and no cancellation intent. Admission advances recovery revision 1 to 2.

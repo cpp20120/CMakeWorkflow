@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using CMakeWorkflow.Binary.Capnp;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Experiments;
 using CMakeWorkflow.Client.Workflows;
@@ -19,7 +20,7 @@ internal static class ExperimentCommand
         CMakeWorkflow experiment plan --repo URL --ref REF
             (--host HOST --workspace PATH --endpoint SOCKET | --host-pool FILE [--arch ARCH] [--min-cpus N])
             (--preset NAME [--config NAME] | --managed-clang --config NAME) [--build-target TARGET]... [--ctest]
-            [--vcpkg] [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
+            [--vcpkg] [--binary [--environment-lock ID]] [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
             [--remote-executable PATH] [--user USER --key-file PATH --host-key-sha256 HASH [--port PORT]]
         CMakeWorkflow experiment deps plan ID
         CMakeWorkflow experiment deps apply ID --approve --plan-sha SHA256
@@ -58,6 +59,7 @@ internal static class ExperimentCommand
         bool profile = false;
         bool managed = false;
         bool vcpkg = false;
+        bool binary = false;
         for (int i = 0; i < args.Length; i++)
         {
             string option = args[i];
@@ -65,13 +67,15 @@ internal static class ExperimentCommand
             {
                 case "--profile": profile = true; break;
                 case "--vcpkg": vcpkg = true; break;
+                case "--binary": binary = true; break;
                 case "--managed-clang": managed = true; break;
                 case "--ctest": break; // Always included in this recipe.
                 case "--build-target": targets.Add(Next(args, ref i)); break;
                 case "--benchmark-arg": arguments.Add(Next(args, ref i)); break;
                 case "--repo" or "--ref" or "--host" or "--workspace" or "--endpoint" or "--preset"
                     or "--config" or "--benchmark-target" or "--repeats" or "--remote-executable" or "--user"
-                    or "--key-file" or "--host-key-sha256" or "--port" or "--host-pool" or "--arch" or "--min-cpus":
+                    or "--key-file" or "--host-key-sha256" or "--port" or "--host-pool" or "--arch" or "--min-cpus"
+                    or "--environment-lock":
                     if (!options.TryAdd(option, Next(args, ref i)))
                     {
                         throw new ArgumentException($"Duplicate option {option}.");
@@ -97,6 +101,10 @@ internal static class ExperimentCommand
         {
             throw new ArgumentException("--vcpkg requires --managed-clang.");
         }
+        if (!binary && options.ContainsKey("--environment-lock"))
+        {
+            throw new ArgumentException("--environment-lock requires a native managed experiment.");
+        }
 
         string repository = Required(options, "--repo");
         string revision = Required(options, "--ref");
@@ -115,7 +123,9 @@ internal static class ExperimentCommand
             Profile = profile,
             Vcpkg = vcpkg,
             Placement = placement
-        }, ExperimentStore(), ct);
+        }, ExperimentStore(), binary ? new(options.GetValueOrDefault("--environment-lock"),
+            static workflow => CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(workflow))),
+            EncodeDependencyPlan) : null, ct);
         string id = plan.Id;
         if (plan.DependencyPlanSha256 is { } dependencyDigest)
         {
@@ -137,6 +147,22 @@ internal static class ExperimentCommand
             Approve only on an isolated Host: cmakeworkflow experiment run --plan {id} --approve
             """);
         return 0;
+    }
+
+    private static byte[] EncodeDependencyPlan(CMakeWorkflow.Client.Experiments.VcpkgProjectPlan value)
+    {
+        static CMakeWorkflow.Tooling.Tools.ManagedToolRelease Release(CMakeWorkflow.Client.Experiments.ManagedToolRelease release) =>
+            new(release.Id, release.Version, release.Platform, release.Source, release.Sha256, release.TreeSha256, release.TarRoot);
+
+        return CMakeWorkflow.Tooling.Tools.BinaryVcpkgPlan.Encode(new(value.SchemaVersion, value.Directory,
+            value.ManifestSha256, value.ConfigurationSha256, value.EnvironmentSha256, Release(value.Executable), Release(value.Checkout))
+        {
+            Commit = value.Commit,
+            SourceSnapshotId = value.SourceSnapshotId,
+            TargetTriplet = value.TargetTriplet,
+            HostTriplet = value.HostTriplet,
+            Registries = value.Registries
+        });
     }
 
     private static ExperimentHost DirectHost(Dictionary<string, string> options)
@@ -205,6 +231,10 @@ internal static class ExperimentCommand
         {
             Console.WriteLine($"Download tree SHA-256 {downloads}");
         }
+        if (result.ReceiptIdentity is { } receipt)
+        {
+            Console.WriteLine($"Binary provisioning receipt identity {receipt}");
+        }
         return 0;
     }
 
@@ -265,7 +295,7 @@ internal static class ExperimentCommand
             return result.State == PipelineStageStates.Succeeded ? 0 : 1;
         }
 
-        string manifestRelative = $".cmakeworkflow/experiments/{id}/workflow.json";
+        string manifestRelative = $".cmakeworkflow/experiments/{id}/{plan.ManifestName}";
         string root = plan.Host.Workspace;
         string manifest = root + "/" + manifestRelative;
         string results = root + $"/.cmakeworkflow/experiment-results/{id}";
@@ -277,7 +307,10 @@ internal static class ExperimentCommand
             throw new InvalidDataException("Initialized Host workspace differs from the approved plan.");
         }
         PipelineChildCoordinator coordinator = new(ledger,
-            new ClientWorkflowChildHost(client, plan.SourceSnapshotId, new(HistoryPolicyMode.Default)));
+            new ClientWorkflowChildHost(client, plan.SourceSnapshotId, new(HistoryPolicyMode.Default))
+            {
+                VerifiedBinaryWorkflow = plan.BinaryManifest.HasValue ? new(1, manifest, plan.ManifestSha256, results) : null
+            });
         pipeline ??= ledger.Accept(id, new()
         {
             SchemaVersion = 1,
@@ -292,7 +325,10 @@ internal static class ExperimentCommand
             }
 
             ExperimentStageRequest stage = new(id, plan.SourceSnapshotId, plan.ManifestSha256, plan.Manifest, plan.Files)
-            { Bundle = plan.Bundle };
+            {
+                Bundle = plan.Bundle,
+                BinaryManifest = plan.BinaryManifest
+            };
             ExperimentStageReceipt staged = plan.Bundle is null
                 ? await client.Workflows.StageExperimentAsync(stage, ct)
                 : await client.Experiments.StageAsync(stage, Path.Combine(directory, "source.zip"), ct);

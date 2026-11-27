@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <OutputType>Exe</OutputType>
+    </PropertyGroup>
+    <ItemGroup>
+        <None Include="../examples/history-compare/workflows/benchmark.json" Link="production-benchmark.json" CopyToOutputDirectory="PreserveNewest"/>
+        <ProjectReference Include="../CMakeWorkflow.Storage.Documents/CMakeWorkflow.Storage.Documents.csproj"/>
+    </ItemGroup>
+</Project>

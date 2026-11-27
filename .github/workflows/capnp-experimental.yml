@@ -1,0 +1,118 @@
+name: Experimental Cap’n Proto runtime
+
+on:
+  push:
+    paths:
+      - 'Capnp.Managed*/**'
+      - 'CMakeWorkflow.Binary.Capnp*/**'
+      - 'CMakeWorkflow.Storage.Documents*/**'
+      - 'CMakeWorkflow.Core/CMakeWorkflow.Core.csproj'
+      - '.github/workflows/capnp-experimental.yml'
+      - 'Directory.Build.props'
+  pull_request:
+    paths:
+      - 'Capnp.Managed*/**'
+      - 'CMakeWorkflow.Binary.Capnp*/**'
+      - 'CMakeWorkflow.Storage.Documents*/**'
+      - 'CMakeWorkflow.Core/CMakeWorkflow.Core.csproj'
+      - '.github/workflows/capnp-experimental.yml'
+      - 'Directory.Build.props'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  managed:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            rid: linux-x64
+            suffix: ''
+          - os: windows-latest
+            rid: win-x64
+            suffix: '.exe'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Linux build prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Managed wire tests and seeded corpus
+        run: dotnet run -c Release -p:TreatWarningsAsErrors=true --project Capnp.Managed.Tests
+      - name: Workflow projection regressions and seeded corpus
+        run: dotnet run -c Release -p:TreatWarningsAsErrors=true --project CMakeWorkflow.Binary.Capnp.Tests
+      - name: Managed code-generation regression tests
+        run: dotnet run -c Release -p:TreatWarningsAsErrors=true --project Capnp.Managed.CodeGen.Tests
+      - name: Document store, concurrent access, fault injection and retention model
+        run: dotnet run -c Release -p:TreatWarningsAsErrors=true --project CMakeWorkflow.Storage.Documents.Tests
+      - name: Required official interoperability
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          ref="$RUNNER_TEMP/capnp-reference"
+          git clone --depth 1 --branch v1.2.0 https://github.com/capnproto/capnproto.git "$ref/source"
+          cmake -S "$ref/source" -B "$ref/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF -DCMAKE_INSTALL_PREFIX="$ref/install"
+          cmake --build "$ref/build" --parallel 2
+          cmake --install "$ref/build"
+          export PATH="$ref/install/bin:$PATH"
+          cmake -S Capnp.Managed.Tests/Interop -B "$ref/runtime" -G Ninja -DCMAKE_PREFIX_PATH="$ref/install"
+          cmake --build "$ref/runtime"
+          cmake -S CMakeWorkflow.Binary.Capnp/Interop -B "$ref/workflow" -G Ninja -DCMAKE_PREFIX_PATH="$ref/install"
+          cmake --build "$ref/workflow"
+          dotnet run -c Release --no-build --project Capnp.Managed.Tests -- \
+            --oracle "$ref/runtime/capnp-managed-oracle"
+          dotnet run -c Release --no-build --project CMakeWorkflow.Binary.Capnp.Tests -- \
+            "$ref/install/bin/capnp" "$ref/workflow/cmwf-capnp-oracle"
+          dotnet run -c Release --no-build --project CMakeWorkflow.Storage.Documents.Tests -- \
+            --oracle "$ref/workflow/cmwf-capnp-oracle"
+          dotnet build Capnp.Managed.Compiler -c Release -warnaserror
+          plugin="$PWD/Capnp.Managed.Compiler/bin/Release/net10.0/capnpc-csharp"
+          capnp compile --src-prefix=CMakeWorkflow.Binary.Capnp/Schema -o- \
+            CMakeWorkflow.Binary.Capnp/Schema/workflow.capnp > "$ref/workflow.request"
+          (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/workflow.request")
+          capnp compile --src-prefix=CMakeWorkflow.Binary.Capnp/Schema -o- \
+            CMakeWorkflow.Binary.Capnp/Schema/productionWorkflow.capnp > "$ref/production-workflow.request"
+          (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/production-workflow.request")
+          capnp compile --src-prefix=CMakeWorkflow.Binary.Capnp/Schema -o- \
+            CMakeWorkflow.Binary.Capnp/Schema/executionBinding.capnp > "$ref/execution-binding.request"
+          capnp compile --src-prefix=CMakeWorkflow.Binary.Capnp/Schema -o- \
+            CMakeWorkflow.Binary.Capnp/Schema/managedToolchain.capnp > "$ref/managed-toolchain.request"
+          (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/execution-binding.request")
+          (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/managed-toolchain.request")
+          mkdir -p "$ref/protocol"
+          capnp compile --src-prefix="$ref/install/include/capnp" "-o$plugin:$ref/protocol" \
+            "$ref/install/include/capnp/schema.capnp"
+          cmake -S Capnp.Managed.CodeGen.Tests/Interop -B "$ref/codegen" -G Ninja -DCMAKE_PREFIX_PATH="$ref/install"
+          cmake --build "$ref/codegen"
+          dotnet run -c Release -p:TreatWarningsAsErrors=true --project Capnp.Managed.CodeGen.Tests \
+            -p:CapnpProtocolBindings="$ref/protocol/Capnp.Generated.Schema.g.cs" -- \
+            --oracle "$ref/install/bin/capnp" "$ref/codegen/capnp-codegen-oracle"
+          dotnet run -c Release --no-build --project Capnp.Managed.CodeGen.Tests -- \
+            --msbuild "$PWD" "$ref/install/bin/capnp" "$plugin"
+      - name: Publish generic NativeAOT smoke
+        run: dotnet publish Capnp.Managed.AotSmoke -c Release -r ${{ matrix.rid }} -warnaserror -o out/capnp-aot
+      - name: Execute generic NativeAOT smoke
+        run: ./out/capnp-aot/Capnp.Managed.AotSmoke${{ matrix.suffix }}
+      - name: Publish workflow NativeAOT smoke
+        run: dotnet publish CMakeWorkflow.Binary.Capnp.AotSmoke -c Release -r ${{ matrix.rid }} -warnaserror -o out/capnp-workflow-aot
+      - name: Execute workflow NativeAOT smoke
+        run: ./out/capnp-workflow-aot/CMakeWorkflow.Binary.Capnp.AotSmoke${{ matrix.suffix }}
+      - name: Publish generated-bindings NativeAOT smoke
+        run: dotnet publish Capnp.Managed.CodeGen.AotSmoke -c Release -r ${{ matrix.rid }} -warnaserror -o out/capnp-codegen-aot
+      - name: Execute generated-bindings NativeAOT smoke
+        run: ./out/capnp-codegen-aot/Capnp.Managed.CodeGen.AotSmoke${{ matrix.suffix }}
+      - name: Publish document-store NativeAOT smoke
+        run: dotnet publish CMakeWorkflow.Storage.Documents.AotSmoke -c Release -r ${{ matrix.rid }} -warnaserror -o out/capnp-documents-aot
+      - name: Execute document-store NativeAOT smoke
+        run: ./out/capnp-documents-aot/CMakeWorkflow.Storage.Documents.AotSmoke${{ matrix.suffix }}

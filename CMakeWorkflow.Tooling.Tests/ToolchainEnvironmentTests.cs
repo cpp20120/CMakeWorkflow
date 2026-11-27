@@ -20,6 +20,18 @@ internal static class ToolchainEnvironmentTests
         Reject(() => ToolchainEnvironment.Validate([.. serialized, (byte)'\n']));
         Reject(() => ToolchainEnvironment.Validate(Encoding.UTF8.GetBytes(
             Encoding.UTF8.GetString(serialized).Replace(ManagedReleases.CMakeRelease.Sha256, new string('0', 64), StringComparison.Ordinal))));
+        byte[] frame = BinaryEnvironmentLock.Encode(baseline);
+        string nativeId = BinaryEnvironmentLock.Identity(frame);
+        Check(frame.AsSpan().SequenceEqual(BinaryEnvironmentLock.Encode(BinaryEnvironmentLock.Decode(frame))) &&
+            nativeId != ManagedEnvironmentIdentity.Hash(serialized), "Native lock and legacy approval identities overlapped.");
+        Reject(() => BinaryEnvironmentLock.Decode(BinaryEnvironmentLock.Encode(
+            baseline with { Target = baseline.Target with { Abi = "invalid" } })));
+        Reject(() => BinaryEnvironmentLock.Decode(BinaryEnvironmentLock.Encode(baseline with
+        {
+            Components = [.. baseline.Components.Select(component => component.Id is "llvm" or "sysroot"
+                ? component with { Distribution = component.Distribution with { Sha256 = new string('0', 64) } }
+                : component)]
+        })));
 
         ManagedComponent ninja = catalog.Single(item => item.Release.Id == "ninja");
         ManagedComponent alternate = ninja with
@@ -65,6 +77,20 @@ internal static class ToolchainEnvironmentTests
                     "Existing Linux Clang lock digest changed");
                 await ManagedEnvironmentLocks.WriteAsync(legacy, legacyDigest, ct);
                 Check(await ManagedEnvironmentLocks.ReadAsync(legacyDigest, ct) is null, "Legacy lock format changed");
+                await Task.WhenAll(ManagedEnvironmentLocks.WriteBinaryAsync(frame, nativeId, ct),
+                    ManagedEnvironmentLocks.WriteBinaryAsync(frame, nativeId, ct));
+                Check(await ManagedEnvironmentLocks.ReadAsync(nativeId, ct) is not null &&
+                    !File.Exists(Path.Combine(store, "manifests", nativeId + ".json")),
+                    "Native lock resolution required a JSON lock.");
+                string project = Directory.CreateDirectory(Path.Combine(root, "native-vcpkg-project")).FullName;
+                await File.WriteAllTextAsync(Path.Combine(project, "vcpkg.json"), "{}", ct);
+                VcpkgProjectPlan plan = (await VcpkgProjects.PlanAsync(project, ct)) with { EnvironmentSha256 = nativeId };
+                string binaryDependency = BinaryVcpkgPlan.Identity(BinaryVcpkgPlan.Encode(plan));
+                Check(binaryDependency != ManagedEnvironmentLocks.Hash(VcpkgProjects.Serialize(plan)),
+                    "Legacy dependency approval implicitly authorized a native plan.");
+                VcpkgProjectReceipt receipt = new(plan, new string('1', 64), new string('2', 64));
+                Check(BinaryVcpkgDocuments.DecodeReceipt(BinaryVcpkgDocuments.EncodeReceipt(receipt)) == receipt,
+                    "Native receipt lost the original approved plan.");
                 string corrupt = ManagedToolStore.Location(store, ninja.Release);
                 _ = Directory.CreateDirectory(corrupt);
                 EnvironmentInventoryEntry damaged = await ToolchainEnvironment.InspectAsync(store, ninja.Release, ct);

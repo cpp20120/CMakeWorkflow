@@ -25,32 +25,65 @@ public static class ManagedEnvironmentLocks
     internal static async Task<ToolchainEnvironmentLock?> ReadAsync(string digest, CancellationToken ct)
     {
         RequireDigest(digest);
-        string path = ManifestPath(digest);
+        string binary = ManifestPath(digest, binary: true);
+        if (File.Exists(binary))
+        {
+            return await ReadBinaryAsync(digest, ct);
+        }
+
+        string path = ManifestPath(digest, binary: false);
         if (!File.Exists(path))
         {
             throw new InvalidDataException($"Environment lock {digest} is missing. Install it using tooling lock --write.");
         }
 
-        if (new FileInfo(path).Length > 128 * 1024)
-        {
-            throw new InvalidDataException("The toolchain environment lock exceeds its size limit.");
-        }
         byte[] expected = Serialize();
-        byte[] actual = await File.ReadAllBytesAsync(path, ct);
+        byte[] actual = await ManagedToolchainWire.ReadBoundedAsync(path, ct);
         return Hash(actual) != digest
             ? throw new InvalidDataException("The environment lock differs from this CLI's pinned Linux toolchain or its approved SHA-256.")
             : Hash(expected) == digest ? null : ToolchainEnvironment.Validate(actual);
     }
 
-    internal static async Task WriteAsync(byte[] bytes, string digest, CancellationToken ct)
+    internal static async Task<ToolchainEnvironmentLock> ReadBinaryAsync(string digest, CancellationToken ct)
     {
         RequireDigest(digest);
-        if (Hash(bytes) != digest)
+        byte[] frame = await ManagedToolchainWire.ReadBoundedAsync(ManifestPath(digest, binary: true), ct);
+        return BinaryEnvironmentLock.Identity(frame) == digest
+            ? BinaryEnvironmentLock.Decode(frame)
+            : throw new InvalidDataException("The binary environment lock differs from its approved identity.");
+    }
+
+    internal static Task WriteAsync(byte[] bytes, string digest, CancellationToken ct) =>
+        WriteAsync(bytes, digest, binary: false, ct);
+
+    internal static Task WriteBinaryAsync(byte[] frame, string digest, CancellationToken ct)
+    {
+        _ = BinaryEnvironmentLock.Decode(frame);
+        return WriteAsync(frame, digest, binary: true, ct);
+    }
+
+    private static async Task WriteAsync(byte[] bytes, string digest, bool binary, CancellationToken ct)
+    {
+        RequireDigest(digest);
+        if ((binary ? BinaryEnvironmentLock.Identity(bytes) : Hash(bytes)) != digest)
         {
             throw new InvalidDataException("Cannot publish an environment lock under a different digest.");
         }
-        string path = ManifestPath(digest);
+        string path = ManifestPath(digest, binary);
         ManagedToolStore.EnsureDirectory(Path.GetDirectoryName(path)!);
+        if (binary)
+        {
+            try
+            {
+                await ManagedToolchainWire.PublishAsync(path, bytes, ct);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                _ = await ReadBinaryAsync(digest, ct);
+            }
+            return;
+        }
+
         string temporary = path + "." + Guid.NewGuid().ToString("N");
         try
         {
@@ -70,11 +103,11 @@ public static class ManagedEnvironmentLocks
         }
     }
 
-    private static string ManifestPath(string digest)
+    private static string ManifestPath(string digest, bool binary)
     {
         string directory = Path.Combine(ManagedToolStore.GetRoot(), "manifests");
         ManagedToolStore.CheckDirectoryPath(directory);
-        string path = Path.Combine(directory, digest + ".json");
+        string path = Path.Combine(directory, digest + (binary ? ".capnp" : ".json"));
         ManagedToolStore.RejectLink(new FileInfo(path));
         return path;
     }

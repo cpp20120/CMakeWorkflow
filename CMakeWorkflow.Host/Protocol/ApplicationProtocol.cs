@@ -17,6 +17,9 @@ namespace CMakeWorkflow.Host.Protocol;
 
 public partial interface IHostRpc
 {
+    [JsonRpcMethod("workflow/prepareBinaryManifest")]
+    Task<WorkflowManifestPreparationReceipt?> PrepareBinaryManifestAsync(WorkflowManifestPreparation request, CancellationToken ct);
+
     [JsonRpcMethod("workflow/prepareManifest")]
     Task<WorkflowManifestPreparationReceipt> PrepareManifestAsync(WorkflowManifestPreparation request, CancellationToken ct);
 

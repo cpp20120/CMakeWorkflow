@@ -42,6 +42,7 @@
         <EmbeddedResource Include="Commands/ReportCharts.js" LogicalName="CMakeWorkflow.ReportCharts.js"/>
         <ProjectReference Include="CMakeWorkflow.Developer/CMakeWorkflow.Developer.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
+        <ProjectReference Include="CMakeWorkflow.Storage.Documents/CMakeWorkflow.Storage.Documents.csproj"/>
         <ProjectReference Include="CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Campaigns/CMakeWorkflow.Campaigns.csproj"/>
         <ProjectReference Include="CMakeWorkflow.Profiling/CMakeWorkflow.Profiling.csproj"/>

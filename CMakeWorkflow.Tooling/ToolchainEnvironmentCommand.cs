@@ -51,6 +51,7 @@ internal static class ToolchainEnvironmentCommand
         string generator = "Ninja Multi-Config";
         ToolResolutionPolicy policy = ToolResolutionPolicy.ManagedOnly;
         string? approval = null;
+        bool binary = false;
         List<ComponentRequirement> versions = [];
         HashSet<string> seen = new(StringComparer.Ordinal);
         for (int i = 1; i < args.Length; i++)
@@ -58,6 +59,11 @@ internal static class ToolchainEnvironmentCommand
             string flag = args[i];
             if (flag == "--json" && seen.Add(flag))
             {
+                continue;
+            }
+            if (flag == "--binary" && seen.Add(flag))
+            {
+                binary = true;
                 continue;
             }
             if (i + 1 == args.Length || (!seen.Add(flag) && flag != "--version"))
@@ -84,6 +90,11 @@ internal static class ToolchainEnvironmentCommand
             }
         }
 
+        if (binary && (profile != ToolchainEnvironment.Profile || policy != ToolResolutionPolicy.ManagedOnly))
+        {
+            throw new ArgumentException("Binary environment locks require the linux-clang profile and ManagedOnly policy.");
+        }
+
         if (host == ManagedComponentCatalog.LinuxHost)
         {
             ManagedLinuxSdk.RequireHostAbi();
@@ -93,13 +104,32 @@ internal static class ToolchainEnvironmentCommand
             generator is "Ninja" or "Ninja Multi-Config" && policy == ToolResolutionPolicy.AllowSystem
                 ? await ResolveSystemToolsAsync(ct)
                 : await ToolchainEnvironment.InspectAsync(new(profile, host, target, generator, policy, [.. versions]), ct);
+        byte[]? frame = null;
+        if (binary && resolution.Environment is { } environment)
+        {
+            frame = BinaryEnvironmentLock.Encode(environment);
+            string identity = BinaryEnvironmentLock.Identity(frame);
+            resolution = resolution with
+            {
+                EnvironmentSha256 = identity,
+                Binding = resolution.Binding is { } binding ? binding with { EnvironmentLockSha256 = identity } : null
+            };
+        }
+
         if (approval is not null)
         {
             if (resolution.Environment is null || !resolution.Ready || resolution.EnvironmentSha256 != approval)
             {
                 throw new InvalidDataException("The environment is not verified or differs from the approved resolution SHA-256.");
             }
-            await ManagedEnvironmentLocks.WriteAsync(ToolchainEnvironment.Serialize(resolution.Environment), approval, ct);
+            if (frame is not null)
+            {
+                await ManagedEnvironmentLocks.WriteBinaryAsync(frame, approval, ct);
+            }
+            else
+            {
+                await ManagedEnvironmentLocks.WriteAsync(ToolchainEnvironment.Serialize(resolution.Environment), approval, ct);
+            }
         }
         await PrintAsync(resolution);
         return resolution.Ready ? 0 : 2;

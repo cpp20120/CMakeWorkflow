@@ -14,6 +14,7 @@ public sealed record WorkflowToolchainRuntime(
     public WorkflowVcpkgConfiguration? Vcpkg { get; init; }
     public LinuxCompilerConfiguration? LinuxCompiler { get; init; }
     public LinuxToolchainIdentity? Linux { get; init; }
+    internal string? VcpkgReceiptIdentity { get; init; }
     public string? CCompiler { get; init; }
     public string? CTest { get; init; }
     public bool RequireConfiguredFingerprint { get; init; }

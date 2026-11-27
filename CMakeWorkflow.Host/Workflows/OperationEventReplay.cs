@@ -18,7 +18,7 @@ public static class OperationEventReplay
             throw new ArgumentException("Invalid event cursor or page limit.");
         }
 
-        string db = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+        string db = WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory);
         _ = paths.Require(db);
         if (!File.Exists(db))
         {

@@ -152,6 +152,11 @@ jobs:
       - name: Publish NativeAOT CLI and Host
         shell: pwsh
         run: dotnet publish CMakeWorkflow.csproj -c Release -r ${{ matrix.rid }} -o out/native -p:Version=$env:SDK_VERSION -p:TreatWarningsAsErrors=true
+      - name: NativeAOT workflow archive and shared CAS collection
+        run: dotnet run --project CMakeWorkflow.Host.Tests -c Release -p:TreatWarningsAsErrors=true -- --workflow-archive-tests out/native/${{ matrix.executable }}
+      - name: NativeAOT binary workflow admission and interrupted Host recovery
+        if: runner.os == 'Linux' || runner.os == 'Windows'
+        run: dotnet run --project CMakeWorkflow.Host.Tests -c Release -p:TreatWarningsAsErrors=true -- --binary-workflow-wire-tests out/native/${{ matrix.executable }} out/recovery-cli/${{ matrix.executable }}
       - name: NativeAOT toolchain catalog
         shell: pwsh
         run: |

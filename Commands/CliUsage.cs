@@ -54,6 +54,11 @@ internal static class CliUsage
         "       CMakeWorkflow history matrix|sweep --metric NAME [--run ID] [--db PATH] --html OUTPUT.html\n" +
         "       CMakeWorkflow history runs --metric NAME [FILTERS] --html OUTPUT.html\n" +
         "       CMakeWorkflow history compare|detect BASELINE_ID CANDIDATE_ID [OPTIONS] --html OUTPUT.html\n" +
+        "       CMakeWorkflow workflow init-binary WORKSPACE\n" +
+        "       CMakeWorkflow workflow pack-binary JSON_SOURCE FRAME_OUTPUT\n" +
+        "       CMakeWorkflow workflow run-binary WORKSPACE FRAME SHA256 REQUEST_ID RESULTS\n" +
+        "       CMakeWorkflow workflow <binary-info|binary-export-json> WORKSPACE OPERATION_ID\n" +
+        "       CMakeWorkflow workflow archive WORKSPACE OPERATION_ID CAS_DIRECTORY\n" +
         "       CMakeWorkflow workflow resume RUN_DIRECTORY\n" +
         "       CMakeWorkflow workflow reconcile RUN_DIRECTORY [--node ID] --decision succeeded|retry\n" +
         "         --reason TEXT --expected-checkpoint SHA256 --confirm-stopped [--json]\n" +

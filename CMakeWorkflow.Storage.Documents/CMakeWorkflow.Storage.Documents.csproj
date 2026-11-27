@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
+        <ProjectReference Include="../CMakeWorkflow.Binary.Capnp/CMakeWorkflow.Binary.Capnp.csproj"/>
+        <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.0"/>
+        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5"/>
+        <InternalsVisibleTo Include="CMakeWorkflow"/>
+        <InternalsVisibleTo Include="CMakeWorkflow.Storage.Documents.Tests"/>
+        <InternalsVisibleTo Include="CMakeWorkflow.Storage.Documents.Benchmarks"/>
+    </ItemGroup>
+</Project>

@@ -4,7 +4,7 @@ namespace CMakeWorkflow.Contracts.Workflows;
 /// <param name="ManifestBase">Existing workspace-relative directory using slash separators, or "." for the workspace root.</param>
 /// <param name="ResultsDirectory">Absolute Host path or workspace-relative path for a proposed result directory.</param>
 /// <param name="Sha256">Expected SHA-256 of ManifestBytes.</param>
-/// <param name="ManifestBytes">Exact UTF-8 workflow manifest.</param>
+/// <param name="ManifestBytes">Exact UTF-8 or binary manifest bytes for the selected RPC. A binary probe uses an empty payload.</param>
 public sealed record WorkflowManifestPreparation(string ManifestBase, string ResultsDirectory, string Sha256,
     ReadOnlyMemory<byte> ManifestBytes)
 {

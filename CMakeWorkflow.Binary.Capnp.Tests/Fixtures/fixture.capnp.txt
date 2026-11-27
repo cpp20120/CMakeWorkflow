@@ -1,0 +1,18 @@
+(schemaVersion = 2,
+ contexts = [
+   (id = "debug", buildDirectory = "/build/debug", configuration = "Debug",
+    configurePreset = "debug", sourceDirectory = "/src", mode = "managed", provenancePolicy = "strict"),
+   (id = "release", buildDirectory = "/build/release", configuration = "Release",
+    mode = "adopt", provenancePolicy = "allowUnverified", compilerCacheProfile = "local-cache")
+ ],
+ nodes = [
+   (id = "generate", context = "debug", operation = (configure = void)),
+   (id = "build", context = "debug", dependsOn = [0], operation = (build = "tool"),
+    outputs = [(name = "tool", path = "bin/tool", root = "manifest", fresh = true)]),
+   (id = "run", dependsOn = [0, 1], operation = (run = 2), arguments = ["--flag", "", "μ"],
+    workingDirectory = ".", environment = [(key = "LANG", value = "C"), (key = "MODE", value = "test")],
+    resources = ["slot"], exclusive = true, hasTimeout = true, timeoutSeconds = 4.5,
+    inputs = [(from = 2, artifact = "tool", snapshot = true)], cpuSet = "2", hasConstraints = true),
+   (id = "verify", context = "debug", dependsOn = [1, 2],
+    operation = (ctest = (labelRegex = "^unit$")))
+ ])

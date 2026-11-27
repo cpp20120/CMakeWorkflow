@@ -21,15 +21,16 @@ internal static class DurableHistoryIndexer
     }
 
     internal static string LedgerPath(WorkspaceReadPaths paths) =>
-        Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+        WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory);
 
     internal static string AuthorizeDatabase(WorkspaceReadPaths paths, string database)
     {
         string resolved = paths.DatabaseForWrite(database);
         string ledger = paths.Require(LedgerPath(paths));
         return WorkflowPlanner.PathComparer.Equals(resolved, ledger) ||
-            SidecarSuffixes.Any(suffix => WorkflowPlanner.PathComparer.Equals(resolved, ledger + suffix))
-            ? throw new ApplicationRefusal("invalid_history_policy", "History cannot use the operation ledger or its sidecars.")
+            SidecarSuffixes.Any(suffix => WorkflowPlanner.PathComparer.Equals(resolved, ledger + suffix)) ||
+            WorkflowLedgerPath.InBinaryMetadata(paths.WorkspaceDirectory, resolved)
+            ? throw new ApplicationRefusal("invalid_history_policy", "History cannot use the operation ledger or execution document store.")
             : resolved;
     }
 

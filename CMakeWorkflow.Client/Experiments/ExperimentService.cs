@@ -40,7 +40,7 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         }
     }
 
-    /// <summary>Opens a schema-v2 controller plan and checks it against the caller-approved ID.</summary>
+    /// <summary>Opens a controller plan with a source archive and verifies its versioned approval identity.</summary>
     public static async Task<PreparedExperimentPlan> ReadPlanAsync(string planPath, string approvedId,
         CancellationToken ct = default)
     {
@@ -79,12 +79,21 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         bool verify, CancellationToken ct)
     {
         client.RequireCapability("experiment/dependencies");
+        if (plan.BinaryWorkflow)
+        {
+            client.RequireCapability("experiment/binary-v1");
+        }
         string expected = plan.DependencyPlanSha256 ??
             throw new InvalidOperationException("This experiment does not opt into vcpkg.");
         ExperimentDependencyResult result = await RpcRefusals.TranslateAsync(() => client.Proxy.ExperimentDependenciesAsync(
-            new(plan.Id, plan.Commit, plan.SourceSnapshotId, plan.ManifestSha256, expected, approval, verify), ct));
-        return result.PlanSha256 == expected &&
-               Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(result.Plan))) == expected && (!(verify || approval is not null) || result.InstalledTreeSha256 is not null)
+            new(plan.Id, plan.Commit, plan.SourceSnapshotId, plan.ManifestSha256, expected, approval, verify)
+            { Binary = plan.BinaryWorkflow }, ct));
+        bool installed = verify || approval is not null;
+        bool validPlan = plan.BinaryWorkflow
+            ? result.BinaryPlan is { } frame && ExperimentPlan.NativeDependencyIdentity(frame.Span) == expected &&
+                (!installed || (result.ReceiptIdentity is { Length: 64 } receipt && receipt.All(char.IsAsciiHexDigitLower)))
+            : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(result.Plan))) == expected;
+        return result.PlanSha256 == expected && validPlan && (!installed || result.InstalledTreeSha256 is not null)
             ? result : throw new InvalidDataException("Host dependency evidence differs from the experiment plan.");
     }
 
@@ -97,21 +106,31 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         {
             await VerifyPlacementAsync(plan.Placement, ct);
         }
-        string manifest = plan.Workspace + $"/.cmakeworkflow/experiments/{plan.Id}/workflow.json";
+        string manifest = plan.Workspace + $"/.cmakeworkflow/experiments/{plan.Id}/{plan.ManifestName}";
         ExperimentStageReceipt staged = await StageAsync(plan.Stage, plan.ArchivePath, ct);
         if (plan.DependencyPlanSha256 is not null)
         {
             await VerifyDependenciesAsync(plan, ct);
         }
+        if (staged != new ExperimentStageReceipt(manifest, plan.ManifestSha256, plan.SourceSnapshotId))
+        {
+            throw new InvalidDataException("Host staged identity does not match the approved plan.");
+        }
+
         StartWorkflowOptions options = new(plan.RequestId, manifest, plan.ManifestSha256, 1,
             plan.Workspace + $"/.cmakeworkflow/experiment-sdk-results/{plan.Id}")
         {
             SourceSnapshotId = plan.SourceSnapshotId,
             HistoryPolicy = new(HistoryPolicyMode.Default)
         };
-        return staged == new ExperimentStageReceipt(manifest, plan.ManifestSha256, plan.SourceSnapshotId)
-            ? await client.Workflows.StartAsync(options, ct)
-            : throw new InvalidDataException("Host staged identity does not match the approved plan.");
+        return plan.BinaryWorkflow
+            ? await client.Executions.StartAsync(new("cmake-capnp-v1", options.ClientRequestId,
+                options.Manifest, options.ManifestSha256, options.Jobs, options.ResultsDirectory)
+            {
+                SourceSnapshotId = plan.SourceSnapshotId,
+                HistoryPolicy = options.HistoryPolicy
+            }, ct)
+            : await client.Workflows.StartAsync(options, ct);
     }
 
     /// <summary>Finds the operation for a durable SDK request after reconnection without starting execution.</summary>
@@ -142,6 +161,10 @@ public sealed class ExperimentService(CMakeWorkflowClient client)
         ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
         ExperimentSourceBundle bundle = request.Bundle ?? throw new ArgumentException("Source bundle metadata is required.", nameof(request));
         client.RequireCapability("experiment/sourceChunk");
+        if (request.BinaryManifest.HasValue)
+        {
+            client.RequireCapability("experiment/binary-v1");
+        }
         await using FileStream archive = await OpenVerifiedArchiveAsync(bundle, archivePath, ct);
 
         ExperimentSourceChunk chunk = new(request.ExperimentId, bundle.Sha256, bundle.Size, 0, ReadOnlyMemory<byte>.Empty);

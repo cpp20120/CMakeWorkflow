@@ -32,17 +32,21 @@ internal static class HostOperationComposition
     /// cmake maps to the legacy workflow domain; process uses its own snapshot validator. A reference acknowledges
     /// acceptance only. No caller RPC token is passed into coordinator execution.
     /// </remarks>
-    internal static OperationReference Start(DurableExecutionCoordinator coordinator,
-        string workspace, ExecutionStartRequest request) => request.Domain switch
+    internal static Task<OperationReference> StartAsync(DurableExecutionCoordinator coordinator,
+        string workspace, ExecutionStartRequest request, CancellationToken ct) => request.Domain switch
         {
-            "cmake" => coordinator.Start(workspace, new WorkflowStartRequest(
+            "cmake" => Task.FromResult(coordinator.Start(workspace, new WorkflowStartRequest(
                 request.ClientRequestId, request.Manifest, request.ManifestSha256,
                 request.Jobs, request.ResultsDirectory)
             {
-                SourceSnapshotId = request.SourceSnapshotId
-            }),
-            "process" when request.SourceSnapshotId is null => coordinator.StartProcess(workspace, request),
-            "process" => throw new InvalidOperationException("source_snapshot_unsupported_for_process"),
+                SourceSnapshotId = request.SourceSnapshotId,
+                Only = request.Only,
+                HistoryPolicy = request.HistoryPolicy
+            })),
+            BinaryWorkflowSubmission.Domain => coordinator.StartBinaryAsync(workspace, request, ct),
+            "process" when request.SourceSnapshotId is null && request.Only is null && request.HistoryPolicy is null => Task.FromResult(coordinator.StartProcess(workspace, request)),
+            "process" when request.SourceSnapshotId is not null => throw new InvalidOperationException("source_snapshot_unsupported_for_process"),
+            "process" => throw new InvalidOperationException("workflow_options_unsupported_for_process"),
             _ => throw new InvalidOperationException("unknown_execution_domain")
         };
 }

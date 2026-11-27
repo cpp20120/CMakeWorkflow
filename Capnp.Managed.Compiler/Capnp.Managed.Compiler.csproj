@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsAotCompatible>true</IsAotCompatible>
+        <OutputType>Exe</OutputType>
+        <AssemblyName>capnpc-csharp</AssemblyName>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../Capnp.Managed.CodeGen/Capnp.Managed.CodeGen.csproj"/>
+    </ItemGroup>
+</Project>

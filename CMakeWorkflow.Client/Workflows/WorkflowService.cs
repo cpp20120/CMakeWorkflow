@@ -19,6 +19,10 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
     {
         ArgumentNullException.ThrowIfNull(request);
         client.RequireCapability("experiment/stage");
+        if (request.BinaryManifest.HasValue)
+        {
+            client.RequireCapability("experiment/binary-v1");
+        }
         return RpcRefusals.TranslateAsync(() => client.Proxy.StageExperimentAsync(request, ct));
     }
 
@@ -49,6 +53,32 @@ public sealed class WorkflowService(CMakeWorkflowClient client)
             !string.IsNullOrWhiteSpace(receipt.Manifest) && !string.IsNullOrWhiteSpace(receipt.ResultsDirectory)
             ? new(receipt.SchemaVersion, receipt.Manifest, receipt.ManifestSha256, receipt.ResultsDirectory)
             : throw new InvalidDataException("Invalid Host manifest preparation receipt.");
+    }
+
+    /// <summary>Stages a canonical binary workflow over the connected local or SSH transport.</summary>
+    /// <remarks>Frames up to 1 MiB reuse the existing bounded RPC transfer envelope. The Host probes by digest before uploading.</remarks>
+    public async Task<PreparedWorkflow> PrepareBinaryManifestAsync(ReadOnlyMemory<byte> frame,
+        string hostResultsDirectory, string manifestBase = ".", CancellationToken ct = default)
+    {
+        client.RequireCapability("workflow/prepareBinaryManifest");
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostResultsDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestBase);
+        if (frame.Length is < 16 or > WorkflowManifestPreparation.MaximumBytes)
+        {
+            throw new ArgumentException("Expected a binary workflow frame of at most 1 MiB.", nameof(frame));
+        }
+
+        byte[] bytes = frame.ToArray();
+        string digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+        WorkflowManifestPreparation request = new(manifestBase, hostResultsDirectory, digest, ReadOnlyMemory<byte>.Empty);
+        WorkflowManifestPreparationReceipt? receipt = await RpcRefusals.TranslateAsync(
+            () => client.Proxy.PrepareBinaryManifestAsync(request, ct));
+        receipt ??= await RpcRefusals.TranslateAsync(() => client.Proxy.PrepareBinaryManifestAsync(
+            request with { ManifestBytes = bytes }, ct));
+        return receipt is { SchemaVersion: 1 } && receipt.ManifestSha256 == digest &&
+            !string.IsNullOrWhiteSpace(receipt.Manifest) && !string.IsNullOrWhiteSpace(receipt.ResultsDirectory)
+            ? new(receipt.SchemaVersion, receipt.Manifest, receipt.ManifestSha256, receipt.ResultsDirectory)
+            : throw new InvalidDataException("Invalid Host binary preparation receipt.");
     }
 
     /// <summary>Submits a workflow through durable Host admission.</summary>

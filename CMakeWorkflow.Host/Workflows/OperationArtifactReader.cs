@@ -36,7 +36,7 @@ internal static class OperationArtifactReader
             throw new ArgumentException("Invalid operation ID.", nameof(operationId));
         }
 
-        _ = paths.Database(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite"));
+        _ = paths.Database(WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory));
         using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);
         AcceptedWorkflow accepted = store.Get(operationId)
                        ?? throw new KeyNotFoundException("Unknown operation.");

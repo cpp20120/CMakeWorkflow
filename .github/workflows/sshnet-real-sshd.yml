@@ -9,6 +9,10 @@ on:
         description: Run the real managed vcpkg installation and upstream experiment
         type: boolean
         default: true
+      binary:
+        description: Run the native Git experiment, managed vcpkg and Host recovery
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,4 +31,5 @@ jobs:
         shell: bash
         env:
           CMWF_SSHNET_TEST_VCPKG: ${{ inputs.vcpkg && '1' || '0' }}
+          CMWF_SSHNET_TEST_BINARY: ${{ inputs.binary && '1' || '0' }}
         run: bash tests/infrastructure/sshnet/run-tests.sh

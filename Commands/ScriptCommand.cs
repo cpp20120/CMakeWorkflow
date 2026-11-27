@@ -12,7 +12,7 @@ namespace CMakeWorkflow.Commands;
 internal static class ScriptCommand
 {
     internal const string Usage = """
-        CMakeWorkflow script compose FILE.cs [--output-dir DIR] [--timeout-seconds N] [-- ARGS...]
+        CMakeWorkflow script compose[-binary] FILE.cs [--output-dir DIR] [--timeout-seconds N] [-- ARGS...]
         CMakeWorkflow script plan FILE.cs [HOST OPTIONS] [-- ARGS...]
         CMakeWorkflow script run FILE.cs --approve [--request-id ID] [HOST OPTIONS] [-- ARGS...]
 
@@ -20,7 +20,7 @@ internal static class ScriptCommand
                       --jobs N, --only NODE (repeatable), --no-history or --history-db HOST_FILE
         Use remote help for persistent local, OpenSSH and SSH.NET connection flags.
         Without connection flags, plan and run own a local Host for the command lifetime.
-        All three commands execute trusted C# on the controller.
+        These commands execute trusted C# on the controller.
         """;
 
     internal static async Task<int> ExecuteAsync(string[] args, CancellationToken ct)
@@ -30,7 +30,7 @@ internal static class ScriptCommand
             Console.WriteLine(Usage);
             return 0;
         }
-        if (args is not ["compose" or "plan" or "run", string source, .. string[] tail])
+        if (args is not ["compose" or "compose-binary" or "plan" or "run", string source, .. string[] tail])
         {
             throw new ArgumentException(Usage);
         }
@@ -50,7 +50,7 @@ internal static class ScriptCommand
         (Dictionary<string, string> values, List<string> only) = RemoteCommand.Parse("script", clean);
         TimeSpan timeout = TimeSpan.FromSeconds(RemoteCommand.Number(values, "--timeout-seconds", 300, 1, 3600));
 
-        if (action == "compose")
+        if (action is "compose" or "compose-binary")
         {
             if (values.Keys.Any(key => key is not ("--output-dir" or "--timeout-seconds")) ||
                 only.Count != 0 || history is not null)
@@ -59,7 +59,16 @@ internal static class ScriptCommand
             }
             string directory = Path.GetFullPath(RemoteCommand.Get(values, "--output-dir") ?? Path.GetDirectoryName(path)!);
             WorkflowManifest composed = await ComposeAsync(path, scriptArguments, timeout, ct);
-            Console.WriteLine($"SHA-256 {composed.Sha256}  {await composed.SaveAsync(directory, ct)}");
+            if (action == "compose-binary")
+            {
+                string frame = Path.Combine(directory, "workflow.capnp");
+                string sha = await WorkflowCliCommand.PublishBinaryFrameAsync(composed.ToDefinition(), frame, ct);
+                Console.WriteLine($"SHA-256 {sha}  {frame}");
+            }
+            else
+            {
+                Console.WriteLine($"SHA-256 {composed.Sha256}  {await composed.SaveAsync(directory, ct)}");
+            }
             return 0;
         }
 

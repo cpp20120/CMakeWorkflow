@@ -28,10 +28,10 @@ public sealed partial class DoctorSession
 ];
     private static readonly string[] ReadCapabilities =
     [
-        "context/inspect", "target/resolve", "workflow/plan", "workflow/preflight", "workflow/prepareManifest", "runs/get",
+        "context/inspect", "target/resolve", "workflow/plan", "workflow/preflight", "workflow/prepareManifest", "workflow/prepareBinaryManifest", "runs/get",
         "profile/prepare", "profileReplay/prepare", "benchmark/prepare", "profileRecipe/prepare", "testMatrix/prepare", "buildMatrix/prepare",
         "benchmarkMatrix/prepare", "profile/analyze", "profile/renderHistorical", "operations/find", "operations/get", "operations/list", "operations/cancel",
-        "workflow/start", "workflow/nodeSelection", "workflow/compilerCacheProfile", "workflow/actionCache", "execution/start", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
+        "workflow/start", "workflow/nodeSelection", "workflow/compilerCacheProfile", "workflow/actionCache", "execution/start", "execution/cmake-capnp-v1", "execution/report", "workflow/recoveryInspect", "workflow/reconcile", "workflow/resume", "workflow/resumeExecute",
         "operations/events", "operations/overview", "operations/report", "operations/artifacts/list", "operations/artifacts/readChunk", "operations/artifacts/timestampText", "history/import", "history/indexStatus", "history/operationRuns", "history/environmentFilter", "history/selectedCompare", "history/retryIndex", "workflow/historyPolicy", "history/runs", "history/show", "history/metrics", "history/query",
         "history/compare", "history/detect", "history/runsPage", "toolchains/discover", "toolchains/resolve",
         "toolchains/inspectEnvironment", "target/prepare", "profile/replay", "dagflow/mutation/run",
@@ -127,7 +127,7 @@ public sealed partial class DoctorSession
         ReadAsync(request, (paths, ct) =>
         {
             ct.ThrowIfCancellationRequested();
-            string path = paths.Database(Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite"));
+            string path = paths.Database(WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory));
             if (!File.Exists(path))
             {
                 throw new KeyNotFoundException("Unknown operation.");
@@ -142,7 +142,7 @@ public sealed partial class DoctorSession
     /// Requires explicit operator-confirmed quiescence and no active coordinator task. A lease cannot prove orphaned descendants stopped.
     /// Only commits the decision: does not dispatch, reset nodes or release results ownership.
     /// </remarks>
-    public Task<RecoveryInspectionView> RecoveryReconcileAsync(RecoveryReconcileRequest request,
+    public async Task<RecoveryInspectionView> RecoveryReconcileAsync(RecoveryReconcileRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -182,8 +182,9 @@ public sealed partial class DoctorSession
         _ = Directory.CreateDirectory(lockDirectory);
         string lockFile = paths.Require(Path.Combine(lockDirectory, request.OperationId + ".lock"));
         using FileStream lease = new(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        return Task.FromResult(RecoveryView(store.Reconcile(request.OperationId,
-            request.ExpectedRevision, request.Decision, request.Note)));
+        return request.RetryBinaryNode is not null || request.ExpectedCheckpointSha256 is not null
+            ? RecoveryView(await BinaryWorkflowRecovery.ReconcileRetryAsync(paths, store, request, cancellationToken))
+            : RecoveryView(store.Reconcile(request.OperationId, request.ExpectedRevision, request.Decision, request.Note));
     }
 
     /// <summary>Admits resume under explicit quiescence confirmation without launching workers.</summary>
@@ -296,6 +297,11 @@ public sealed partial class DoctorSession
             throw new InvalidOperationException("resume_not_admitted_or_bound");
         }
 
+        if (store.ReadBinaryInput(request.OperationId) is not null)
+        {
+            await store.VerifyStoredDispatchAsync(request.OperationId, cancellationToken);
+        }
+
         (string? RunDirectory, string? CheckpointSha256) = store.GetDispatchCheckpoint(request.OperationId)
                       ?? throw new InvalidOperationException("resume_checkpoint_missing");
         _ = paths.Require(Path.Combine(RunDirectory, "run.json"));
@@ -342,7 +348,7 @@ public sealed partial class DoctorSession
             ct.ThrowIfCancellationRequested();
             DurableAcceptanceStore.ValidateListQuery(request);
             // Listing is read-only. A fresh workspace must not get an SQLite store as a side effect.
-            string storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+            string storePath = WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory);
             if (!File.Exists(storePath))
             {
                 return request.Cursor is not null
@@ -373,7 +379,7 @@ public sealed partial class DoctorSession
             throw new ArgumentException("Operation identifier must contain 1..128 non-whitespace characters.");
         }
         // A query must never initialize an operations store or mutate workspace state.
-        string storePath = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+        string storePath = WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory);
         if (!File.Exists(storePath))
         {
             throw new KeyNotFoundException("Unknown operation.");

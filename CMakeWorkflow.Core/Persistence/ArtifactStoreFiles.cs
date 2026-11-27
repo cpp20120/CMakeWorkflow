@@ -6,6 +6,8 @@ namespace CMakeWorkflow.Core.Persistence;
 internal sealed class ArtifactStoreFiles(string directory)
 {
     private const string Format = "cmakeworkflow-artifact-cas-v1";
+    private const string DocumentFormat = "cmakeworkflow-artifact-cas-v2";
+    internal const string DocumentCatalogName = "documents.sqlite";
     internal string Root { get; } = Path.GetFullPath(directory);
     internal string Blobs => Path.Combine(Root, "blobs");
     internal string Operations => Path.Combine(Root, "operations");
@@ -14,7 +16,7 @@ internal sealed class ArtifactStoreFiles(string directory)
 
     internal string Blob(string digest) => Path.Combine(Blobs, NormalizeDigest(digest));
 
-    internal async Task<FileStream> OpenLeaseAsync(bool create, CancellationToken ct)
+    internal async Task<FileStream> OpenLeaseAsync(bool create, CancellationToken ct, bool requireDocumentFormat = false)
     {
         if (create)
         {
@@ -35,13 +37,14 @@ internal sealed class ArtifactStoreFiles(string directory)
                     throw new InvalidDataException("Choose an empty directory for a new artifact CAS.");
                 }
 
-                await DurableByteWriter.WriteAsync(marker, Encoding.UTF8.GetBytes(Format), ct);
+                await DurableByteWriter.WriteAsync(marker,
+                    Encoding.UTF8.GetBytes(requireDocumentFormat ? DocumentFormat : Format), ct);
             }
 
-            if (!File.Exists(marker) || new FileInfo(marker).Length != Format.Length
-                || await File.ReadAllTextAsync(marker, ct) != Format)
+            string format = await ReadFormatAsync(ct);
+            if (requireDocumentFormat && format != DocumentFormat)
             {
-                throw new InvalidDataException("Unrecognized CMakeWorkflow artifact CAS format.");
+                throw new InvalidDataException("The document catalog requires a CAS initialized with document format v2.");
             }
 
             if (create)
@@ -59,6 +62,23 @@ internal sealed class ArtifactStoreFiles(string directory)
             await lease.DisposeAsync();
             throw;
         }
+    }
+
+    // Call under the store lease before selecting any roots or candidates for collection.
+    internal async Task<bool> HasDocumentFormatAsync(CancellationToken ct) => await ReadFormatAsync(ct) == DocumentFormat;
+
+    private async Task<string> ReadFormatAsync(CancellationToken ct)
+    {
+        string marker = Path.Combine(Root, ".cas-format");
+        if (!File.Exists(marker) || new FileInfo(marker).Length != Format.Length)
+        {
+            throw new InvalidDataException("Unrecognized CMakeWorkflow artifact CAS format.");
+        }
+
+        string format = await File.ReadAllTextAsync(marker, ct);
+        return format is Format or DocumentFormat
+            ? format
+            : throw new InvalidDataException("Unrecognized CMakeWorkflow artifact CAS format.");
     }
 
     private static async Task<FileStream> AcquireAsync(string path, FileMode mode, CancellationToken ct)

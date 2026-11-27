@@ -6,8 +6,10 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
     <ItemGroup>
+        <ProjectReference Include="../CMakeWorkflow.Binary.Capnp/CMakeWorkflow.Binary.Capnp.csproj"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Tooling.Tests"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Host"/>
         <InternalsVisibleTo Include="CMakeWorkflow.Developer"/>
+        <InternalsVisibleTo Include="CMakeWorkflow"/>
     </ItemGroup>
 </Project>

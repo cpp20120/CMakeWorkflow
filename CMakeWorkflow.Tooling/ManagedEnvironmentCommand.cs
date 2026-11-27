@@ -29,6 +29,34 @@ internal static class ManagedEnvironmentCommand
     internal static async Task<int> VcpkgAsync(string[] args, CancellationToken ct)
     {
         ManagedLinuxSdk.RequireHostAbi();
+        if (args is ["plan", string projectDirectory, "--binary-plan", string framePath, "--environment-lock", string environment])
+        {
+            _ = await ManagedEnvironmentLocks.ReadBinaryAsync(environment, ct);
+            VcpkgProjectPlan plan = (await VcpkgProjects.PlanAsync(projectDirectory, ct)) with { EnvironmentSha256 = environment };
+            byte[] frame = BinaryVcpkgPlan.Encode(plan);
+            await ManagedToolchainWire.PublishAsync(framePath, frame, ct);
+            await Console.Out.WriteLineAsync(BinaryVcpkgPlan.Identity(frame));
+            return 0;
+        }
+
+        if (args is ["install", string binaryDirectory, "--yes", "--plan-sha", string binaryApproval,
+            "--binary-plan", string planPath, "--environment-lock", string environmentLock])
+        {
+            _ = await ManagedEnvironmentLocks.ReadBinaryAsync(environmentLock, ct);
+            VcpkgProjectPlan plan = (await VcpkgProjects.PlanAsync(binaryDirectory, ct)) with { EnvironmentSha256 = environmentLock };
+            byte[] frame = await ManagedToolchainWire.ReadBoundedAsync(planPath, ct);
+            string digest = BinaryVcpkgPlan.Identity(frame);
+            if (!string.Equals(digest, binaryApproval, StringComparison.OrdinalIgnoreCase) ||
+                !frame.AsSpan().SequenceEqual(BinaryVcpkgPlan.Encode(plan)))
+            {
+                throw new InvalidDataException("The vcpkg project differs from the approved binary dependency plan.");
+            }
+
+            await VcpkgProjects.InstallBinaryAsync(plan, digest, plan.Directory, ct);
+            await Console.Out.WriteLineAsync("Vcpkg project SHA-256: " + digest);
+            return 0;
+        }
+
         if (args is ["plan", string project])
         {
             byte[] plan = VcpkgProjects.Serialize(await VcpkgProjects.PlanAsync(project, ct));

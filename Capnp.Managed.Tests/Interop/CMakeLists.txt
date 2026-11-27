@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(capnp_managed_oracle LANGUAGES C CXX)
+find_package(CapnProto 1.2 CONFIG REQUIRED)
+capnp_generate_cpp(probe_sources probe_headers probe.capnp)
+add_executable(capnp-managed-oracle oracle.cpp ${probe_sources} ${probe_headers})
+target_include_directories(capnp-managed-oracle PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(capnp-managed-oracle PRIVATE CapnProto::capnp)
+target_compile_features(capnp-managed-oracle PRIVATE cxx_std_17)

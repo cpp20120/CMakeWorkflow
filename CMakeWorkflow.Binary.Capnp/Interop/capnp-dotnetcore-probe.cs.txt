@@ -1,0 +1,28 @@
+using Capnp;
+
+byte[] bytes = File.ReadAllBytes(args[0]);
+using MemoryStream stream = new(bytes);
+WireFrame frame = Framing.ReadSegments(stream);
+DeserializerState root = DeserializerState.CreateRoot(frame);
+IReadOnlyList<DeserializerState> nodes = root.ReadListOfStructs(1, static value => value);
+if (root.StructReadData(0, 32) != 2 || nodes.Count != 4 || nodes[1].ReadText(0) != "build")
+{
+    throw new InvalidDataException("Reference fixture mismatch.");
+}
+
+long start = GC.GetAllocatedBytesForCurrentThread();
+int values = 0;
+for (int i = 0; i < 1000; i++)
+{
+    values += nodes[1].ReadText(0)!.Length;
+}
+long textBytes = GC.GetAllocatedBytesForCurrentThread() - start;
+
+start = GC.GetAllocatedBytesForCurrentThread();
+for (int i = 0; i < 1000; i++)
+{
+    stream.Position = 0;
+    values += Framing.ReadSegments(stream).Segments.Count;
+}
+long frameBytes = GC.GetAllocatedBytesForCurrentThread() - start;
+Console.WriteLine($"result={values} decoded-text-B/op={textBytes / 1000} stream-frame-B/op={frameBytes / 1000}");

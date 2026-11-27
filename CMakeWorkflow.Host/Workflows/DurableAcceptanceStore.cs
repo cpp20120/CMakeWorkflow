@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.History;
 using CMakeWorkflow.Contracts.History;
@@ -46,10 +47,21 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         workspace = new WorkspaceReadPaths(workspaceDirectory).WorkspaceDirectory;
         WorkspaceReadPaths paths = new(workspace);
         string storeDirectory = paths.Require(Path.Combine(workspace, ".cmakeworkflow"));
-        _ = paths.Require(Path.Combine(storeDirectory, "operations.sqlite"));
+        string database = WorkflowLedgerPath.Resolve(workspace);
+        BinaryLedger = WorkflowLedgerPath.IsBinary(workspace, database);
+        if (BinaryLedger)
+        {
+            _ = paths.DatabaseForWrite(database);
+            if (!WorkflowPlanner.PathComparer.Equals(paths.Require(database), database))
+            {
+                throw new InvalidDataException("Binary operation database is redirected.");
+            }
+        }
+
+        _ = paths.Require(database);
         foreach (string? suffix in new[] { "-journal", "-wal", "-shm" })
         {
-            _ = paths.Require(Path.Combine(storeDirectory, "operations.sqlite" + suffix));
+            _ = paths.Require(database + suffix);
         }
 
         if (!readOnly)
@@ -59,7 +71,7 @@ public sealed partial class DurableAcceptanceStore : IDisposable
 
         connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = Path.Combine(storeDirectory, "operations.sqlite"),
+            DataSource = database,
             Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
             Pooling = false,
             DefaultTimeout = 30
@@ -67,6 +79,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         connection.Open();
         try
         {
+            if (BinaryLedger)
+            {
+                OpenBinaryLedgerEpoch(readOnly);
+            }
+
             if (!readOnly)
             {
                 Execute(static command => command.CommandText = "PRAGMA journal_mode=DELETE;");
@@ -407,7 +424,7 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         return AcceptImmutableCanonical(request with { SnapshotPath = source, ResultsDirectory = result });
     }
 
-    private AcceptedWorkflow AcceptImmutableCanonical(DurableImmutableRequest request)
+    private AcceptedWorkflow AcceptImmutableCanonical(DurableImmutableRequest request, BinaryWorkflowInput? binary = null)
     {
         string source = request.SnapshotPath;
         _ = request.ResultsDirectory;
@@ -438,8 +455,8 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         }
 
         // Only a new acceptance needs to validate current manifest bytes.
-        byte[] snapshot = File.ReadAllBytes(source);
-        if (!string.Equals(Hex(snapshot), expectedManifestSha256, StringComparison.OrdinalIgnoreCase))
+        byte[] snapshot = binary is null ? File.ReadAllBytes(source) : [];
+        if (binary is null && !string.Equals(Hex(snapshot), expectedManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("stale_manifest");
         }
@@ -460,6 +477,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             _ = insert.Parameters.AddWithValue("$base", baseDirectory);
             insert.Parameters.Add("$snapshot", SqliteType.Blob).Value = snapshot;
             _ = insert.ExecuteNonQuery();
+        }
+
+        if (binary is not null)
+        {
+            InsertBinaryInput(transaction, operationId, binary);
         }
 
         if (request.WorkflowSelection is { } selection)
@@ -1192,7 +1214,10 @@ public sealed partial class DurableAcceptanceStore : IDisposable
     /// Requires accepted_not_dispatched. The caller must hold the operation execution lease and reserve results first.
     /// After commit, a crash must not cause implicit second execution. This state is not evidence a process started.
     /// </remarks>
-    public AcceptedWorkflow AuthorizeDispatch(string operationId)
+    public AcceptedWorkflow AuthorizeDispatch(string operationId) => AuthorizeDispatch(operationId, null, null);
+
+    internal AcceptedWorkflow AuthorizeDispatch(string operationId, BinaryWorkflowInput? verifiedBinary, byte[]? planBinding,
+        StoredPlanAuthorization? planAuthorization = null)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128)
         {
@@ -1225,18 +1250,24 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         {
             throw new InvalidDataException("Unexpected acceptance state.");
         }
-        // Verify snapshot integrity BEFORE authorizing dispatch.
-        using (SqliteCommand verify = connection.CreateCommand())
+        // Bind the dispatch to the exact admitted representation.
+        BinaryWorkflowInput? binary = ReadBinaryInput(operationId, transaction);
+        if (binary != verifiedBinary || (binary is not null &&
+            !string.Equals(binary.Document.Blob.Value, sha, StringComparison.OrdinalIgnoreCase)))
         {
-            verify.Transaction = transaction;
-            verify.CommandText = "SELECT snapshot FROM accepted_workflows WHERE operation_id=$id;";
-            _ = verify.Parameters.AddWithValue("$id", operationId);
-            byte[] snapshot = (byte[]?)verify.ExecuteScalar() ??
-                           throw new InvalidDataException("Missing manifest snapshot.");
-            if (!string.Equals(Hex(snapshot), sha, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException("Admission snapshot integrity failure.");
-            }
+            throw new InvalidDataException("Verified execution input does not match admission.");
+        }
+
+        if (binary is null)
+        {
+            VerifyLegacyDispatch(operationId, sha, transaction);
+        }
+        else
+        {
+            BindBinaryDispatch(transaction, operationId,
+                planBinding ?? throw new InvalidDataException("Binary dispatch requires an authorized plan binding."),
+                planAuthorization,
+                initial: state == "accepted_not_dispatched");
         }
 
         if (state == "accepted_not_dispatched")
@@ -1277,7 +1308,10 @@ public sealed partial class DurableAcceptanceStore : IDisposable
     /// This method does not acquire leases, schedule work or replace immutable accepted bytes.
     /// </remarks>
     /// <returns>SHA-256 of the bound checkpoint bytes.</returns>
-    public string ConfirmRunnerCheckpoint(string operationId, string runDirectory)
+    public string ConfirmRunnerCheckpoint(string operationId, string runDirectory) =>
+        ConfirmRunnerCheckpoint(operationId, runDirectory, null);
+
+    internal string ConfirmRunnerCheckpoint(string operationId, string runDirectory, StoredPlanAuthorization? planAuthorization)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 ||
             !Path.IsPathFullyQualified(runDirectory))
@@ -1294,6 +1328,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         string hash = Hex(bytes);
         bool processDomain = GetDomainKind(operationId) == "process";
         using SqliteTransaction transaction = connection.BeginTransaction();
+        BinaryWorkflowInput? binary = ReadBinaryInput(operationId, transaction);
+        if (binary is not null)
+        {
+            RequireBinaryDispatch(operationId, null, planAuthorization, transaction);
+        }
+
         using (SqliteCommand verify = connection.CreateCommand())
         {
             verify.Transaction = transaction;
@@ -1313,8 +1353,9 @@ public sealed partial class DurableAcceptanceStore : IDisposable
 
             if (reader.GetString(1) != "dispatch_authorized" ||
                 !string.Equals(reader.GetString(0), evidence.SnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(Hex((byte[])reader.GetValue(2)), reader.GetString(0),
-                    StringComparison.OrdinalIgnoreCase))
+                !string.Equals(binary?.Document.Blob.Value ?? Hex((byte[])reader.GetValue(2)), reader.GetString(0),
+                    StringComparison.OrdinalIgnoreCase) ||
+                (binary is not null && !PathComparer.Equals(binary.ResultsDirectory, directory)))
             {
                 throw new InvalidOperationException("dispatch_checkpoint_mismatch");
             }
@@ -1516,10 +1557,31 @@ public sealed partial class DurableAcceptanceStore : IDisposable
     }
 
     /// <summary>Returns the immutable accepted snapshot bytes, independent of the current manifest file.</summary>
-    public byte[] GetSnapshot(string operationId)
+    public byte[] GetSnapshot(string operationId) => ReadSnapshot(operationId, int.MaxValue);
+
+    private void VerifyLegacyDispatch(string operationId, string sha, SqliteTransaction transaction)
     {
+        using SqliteCommand verify = connection.CreateCommand();
+        verify.Transaction = transaction;
+        verify.CommandText = "SELECT snapshot FROM accepted_workflows WHERE operation_id=$id;";
+        _ = verify.Parameters.AddWithValue("$id", operationId);
+        byte[] snapshot = (byte[]?)verify.ExecuteScalar() ??
+                       throw new InvalidDataException("Missing manifest snapshot.");
+        if (!string.Equals(Hex(snapshot), sha, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Admission snapshot integrity failure.");
+        }
+    }
+
+    internal byte[] ReadSnapshot(string operationId, int maximumBytes)
+    {
+        if (ReadBinaryInput(operationId) is not null)
+        {
+            throw new InvalidOperationException("Native binary workflows have no legacy snapshot.");
+        }
+
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT snapshot,manifest_sha256 FROM accepted_workflows WHERE operation_id=$id;";
+        command.CommandText = "SELECT length(snapshot),manifest_sha256,snapshot FROM accepted_workflows WHERE operation_id=$id;";
         _ = command.Parameters.AddWithValue("$id", operationId);
         using SqliteDataReader reader = command.ExecuteReader();
         if (!reader.Read())
@@ -1527,7 +1589,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             throw new KeyNotFoundException("Unknown operation.");
         }
 
-        byte[] bytes = (byte[])reader.GetValue(0);
+        if (reader.GetInt64(0) > maximumBytes)
+        {
+            throw new InvalidDataException("Accepted snapshot exceeds the requested size limit.");
+        }
+
+        byte[] bytes = (byte[])reader.GetValue(2);
         return !string.Equals(Hex(bytes), reader.GetString(1), StringComparison.OrdinalIgnoreCase)
             ? throw new InvalidDataException("Admission snapshot integrity failure.")
             : bytes;

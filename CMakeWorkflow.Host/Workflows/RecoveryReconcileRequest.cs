@@ -5,4 +5,8 @@ public sealed record RecoveryReconcileRequest(
     long ExpectedRevision,
     string Decision,
     string Note,
-    bool ConfirmedQuiescent);
+    bool ConfirmedQuiescent)
+{
+    public string? RetryBinaryNode { get; init; }
+    public string? ExpectedCheckpointSha256 { get; init; }
+}

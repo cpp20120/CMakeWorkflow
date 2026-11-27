@@ -61,6 +61,7 @@ if ! docker exec "$container" runuser -u cmwf -- test -x /opt/cmwf/CMakeWorkflow
   exit 1
 fi
 
+
 binding="$(docker port "$container" 22/tcp | head -n 1)"
 [[ "$binding" == 127.0.0.1:* ]] || { echo "Unsafe SSH publish binding: $binding" >&2; exit 1; }
 port="${binding##*:}"
@@ -154,4 +155,25 @@ if [[ ${CMWF_SSHNET_TEST_VCPKG:-0} == 1 ]]; then
     "$tmp/publish/CMakeWorkflow" "$tmp/vcpkg-project" "$container"
   CMAKEWORKFLOW_EXPERIMENT_STORE="$tmp/experiments" bash tests/infrastructure/sshnet/experiment-vcpkg-upstream.sh \
     "$tmp/publish/CMakeWorkflow" "$tmp/vcpkg-upstream"
+fi
+
+if [[ ${CMWF_SSHNET_TEST_BINARY:-0} == 1 ]]; then
+  echo '=== Real sshd / SSH.NET: native workflow and managed Git experiment recovery ==='
+  dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -warnaserror -m:2 \
+    --artifacts-path "$tmp/native-build" -o "$tmp/native"
+  dotnet publish CMakeWorkflow.csproj -c Release -r linux-x64 -warnaserror -m:2 \
+    -p:PublishAot=false -p:RecoveryFaultInjection=true \
+    --artifacts-path "$tmp/fault-build" -o "$tmp/fault"
+  chmod -R a+rX "$tmp/native" "$tmp/fault"
+  docker cp "$tmp/native" "$container:/opt/cmwf-native"
+  docker cp "$tmp/fault" "$container:/opt/cmwf-fault"
+  export CMWF_SSHNET_EXE=/opt/cmwf-native/CMakeWorkflow
+  export CMWF_SSHNET_CONTROLLER_EXE="$tmp/native/CMakeWorkflow"
+  export CMWF_SSHNET_FAULT_EXE=/opt/cmwf-fault/CMakeWorkflow
+  export CMWF_SSHNET_TOOL_STORE=/home/cmwf/.local/share/CMakeWorkflow
+  dotnet build CMakeWorkflow.Host.Tests -c Release -r linux-x64 -warnaserror -m:2 -nr:false
+  suite=CMakeWorkflow.Host.Tests/bin/Release/net10.0/linux-x64/CMakeWorkflow.Host.Tests.dll
+  for scenario in binary-recovery binary-experiment; do
+    timeout --signal=TERM --kill-after=5s 720s dotnet "$suite" --sshnet-live-lifecycle-tests "$scenario"
+  done
 fi

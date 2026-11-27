@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Core.Persistence;
+using CMakeWorkflow.Storage.Documents;
 
 namespace CMakeWorkflow.Commands;
 
@@ -137,6 +138,36 @@ internal sealed class ArtifactCas(string directory)
             _ = reachable.Add(action.Digest);
         }
 
+        long count, size, protectedBlobs;
+        if (await files.HasDocumentFormatAsync(ct))
+        {
+            (CollectionResult result, size, protectedBlobs) =
+                await DocumentStore.CollectArtifactNamespaceAsync(files.Root, reachable, apply, ct);
+            count = result.BlobsRemoved;
+        }
+        else
+        {
+            (count, size) = CollectArtifacts(reachable, apply, ct);
+            protectedBlobs = reachable.Count;
+        }
+
+        if (apply)
+        {
+            foreach (string stage in Directory.EnumerateDirectories(files.Staging))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (ArtifactStoreFiles.IsCanonicalHex(Path.GetFileName(stage), 32))
+                {
+                    Directory.Delete(stage, recursive: true);
+                }
+            }
+        }
+
+        return new(apply, protectedBlobs, count, size);
+    }
+
+    private (long Count, long Size) CollectArtifacts(HashSet<string> reachable, bool apply, CancellationToken ct)
+    {
         long count = 0, size = 0;
         foreach (string path in Directory.EnumerateFiles(files.Blobs))
         {
@@ -155,19 +186,7 @@ internal sealed class ArtifactCas(string directory)
             }
         }
 
-        if (apply)
-        {
-            foreach (string stage in Directory.EnumerateDirectories(files.Staging))
-            {
-                ct.ThrowIfCancellationRequested();
-                if (ArtifactStoreFiles.IsCanonicalHex(Path.GetFileName(stage), 32))
-                {
-                    Directory.Delete(stage, recursive: true);
-                }
-            }
-        }
-
-        return new(apply, reachable.Count, count, size);
+        return (count, size);
     }
 
     private string Reference(string operation) => Path.Combine(files.Operations, operation + ".json");

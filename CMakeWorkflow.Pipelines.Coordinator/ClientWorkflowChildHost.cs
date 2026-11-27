@@ -15,11 +15,23 @@ public sealed class ClientWorkflowChildHost(CMakeWorkflowClient client, string? 
     private readonly CMakeWorkflowClient client = client ?? throw new ArgumentNullException(nameof(client));
 
     public string WorkspaceDirectory => client.Host.WorkspaceDirectory;
+    public PreparedWorkflow? VerifiedBinaryWorkflow { get; init; }
 
     public async Task ValidatePreflightAsync(PipelineChildLaunch launch,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(launch);
+        if (VerifiedBinaryWorkflow is { } prepared)
+        {
+            if (prepared.SchemaVersion != 1 || prepared.Manifest != launch.Manifest ||
+                prepared.ResultsDirectory != launch.ResultsDirectory || prepared.ManifestSha256 != launch.ManifestSha256)
+            {
+                throw new InvalidOperationException("host_binary_stage_not_equivalent");
+            }
+
+            return;
+        }
+
         WorkflowPreflightResult result = await client.Workflows.PreflightAsync(
             new WorkflowPreflightOptions(launch.Manifest, launch.ManifestSha256, launch.Jobs,
                 launch.ResultsDirectory)
@@ -47,7 +59,14 @@ public sealed class ClientWorkflowChildHost(CMakeWorkflowClient client, string? 
     {
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentException.ThrowIfNullOrWhiteSpace(childRequestId);
-        WorkflowOperation accepted = await client.Workflows.StartAsync(
+        WorkflowOperation accepted = VerifiedBinaryWorkflow is not null
+            ? await client.Executions.StartAsync(new("cmake-capnp-v1", childRequestId, launch.Manifest,
+                launch.ManifestSha256, launch.Jobs, launch.ResultsDirectory)
+            {
+                SourceSnapshotId = sourceSnapshotId,
+                HistoryPolicy = historyPolicy
+            }, cancellationToken)
+            : await client.Workflows.StartAsync(
             new StartWorkflowOptions(childRequestId, launch.Manifest, launch.ManifestSha256,
                 launch.Jobs, launch.ResultsDirectory)
             {

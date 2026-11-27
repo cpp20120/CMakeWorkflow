@@ -24,7 +24,7 @@ public sealed partial class DoctorSession
         // precedes immutable acceptance and survives loss of the RPC response.
         string manifest = paths.Require(request.Manifest);
         string output = paths.Require(request.ResultsDirectory);
-        return Task.FromResult(HostOperationComposition.Start(durableExecutions, paths.WorkspaceDirectory,
-            request with { Manifest = manifest, ResultsDirectory = output }));
+        return HostOperationComposition.StartAsync(durableExecutions, paths.WorkspaceDirectory,
+            request with { Manifest = manifest, ResultsDirectory = output }, cancellationToken);
     }
 }

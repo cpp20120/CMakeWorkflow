@@ -16,6 +16,36 @@ using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 using IHostRpc = CMakeWorkflow.Host.Protocol.IHostRpc;
 
+if (args is ["--measure-binary-workflow", string current, string archived])
+{
+    await BinaryWorkflowWireTests.MeasureAsync(current, archived);
+    return;
+}
+
+if (args is ["--binary-action-cache-tests", string cacheCli])
+{
+    await BinaryWorkflowWireTests.VerifyActionCacheAsync(cacheCli);
+    return;
+}
+
+if (args is ["--binary-operation-kinds-tests", string executable])
+{
+    await BinaryWorkflowWireTests.VerifyAllKindsAsync(executable);
+    return;
+}
+
+if (args.Length is >= 3 and <= 5 && args[0] == "--binary-workflow-wire-tests")
+{
+    await BinaryWorkflowWireTests.RunAsync(args[1], args[2], args.ElementAtOrDefault(3), args.ElementAtOrDefault(4));
+    return;
+}
+
+if (args.Length is >= 1 and <= 3 && args[0] == "--workflow-archive-tests")
+{
+    await WorkflowArchiveTests.RunAsync(args.Length > 1 ? args[1] : null, args.Length > 2 ? args[2] : null);
+    return;
+}
+
 if (args is ["--sdk-catalog-tests"])
 {
     ProjectSdkCatalogTests.Run();
@@ -181,6 +211,7 @@ if (args.Length > 0 && args[0] == "--source-binding-tests")
     try
     {
         await SourceBindingExecutionTests.RunAsync(sourceRoot);
+        await SourceBindingExecutionTests.RunAsync(sourceRoot, binary: true);
         await SourceBindingRecoveryTests.RunAsync(sourceRoot);
     }
     finally

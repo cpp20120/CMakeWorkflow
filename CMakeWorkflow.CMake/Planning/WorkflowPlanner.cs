@@ -25,107 +25,32 @@ public static class WorkflowPlanner
     // Parse a durably accepted manifest snapshot while preserving its ORIGINAL path
     // as the base for all relative CMake source/build/working directories.
     // The snapshot bytes must be verified by the durable acceptance store before use.
-    public static async Task<WorkflowPlan> LoadSnapshotAsync(string originalManifestPath, byte[] snapshot,
+    public static Task<WorkflowPlan> LoadSnapshotAsync(string originalManifestPath, byte[] snapshot,
         IReadOnlyList<string> only, string? controllerDirectory, CancellationToken ct,
         Action<string>? readGuard = null)
     {
-        ArgumentNullException.ThrowIfNull(only);
         ArgumentNullException.ThrowIfNull(snapshot);
+        ct.ThrowIfCancellationRequested();
+        WorkflowDocument document = JsonSerializer.Deserialize(snapshot, WorkflowDefinitionJson.Default.WorkflowDocument)
+                       ?? throw new ArgumentException("Empty workflow document.");
+        return LoadDocumentAsync(originalManifestPath, document,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(snapshot)), only, controllerDirectory, ct, readGuard);
+    }
+
+    /// <summary>Plans a verified in-memory workflow with its original provenance and path base.</summary>
+    public static async Task<WorkflowPlan> LoadDocumentAsync(string originalManifestPath, WorkflowDocument document,
+        string manifestHash, IReadOnlyList<string> only, string? controllerDirectory, CancellationToken ct,
+        Action<string>? readGuard = null)
+    {
+        ArgumentNullException.ThrowIfNull(only);
+        ArgumentNullException.ThrowIfNull(document);
         string file = Path.GetFullPath(originalManifestPath);
         readGuard?.Invoke(file);
         ct.ThrowIfCancellationRequested();
-        byte[] bytes = snapshot;
-        WorkflowDocument document = JsonSerializer.Deserialize(bytes, WorkflowDefinitionJson.Default.WorkflowDocument)
-                       ?? throw new ArgumentException("Empty workflow document.");
-        if (document.SchemaVersion is not (1 or 2))
-        {
-            throw new ArgumentException("Workflow schemaVersion must be 1 or 2.");
-        }
-
-        if (document.Contexts is null || document.Nodes is null || document.Nodes.Count == 0)
-        {
-            throw new ArgumentException("Workflow requires contexts and a nonempty nodes array.");
-        }
-
-        Dictionary<string, WorkflowNode> nodes = new(StringComparer.Ordinal);
-        foreach (WorkflowNode? node in document.Nodes)
-        {
-            if (node is null || !IsIdentifier(node.Id) || !nodes.TryAdd(node.Id, node))
-            {
-                throw new ArgumentException(
-                    "Node IDs must be unique nonempty identifiers (letters, digits, '.', '_', '-').");
-            }
-
-            ValidateNode(node);
-            if (node.Kind is "profile_snapshot" or "format_check" && document.SchemaVersion != 2)
-            {
-                throw new ArgumentException($"{node.Id}: {node.Kind} requires schemaVersion 2.");
-            }
-            if (node.ActionCache && document.SchemaVersion != 2)
-            {
-                throw new ArgumentException($"{node.Id}: actionCache requires schemaVersion 2.");
-            }
-            if (node.Metrics is not null)
-            {
-                if (document.SchemaVersion != 2 || node.Kind != "run" || node.ActionCache)
-                {
-                    throw new ArgumentException($"{node.Id}: metrics requires an uncached schema-v2 run.");
-                }
-
-                BenchmarkMetricExtractor.Validate(node.Metrics);
-            }
-            if (node.BenchmarkTrial is not null && (document.SchemaVersion != 2 || node.Kind != "run" || node.ActionCache))
-            {
-                throw new ArgumentException($"{node.Id}: benchmarkTrial requires an uncached schema-v2 run.");
-            }
-        }
-
-        string[] orderedNodeIds = [.. document.Nodes.Select(node => node.Id)];
-        HashSet<string> nodeIds = new(nodes.Keys, StringComparer.Ordinal);
-        Dictionary<string, string[]> dependencies = new(StringComparer.Ordinal);
-        foreach (WorkflowNode node in document.Nodes)
-        {
-            List<string> deps = [.. node.DependsOn];
-            foreach (WorkflowArtifactInput input in node.Inputs)
-            {
-                if (input.From is null)
-                {
-                    continue;
-                }
-
-                if (!nodes.TryGetValue(input.From, out WorkflowNode? producer)
-                    || !producer.Outputs.Any(output => output.Name == input.Artifact))
-                {
-                    throw new ArgumentException($"{node.Id}: artifact reference must name a declared producer output.");
-                }
-
-                deps.Add(input.From);
-            }
-
-            if (node.Kind is "run" or "profile")
-            {
-                if (node.From is null || !nodes.TryGetValue(node.From, out WorkflowNode? source) || source.Kind != "build")
-                {
-                    throw new ArgumentException($"{node.Id}: from must refer to a build node.");
-                }
-
-                deps.Add(node.From);
-            }
-            else if (node.Kind != "profile_snapshot" &&
-                     (node.Context is null || !document.Contexts.ContainsKey(node.Context)))
-            {
-                throw new ArgumentException($"{node.Id}: unknown context '{node.Context}'.");
-            }
-
-            WorkflowDag.ValidateDependencies(node.Id, deps, nodeIds);
-            dependencies[node.Id] = [.. deps.Distinct(StringComparer.Ordinal)];
-        }
-
-        (List<string>? orderedIds, HashSet<string>? selected) = WorkflowDag.Select(orderedNodeIds, dependencies, only);
-        List<WorkflowNode> ordered = [.. orderedIds.Select(id => nodes[id])];
+        (List<WorkflowNode> ordered, Dictionary<string, string[]> dependencies, Dictionary<string, WorkflowNode> nodes) = ValidateGraph(document, only);
 
         string directory = Path.GetDirectoryName(file)!;
-        foreach (WorkflowNode? node in ordered.Where(n => selected.Contains(n.Id)))
+        foreach (WorkflowNode? node in ordered)
         {
             foreach (WorkflowArtifactInput? input in node.Inputs.Where(x => x.Path is not null))
             {
@@ -142,7 +67,7 @@ public static class WorkflowPlanner
             new(StringComparer
                 .Ordinal);
         List<PlannedNode> plan = [];
-        foreach (WorkflowNode? node in ordered.Where(n => selected.Contains(n.Id)))
+        foreach (WorkflowNode? node in ordered)
         {
             if (node.Kind == "profile_snapshot")
             {
@@ -250,7 +175,7 @@ public static class WorkflowPlanner
 
                 ObservedBuildContext observed = await CMakeInspection.InspectAsync(path, ct, readGuard);
                 bool hasConfigure = ordered.Any(n =>
-                    selected.Contains(n.Id) && n.Kind == "configure" && n.Context == contextName);
+                    n.Kind == "configure" && n.Context == contextName);
                 // A configure barrier opts into Managed. An unmanaged tree is
                 // observation-only until mode: adopt is explicitly declared;
                 // AllowUnverified changes the provenance policy, not that boundary.
@@ -489,7 +414,7 @@ public static class WorkflowPlanner
             }
         }
 
-        return new WorkflowPlan(file, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), plan);
+        return new WorkflowPlan(file, manifestHash, plan);
     }
 
     private static HashSet<string> Ancestors(string node, Dictionary<string, string[]> dependencies)
@@ -514,6 +439,97 @@ public static class WorkflowPlanner
                                                        && value is not "." and not ".."
                                                        && value.All(c =>
                                                            char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
+
+    internal static (List<WorkflowNode> Ordered, Dictionary<string, string[]> Dependencies, Dictionary<string, WorkflowNode> Nodes) ValidateGraph(
+        WorkflowDocument document, IReadOnlyList<string> only)
+    {
+        if (document.SchemaVersion is not (1 or 2))
+        {
+            throw new ArgumentException("Workflow schemaVersion must be 1 or 2.");
+        }
+
+        if (document.Contexts is null || document.Nodes is null || document.Nodes.Count == 0)
+        {
+            throw new ArgumentException("Workflow requires contexts and a nonempty nodes array.");
+        }
+
+        Dictionary<string, WorkflowNode> nodes = new(StringComparer.Ordinal);
+        foreach (WorkflowNode? node in document.Nodes)
+        {
+            if (node is null || !IsIdentifier(node.Id) || !nodes.TryAdd(node.Id, node))
+            {
+                throw new ArgumentException(
+                    "Node IDs must be unique nonempty identifiers (letters, digits, '.', '_', '-').");
+            }
+
+            ValidateNode(node);
+            if (node.Kind is "profile_snapshot" or "format_check" && document.SchemaVersion != 2)
+            {
+                throw new ArgumentException($"{node.Id}: {node.Kind} requires schemaVersion 2.");
+            }
+            if (node.ActionCache && document.SchemaVersion != 2)
+            {
+                throw new ArgumentException($"{node.Id}: actionCache requires schemaVersion 2.");
+            }
+            if (node.Metrics is not null)
+            {
+                if (document.SchemaVersion != 2 || node.Kind != "run" || node.ActionCache)
+                {
+                    throw new ArgumentException($"{node.Id}: metrics requires an uncached schema-v2 run.");
+                }
+
+                BenchmarkMetricExtractor.Validate(node.Metrics);
+            }
+            if (node.BenchmarkTrial is not null && (document.SchemaVersion != 2 || node.Kind != "run" || node.ActionCache))
+            {
+                throw new ArgumentException($"{node.Id}: benchmarkTrial requires an uncached schema-v2 run.");
+            }
+        }
+
+        string[] orderedNodeIds = [.. document.Nodes.Select(node => node.Id)];
+        HashSet<string> nodeIds = new(nodes.Keys, StringComparer.Ordinal);
+        Dictionary<string, string[]> dependencies = new(StringComparer.Ordinal);
+        foreach (WorkflowNode node in document.Nodes)
+        {
+            List<string> deps = [.. node.DependsOn];
+            foreach (WorkflowArtifactInput input in node.Inputs)
+            {
+                if (input.From is null)
+                {
+                    continue;
+                }
+
+                if (!nodes.TryGetValue(input.From, out WorkflowNode? producer)
+                    || !producer.Outputs.Any(output => output.Name == input.Artifact))
+                {
+                    throw new ArgumentException($"{node.Id}: artifact reference must name a declared producer output.");
+                }
+
+                deps.Add(input.From);
+            }
+
+            if (node.Kind is "run" or "profile")
+            {
+                if (node.From is null || !nodes.TryGetValue(node.From, out WorkflowNode? source) || source.Kind != "build")
+                {
+                    throw new ArgumentException($"{node.Id}: from must refer to a build node.");
+                }
+
+                deps.Add(node.From);
+            }
+            else if (node.Kind != "profile_snapshot" &&
+                     (node.Context is null || !document.Contexts.ContainsKey(node.Context)))
+            {
+                throw new ArgumentException($"{node.Id}: unknown context '{node.Context}'.");
+            }
+
+            WorkflowDag.ValidateDependencies(node.Id, deps, nodeIds);
+            dependencies[node.Id] = [.. deps.Distinct(StringComparer.Ordinal)];
+        }
+
+        (List<string>? orderedIds, HashSet<string>? selected) = WorkflowDag.Select(orderedNodeIds, dependencies, only);
+        return ([.. orderedIds.Where(selected.Contains).Select(id => nodes[id])], dependencies, nodes);
+    }
 
     private static void ValidateNode(WorkflowNode n)
     {

@@ -28,7 +28,7 @@ public sealed partial class DoctorSession
             throw new ArgumentException("The dependency approval SHA-256 differs from the approved experiment plan.");
         }
         string stage = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "experiments", request.ExperimentId);
-        string manifest = RequireStagePath(paths, Path.Combine(stage, "workflow.json"));
+        string manifest = RequireStagePath(paths, Path.Combine(stage, request.Binary ? "workflow.capnp" : "workflow.json"));
         string source = RequireStagePath(paths, Path.Combine(stage, "source"));
         string binding = RequireStagePath(paths, Path.Combine(stage, "source.sha256"));
         paths.Read(manifest);
@@ -44,26 +44,51 @@ public sealed partial class DoctorSession
         SnapshotManifest snapshot = await lore.InspectAsync(request.SourceSnapshotId, token);
         await WorkflowSourceSnapshotExecution.VerifyExistingMaterializationAsync(snapshot, source, token);
         VcpkgProjectPlan plan = await VcpkgProjects.PlanSnapshotAsync(source, request.Commit, request.SourceSnapshotId, token);
-        byte[] bytes = VcpkgProjects.Serialize(plan);
-        WorkflowDocument workflow = JsonSerializer.Deserialize(workflowBytes, WorkflowJson.Default.WorkflowDocument)
-            ?? throw new InvalidDataException("Missing staged workflow.");
-        if (ManagedEnvironmentLocks.Hash(bytes) != request.PlanSha256 || workflow.Contexts.Count != 1 ||
+        WorkflowDocument workflow = request.Binary ? VerifyFrame(workflowBytes, request.ManifestSha256)
+            : JsonSerializer.Deserialize(workflowBytes, WorkflowJson.Default.WorkflowDocument)
+                ?? throw new InvalidDataException("Missing staged workflow.");
+        if (workflow.Contexts.Count != 1 ||
             workflow.Contexts.Values.Single().Toolchain is not { EnvironmentProfileId: "linux-managed-clang" } tooling ||
-            tooling.VcpkgProjectSha256 != request.PlanSha256 || tooling.EnvironmentLockSha256 != plan.EnvironmentSha256)
+            tooling.VcpkgProjectSha256 != request.PlanSha256 || tooling.EnvironmentLockSha256 is not { } environment)
         {
             throw new InvalidDataException("Staged workflow does not bind the approved dependency and environment plan.");
         }
 
+        if (request.Binary)
+        {
+            _ = await ManagedEnvironmentLocks.ReadBinaryAsync(environment, token);
+            plan = plan with { EnvironmentSha256 = environment };
+        }
+        byte[] bytes = request.Binary ? BinaryVcpkgPlan.Encode(plan) : VcpkgProjects.Serialize(plan);
+        if ((request.Binary ? BinaryVcpkgPlan.Identity(bytes) : ManagedEnvironmentLocks.Hash(bytes)) != request.PlanSha256 ||
+            environment != plan.EnvironmentSha256)
+        {
+            throw new InvalidDataException("The dependency plan differs from the staged manifest.");
+        }
+
         if (request.ApprovalSha256 is not null)
         {
-            await VcpkgProjects.InstallAsync(plan, request.PlanSha256, source, token);
+            if (request.Binary)
+            {
+                await VcpkgProjects.InstallBinaryAsync(plan, request.PlanSha256, source, token);
+            }
+            else
+            {
+                await VcpkgProjects.InstallAsync(plan, request.PlanSha256, source, token);
+            }
         }
         ManagedVcpkgInstallation? installed = request.VerifyInstalled || request.ApprovalSha256 is not null
             ? await VcpkgProjects.ResolveAsync(request.PlanSha256, request.SourceSnapshotId, source, token) : null;
-        return new ExperimentDependencyResult(request.PlanSha256, Encoding.UTF8.GetString(bytes), installed?.PackageTreeSha256)
-        {
-            DownloadTreeSha256 = installed?.DownloadTreeSha256
-        };
+        return request.Binary && installed is { BinaryReceiptIdentity: null }
+            ? throw new InvalidDataException("The approved native dependency plan has no native receipt.")
+            : new ExperimentDependencyResult(request.PlanSha256,
+                Encoding.UTF8.GetString(request.Binary ? VcpkgProjects.Serialize(plan) : bytes),
+                installed?.PackageTreeSha256)
+            {
+                DownloadTreeSha256 = installed?.DownloadTreeSha256,
+                BinaryPlan = request.Binary ? (ReadOnlyMemory<byte>)bytes : null,
+                ReceiptIdentity = installed?.BinaryReceiptIdentity
+            };
     }, ct);
     private static async Task ValidateSourceDependenciesAsync(WorkspaceReadPaths paths, WorkflowStartRequest request,
         CancellationToken ct)

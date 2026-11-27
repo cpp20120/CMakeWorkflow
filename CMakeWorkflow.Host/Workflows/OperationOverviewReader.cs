@@ -24,7 +24,7 @@ internal static class OperationOverviewReader
         }
 
         ct.ThrowIfCancellationRequested();
-        string database = Path.Combine(paths.WorkspaceDirectory, ".cmakeworkflow", "operations.sqlite");
+        string database = WorkflowLedgerPath.Resolve(paths.WorkspaceDirectory);
         if (!File.Exists(database))
         {
             throw new KeyNotFoundException("Unknown operation.");

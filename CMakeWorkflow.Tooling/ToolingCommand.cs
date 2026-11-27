@@ -49,6 +49,7 @@ public static class ToolingCommand
             bool fallback = true;
             ToolResolutionPolicy? policy = null;
             string? approval = null;
+            string? binaryPlan = null;
             bool json = false;
             bool dryRun = false;
             bool yes = false;
@@ -64,6 +65,8 @@ public static class ToolingCommand
                         policy = ParsePolicy(args[++i]); break;
                     case "--plan-sha" when i + 1 < args.Length:
                         approval = args[++i]; break;
+                    case "--binary-plan" when i + 1 < args.Length && binaryPlan is null:
+                        binaryPlan = args[++i]; break;
                     case "--version" when i + 1 < args.Length:
                         versions.Add(ToolchainEnvironmentCommand.ParseVersion(args[++i])); break;
                     case "--no-fallback": fallback = false; break;
@@ -93,6 +96,11 @@ public static class ToolingCommand
             if (approval is not null && (policy is null || action != "setup"))
             {
                 throw new ArgumentException("--plan-sha requires tooling setup with an explicit --tool-policy.");
+            }
+
+            if (binaryPlan is not null && (policy is null || action is not ("plan" or "setup") || dryRun))
+            {
+                throw new ArgumentException("--binary-plan requires tooling plan or setup with an explicit --tool-policy.");
             }
 
             if (action == "list")
@@ -139,15 +147,32 @@ public static class ToolingCommand
                     ToolchainEnvironment.ReleaseForTool(selectedEnvironment, tool)
             };
             ToolingPlan plan = await service.PlanAsync(profiles, manager, fallback, installDirectory, ct, resolutionPolicy: policy);
+            byte[]? frame = binaryPlan is null ? null : BinaryToolingPlan.Encode(plan);
             if (action is "doctor" or "plan" || dryRun)
             {
+                if (binaryPlan is not null)
+                {
+                    await ManagedToolchainWire.PublishAsync(binaryPlan, frame!, ct);
+                }
                 PrintPlan(plan, json);
                 if (policy is not null)
                 {
-                    await Console.Error.WriteLineAsync("Plan SHA-256: " + ToolingPlanApproval.Compute(plan));
+                    await Console.Error.WriteLineAsync(frame is null
+                        ? "Plan SHA-256: " + ToolingPlanApproval.Compute(plan)
+                        : "Binary plan approval: " + BinaryToolingPlan.Identity(frame));
                 }
 
                 return action == "doctor" && !plan.Ready ? 2 : 0;
+            }
+
+            if (binaryPlan is not null)
+            {
+                byte[] approvedFrame = await ManagedToolchainWire.ReadBoundedAsync(binaryPlan, ct);
+                if (!approvedFrame.AsSpan().SequenceEqual(frame) ||
+                    !string.Equals(approval, BinaryToolingPlan.Identity(approvedFrame), StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("Tooling setup differs from the reviewed binary plan or its approval.");
+                }
             }
 
             if (plan.Ready)
@@ -173,7 +198,7 @@ public static class ToolingCommand
                     "tooling setup changes the machine; inspect `tooling plan` and pass --yes to apply it.");
             }
 
-            if (policy is not null && !string.Equals(approval, ToolingPlanApproval.Compute(plan),
+            if (binaryPlan is null && policy is not null && !string.Equals(approval, ToolingPlanApproval.Compute(plan),
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new ArgumentException("Managed setup requires --plan-sha from the reviewed tooling plan.");

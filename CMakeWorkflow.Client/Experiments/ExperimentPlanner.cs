@@ -13,8 +13,14 @@ public static class ExperimentPlanner
 {
     /// <summary>Publishes plan.json and source.zip in a SHA-256-named directory under the supplied store.</summary>
     /// <remarks>Does not connect to the Host or install dependencies. Review the returned plan ID before execution.</remarks>
-    public static async Task<PreparedExperimentPlan> CreateAsync(ExperimentPlanOptions options, string storeDirectory,
-        CancellationToken ct = default)
+    public static Task<PreparedExperimentPlan> CreateAsync(ExperimentPlanOptions options, string storeDirectory,
+        CancellationToken ct = default) => CreateAsync(options, storeDirectory, null, ct);
+
+    internal sealed record BinaryPlanning(string? EnvironmentLockIdentity, Func<WorkflowDocument, byte[]> EncodeWorkflow,
+        Func<VcpkgProjectPlan, byte[]> EncodeDependencyPlan);
+
+    internal static async Task<PreparedExperimentPlan> CreateAsync(ExperimentPlanOptions options, string storeDirectory,
+        BinaryPlanning? native, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (OperatingSystem.IsWindows() || (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()))
@@ -34,6 +40,13 @@ public static class ExperimentPlanner
         {
             throw new ArgumentException("Select a configure preset, or specify a managed Clang configuration. Vcpkg requires managed Clang.", nameof(options));
         }
+        bool needsNativeLock = native is not null && options.ConfigurePreset is null;
+        if (needsNativeLock
+            ? native?.EnvironmentLockIdentity is not { Length: 64 } identity || !identity.All(char.IsAsciiHexDigitLower)
+            : native?.EnvironmentLockIdentity is not null)
+        {
+            throw new ArgumentException("Native managed experiments require an approved binary environment lock identity.", nameof(options));
+        }
         string[] args = [.. options.BenchmarkArguments];
         string[] targets = [.. options.BuildTargets];
         if (options.Repeats is < 1 or > 200 ||
@@ -51,10 +64,11 @@ public static class ExperimentPlanner
         {
             ExperimentPlan plan = await BuildAsync(options.Repository, options.Revision, host, options.ConfigurePreset,
                 options.Configuration, targets, options.BenchmarkTarget, options.Repeats,
-                args, options.Profile, options.Vcpkg, Path.Combine(scratch, "source.zip"), ct);
+                args, options.Profile, options.Vcpkg, native,
+                Path.Combine(scratch, "source.zip"), ct);
             plan = plan with { Placement = options.Placement };
             byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan, ExperimentPlanJson.Default.ExperimentPlan);
-            string id = ExperimentPlan.Hash(bytes);
+            string id = ExperimentPlan.Approval(bytes, native is not null);
             string destination = Path.Combine(root, id);
             await File.WriteAllBytesAsync(Path.Combine(scratch, "plan.json"), bytes, ct);
             ct.ThrowIfCancellationRequested();
@@ -84,7 +98,8 @@ public static class ExperimentPlanner
 
     private static async Task<ExperimentPlan> BuildAsync(string repository, string revision, ExperimentHost host,
         string? preset, string? configuration, string[] targets, string? benchmark, int repeats,
-        string[] arguments, bool profile, bool vcpkg, string archivePath, CancellationToken ct)
+        string[] arguments, bool profile, bool vcpkg, BinaryPlanning? native, string archivePath,
+        CancellationToken ct)
     {
         if (!Uri.TryCreate(repository, UriKind.Absolute, out Uri? uri) ||
             (uri.Scheme != "https" && !(uri.IsFile && uri.Host.Length == 0 && repository.StartsWith("file:///", StringComparison.Ordinal))) ||
@@ -200,16 +215,26 @@ public static class ExperimentPlanner
             VcpkgProjectPlan? dependencies = vcpkg
                 ? await VcpkgProjectPlanning.PlanSnapshotAsync(checkout.FullName, commit, snapshotId, ct)
                 : null;
-            string? dependencyDigest = dependencies is null ? null :
-                ManagedEnvironmentIdentity.Hash(VcpkgProjectPlanning.Serialize(dependencies));
-            string manifest = CreateManifest(preset, configuration, targets, benchmark, repeats, arguments, profile,
-                dependencyDigest, dependencies?.EnvironmentSha256);
-            return manifest.Length <= ExperimentStageRequest.MaximumManifestCharacters
-                ? new(2, uri.AbsoluteUri, revision, commit, host, snapshotId,
-                    ExperimentPlan.Hash(Encoding.UTF8.GetBytes(manifest)), manifest, [])
+            string? environmentLock = native?.EnvironmentLockIdentity;
+            if (native is not null && dependencies is not null)
+            {
+                dependencies = dependencies with { EnvironmentSha256 = environmentLock! };
+            }
+            string? dependencyDigest = dependencies is null ? null : native is not null
+                ? ExperimentPlan.NativeDependencyIdentity(native.EncodeDependencyPlan(dependencies))
+                : ManagedEnvironmentIdentity.Hash(VcpkgProjectPlanning.Serialize(dependencies));
+            WorkflowDocument document = CreateManifest(preset, configuration, targets, benchmark, repeats, arguments, profile,
+                dependencyDigest, environmentLock ?? dependencies?.EnvironmentSha256);
+            byte[]? frame = native?.EncodeWorkflow(document);
+            string manifest = native is not null ? "" : JsonSerializer.Serialize(document, ExperimentPlanJson.Default.WorkflowDocument) + "\n";
+            return manifest.Length <= ExperimentStageRequest.MaximumManifestCharacters &&
+                (frame is null || frame.Length <= WorkflowManifestPreparation.MaximumBytes)
+                ? new(native is not null ? 3 : 2, uri.AbsoluteUri, revision, commit, host, snapshotId,
+                    ExperimentPlan.Hash(frame ?? Encoding.UTF8.GetBytes(manifest)), manifest, [])
                 {
                     Bundle = new(archiveHash, archive.Length, evidence.Count),
-                    DependencyPlanSha256 = dependencyDigest
+                    DependencyPlanSha256 = dependencyDigest,
+                    BinaryManifest = frame is null ? null : (ReadOnlyMemory<byte>)frame
                 }
                 : throw new ArgumentException("Generated manifest is too large. Reduce benchmark arguments or repetitions.");
         }
@@ -257,7 +282,7 @@ public static class ExperimentPlanner
         return executable;
     }
 
-    private static string CreateManifest(string? preset, string? configuration, string[] targets,
+    private static WorkflowDocument CreateManifest(string? preset, string? configuration, string[] targets,
         string? benchmark, int repeats, string[] arguments, bool profile, string? dependencyDigest, string? environmentDigest)
     {
         const string context = "experiment";
@@ -317,7 +342,7 @@ public static class ExperimentPlanner
                 });
             }
         }
-        return JsonSerializer.Serialize(document, ExperimentPlanJson.Default.WorkflowDocument) + "\n";
+        return document;
     }
 
     private static Dictionary<string, string?> GetGitEnvironment()
