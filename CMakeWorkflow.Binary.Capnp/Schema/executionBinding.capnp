@@ -15,6 +15,9 @@ struct DispatchBinding {
   jobs @9 :UInt32;
   nodes @10 :List(NodeBinding);
   sourceSnapshotId @11 :Text;
+  manifestArtifactPolicy @12 :UInt16;
+  manifestArtifactRoot @13 :Text;
+  manifestInputPrefix @14 :Text;
 }
 
 struct NodeBinding {

@@ -146,6 +146,10 @@ public static class VcpkgProjects
             };
             byte[] receipt = binary ? BinaryVcpkgDocuments.EncodeReceipt(evidence)
                 : JsonSerializer.SerializeToUtf8Bytes(evidence, ManagedEnvironmentJson.Default.VcpkgProjectReceipt);
+            if (binary)
+            {
+                await ProvisioningInterruption.PauseAsync("before-dependency-receipt", ct);
+            }
             if (binary || plan.SchemaVersion == 2)
             {
                 receipt = await PinReceiptAsync(store, digest, evidence, receipt, binary, ct);

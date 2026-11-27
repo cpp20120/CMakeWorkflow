@@ -16,6 +16,12 @@ using CMakeWorkflow.Tooling.Tools;
 using StreamJsonRpc;
 using IHostRpc = CMakeWorkflow.Host.Protocol.IHostRpc;
 
+if (args is ["--managed-provisioning-fault-tests", string cli, string fault, string verifiedStore])
+{
+    await ManagedProvisioningFaultTests.RunAsync(cli, fault, verifiedStore);
+    return;
+}
+
 if (args is ["--measure-binary-workflow", string current, string archived])
 {
     await BinaryWorkflowWireTests.MeasureAsync(current, archived);
@@ -28,15 +34,28 @@ if (args is ["--binary-action-cache-tests", string cacheCli])
     return;
 }
 
+if (args is ["--indexed-action-cache-tests", string indexedCli, string olderCollector])
+{
+    await BinaryWorkflowWireTests.VerifyActionCacheAsync(indexedCli, olderCollector);
+    return;
+}
+
+if (args is ["--historical-action-cache-tests", string currentCli, string producer])
+{
+    await BinaryWorkflowWireTests.VerifyActionCacheAsync(currentCli, legacyProducer: producer);
+    return;
+}
+
 if (args is ["--binary-operation-kinds-tests", string executable])
 {
     await BinaryWorkflowWireTests.VerifyAllKindsAsync(executable);
     return;
 }
 
-if (args.Length is >= 3 and <= 5 && args[0] == "--binary-workflow-wire-tests")
+if (args.Length is >= 3 and <= 6 && args[0] == "--binary-workflow-wire-tests")
 {
-    await BinaryWorkflowWireTests.RunAsync(args[1], args[2], args.ElementAtOrDefault(3), args.ElementAtOrDefault(4));
+    await BinaryWorkflowWireTests.RunAsync(args[1], args[2], args.ElementAtOrDefault(3), args.ElementAtOrDefault(4),
+        args.ElementAtOrDefault(5));
     return;
 }
 

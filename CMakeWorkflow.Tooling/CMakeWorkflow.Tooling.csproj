@@ -4,6 +4,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <DefineConstants Condition="'$(RecoveryFaultInjection)' == 'true'">$(DefineConstants);RECOVERY_FAULT_INJECTION</DefineConstants>
     </PropertyGroup>
     <ItemGroup>
         <ProjectReference Include="../CMakeWorkflow.Binary.Capnp/CMakeWorkflow.Binary.Capnp.csproj"/>

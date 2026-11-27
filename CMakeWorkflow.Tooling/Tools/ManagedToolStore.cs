@@ -154,6 +154,7 @@ internal sealed class ManagedToolStore(VerifiedCMakeInstaller installer)
 
             await VerifyTreeAsync(files, release, ct);
 
+            await ProvisioningInterruption.PauseAsync("before-tool-publication", ct);
             ct.ThrowIfCancellationRequested();
             Directory.Move(files, destination);
         }

@@ -7,7 +7,7 @@ namespace Capnp.Generated.ExecutionBinding;
 public static partial class DispatchBinding
 {
     public const ulong SchemaId = 0x976211FE7928C946UL;
-    public static StructLayout Layout => new(1, 10);
+    public static StructLayout Layout => new(1, 12);
     public static Reader ReadRoot(MessageReader message) => new(message.Root.AsStruct());
     public static Builder InitRoot(MessageBuilder message) => new(message.InitRoot(Layout));
     public readonly ref struct NodesListReader
@@ -68,6 +68,13 @@ public static partial class DispatchBinding
         public bool HasSourceSnapshotId => !(wire.GetPointer(9)).IsNull;
         public ReadOnlySpan<byte> SourceSnapshotIdUtf8 => (wire.GetPointer(9)).AsText();
         public string? DecodeSourceSnapshotId() => (wire.GetPointer(9)).DecodeText();
+        public ushort ManifestArtifactPolicy => unchecked((ushort)wire.ReadScalar(16, 16, 0x0UL));
+        public bool HasManifestArtifactRoot => !(wire.GetPointer(10)).IsNull;
+        public ReadOnlySpan<byte> ManifestArtifactRootUtf8 => (wire.GetPointer(10)).AsText();
+        public string? DecodeManifestArtifactRoot() => (wire.GetPointer(10)).DecodeText();
+        public bool HasManifestInputPrefix => !(wire.GetPointer(11)).IsNull;
+        public ReadOnlySpan<byte> ManifestInputPrefixUtf8 => (wire.GetPointer(11)).AsText();
+        public string? DecodeManifestInputPrefix() => (wire.GetPointer(11)).DecodeText();
     }
     public readonly ref struct Builder
     {
@@ -95,6 +102,11 @@ public static partial class DispatchBinding
         public void ClearNodes() { wire.GetPointer(8).Clear(); }
         public void SetSourceSnapshotId(string? value) { wire.GetPointer(9).SetText(value); }
         public void ClearSourceSnapshotId() { wire.GetPointer(9).Clear(); }
+        public void SetManifestArtifactPolicy(ushort value) { wire.SetScalar(16, 16, unchecked((ulong)value), 0x0UL); }
+        public void SetManifestArtifactRoot(string? value) { wire.GetPointer(10).SetText(value); }
+        public void ClearManifestArtifactRoot() { wire.GetPointer(10).Clear(); }
+        public void SetManifestInputPrefix(string? value) { wire.GetPointer(11).SetText(value); }
+        public void ClearManifestInputPrefix() { wire.GetPointer(11).Clear(); }
     }
 }
 

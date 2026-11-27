@@ -26,6 +26,7 @@ internal static class SourceBindingExecutionTests
         _ = Directory.CreateDirectory(liveBuild);
         string storePath = SourceStorePaths.ForWorkspace(BuildTreeOwnership.CanonicalPath(workspace));
         string? previousGenerator = Environment.GetEnvironmentVariable("CMAKE_GENERATOR");
+        string? previousCas = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS");
         // All three CI images install Ninja. Pin a single-config backend so this
         // fixture makes no assumptions about the platform's default generator.
         Environment.SetEnvironmentVariable("CMAKE_GENERATOR", "Ninja");
@@ -35,7 +36,23 @@ internal static class SourceBindingExecutionTests
                 "cmake_minimum_required(VERSION 3.26)\nproject(source_binding LANGUAGES CXX)\n" +
                 "add_executable(probe main.cpp)\nenable_testing()\nadd_test(NAME probe COMMAND probe)\n");
             string cpp = Path.Combine(source, "main.cpp");
-            await File.WriteAllTextAsync(cpp, "#include <cstdio>\nint main(){ std::puts(\"captured\"); return 0; }\n");
+            await File.WriteAllTextAsync(cpp, """
+                #include <cstdio>
+                #include <fstream>
+                #include <string>
+                int main(int argc, char** argv) {
+                    std::puts("captured");
+                    if (argc == 1) return 0;
+                    std::ifstream input(argv[1]);
+                    std::string line;
+                    std::getline(input, line);
+                    std::ofstream output(argv[2]);
+                    output << line;
+                    return input && output ? 0 : 2;
+                }
+                """);
+            string input = Path.Combine(source, "message.txt");
+            await File.WriteAllTextAsync(input, "snapshot data");
             byte[] manifestBytes = Encoding.UTF8.GetBytes("""
                 {"schemaVersion":1,
                  "contexts":{"only":{"buildDirectory":"legacy-build","sourceDirectory":"source","mode":"managed","generator":"Ninja"}},
@@ -48,6 +65,16 @@ internal static class SourceBindingExecutionTests
                  ]}
                 """);
             WorkflowDocument document = JsonSerializer.Deserialize(manifestBytes, WorkflowDefinitionJson.Default.WorkflowDocument)!;
+            if (binary)
+            {
+                Environment.SetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS", Path.Combine(workspace, "action-cache"));
+                document.SchemaVersion = 2;
+                WorkflowNode execute = document.Nodes[^1];
+                execute.ActionCache = true;
+                execute.Inputs.Add(new() { Path = "source/message.txt" });
+                execute.Outputs.Add(new() { Name = "mapped", Path = "publish/result.txt", Fresh = true });
+                execute.Arguments.AddRange(["@input:0", "@output:mapped"]);
+            }
             byte[] wire = binary
                 ? CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(document)))
                 : manifestBytes;
@@ -56,7 +83,7 @@ internal static class SourceBindingExecutionTests
                 "stale cache must never be adopted\n");
             string hash = Convert.ToHexString(SHA256.HashData(wire));
             LoreSnapshotStore lore = new(storePath);
-            string id = await lore.CaptureAsync(source, ["CMakeLists.txt", "main.cpp"]);
+            string id = await lore.CaptureAsync(source, ["CMakeLists.txt", "main.cpp", "message.txt"]);
             WorkflowStartRequest request = new("source-bound", manifest, hash, 1, output)
             {
                 SourceSnapshotId = id
@@ -68,12 +95,27 @@ internal static class SourceBindingExecutionTests
             if (binary)
             {
                 BinaryWorkflowSubmission.InitializeWorkspace(workspace);
+                _ = SourceBoundArtifactLayout.Validate(document, manifest, source, await lore.VerifyAsync(id, CancellationToken.None));
             }
 
             using (DurableAcceptanceStore db = new(workspace))
             {
                 if (binary)
                 {
+                    SnapshotManifest snapshot = await lore.VerifyAsync(id, CancellationToken.None);
+                    WorkflowNode execute = document.Nodes[^1];
+                    string originalPath = execute.Inputs[0].Path!;
+                    execute.Inputs[0].Path = "../source/message.txt";
+                    await RejectArtifactLayoutAsync(db, binaryRequest, document, "traversal-input");
+                    execute.Inputs[0].Path = "source/missing.txt";
+                    await RejectArtifactLayoutAsync(db, binaryRequest, document, "missing-input");
+                    execute.Inputs[0].Path = originalPath;
+                    string originalOutput = execute.Outputs[0].Path;
+                    execute.Outputs[0].Path = "source/message.txt";
+                    await RejectArtifactLayoutAsync(db, binaryRequest, document, "aliased-output");
+                    execute.Outputs[0].Path = originalOutput;
+                    _ = SourceBoundArtifactLayout.Validate(document, manifest, source, snapshot);
+                    await File.WriteAllBytesAsync(manifest, wire);
                     _ = await db.AcceptBinaryAsync(binaryRequest, CancellationToken.None);
                     await ExpectRefusalAsync(() => db.AcceptBinaryAsync(
                         binaryRequest with { SourceSnapshotId = new string('0', 64) }, CancellationToken.None),
@@ -88,6 +130,7 @@ internal static class SourceBindingExecutionTests
             // An accepted request must use immutable Lore bytes, not the files
             // currently present on disk (nor the old preconfigured build tree).
             await File.WriteAllTextAsync(cpp, "#include <cstdio>\nint main(){ std::puts(\"live\"); return 0; }\n");
+            await File.WriteAllTextAsync(input, "live data");
             using (DurableExecutionCoordinator coordinator = new(CancellationToken.None))
             {
                 OperationReference accepted = binary
@@ -141,12 +184,34 @@ internal static class SourceBindingExecutionTests
 
             string isolatedRoot = Path.Combine(workspace, ".cw", operation);
             string isolatedSource = Path.Combine(isolatedRoot, "s");
-            using (System.Text.Json.JsonDocument report = System.Text.Json.JsonDocument.Parse(
+            using (JsonDocument report = JsonDocument.Parse(
                        await File.ReadAllBytesAsync(Path.Combine(output, "run.json"))))
             {
                 if (report.RootElement.GetProperty("sourceSnapshotId").GetString() != id)
                 {
                     throw new UnreachableException("Runner report lost immutable Lore identity.");
+                }
+                if (binary)
+                {
+                    JsonElement executed = report.RootElement.GetProperty("nodes").EnumerateArray()
+                        .Single(node => node.GetProperty("id").GetString() == "execute");
+                    if (executed.GetProperty("actionCacheHit").GetBoolean() ||
+                        string.IsNullOrEmpty(executed.GetProperty("actionDigest").GetString()))
+                    {
+                        throw new UnreachableException("Mapped action did not publish a cache result.");
+                    }
+                }
+            }
+            if (binary)
+            {
+                string mapped = Path.Combine(output, "manifest-artifacts", "publish", "result.txt");
+                OperationArtifactList artifacts = await OperationArtifactReader.ListAsync(
+                    new(workspace), operation, CancellationToken.None);
+                if (await File.ReadAllTextAsync(mapped) != "snapshot data" ||
+                    Directory.Exists(Path.Combine(workspace, "publish")) ||
+                    !artifacts.Artifacts.Any(item => item.RelativePath == "manifest-artifacts/publish/result.txt"))
+                {
+                    throw new UnreachableException("Mapped manifest output lost snapshot bytes or escaped the results directory.");
                 }
             }
             using (CMakeWorkflow.History.Storage.HistoryStore history = new(Path.Combine(workspace, "history-test.sqlite")))
@@ -176,7 +241,7 @@ internal static class SourceBindingExecutionTests
                 CMakeWorkflow.Host.Sessions.WorkspaceReadPaths paths = new(workspace);
                 _ = binary
                     ? await WorkflowSourceSnapshotExecution.PlanAsync(paths, operation, manifest, output, document,
-                        hash, id, [], CancellationToken.None, resume: true)
+                        hash, id, [], CancellationToken.None, resume: true, allowManifestArtifacts: true)
                     : await WorkflowSourceSnapshotExecution.PlanAsync(paths, operation, manifest, output,
                         manifestBytes, id, [], CancellationToken.None, resume: true);
                 throw new UnreachableException("Tampered materialization was accepted on resume.");
@@ -229,6 +294,7 @@ internal static class SourceBindingExecutionTests
         finally
         {
             Environment.SetEnvironmentVariable("CMAKE_GENERATOR", previousGenerator);
+            Environment.SetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS", previousCas);
             if (Directory.Exists(storePath))
             {
                 Directory.Delete(storePath, recursive: true);
@@ -237,6 +303,22 @@ internal static class SourceBindingExecutionTests
             {
                 Directory.Delete(workspace, recursive: true);
             }
+        }
+    }
+
+    private static async Task RejectArtifactLayoutAsync(DurableAcceptanceStore ledger, ExecutionStartRequest valid,
+        WorkflowDocument document, string clientRequestId)
+    {
+        byte[] frame = CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(document)));
+        await File.WriteAllBytesAsync(valid.Manifest, frame);
+        await ExpectRefusalAsync(() => ledger.AcceptBinaryAsync(valid with
+        {
+            ClientRequestId = clientRequestId,
+            ManifestSha256 = Convert.ToHexString(SHA256.HashData(frame))
+        }, CancellationToken.None), "Unsafe artifact layout reached native admission.");
+        if (ledger.Find(clientRequestId) is not null)
+        {
+            throw new UnreachableException("Unsafe artifact layout created an accepted operation.");
         }
     }
 

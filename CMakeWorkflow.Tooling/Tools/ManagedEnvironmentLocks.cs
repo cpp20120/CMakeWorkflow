@@ -75,6 +75,7 @@ public static class ManagedEnvironmentLocks
         {
             try
             {
+                await ProvisioningInterruption.PauseAsync("before-environment-publication", ct);
                 await ManagedToolchainWire.PublishAsync(path, bytes, ct);
             }
             catch (IOException) when (File.Exists(path))

@@ -6,6 +6,7 @@ using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Transport;
 using CMakeWorkflow.Host.Workflows;
@@ -17,7 +18,8 @@ namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static partial class BinaryWorkflowWireTests
 {
-    internal static async Task RunAsync(string cli, string faultCli, string? oldCli, string? inlineCli)
+    internal static async Task RunAsync(string cli, string faultCli, string? oldCli, string? inlineCli,
+        string? previousDocumentCli)
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
         CancellationToken ct = timeout.Token;
@@ -103,6 +105,10 @@ internal static partial class BinaryWorkflowWireTests
                 await WaitForAsync(() => Task.FromResult(File.Exists(marker)), ct);
                 await RunCommandAsync(cli, ["cas", WorkflowLedgerPath.Documents(root), "gc", "--apply"], ct);
                 await interrupted.KillAsync(ct);
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.Delete(interrupted.Endpoint);
+                }
                 Require((await File.ReadAllLinesAsync(effects, ct)).SequenceEqual(["a"]), "Fault did not precede B's effect.");
                 using DurableAcceptanceStore ledger = new(root, readOnly: true);
                 checkpoint = ledger.InspectRecovery(operation).CheckpointSha256
@@ -110,6 +116,7 @@ internal static partial class BinaryWorkflowWireTests
                 AssertBinaryOnly(root, operation);
             }
 
+            RehearseOfflineRestore(root);
             string cas = WorkflowLedgerPath.Documents(root);
             await RunCommandAsync(cli, ["cas", cas, "gc", "--apply"], ct);
             if (oldCli is not null)
@@ -120,7 +127,12 @@ internal static partial class BinaryWorkflowWireTests
             {
                 await CheckOldHostAsync(inlineCli, root, ct);
                 await RunCommandRejectedAsync(inlineCli, ["cas", cas, "gc", "--apply"], ct);
-                await VerifyInlineWorkspaceAsync(inlineCli, cli, CreateWorkspace(root, "inline"), ct);
+                await VerifyPreviousWorkspaceAsync(inlineCli, cli, CreateWorkspace(root, "inline"), usesDocumentPlans: false, ct);
+            }
+            if (previousDocumentCli is not null)
+            {
+                await CheckOldHostAsync(previousDocumentCli, root, ct);
+                await VerifyPreviousWorkspaceAsync(previousDocumentCli, cli, CreateWorkspace(root, "previous"), usesDocumentPlans: true, ct);
             }
 
             DocumentStore documents = await DocumentStore.OpenExecutionStoreAsync(cas, ct);
@@ -191,6 +203,7 @@ internal static partial class BinaryWorkflowWireTests
                 Require(artifacts.Artifacts.Any(artifact => artifact.Kind == "output")
                     && await File.ReadAllTextAsync(Path.Combine(run, "effect-b.txt"), ct) == "recovered",
                     "Recovered artifact is absent from the verified operation catalog.");
+                await VerifyIndexedArtifactsAsync(cli, restarted.Endpoint, root, operation, ct);
             }
 
             Require((await File.ReadAllLinesAsync(effects, ct)).SequenceEqual(["a", "b"]),
@@ -208,7 +221,7 @@ internal static partial class BinaryWorkflowWireTests
             }
 
             Console.WriteLine("Binary RPC publication, concurrent admission, active GC, plan retention, Host termination and recovery passed.");
-            if (oldCli is not null || inlineCli is not null)
+            if (oldCli is not null || inlineCli is not null || previousDocumentCli is not null)
             {
                 Console.WriteLine("Supplied older executable fences passed.");
             }
@@ -219,7 +232,86 @@ internal static partial class BinaryWorkflowWireTests
         }
     }
 
-    private static async Task VerifyInlineWorkspaceAsync(string previous, string current, string workspace, CancellationToken ct)
+    private static void RehearseOfflineRestore(string workspace)
+    {
+        string archive = workspace + ".backup";
+        string original = workspace + ".original";
+        try
+        {
+            _ = OperatingSystem.IsWindows() ? Directory.CreateDirectory(archive)
+                : Directory.CreateDirectory(archive, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            foreach (string directory in Directory.EnumerateDirectories(workspace, "*", SearchOption.AllDirectories))
+            {
+                _ = Directory.CreateDirectory(Path.Combine(archive, Path.GetRelativePath(workspace, directory)));
+            }
+            foreach (string file in Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories))
+            {
+                File.Copy(file, Path.Combine(archive, Path.GetRelativePath(workspace, file)));
+            }
+
+            // All clients and the killed Host are closed. Restore to the same path
+            // because dispatch binds absolute CMake and result paths.
+            Directory.Move(workspace, original);
+            try
+            {
+                Directory.Move(archive, workspace);
+            }
+            catch
+            {
+                Directory.Move(original, workspace);
+                throw;
+            }
+            Directory.Delete(original, recursive: true);
+        }
+        finally
+        {
+            if (Directory.Exists(archive))
+            {
+                Directory.Delete(archive, recursive: true);
+            }
+        }
+    }
+
+    private static async Task VerifyIndexedArtifactsAsync(string cli, string endpoint, string workspace, string operation,
+        CancellationToken ct)
+    {
+        string stash = Path.Combine(workspace, "indexed-stash");
+        await RunCommandAsync(cli, ["cas", stash, "init-indexed"], ct);
+        string[] import = ["remote", "stash", "--transport", "local", "--endpoint", endpoint,
+            "--workspace", workspace, "--operation", operation, "--store", stash];
+        await Task.WhenAll(RunCommandAsync(cli, import, ct), RunCommandAsync(cli, import, ct));
+        ArtifactStoreFiles files = new(stash);
+        CasReferenceIndex.ReceiptReference before;
+        using (FileStream lease = await files.OpenLeaseAsync(false, ct))
+        {
+            using CasReferenceIndex index = new(files);
+            before = index.FindReceipt(operation) ?? throw new InvalidDataException("Native artifact manifest is absent.");
+            Require(before.Pinned && File.Exists(files.Blob(before.Blob)) &&
+                !Directory.EnumerateFiles(files.Operations, "*.json").Any(),
+                "Artifact stash wrote legacy metadata or did not retain its manifest.");
+        }
+
+        string destination = Path.Combine(workspace, "downloaded");
+        await RunCommandAsync(cli, ["cas", stash, "gc", "--apply"], ct);
+        await RunCommandAsync(cli, ["cas", stash, "fetch", operation, "output:b:0", destination], ct);
+        Require(await File.ReadAllTextAsync(destination, ct) == "recovered", "Fetched native artifact bytes differ.");
+        await RunCommandAsync(cli, ["cas", stash, "unpin", operation], ct);
+        await RunCommandAsync(cli, ["cas", stash, "gc", "--apply"], ct);
+        await RunCommandRejectedAsync(cli, ["cas", stash, "pin", operation], ct);
+        using (FileStream lease = await files.OpenLeaseAsync(false, ct))
+        {
+            using CasReferenceIndex index = new(files);
+            Require(index.FindReceipt(operation) == before with { Pinned = false } && File.Exists(files.Blob(before.Blob)),
+                "Unpin changed the immutable manifest or removed its identity.");
+        }
+
+        string blob = files.Blob(before.Blob);
+        await File.WriteAllTextAsync(blob, "corrupt", ct);
+        await RunCommandRejectedAsync(cli, ["cas", stash, "gc", "--apply"], ct);
+    }
+
+    private static async Task VerifyPreviousWorkspaceAsync(string previous, string current, string workspace, bool usesDocumentPlans,
+        CancellationToken ct)
     {
         string source = Directory.CreateDirectory(Path.Combine(workspace, "src")).FullName;
         string build = Path.Combine(workspace, "b");
@@ -243,7 +335,7 @@ internal static partial class BinaryWorkflowWireTests
         using DurableAcceptanceStore ledger = new(workspace, readOnly: true);
         AcceptedWorkflow accepted = ledger.Find("inline-inquiry")
             ?? throw new InvalidDataException("Prior Host did not produce an inline authorized operation.");
-        Require(!ledger.UsesDocumentPlans && accepted.State == "succeeded",
+        Require(ledger.UsesDocumentPlans == usesDocumentPlans && !ledger.AllowsSourceManifestArtifacts && accepted.State == "succeeded",
             "Reading an earlier workspace changed its operation or ledger epoch.");
         await RunCommandAsync(current, ["workflow", "binary-info", workspace, accepted.OperationId], ct);
     }
@@ -516,7 +608,10 @@ internal static partial class BinaryWorkflowWireTests
         string workspace = Directory.CreateDirectory(Path.Combine(parent, "version-fence")).FullName;
         BinaryWorkflowSubmission.InitializeWorkspace(workspace);
         string manifest = Path.Combine(workspace, "unrelated-legacy.json");
-        byte[] bytes = "{\"schemaVersion\":1}"u8.ToArray();
+        byte[] bytes = """
+            {"schemaVersion":1,"contexts":{"tree":{"buildDirectory":"build","mode":"observe","provenancePolicy":"allowUnverified"}},
+             "nodes":[{"id":"inspect","kind":"inspect","context":"tree"}]}
+            """u8.ToArray();
         await File.WriteAllBytesAsync(manifest, bytes, ct);
         using Peer old = await Peer.StartAsync(cli, workspace, ct);
         using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(old.Endpoint, ct));

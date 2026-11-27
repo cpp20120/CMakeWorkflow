@@ -8,6 +8,9 @@ internal sealed record CasArtifact(string ArtifactId, string Role, string Logica
 internal sealed record CasOperation(int SchemaVersion, string WorkspaceId, string OperationId,
     string? HostId, string ReportDigest, bool Pinned, IReadOnlyList<CasArtifact> Artifacts)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ArtifactManifestBlobId { get; init; }
+
     public long LogicalBytes => Artifacts.Sum(a => a.Size);
     public long DistinctBytes => Artifacts.DistinctBy(a => a.Digest).Sum(a => a.Size);
 }

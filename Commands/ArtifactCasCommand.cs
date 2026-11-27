@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CMakeWorkflow.Core.Persistence;
+using CMakeWorkflow.Storage.Documents;
 
 namespace CMakeWorkflow.Commands;
 
@@ -7,6 +8,7 @@ internal static class ArtifactCasCommand
 {
     private const string Usage = """
         Usage: CMakeWorkflow cas STORE COMMAND
+          init-indexed
           show OPERATION
           fetch OPERATION ARTIFACT_ID OUTPUT
           pin OPERATION
@@ -26,6 +28,9 @@ internal static class ArtifactCasCommand
 
         switch (args)
         {
+            case [string root, "init-indexed"]:
+                _ = await DocumentStore.InitializeIndexedActionsAsync(root, ct);
+                break;
             case [string root, "show", string id]:
                 Print(await new ArtifactCas(root).ShowAsync(id, ct));
                 break;

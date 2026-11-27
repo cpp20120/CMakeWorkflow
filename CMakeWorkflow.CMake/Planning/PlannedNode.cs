@@ -1,4 +1,5 @@
 using CMakeWorkflow.CMake.Build;
+using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.Contracts.Workflows;
 
 namespace CMakeWorkflow.CMake.Planning;
@@ -16,4 +17,5 @@ public sealed record PlannedNode(
     public string? CompilerCacheProfile { get; init; }
     internal WorkflowVariantBinding? VariantBinding { get; init; }
     internal Action<string>? ReadGuard { get; init; }
+    internal SourceBoundManifestArtifacts? ManifestArtifacts { get; init; }
 }

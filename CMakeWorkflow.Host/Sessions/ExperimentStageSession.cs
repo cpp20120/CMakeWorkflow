@@ -75,6 +75,7 @@ public sealed partial class DoctorSession
             throw new InvalidDataException("Experiment manifest SHA-256 mismatch.");
         }
         WorkflowDocument? workflow = null;
+        bool allowManifestArtifacts = false;
         if (binary)
         {
             using DurableAcceptanceStore ledger = new(paths.WorkspaceDirectory, readOnly: true);
@@ -82,6 +83,7 @@ public sealed partial class DoctorSession
             {
                 throw new InvalidOperationException("native_experiment_requires_fresh_execution_workspace");
             }
+            allowManifestArtifacts = ledger.AllowsSourceManifestArtifacts;
             workflow = VerifyFrame(manifestBytes, request.ManifestSha256);
             _ = WorkflowPlanner.ValidateGraph(workflow, []);
             foreach (WorkflowContext context in workflow.Contexts.Values)
@@ -164,7 +166,12 @@ public sealed partial class DoctorSession
         await WorkflowSourceSnapshotExecution.VerifyExistingMaterializationAsync(snapshot, source, token);
         if (workflow is not null)
         {
-            _ = WorkflowSourceSnapshotExecution.ValidateSourceLayout(paths, manifest, workflow);
+            string originalSource = WorkflowSourceSnapshotExecution.ValidateSourceLayout(paths, manifest, workflow,
+                allowManifestArtifacts);
+            if (allowManifestArtifacts)
+            {
+                _ = SourceBoundArtifactLayout.Validate(workflow, manifest, originalSource, snapshot);
+            }
         }
         return new ExperimentStageReceipt(manifest, request.ManifestSha256, request.SourceSnapshotId);
     }, ct);

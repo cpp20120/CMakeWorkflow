@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.Contracts.Workflows;
@@ -37,9 +38,9 @@ internal static class WorkflowSourceSnapshotExecution
     internal static async Task<WorkflowPlan> PlanAsync(
         WorkspaceReadPaths paths, string operationId, string originalManifest, string resultsDirectory,
         WorkflowDocument document, string manifestHash, string sourceSnapshotId, IReadOnlyList<string> only,
-        CancellationToken ct, bool resume = false)
+        CancellationToken ct, bool resume = false, bool allowManifestArtifacts = false)
     {
-        _ = ValidateSourceLayout(paths, originalManifest, document);
+        string originalSource = ValidateSourceLayout(paths, originalManifest, document, allowManifestArtifacts);
         // Keep both source and build trees short: CMake/Ninja create deep
         // CMakeFiles/CMakeScratch/TryCompile paths on Windows.
         string operationPath = Path.Combine(paths.WorkspaceDirectory, ".cw", operationId);
@@ -79,6 +80,10 @@ internal static class WorkflowSourceSnapshotExecution
         {
             throw new InvalidDataException("Source snapshot does not contain CMakeLists.txt at its root.");
         }
+        SourceBoundManifestArtifacts? manifestArtifacts = allowManifestArtifacts
+            ? SourceBoundArtifactLayout.Validate(document, originalManifest, originalSource, sourceManifest)
+                ?.Map(paths, materialized, results, sourceSnapshotId)
+            : null;
         if (!hasMaterialization)
         {
             await lore.MaterializeAsync(sourceSnapshotId, materialized, ct);
@@ -113,12 +118,13 @@ internal static class WorkflowSourceSnapshotExecution
             }
         }
         WorkflowPlan plan = await WorkflowPlanner.LoadDocumentAsync(originalManifest, document,
-            manifestHash, only, null, ct, GuardPlannedPath);
+            manifestHash, only, null, GuardPlannedPath, manifestArtifacts, ct);
         await VerifyExistingMaterializationAsync(sourceManifest, materialized, ct);
         return plan;
     }
 
-    internal static string ValidateSourceLayout(WorkspaceReadPaths paths, string manifest, WorkflowDocument document)
+    internal static string ValidateSourceLayout(WorkspaceReadPaths paths, string manifest, WorkflowDocument document,
+        bool allowManifestArtifacts = false)
     {
         if (document.Contexts is null || document.Contexts.Count == 0 ||
             document.Nodes is null || document.Nodes.Count == 0)
@@ -143,6 +149,10 @@ internal static class WorkflowSourceSnapshotExecution
             string requested = Path.IsPathFullyQualified(context.SourceDirectory)
                 ? context.SourceDirectory : Path.Combine(manifestBase, context.SourceDirectory);
             string canonical = paths.Require(requested);
+            if (allowManifestArtifacts && !WorkflowPlanner.PathComparer.Equals(Path.GetFullPath(requested), canonical))
+            {
+                throw new InvalidDataException("Source-bound manifest root cannot refer through a redirected source directory.");
+            }
             if (originalSource is not null && !WorkflowPlanner.PathComparer.Equals(originalSource, canonical))
             {
                 throw new InvalidOperationException("source_snapshot_multiple_source_roots_unsupported");
@@ -150,15 +160,13 @@ internal static class WorkflowSourceSnapshotExecution
             originalSource = canonical;
         }
 
-        // Inputs and outputs rooted at the ORIGINAL manifest, custom working directories
-        // and buildless replay cannot be redirected safely without a separate mapping.
-        // Refuse them instead of silently reading the live workspace.
+        // Custom working directories and buildless replay have no snapshot binding.
         foreach (WorkflowNode? node in document.Nodes)
         {
             if (node is null || node.Kind == "profile_snapshot" || node.WorkingDirectory is not null ||
                 node.Inputs is null || node.Outputs is null ||
-                node.Inputs.Any(input => input is null || input.Path is not null) ||
-                node.Outputs.Any(output => output is null || output.Root == "manifest"))
+                node.Inputs.Any(input => input is null || (!allowManifestArtifacts && input.Path is not null)) ||
+                node.Outputs.Any(output => output is null || (!allowManifestArtifacts && output.Root == "manifest")))
             {
                 throw new InvalidOperationException("source_snapshot_unmapped_manifest_path");
             }

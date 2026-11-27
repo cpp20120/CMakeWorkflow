@@ -9,7 +9,7 @@
 | Public transport | JSON-RPC protocol 1. Native execution uses `execution/start` with domain `cmake-capnp-v1`. The SDK negotiates `execution/cmake-capnp-v1`, `workflow/prepareBinaryManifest` and, for a native Git experiment, `experiment/binary-v1`. |
 | Submitted workflow | Bounded, unpacked canonical production workflow frame. The exact frame SHA-256 is also the workflow report provenance hash. |
 | Immutable execution documents | Shared artifact CAS marker `cmakeworkflow-artifact-cas-v2`, application ID `0x434d5744`, catalog epoch 3 for fresh execution stores. Archives and historical binary execution stores continue to use epoch 2. |
-| Operation ledger | Application ID `0x434d5742`. Fresh ledgers use epoch 3 and store a retained plan reference. Existing epoch-2 binaries use the original inline binding. |
+| Operation ledger | Application ID `0x434d5742`. Epoch 3 introduced a retained plan reference. Fresh ledgers use epoch 4 with a versioned source artifact path policy. Epoch 2 uses the original inline binding. |
 | Managed tooling | Native environment locks, provisioning plans, dependency plans and receipts have separate Cap’n Proto schemas and identities. Host-wide locks and receipts use the existing managed tooling store. |
 | Controller | Experiment plan schema 3 carries its binary workflow frame and the exact approved source and execution metadata in the existing controller JSON envelope. External Git, ZIP, CMake and vcpkg formats stay compatible. |
 
@@ -46,4 +46,4 @@ All listed identity domains append LF before the hashed payload. Existing legacy
 
 ## Scope and verification
 
-See the [P4.C and P4.D verification report](../p4-binary-execution-verification.md) for reproduction commands, test evidence and outstanding scope. P4.E covers report, History, journal and cache metadata formats. P4.F covers deployment migration, Windows verification and mixed-version operations on supported filesystems. P4.G covers changes to the default writer and legacy retirement. P5 covers performance analysis and optimization under matched workloads.
+See [ADR-0011](0011-source-artifact-paths-and-deployment-fencing.md) for epoch 4 and the [P4.C and P4.D verification report](../p4-binary-execution-verification.md) for reproduction commands, test evidence and outstanding scope. P4.E covers report, History, journal and cache metadata formats. P4.F covers deployment migration, Windows verification and mixed-version operations on supported filesystems. P4.G covers changes to the default writer and legacy retirement. P5 covers performance analysis and optimization under matched workloads.

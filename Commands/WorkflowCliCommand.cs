@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CMakeWorkflow.Binary.Capnp;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Core.Persistence;
@@ -23,6 +24,7 @@ internal static class WorkflowCliCommand
         ["binary-info", string workspace, string operation] => ReadBinaryAsync(workspace, operation, export: false, ct),
         ["binary-export-json", string workspace, string operation] => ReadBinaryAsync(workspace, operation, export: true, ct),
         ["init-binary", string workspace] => InitializeBinaryAsync(workspace),
+        ["storage-inspect", string workspace] => InspectStorageAsync(workspace, ct),
         ["pack-binary", string json, string frame] => PackBinaryAsync(json, frame, ct),
         ["run-binary", string workspace, string frame, string sha, string id, string results] =>
             RunBinaryAsync(workspace, frame, sha, id, results, ct),
@@ -38,6 +40,13 @@ internal static class WorkflowCliCommand
         ["sequence", .. string[] tail] => TwoTargetWorkflow.ExecuteAsync(tail, ct),
         _ => Task.FromResult(CliUsage.Write())
     };
+
+    private static async Task<int> InspectStorageAsync(string workspace, CancellationToken ct)
+    {
+        WorkflowStorageFormats formats = await WorkflowStorageFormats.InspectAsync(Path.GetFullPath(workspace), ct);
+        Console.WriteLine(JsonSerializer.Serialize(formats, WorkflowStorageJson.Default.WorkflowStorageFormats));
+        return 0;
+    }
 
     private static async Task<int> ReadBinaryAsync(string workspace, string operation, bool export, CancellationToken ct)
     {
@@ -161,3 +170,7 @@ internal static class WorkflowCliCommand
         }, historyPolicy);
     }
 }
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(WorkflowStorageFormats))]
+internal sealed partial class WorkflowStorageJson : JsonSerializerContext;

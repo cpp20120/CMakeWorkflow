@@ -33,6 +33,12 @@ internal static class BinaryDispatchBinding
         root.SetResultsDirectory(input.ResultsDirectory);
         root.SetJobs((uint)input.Jobs);
         root.SetSourceSnapshotId(sourceSnapshotId);
+        if (plan.Nodes.FirstOrDefault(node => node.ManifestArtifacts is not null)?.ManifestArtifacts is { } artifacts)
+        {
+            root.SetManifestArtifactPolicy(1);
+            root.SetManifestArtifactRoot(artifacts.OutputRoot);
+            root.SetManifestInputPrefix(artifacts.InputPrefix);
+        }
         Binding.DispatchBinding.NodesListBuilder nodes = root.InitNodes(plan.Nodes.Count);
         Dictionary<string, string> environmentHashes = new(WorkflowPlanner.PathComparer);
         for (int i = 0; i < nodes.Count; i++)

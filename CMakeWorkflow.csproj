@@ -31,6 +31,7 @@
         <Compile Include="Commands/ArtifactCasCommand.cs"/>
         <Compile Include="Commands/ArtifactCas.cs"/>
         <Compile Include="Commands/ArtifactCasJson.cs"/>
+        <Compile Include="Commands/BinaryArtifactManifest.cs"/>
         <Compile Include="Commands/RemoteProvisionCommand.cs"/>
         <Compile Include="Commands/BenchmarkGenerateCommand.cs"/>
         <Compile Include="Commands/RecipeJson.cs" />

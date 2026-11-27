@@ -196,7 +196,11 @@ internal static class OperationArtifactReader
                 }
                 else if (evidence.Role == "output" && IsLexicallyWithin(report.RunDirectory, evidence.Path))
                 {
-                    found.Add(new($"output:{node.Id}:{i}", "output", node.Id, evidence.Path));
+                    string relative = Path.GetRelativePath(report.RunDirectory, evidence.Path);
+                    string? digest = report.Report.SourceSnapshotId is not null &&
+                        relative.StartsWith(SourceBoundArtifactLayout.OutputDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                        ? evidence.Sha256 : null;
+                    found.Add(new($"output:{node.Id}:{i}", "output", node.Id, evidence.Path, digest));
                 }
             }
         }

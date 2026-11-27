@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Storage.Documents;
@@ -34,8 +35,8 @@ internal sealed class ArtifactCas(string directory)
         }
 
         using FileStream lease = await files.OpenLeaseAsync(true, ct);
-        string reference = Reference(id);
-        CasOperation? existing = File.Exists(reference) ? await ReadAsync(id, ct) : null;
+        using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
+        CasOperation? existing = await TryReadAsync(id, index, ct);
         if (existing is not null && (existing.WorkspaceId != snapshot.WorkspaceId
             || existing.ReportDigest != reportDigest || !existing.Artifacts.SequenceEqual(entries)))
         {
@@ -70,11 +71,7 @@ internal sealed class ArtifactCas(string directory)
 
             string? hostId = existing?.HostId ?? await ReadHostIdAsync(files.Blob(reportDigest), ct);
             CasOperation receipt = new(1, snapshot.WorkspaceId, id, hostId, reportDigest, true, entries);
-            if (existing is not { Pinned: true })
-            {
-                await WriteAsync(receipt, ct);
-            }
-            return receipt;
+            return existing is { Pinned: true } ? existing : await WriteAsync(receipt, index, ct);
         }
         finally
         {
@@ -85,13 +82,15 @@ internal sealed class ArtifactCas(string directory)
     internal async Task<CasOperation> ShowAsync(string operation, CancellationToken ct)
     {
         using FileStream lease = await files.OpenLeaseAsync(false, ct);
-        return await ReadAsync(OperationId(operation), ct);
+        using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
+        return await ReadAsync(OperationId(operation), index, ct);
     }
 
     internal async Task<CasOperation> PinAsync(string operation, bool pinned, CancellationToken ct)
     {
         using FileStream lease = await files.OpenLeaseAsync(false, ct);
-        CasOperation current = await ReadAsync(OperationId(operation), ct);
+        using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
+        CasOperation current = await ReadAsync(OperationId(operation), index, ct);
         if (pinned)
         {
             foreach (CasArtifact artifact in current.Artifacts.DistinctBy(a => a.Digest))
@@ -101,17 +100,14 @@ internal sealed class ArtifactCas(string directory)
         }
 
         CasOperation updated = current with { Pinned = pinned };
-        if (current.Pinned != pinned)
-        {
-            await WriteAsync(updated, ct);
-        }
-        return updated;
+        return current.Pinned != pinned ? await WriteAsync(updated, index, ct) : updated;
     }
 
     internal async Task FetchAsync(string operation, string artifactId, string destination, CancellationToken ct)
     {
         using FileStream lease = await files.OpenLeaseAsync(false, ct);
-        CasOperation reference = await ReadAsync(OperationId(operation), ct);
+        using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
+        CasOperation reference = await ReadAsync(OperationId(operation), index, ct);
         CasArtifact entry = reference.Artifacts.SingleOrDefault(a => a.ArtifactId == artifactId)
                           ?? throw new KeyNotFoundException("Unknown artifact for this operation.");
         await files.RestoreAsync(entry.Digest, entry.Size, destination, ct);
@@ -121,22 +117,38 @@ internal sealed class ArtifactCas(string directory)
     {
         using FileStream lease = await files.OpenLeaseAsync(false, ct);
         HashSet<string> reachable = new(StringComparer.Ordinal);
-        foreach (string path in Directory.EnumerateFiles(files.Operations, "*.json"))
+        IEnumerable<string> legacy = Directory.EnumerateFiles(files.Operations, "*.json");
+        if (await files.HasIndexedActionsAsync(ct))
         {
-            ct.ThrowIfCancellationRequested();
-            CasOperation operation = await ReadAsync(OperationId(Path.GetFileNameWithoutExtension(path)), ct);
-            if (operation.Pinned)
+            if (legacy.Any())
             {
-                reachable.UnionWith(operation.Artifacts.Select(a => a.Digest));
+                throw new InvalidDataException("Legacy operation receipt found in an indexed CAS.");
+            }
+            using CasReferenceIndex index = new(files);
+            foreach (CasReferenceIndex.ReceiptReference reference in index.Receipts(ct))
+            {
+                CasOperation operation = await BinaryArtifactManifest.ReadAsync(files, reference, ct);
+                _ = reachable.Add(reference.Blob);
+                if (operation.Pinned)
+                {
+                    reachable.UnionWith(operation.Artifacts.Select(a => a.Digest));
+                }
+            }
+        }
+        else
+        {
+            foreach (string path in legacy)
+            {
+                ct.ThrowIfCancellationRequested();
+                CasOperation operation = await ReadLegacyAsync(OperationId(Path.GetFileNameWithoutExtension(path)), ct);
+                if (operation.Pinned)
+                {
+                    reachable.UnionWith(operation.Artifacts.Select(a => a.Digest));
+                }
             }
         }
 
-        foreach (string path in Directory.EnumerateFiles(files.Actions, "*.json"))
-        {
-            string key = Path.GetFileNameWithoutExtension(path);
-            CasActionResult action = await CasActions.ReadAsync(files, key, ct);
-            _ = reachable.Add(action.Digest);
-        }
+        await CasActions.AddRootsAsync(files, reachable, ct);
 
         long count, size, protectedBlobs;
         if (await files.HasDocumentFormatAsync(ct))
@@ -191,7 +203,21 @@ internal sealed class ArtifactCas(string directory)
 
     private string Reference(string operation) => Path.Combine(files.Operations, operation + ".json");
 
-    private async Task<CasOperation> ReadAsync(string operation, CancellationToken ct)
+    private async Task<CasOperation> ReadAsync(string operation, CasReferenceIndex? index, CancellationToken ct) =>
+        await TryReadAsync(operation, index, ct) ?? throw new FileNotFoundException("Artifact manifest is missing.");
+
+    private async Task<CasOperation?> TryReadAsync(string operation, CasReferenceIndex? index, CancellationToken ct)
+    {
+        if (index is null)
+        {
+            return File.Exists(Reference(operation)) ? await ReadLegacyAsync(operation, ct) : null;
+        }
+
+        CasReferenceIndex.ReceiptReference? reference = index.FindReceipt(operation);
+        return reference.HasValue ? await BinaryArtifactManifest.ReadAsync(files, reference.Value, ct) : null;
+    }
+
+    private async Task<CasOperation> ReadLegacyAsync(string operation, CancellationToken ct)
     {
         string path = Reference(operation);
         if (new FileInfo(path).Length > 4 * 1024 * 1024)
@@ -209,9 +235,55 @@ internal sealed class ArtifactCas(string directory)
             : receipt;
     }
 
-    private Task WriteAsync(CasOperation receipt, CancellationToken ct) =>
-        DurableByteWriter.WriteAsync(Reference(receipt.OperationId),
-            JsonSerializer.SerializeToUtf8Bytes(receipt, ArtifactCasJson.Default.CasOperation), ct);
+    private async Task<CasOperation> WriteAsync(CasOperation receipt, CasReferenceIndex? index, CancellationToken ct)
+    {
+        if (index is null)
+        {
+            await DurableByteWriter.WriteAsync(Reference(receipt.OperationId),
+                JsonSerializer.SerializeToUtf8Bytes(receipt, ArtifactCasJson.Default.CasOperation), ct);
+            return receipt;
+        }
+
+        byte[] frame = BinaryArtifactManifest.Encode(receipt);
+        string digest = Convert.ToHexStringLower(SHA256.HashData(frame));
+        if (index.FindReceipt(receipt.OperationId) is { } prior)
+        {
+            if (prior.Blob != digest || prior.Size != frame.Length)
+            {
+                throw new InvalidDataException("Operation already has another immutable artifact manifest.");
+            }
+            ct.ThrowIfCancellationRequested();
+            index.SetPinned(receipt.OperationId, receipt.Pinned);
+        }
+        else
+        {
+            string blob = files.Blob(digest);
+            if (File.Exists(blob))
+            {
+                await ArtifactStoreFiles.VerifyAsync(blob, digest, frame.Length, ct);
+            }
+            else
+            {
+                string ephemeral = Path.Combine(files.Staging, Guid.NewGuid().ToString("N"));
+                _ = Directory.CreateDirectory(ephemeral);
+                try
+                {
+                    string stage = Path.Combine(ephemeral, "manifest");
+                    await DurableByteWriter.WriteAsync(stage, frame, ct);
+                    ct.ThrowIfCancellationRequested();
+                    DurableByteWriter.PublishNewFile(stage, blob);
+                }
+                finally
+                {
+                    Directory.Delete(ephemeral, recursive: true);
+                }
+            }
+            ct.ThrowIfCancellationRequested();
+            index.PublishReceipt(new(receipt.OperationId, digest, frame.Length, receipt.Pinned));
+        }
+
+        return receipt with { ArtifactManifestBlobId = digest };
+    }
 
     private static async Task<string?> ReadHostIdAsync(string path, CancellationToken ct)
     {

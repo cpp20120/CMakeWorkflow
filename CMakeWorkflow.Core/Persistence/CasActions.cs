@@ -10,17 +10,20 @@ internal sealed record CasActionResult(int SchemaVersion, string ActionDigest, s
 [JsonSerializable(typeof(CasActionResult))]
 internal sealed partial class CasActionJson : JsonSerializerContext;
 
-internal sealed class CasActions(ArtifactStoreFiles files)
+internal sealed class CasActions(ArtifactStoreFiles files, int keyPolicy = 1)
 {
     internal async Task<bool> TryRestoreAsync(string key, string output, CancellationToken ct)
     {
         await using FileStream lease = await files.OpenLeaseAsync(true, ct);
-        if (!File.Exists(PathFor(files, key)))
+        string reference = PathFor(files, key);
+        using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
+        CasActionResult? entry = index is not null ? index.Find(key, keyPolicy)
+            : File.Exists(reference) ? await ReadAsync(files, key, ct) : null;
+        if (entry is null)
         {
             return false;
         }
 
-        CasActionResult entry = await ReadAsync(files, key, ct);
         _ = Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         await files.RestoreAsync(entry.Digest, entry.Size, output, ct);
         return true;
@@ -44,7 +47,10 @@ internal sealed class CasActions(ArtifactStoreFiles files)
         CasActionResult result = new(1, key, ArtifactStoreFiles.NormalizeDigest(expectedDigest), source.Length);
         await using FileStream lease = await files.OpenLeaseAsync(true, ct);
         string reference = PathFor(files, key);
-        if (File.Exists(reference) && await ReadAsync(files, key, ct) != result)
+        using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
+        CasActionResult? existing = index is not null ? index.Find(key, keyPolicy)
+            : File.Exists(reference) ? await ReadAsync(files, key, ct) : null;
+        if (existing is not null && existing != result)
         {
             throw new InvalidDataException("Identical cached action inputs produced different output evidence.");
         }
@@ -72,7 +78,12 @@ internal sealed class CasActions(ArtifactStoreFiles files)
             }
         }
 
-        if (!File.Exists(reference))
+        if (existing is null && index is not null)
+        {
+            ct.ThrowIfCancellationRequested();
+            index.Publish(result, keyPolicy);
+        }
+        else if (existing is null)
         {
             await DurableByteWriter.WriteAsync(reference,
                 JsonSerializer.SerializeToUtf8Bytes(result, CasActionJson.Default.CasActionResult), ct);
@@ -82,11 +93,42 @@ internal sealed class CasActions(ArtifactStoreFiles files)
     internal async Task DropAsync(string key, CancellationToken ct)
     {
         await using FileStream lease = await files.OpenLeaseAsync(false, ct);
-        File.Delete(PathFor(files, ArtifactStoreFiles.NormalizeDigest(key)));
+        string normalized = ArtifactStoreFiles.NormalizeDigest(key);
+        if (await files.HasIndexedActionsAsync(ct))
+        {
+            using CasReferenceIndex index = new(files);
+            index.Drop(normalized);
+        }
+        else
+        {
+            File.Delete(PathFor(files, normalized));
+        }
     }
 
     // Callers own the store lease while reading references for collection.
-    internal static async Task<CasActionResult> ReadAsync(ArtifactStoreFiles files, string key, CancellationToken ct)
+    internal static async Task AddRootsAsync(ArtifactStoreFiles files, ISet<string> reachable, CancellationToken ct)
+    {
+        IEnumerable<string> legacy = Directory.EnumerateFiles(files.Actions, "*.json");
+        if (await files.HasIndexedActionsAsync(ct))
+        {
+            if (legacy.Any())
+            {
+                throw new InvalidDataException("Legacy action reference found in an indexed CAS. Restore the original store format.");
+            }
+
+            using CasReferenceIndex index = new(files);
+            index.AddRoots(reachable, ct);
+            return;
+        }
+
+        foreach (string path in legacy)
+        {
+            CasActionResult entry = await ReadAsync(files, Path.GetFileNameWithoutExtension(path), ct);
+            _ = reachable.Add(entry.Digest);
+        }
+    }
+
+    private static async Task<CasActionResult> ReadAsync(ArtifactStoreFiles files, string key, CancellationToken ct)
     {
         string path = PathFor(files, key);
         if (new FileInfo(path).Length > 4096)

@@ -7,6 +7,7 @@ internal sealed class ArtifactStoreFiles(string directory)
 {
     private const string Format = "cmakeworkflow-artifact-cas-v1";
     private const string DocumentFormat = "cmakeworkflow-artifact-cas-v2";
+    private const string IndexedFormat = "cmakeworkflow-artifact-cas-v3";
     internal const string DocumentCatalogName = "documents.sqlite";
     internal string Root { get; } = Path.GetFullPath(directory);
     internal string Blobs => Path.Combine(Root, "blobs");
@@ -16,7 +17,8 @@ internal sealed class ArtifactStoreFiles(string directory)
 
     internal string Blob(string digest) => Path.Combine(Blobs, NormalizeDigest(digest));
 
-    internal async Task<FileStream> OpenLeaseAsync(bool create, CancellationToken ct, bool requireDocumentFormat = false)
+    internal async Task<FileStream> OpenLeaseAsync(bool create, CancellationToken ct, bool requireDocumentFormat = false,
+        bool requireIndexedActions = false)
     {
         if (create)
         {
@@ -38,11 +40,15 @@ internal sealed class ArtifactStoreFiles(string directory)
                 }
 
                 await DurableByteWriter.WriteAsync(marker,
-                    Encoding.UTF8.GetBytes(requireDocumentFormat ? DocumentFormat : Format), ct);
+                    Encoding.UTF8.GetBytes(requireIndexedActions ? IndexedFormat : requireDocumentFormat ? DocumentFormat : Format), ct);
             }
 
             string format = await ReadFormatAsync(ct);
-            if (requireDocumentFormat && format != DocumentFormat)
+            if (requireIndexedActions && format != IndexedFormat)
+            {
+                throw new InvalidDataException("Indexed Action Cache initialization requires a fresh CAS directory.");
+            }
+            if (requireDocumentFormat && format is not (DocumentFormat or IndexedFormat))
             {
                 throw new InvalidDataException("The document catalog requires a CAS initialized with document format v2.");
             }
@@ -65,7 +71,11 @@ internal sealed class ArtifactStoreFiles(string directory)
     }
 
     // Call under the store lease before selecting any roots or candidates for collection.
-    internal async Task<bool> HasDocumentFormatAsync(CancellationToken ct) => await ReadFormatAsync(ct) == DocumentFormat;
+    internal async Task<bool> HasDocumentFormatAsync(CancellationToken ct) =>
+        await ReadFormatAsync(ct) is DocumentFormat or IndexedFormat;
+
+    internal async Task<bool> HasIndexedActionsAsync(CancellationToken ct) =>
+        await ReadFormatAsync(ct) == IndexedFormat;
 
     private async Task<string> ReadFormatAsync(CancellationToken ct)
     {
@@ -76,7 +86,7 @@ internal sealed class ArtifactStoreFiles(string directory)
         }
 
         string format = await File.ReadAllTextAsync(marker, ct);
-        return format is Format or DocumentFormat
+        return format is Format or DocumentFormat or IndexedFormat
             ? format
             : throw new InvalidDataException("Unrecognized CMakeWorkflow artifact CAS format.");
     }

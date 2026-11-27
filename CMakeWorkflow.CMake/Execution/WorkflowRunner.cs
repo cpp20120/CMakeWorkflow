@@ -168,6 +168,8 @@ public static class WorkflowRunner
                 }
             }
 
+            SourceBoundManifestArtifacts? boundArtifacts =
+                plan.Nodes.FirstOrDefault(node => node.ManifestArtifacts is not null)?.ManifestArtifacts;
             foreach (NodeResult? node in saved.Nodes.Where(n => n.Status == "succeeded"))
             {
                 if (node.Artifact is { } artifact)
@@ -181,6 +183,11 @@ public static class WorkflowRunner
 
                 foreach (WorkflowArtifactEvidence evidence in node.DeclaredArtifacts)
                 {
+                    boundArtifacts?.RequireUnredirected(evidence.Path);
+                    if (evidence.SnapshotPath is { } snapshotPath)
+                    {
+                        boundArtifacts?.RequireUnredirected(snapshotPath);
+                    }
                     if (await WorkflowArtifacts.HashAsync(evidence.Path, ct) != evidence.Sha256
                         || (evidence.SnapshotPath is { } snapshot
                         && await WorkflowArtifacts.HashAsync(snapshot, ct) != evidence.Sha256))

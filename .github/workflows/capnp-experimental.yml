@@ -90,6 +90,9 @@ jobs:
             CMakeWorkflow.Binary.Capnp/Schema/managedToolchain.capnp > "$ref/managed-toolchain.request"
           (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/execution-binding.request")
           (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/managed-toolchain.request")
+          capnp compile --src-prefix=CMakeWorkflow.Binary.Capnp/Schema -o- \
+            CMakeWorkflow.Binary.Capnp/Schema/artifactEvidence.capnp > "$ref/artifact-evidence.request"
+          (cd CMakeWorkflow.Binary.Capnp/Generated && "$plugin" --check < "$ref/artifact-evidence.request")
           mkdir -p "$ref/protocol"
           capnp compile --src-prefix="$ref/install/include/capnp" "-o$plugin:$ref/protocol" \
             "$ref/install/include/capnp/schema.capnp"

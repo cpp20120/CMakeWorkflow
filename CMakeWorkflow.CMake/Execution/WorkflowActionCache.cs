@@ -17,7 +17,7 @@ internal sealed class WorkflowActionCache(CasActions actions, string key, string
     internal Task PublishAsync(string digest, CancellationToken ct) => actions.PublishAsync(key, output, digest, ct);
 
     internal static WorkflowActionCache Create(NodeResult result, string destination,
-        IReadOnlyDictionary<string, string> overrides)
+        IReadOnlyDictionary<string, string> overrides, string? sourceSnapshotId)
     {
         string? directory = Environment.GetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS");
         if (directory is null || !Path.IsPathFullyQualified(directory))
@@ -42,7 +42,11 @@ internal sealed class WorkflowActionCache(CasActions actions, string key, string
         // when arguments, paths or environment values contain delimiters.
         using MemoryStream bytes = new();
         using BinaryWriter writer = new(bytes, Encoding.UTF8, leaveOpen: true);
-        writer.Write("cmakeworkflow-action-v1");
+        writer.Write(sourceSnapshotId is null ? "cmakeworkflow-action-v1" : "cmakeworkflow-action-source-v1");
+        if (sourceSnapshotId is not null)
+        {
+            writer.Write(sourceSnapshotId);
+        }
         writer.Write(host);
         writer.Write(result.Executable!);
         writer.Write(result.ExecutableSha256!);
@@ -72,6 +76,6 @@ internal sealed class WorkflowActionCache(CasActions actions, string key, string
 
         writer.Flush();
         string key = Convert.ToHexStringLower(SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length))));
-        return new(new CasActions(new ArtifactStoreFiles(directory)), key, destination);
+        return new(new CasActions(new ArtifactStoreFiles(directory), sourceSnapshotId is null ? 1 : 2), key, destination);
     }
 }

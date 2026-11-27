@@ -18,13 +18,15 @@ public sealed class DocumentStore
     private readonly string database;
     private readonly bool production;
     private readonly int catalogVersion;
+    private readonly bool requireIndexedActions;
     private readonly Action<StoreFault>? fault;
 
-    private DocumentStore(string root, int catalogVersion, Action<StoreFault>? fault = null)
+    private DocumentStore(string root, int catalogVersion, Action<StoreFault>? fault = null, bool requireIndexedActions = false)
     {
         Root = Path.GetFullPath(root);
         production = catalogVersion != Catalog.PrototypeVersion;
         this.catalogVersion = catalogVersion;
+        this.requireIndexedActions = requireIndexedActions;
         files = new(production ? Root : Path.Combine(Root, "payload"));
         database = Path.Combine(Root, ArtifactStoreFiles.DocumentCatalogName);
         this.fault = fault;
@@ -42,17 +44,20 @@ public sealed class DocumentStore
 
     /// <summary>Opens or creates the fenced execution catalog with retained plans.</summary>
     public static Task<DocumentStore> OpenExecutionStoreAsync(string path, CancellationToken ct = default) =>
-        InitializeAsync(path, Catalog.ExecutionVersion, null, ct);
+        InitializeAsync(path, Catalog.ExecutionVersion, null, indexedActions: false, ct);
+
+    internal static Task<DocumentStore> InitializeIndexedActionsAsync(string path, CancellationToken ct) =>
+        InitializeAsync(path, Catalog.ExecutionVersion, null, indexedActions: true, ct);
 
     internal static Task<DocumentStore> InitializeAsync(string path, CancellationToken ct,
         Action<StoreFault>? fault = null, bool production = false) =>
-        InitializeAsync(path, production ? Catalog.WorkflowVersion : Catalog.PrototypeVersion, fault, ct);
+        InitializeAsync(path, production ? Catalog.WorkflowVersion : Catalog.PrototypeVersion, fault, indexedActions: false, ct);
 
     private static async Task<DocumentStore> InitializeAsync(string path, int catalogVersion, Action<StoreFault>? fault,
-        CancellationToken ct)
+        bool indexedActions, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        DocumentStore store = new(path, catalogVersion, fault);
+        DocumentStore store = new(path, catalogVersion, fault, requireIndexedActions: indexedActions);
         ct.ThrowIfCancellationRequested();
         CheckAncestors(store.Root);
         _ = OperatingSystem.IsWindows()
@@ -66,6 +71,10 @@ public sealed class DocumentStore
 
         using FileStream lease = await store.AcquireAsync(create: true, ct).ConfigureAwait(false);
         using Catalog catalog = store.OpenCatalog(initialize: true);
+        if (indexedActions)
+        {
+            using CasReferenceIndex index = new(store.files, initialize: true);
+        }
         return store;
     }
 
@@ -478,7 +487,8 @@ public sealed class DocumentStore
         CheckPath(files.Staging);
         CheckPath(files.Actions);
         CheckPath(files.Operations);
-        FileStream lease = await files.OpenLeaseAsync(create, ct, requireDocumentFormat: production).ConfigureAwait(false);
+        FileStream lease = await files.OpenLeaseAsync(create, ct, requireDocumentFormat: production,
+            requireIndexedActions: requireIndexedActions).ConfigureAwait(false);
         return lease;
     }
 

@@ -38,9 +38,14 @@ public static class WorkflowPlanner
     }
 
     /// <summary>Plans a verified in-memory workflow with its original provenance and path base.</summary>
-    public static async Task<WorkflowPlan> LoadDocumentAsync(string originalManifestPath, WorkflowDocument document,
+    public static Task<WorkflowPlan> LoadDocumentAsync(string originalManifestPath, WorkflowDocument document,
         string manifestHash, IReadOnlyList<string> only, string? controllerDirectory, CancellationToken ct,
-        Action<string>? readGuard = null)
+        Action<string>? readGuard = null) =>
+        LoadDocumentAsync(originalManifestPath, document, manifestHash, only, controllerDirectory, readGuard, null, ct);
+
+    internal static async Task<WorkflowPlan> LoadDocumentAsync(string originalManifestPath, WorkflowDocument document,
+        string manifestHash, IReadOnlyList<string> only, string? controllerDirectory, Action<string>? readGuard,
+        SourceBoundManifestArtifacts? manifestArtifacts, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(only);
         ArgumentNullException.ThrowIfNull(document);
@@ -54,12 +59,12 @@ public static class WorkflowPlanner
         {
             foreach (WorkflowArtifactInput? input in node.Inputs.Where(x => x.Path is not null))
             {
-                readGuard?.Invoke(WorkflowArtifacts.ManifestPath(directory, input.Path!));
+                readGuard?.Invoke(manifestArtifacts?.Input(input.Path!) ?? WorkflowArtifacts.ManifestPath(directory, input.Path!));
             }
 
             foreach (WorkflowArtifactOutput? declared in node.Outputs.Where(x => x.Root == "manifest"))
             {
-                readGuard?.Invoke(WorkflowArtifacts.ManifestPath(directory, declared.Path));
+                readGuard?.Invoke(manifestArtifacts?.Output(declared) ?? WorkflowArtifacts.ManifestPath(directory, declared.Path));
             }
         }
 
@@ -369,7 +374,8 @@ public static class WorkflowPlanner
             {
                 CompilerCacheProfile = compilerCache,
                 VariantBinding = document.Contexts[contextName].BuildVariant,
-                ReadGuard = readGuard
+                ReadGuard = readGuard,
+                ManifestArtifacts = manifestArtifacts
             });
         }
 

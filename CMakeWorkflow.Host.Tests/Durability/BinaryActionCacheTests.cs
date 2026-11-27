@@ -13,7 +13,7 @@ namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static partial class BinaryWorkflowWireTests
 {
-    internal static async Task VerifyActionCacheAsync(string cli)
+    internal static async Task VerifyActionCacheAsync(string cli, string? previous = null, string? legacyProducer = null)
     {
         using CancellationTokenSource deadline = new(TimeSpan.FromMinutes(3));
         CancellationToken ct = deadline.Token;
@@ -23,6 +23,11 @@ internal static partial class BinaryWorkflowWireTests
         {
             string root = temp.FullName;
             string cas = Path.Combine(root, "cas");
+            if (previous is not null)
+            {
+                await RunCommandAsync(cli, ["cas", cas, "init-indexed"], ct);
+                await RunCommandRejectedAsync(previous, ["cas", cas, "gc", "--apply"], ct);
+            }
             Environment.SetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS", cas);
             string source = Directory.CreateDirectory(Path.Combine(root, "src")).FullName;
             string output = Path.Combine(root, "result.txt");
@@ -50,7 +55,14 @@ internal static partial class BinaryWorkflowWireTests
                 }
                 """, ct);
             await File.WriteAllTextAsync(input, "first", ct);
-            BinaryWorkflowSubmission.InitializeWorkspace(root);
+            if (legacyProducer is null)
+            {
+                BinaryWorkflowSubmission.InitializeWorkspace(root);
+            }
+            else
+            {
+                await RunCommandAsync(legacyProducer, ["workflow", "init-binary", root], ct);
+            }
             WorkflowDocument workflow = new()
             {
                 SchemaVersion = 2,
@@ -72,30 +84,35 @@ internal static partial class BinaryWorkflowWireTests
                     }
                 ]
             };
+            int attempt = 0;
+            NodeResult legacy;
+            using (Peer producer = await Peer.StartAsync(legacyProducer ?? cli, root, ct))
+            using (JsonRpc producerConnection = HostConnection.Create(await LocalTransport.ConnectAsync(producer.Endpoint, ct)))
+            {
+                IHostRpc producerRpc = await ConnectAsync(producerConnection, root, ct);
+                legacy = await RunAsync(producerRpc, binary: false, selected: [], "succeeded");
+            }
+            Require(legacy.ActionCacheHit == false, "Cold legacy action unexpectedly hit the cache.");
             using Peer host = await Peer.StartAsync(cli, root, ct);
             using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(host.Endpoint, ct));
             IHostRpc rpc = await ConnectAsync(connection, root, ct);
-            int attempt = 0;
-
-            NodeResult legacy = await RunAsync(binary: false, selected: [], "succeeded");
-            Require(legacy.ActionCacheHit == false, "Cold legacy action unexpectedly hit the cache.");
             // Managed configure is needed once. Reuse the same provenanced tree and
             // select the build and run nodes in subsequent attempts.
             workflow.Nodes[1].DependsOn.Clear();
-            NodeResult same = await RunAsync(binary: true, selected: ["cached"], "succeeded");
+            NodeResult same = await RunAsync(rpc, binary: true, selected: ["cached"], "succeeded");
             Require(same.ActionCacheHit == true && same.ActionDigest == legacy.ActionDigest,
                 "Equivalent binary input did not reuse a verified legacy cache result.");
             workflow.Nodes[^1].TimeoutSeconds = 30;
-            NodeResult policyOnly = await RunAsync(binary: true, selected: ["cached"], "succeeded");
+            NodeResult policyOnly = await RunAsync(rpc, binary: true, selected: ["cached"], "succeeded");
             Require(policyOnly.ActionCacheHit == true && policyOnly.ActionDigest == same.ActionDigest,
                 "Workflow-only declaration changed an equivalent action key.");
 
             workflow.Nodes[^1].Arguments[2] = "B";
-            NodeResult argument = await RunAsync(binary: true, selected: ["cached"], "succeeded");
+            NodeResult argument = await RunAsync(rpc, binary: true, selected: ["cached"], "succeeded");
             workflow.Nodes[^1].Environment["CMWF_FIXTURE_MODE"] = "different";
-            NodeResult variable = await RunAsync(binary: true, selected: ["cached"], "succeeded");
+            NodeResult variable = await RunAsync(rpc, binary: true, selected: ["cached"], "succeeded");
             await File.WriteAllTextAsync(input, "second", ct);
-            NodeResult changedInput = await RunAsync(binary: true, selected: ["cached"], "succeeded");
+            NodeResult changedInput = await RunAsync(rpc, binary: true, selected: ["cached"], "succeeded");
             Require(new[] { legacy.ActionDigest, argument.ActionDigest, variable.ActionDigest, changedInput.ActionDigest }.Distinct().Count() == 4 &&
                 argument.ActionCacheHit == false && variable.ActionCacheHit == false && changedInput.ActionCacheHit == false,
                 "Effective arguments, environment or declared input bytes reused an unrelated action.");
@@ -104,13 +121,27 @@ internal static partial class BinaryWorkflowWireTests
             string digest = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(output, ct)));
             string blob = Path.Combine(cas, "blobs", digest);
             await File.WriteAllTextAsync(blob, "corrupt", ct);
-            _ = await RunAsync(binary: true, selected: ["cached"], "failed");
+            _ = await RunAsync(rpc, binary: true, selected: ["cached"], "failed");
             File.Delete(blob);
-            _ = await RunAsync(binary: true, selected: ["cached"], "failed");
+            _ = await RunAsync(rpc, binary: true, selected: ["cached"], "failed");
             Require((await File.ReadAllLinesAsync(effects, ct)).Length == 4 && !File.Exists(output),
                 "A corrupted or missing cache blob launched work or published an unverified output.");
+            if (previous is not null)
+            {
+                string index = Path.Combine(cas, "actions", "index.sqlite");
+                Require(File.Exists(index) && !Directory.EnumerateFiles(Path.Combine(cas, "actions"), "*.json").Any(),
+                    "Indexed Action Cache wrote a legacy reference.");
+                await RunCommandAsync(cli, ["cas", cas, "gc", "--apply"], ct);
+                string legacyBlob = Path.Combine(cas, "blobs", Convert.ToHexStringLower(SHA256.HashData("firstAclean"u8)));
+                Require(File.Exists(legacyBlob), "GC removed a retained indexed action.");
+                await RunCommandAsync(cli, ["cas", cas, "drop-action", legacy.ActionDigest!], ct);
+                await RunCommandAsync(cli, ["cas", cas, "gc", "--apply"], ct);
+                Require(!File.Exists(legacyBlob), "GC retained an evicted indexed action.");
+                File.Move(index, index + ".unavailable");
+                await RunCommandRejectedAsync(cli, ["cas", cas, "gc", "--apply"], ct);
+            }
 
-            async Task<NodeResult> RunAsync(bool binary, IReadOnlyList<string> selected, string expected)
+            async Task<NodeResult> RunAsync(IHostRpc target, bool binary, IReadOnlyList<string> selected, string expected)
             {
                 File.Delete(output);
                 string id = "action-" + (++attempt).ToString(CultureInfo.InvariantCulture);
@@ -121,14 +152,14 @@ internal static partial class BinaryWorkflowWireTests
                 string sha = Convert.ToHexString(SHA256.HashData(frame));
                 string results = Path.Combine(root, id);
                 OperationReference accepted = binary
-                    ? await rpc.ExecutionStartAsync(new(BinaryWorkflowSubmission.Domain, id, manifest, sha, 1, results)
+                    ? await target.ExecutionStartAsync(new(BinaryWorkflowSubmission.Domain, id, manifest, sha, 1, results)
                     {
                         Only = selected
                     }, ct)
-                    : await rpc.WorkflowStartAsync(new(id, manifest, sha, 1, results), ct);
-                await WaitForAsync(async () => (await rpc.OperationGetAsync(new(accepted.OperationId), ct)).State
+                    : await target.WorkflowStartAsync(new(id, manifest, sha, 1, results), ct);
+                await WaitForAsync(async () => (await target.OperationGetAsync(new(accepted.OperationId), ct)).State
                     is "succeeded" or "failed" or "canceled", ct);
-                WorkflowReportSnapshot report = await rpc.OperationReportAsync(new(accepted.OperationId), ct);
+                WorkflowReportSnapshot report = await target.OperationReportAsync(new(accepted.OperationId), ct);
                 NodeResult result = report.Report.Nodes.Single(node => node.Id == "cached");
                 Require(result.Status == expected, "Unexpected action status: " + result.Error);
                 return result;

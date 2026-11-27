@@ -241,7 +241,7 @@ public static class DurableWorkflowExecutor
         return sourceId is null
             ? await WorkflowPlanner.LoadDocumentAsync(manifest, document, accepted.ManifestSha256, selection, null, ct, paths.Read)
             : await WorkflowSourceSnapshotExecution.PlanAsync(paths, accepted.OperationId, manifest, output,
-                document, accepted.ManifestSha256, sourceId, selection, ct, resume);
+                document, accepted.ManifestSha256, sourceId, selection, ct, resume, store.AllowsSourceManifestArtifacts);
     }
 
 }

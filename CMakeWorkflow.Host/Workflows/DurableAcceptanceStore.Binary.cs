@@ -23,10 +23,13 @@ public sealed partial class DurableAcceptanceStore
     private const int BinaryApplicationId = 0x434D5742;
     private const int InlineBindingLedgerVersion = 2;
     private const int DocumentPlanLedgerVersion = 3;
+    private const int SourceManifestArtifactLedgerVersion = 4;
 
     internal bool BinaryLedger { get; }
     private int binaryLedgerVersion;
-    internal bool UsesDocumentPlans => binaryLedgerVersion == DocumentPlanLedgerVersion;
+    internal bool UsesDocumentPlans => binaryLedgerVersion is DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion;
+    internal bool AllowsSourceManifestArtifacts => binaryLedgerVersion == SourceManifestArtifactLedgerVersion;
+    internal int? NativeFormatEpoch => BinaryLedger ? binaryLedgerVersion : null;
 
     private void OpenBinaryLedgerEpoch(bool readOnly)
     {
@@ -37,7 +40,8 @@ public sealed partial class DurableAcceptanceStore
         long application = (long)(sql.ExecuteScalar() ?? -1L);
         sql.CommandText = "PRAGMA user_version;";
         long version = (long)(sql.ExecuteScalar() ?? -1L);
-        if (application == BinaryApplicationId && version is InlineBindingLedgerVersion or DocumentPlanLedgerVersion)
+        if (application == BinaryApplicationId &&
+            version is InlineBindingLedgerVersion or DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion)
         {
             binaryLedgerVersion = (int)version;
             tx?.Commit();
@@ -70,11 +74,11 @@ public sealed partial class DurableAcceptanceStore
                 plan_document_id TEXT NOT NULL CHECK(length(plan_document_id)=64)
             ) STRICT;
             PRAGMA application_id=1129142082;
-            PRAGMA user_version=3;
+            PRAGMA user_version=4;
             """;
         _ = sql.ExecuteNonQuery();
         tx!.Commit();
-        binaryLedgerVersion = DocumentPlanLedgerVersion;
+        binaryLedgerVersion = SourceManifestArtifactLedgerVersion;
     }
 
     internal Task<DocumentStore> OpenExecutionDocumentsAsync(CancellationToken ct) => UsesDocumentPlans
@@ -334,16 +338,20 @@ public sealed partial class DurableAcceptanceStore
             SourceSnapshotId: snapshot), new(descriptor, source, results, request.Jobs));
     }
 
-    private static async Task ValidateBinarySourceAsync(WorkspaceReadPaths paths, string manifest, WorkflowDocument workflow,
+    private async Task ValidateBinarySourceAsync(WorkspaceReadPaths paths, string manifest, WorkflowDocument workflow,
         IReadOnlyList<string> selection, string sourceId, CancellationToken ct)
     {
-        string source = WorkflowSourceSnapshotExecution.ValidateSourceLayout(paths, manifest, workflow);
+        string source = WorkflowSourceSnapshotExecution.ValidateSourceLayout(paths, manifest, workflow, AllowsSourceManifestArtifacts);
         _ = WorkflowPlanner.ValidateGraph(workflow, selection);
         LoreSnapshotStore store = new(SourceStorePaths.ForWorkspace(paths.WorkspaceDirectory));
         SnapshotManifest snapshot = await store.VerifyAsync(sourceId, ct);
         if (!snapshot.Files.Any(file => file.Path == "CMakeLists.txt"))
         {
             throw new InvalidDataException("Source snapshot does not contain CMakeLists.txt at its root.");
+        }
+        if (AllowsSourceManifestArtifacts)
+        {
+            _ = SourceBoundArtifactLayout.Validate(workflow, manifest, source, snapshot);
         }
 
         foreach (WorkflowContext context in workflow.Contexts.Values)

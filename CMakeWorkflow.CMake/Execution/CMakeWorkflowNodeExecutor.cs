@@ -51,6 +51,9 @@ internal static class CMakeWorkflowNodeExecutor
         IReadOnlyDictionary<string, NodeResult> artifactSources, CancellationToken ct)
     {
         WorkflowNode definition = node.Definition;
+        SourceBoundManifestArtifacts? manifestArtifacts = node.ManifestArtifacts;
+        string OutputPath(WorkflowArtifactOutput declared) => manifestArtifacts?.ResolveOutput(declared, output)
+            ?? WorkflowArtifacts.OutputPath(manifest, output, declared);
         NodeResult result = new()
         {
             Id = definition.Id,
@@ -132,10 +135,13 @@ internal static class CMakeWorkflowNodeExecutor
                                        $"{definition.Id}: producer output '{input.Artifact}' has no verified evidence."));
                 string path = input.Path is null
                     ? produced!.Path
-                    : WorkflowArtifacts.ManifestPath(Path.GetDirectoryName(manifest)!, input.Path);
+                    : manifestArtifacts?.Input(input.Path) ?? WorkflowArtifacts.ManifestPath(Path.GetDirectoryName(manifest)!, input.Path);
+                manifestArtifacts?.RequireUnredirected(path);
                 string sha = await WorkflowArtifacts.HashAsync(path, deadline.Token);
                 if ((input.Sha256 is { } expected && !sha.Equals(expected, StringComparison.OrdinalIgnoreCase))
-                    || (produced is not null && sha != produced.Sha256))
+                    || (produced is not null && sha != produced.Sha256)
+                    || (manifestArtifacts is not null && input.Path is { } logical &&
+                        !sha.Equals(manifestArtifacts.InputDigests[logical], StringComparison.OrdinalIgnoreCase)))
                 {
                     throw new InvalidDataException($"{definition.Id}: declared input changed: {path}");
                 }
@@ -155,12 +161,18 @@ internal static class CMakeWorkflowNodeExecutor
                     "input", input.From, snapshot));
             }
 
-            foreach (WorkflowArtifactOutput? declared in definition.Outputs.Where(x => x.Fresh))
+            foreach (WorkflowArtifactOutput declared in definition.Outputs.Where(x => x.Fresh || manifestArtifacts is not null))
             {
-                string path = WorkflowArtifacts.OutputPath(manifest, output, declared);
-                if (File.Exists(path) || Directory.Exists(path))
+                string path = OutputPath(declared);
+                if (declared.Fresh && (File.Exists(path) || Directory.Exists(path)))
                 {
                     throw new InvalidDataException($"{definition.Id}: fresh output already exists: {path}");
+                }
+
+                if (manifestArtifacts is not null && declared.Root == "manifest")
+                {
+                    _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    manifestArtifacts.RequireUnredirected(path);
                 }
             }
 
@@ -241,7 +253,8 @@ internal static class CMakeWorkflowNodeExecutor
                         result.ExecutableSha256 = currentHash;
                         result.Artifact = new ArtifactReference(definition.From!, target, item.Executable,
                             currentHash, "VerifiedAgainstBuild");
-                        result.Arguments = [.. definition.Arguments];
+                        result.Arguments = manifestArtifacts?.Arguments(definition, result.DeclaredArtifacts, output)
+                            ?? [.. definition.Arguments];
                         break;
                     case "ctest":
                         result.Executable = toolchain?.CTest ?? result.ObservedContext.CTestExecutable ?? "ctest";
@@ -316,8 +329,8 @@ internal static class CMakeWorkflowNodeExecutor
 
                     if (definition.ActionCache)
                     {
-                        string cachedOutput = WorkflowArtifacts.OutputPath(manifest, output, definition.Outputs[0]);
-                        actionCache = WorkflowActionCache.Create(result, cachedOutput, environment);
+                        string cachedOutput = OutputPath(definition.Outputs[0]);
+                        actionCache = WorkflowActionCache.Create(result, cachedOutput, environment, manifestArtifacts?.SourceSnapshotId);
                         result.ActionDigest = actionCache.Key;
                         result.ActionCacheHit = await actionCache.TryRestoreAsync(deadline.Token);
                     }
@@ -439,6 +452,7 @@ internal static class CMakeWorkflowNodeExecutor
             {
                 foreach (WorkflowArtifactEvidence? evidence in result.DeclaredArtifacts.Where(x => x.Role == "input"))
                 {
+                    manifestArtifacts?.RequireUnredirected(evidence.Path);
                     if (await WorkflowArtifacts.HashAsync(evidence.Path, deadline.Token) != evidence.Sha256)
                     {
                         throw new InvalidDataException(
@@ -448,7 +462,11 @@ internal static class CMakeWorkflowNodeExecutor
 
                 foreach (WorkflowArtifactOutput declared in definition.Outputs)
                 {
-                    string path = WorkflowArtifacts.OutputPath(manifest, output, declared);
+                    string path = OutputPath(declared);
+                    if (manifestArtifacts is not null && declared.Root == "manifest" && !File.Exists(path))
+                    {
+                        throw new InvalidDataException($"Mapped manifest output must be a file: {path}");
+                    }
                     string sha = await WorkflowArtifacts.HashAsync(path, deadline.Token);
                     result.DeclaredArtifacts.Add(new(declared.Name, path, sha, "output"));
                     if (actionCache is not null && result.ActionCacheHit == false)
