@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow.Host.Workflows;
 
@@ -36,6 +37,26 @@ internal sealed record RecoveryRunBinding(string Directory, string Snapshot)
             if (new DirectoryInfo(path).LinkTarget is not null)
             {
                 throw new ArgumentException("Symlinked run directories are not supported.");
+            }
+        }
+
+        string ledger = WorkflowLedgerPath.Resolve(root);
+        if (WorkflowLedgerPath.IsBinary(root, ledger) && File.Exists(ledger))
+        {
+            using DurableAcceptanceStore store = new(root, readOnly: true);
+            if (store.FindNativeCheckpointByResults(directory) is { } checkpoint)
+            {
+                WorkflowReport report = checkpoint.State.Report;
+                if (report.Status != "needs_attention" || report.Findings.Count == 0)
+                {
+                    throw new ArgumentException("Only needs_attention runs with findings can be fixed.");
+                }
+
+                HashSet<string> allowed = new(report.Findings.SelectMany(finding => finding.SuggestedProfiles),
+                    StringComparer.OrdinalIgnoreCase);
+                return profiles.Length == 0 || profiles.Any(profile => !allowed.Contains(profile))
+                    ? throw new ArgumentException("Fix profiles must be suggested by the run findings.")
+                    : new(directory, checkpoint.Digest);
             }
         }
 
@@ -108,7 +129,7 @@ internal sealed record RecoveryRunBinding(string Directory, string Snapshot)
             return (await ReadAsync(workspace, directory, profiles, ct)).Snapshot == snapshot;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
-                                          or JsonException)
+                                          or JsonException or InvalidDataException)
         {
             return false;
         }

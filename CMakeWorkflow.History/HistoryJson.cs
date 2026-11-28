@@ -7,6 +7,7 @@ namespace CMakeWorkflow.History;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(List<HistoryRun>))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(HistoryDetail))]
 [JsonSerializable(typeof(List<HistoryMeasurement>))]
 [JsonSerializable(typeof(BenchmarkTrial))]

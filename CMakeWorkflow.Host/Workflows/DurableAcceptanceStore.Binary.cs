@@ -24,11 +24,17 @@ public sealed partial class DurableAcceptanceStore
     private const int InlineBindingLedgerVersion = 2;
     private const int DocumentPlanLedgerVersion = 3;
     private const int SourceManifestArtifactLedgerVersion = 4;
+    private const int NativeEventLedgerVersion = 5;
+    private const int NativeReportLedgerVersion = 6;
+    private const int NativeCheckpointLedgerVersion = 7;
 
     internal bool BinaryLedger { get; }
     private int binaryLedgerVersion;
-    internal bool UsesDocumentPlans => binaryLedgerVersion is DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion;
-    internal bool AllowsSourceManifestArtifacts => binaryLedgerVersion == SourceManifestArtifactLedgerVersion;
+    internal bool UsesDocumentPlans => binaryLedgerVersion >= DocumentPlanLedgerVersion;
+    internal bool AllowsSourceManifestArtifacts => binaryLedgerVersion >= SourceManifestArtifactLedgerVersion;
+    internal bool UsesNativeWorkflowEvents => binaryLedgerVersion >= NativeEventLedgerVersion;
+    internal bool UsesNativeWorkflowReports => binaryLedgerVersion >= NativeReportLedgerVersion;
+    internal bool UsesNativeWorkflowCheckpoints => binaryLedgerVersion == NativeCheckpointLedgerVersion;
     internal int? NativeFormatEpoch => BinaryLedger ? binaryLedgerVersion : null;
 
     private void OpenBinaryLedgerEpoch(bool readOnly)
@@ -41,7 +47,7 @@ public sealed partial class DurableAcceptanceStore
         sql.CommandText = "PRAGMA user_version;";
         long version = (long)(sql.ExecuteScalar() ?? -1L);
         if (application == BinaryApplicationId &&
-            version is InlineBindingLedgerVersion or DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion)
+            version is InlineBindingLedgerVersion or DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion or NativeEventLedgerVersion or NativeReportLedgerVersion or NativeCheckpointLedgerVersion)
         {
             binaryLedgerVersion = (int)version;
             tx?.Commit();
@@ -74,16 +80,20 @@ public sealed partial class DurableAcceptanceStore
                 plan_document_id TEXT NOT NULL CHECK(length(plan_document_id)=64)
             ) STRICT;
             PRAGMA application_id=1129142082;
-            PRAGMA user_version=4;
-            """;
+            PRAGMA user_version=7;
+            """ + NativeWorkflowEventSchema + NativeWorkflowReportSchema + NativeWorkflowCheckpointSchema;
         _ = sql.ExecuteNonQuery();
         tx!.Commit();
-        binaryLedgerVersion = SourceManifestArtifactLedgerVersion;
+        binaryLedgerVersion = NativeCheckpointLedgerVersion;
     }
 
-    internal Task<DocumentStore> OpenExecutionDocumentsAsync(CancellationToken ct) => UsesDocumentPlans
-        ? DocumentStore.OpenExecutionStoreAsync(WorkflowLedgerPath.Documents(workspace), ct)
-        : DocumentStore.OpenProductionStoreAsync(WorkflowLedgerPath.Documents(workspace), ct);
+    internal Task<DocumentStore> OpenExecutionDocumentsAsync(CancellationToken ct)
+    {
+        string root = WorkflowLedgerPath.Documents(workspace);
+        return UsesNativeWorkflowReports ? DocumentStore.OpenReportStoreAsync(root, ct)
+            : UsesDocumentPlans ? DocumentStore.OpenExecutionStoreAsync(root, ct)
+            : DocumentStore.OpenProductionStoreAsync(root, ct);
+    }
 
     internal async Task<StoredPlanAuthorization?> PublishExecutionPlanAsync(string operationId, byte[] binding, CancellationToken ct)
     {

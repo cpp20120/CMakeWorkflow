@@ -4,33 +4,38 @@ using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow.CMake.Recovery;
 
-/// <summary>Best-effort event projection owned by one CMake runner under its run lease.</summary>
+/// <summary>Ordered event projection owned by one CMake runner under its run lease.</summary>
 /// <remarks>
 /// Not thread-safe; PublishAsync is called on the serial report persistence path. Resume recovers the maximum
 /// parseable sequence and suppresses already successful node events; malformed JSON lines are ignored during
-/// that scan. It does not validate recovery authority or prove event completeness. Flushing the event stream does not make it a durable checkpoint.
-/// Handled journal/stdout I/O failures disable those outputs; unexpected errors may still propagate.
+/// that scan. A Host can provide a mandatory durable append sink instead. Recovery authority remains with the checkpoint.
+/// Handled legacy journal and stdout I/O failures disable those outputs.
 /// </remarks>
 internal sealed class WorkflowEventJournal : IAsyncDisposable
 {
     private StreamWriter? journal;
     private bool stdout;
     private readonly string directory;
+    private readonly Action<WorkflowEvent>? appendEvent;
+    private readonly bool suppressFileEvidence;
     private readonly Dictionary<string, string> previous = new(StringComparer.Ordinal);
     private bool started;
     private bool finished;
     private bool resumedEventEmitted;
     private long sequence;
 
-    private WorkflowEventJournal(string directory, bool stdout)
+    private WorkflowEventJournal(string directory, bool stdout, Action<WorkflowEvent>? appendEvent, bool suppressFileEvidence)
     {
         this.directory = directory;
         this.stdout = stdout;
+        this.appendEvent = appendEvent;
+        this.suppressFileEvidence = suppressFileEvidence;
     }
 
-    internal static async Task<WorkflowEventJournal> OpenAsync(string directory, bool stdout, WorkflowReport? resumed)
+    internal static async Task<WorkflowEventJournal> OpenAsync(string directory, bool stdout, WorkflowReport? resumed,
+        Action<WorkflowEvent>? appendEvent, long previousSequence, bool suppressFileEvidence)
     {
-        WorkflowEventJournal events = new(directory, stdout);
+        WorkflowEventJournal events = new(directory, stdout, appendEvent, suppressFileEvidence) { sequence = previousSequence };
         if (resumed is not null)
         {
             foreach (NodeResult node in resumed.Nodes.Where(n => n.Status == "succeeded"))
@@ -39,6 +44,11 @@ internal sealed class WorkflowEventJournal : IAsyncDisposable
             }
 
             events.started = true;
+        }
+
+        if (appendEvent is not null)
+        {
+            return events;
         }
 
         try
@@ -88,11 +98,12 @@ internal sealed class WorkflowEventJournal : IAsyncDisposable
         if (!started)
         {
             started = true;
-            await EmitAsync("workflow_started", null, "running", null, null,
-            [
-                new("report", Path.Combine(directory, "run.json"), null),
-                new("event-journal", Path.Combine(directory, "events.jsonl"), null)
-            ]);
+            List<WorkflowArtifactView> paths = suppressFileEvidence ? [] : [new("report", Path.Combine(directory, "run.json"), null)];
+            if (appendEvent is null)
+            {
+                paths.Add(new("event-journal", Path.Combine(directory, "events.jsonl"), null));
+            }
+            await EmitAsync("workflow_started", null, "running", null, null, paths);
         }
 
         foreach (NodeResult node in report.Nodes)
@@ -117,7 +128,7 @@ internal sealed class WorkflowEventJournal : IAsyncDisposable
         {
             finished = true;
             await EmitAsync("workflow_finished", null, report.Status, null, report.Error,
-                [new("report", Path.Combine(directory, "run.json"), null)]);
+                suppressFileEvidence ? [] : [new("report", Path.Combine(directory, "run.json"), null)]);
         }
     }
 
@@ -177,28 +188,34 @@ internal sealed class WorkflowEventJournal : IAsyncDisposable
     {
         WorkflowEvent item = new(1, ++sequence, DateTimeOffset.UtcNow, type, directory,
             node?.Id, node?.Kind, status, exitCode, error, artifacts);
-        string line = JsonSerializer.Serialize(item, Serialization.WorkflowProtocolJson.Default.WorkflowEvent);
-        if (journal is null)
+        if (appendEvent is not null)
         {
-            return;
+            appendEvent(item);
         }
-
-        try
+        else
         {
-            await EventJournalFile.AppendAsync(journal, line);
-        }
-        catch (Exception failure) when (failure is IOException or ObjectDisposedException)
-        {
-            await EventJournalFile.CloseAsync(journal);
-            journal = null;
-            return;
+            if (journal is null)
+            {
+                return;
+            }
+            try
+            {
+                await EventJournalFile.AppendAsync(journal,
+                    JsonSerializer.Serialize(item, Serialization.WorkflowProtocolJson.Default.WorkflowEvent));
+            }
+            catch (Exception failure) when (failure is IOException or ObjectDisposedException)
+            {
+                await EventJournalFile.CloseAsync(journal);
+                journal = null;
+                return;
+            }
         }
 
         if (stdout)
         {
             try
             {
-                await Console.Out.WriteLineAsync(line);
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(item, Serialization.WorkflowProtocolJson.Default.WorkflowEvent));
             }
             catch (IOException)
             {

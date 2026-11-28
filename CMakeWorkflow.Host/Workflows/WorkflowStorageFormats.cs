@@ -59,7 +59,7 @@ public sealed record WorkflowStorageFormats(string Workspace, string OperationLe
         await using SqliteCommand check = sql.CreateCommand();
         check.CommandText = "SELECT application_id, user_version FROM pragma_application_id, pragma_user_version;";
         await using SqliteDataReader row = await check.ExecuteReaderAsync(ct);
-        return await row.ReadAsync(ct) && row.GetInt32(0) == 0x434D5744 && row.GetInt64(1) is 2 or 3
+        return await row.ReadAsync(ct) && row.GetInt32(0) == 0x434D5744 && row.GetInt64(1) is 2 or 3 or 4
             ? new(root, ledgerPath, ledgerFormat, documentRoot, format, row.GetInt64(1),
                 SourceStorePaths.ForWorkspace(root), ManagedToolStore.GetRoot())
             : throw new InvalidDataException("Unsupported execution document catalog.");

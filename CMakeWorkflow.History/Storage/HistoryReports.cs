@@ -14,7 +14,7 @@ namespace CMakeWorkflow.History.Storage;
 /// in reports are resolved as artifact metadata, not inherently workspace-authorized file handles; callers
 /// apply their own path policy. Parse errors propagate so the store can reject a batch before writing it.
 /// </remarks>
-internal static class HistoryReports
+internal static partial class HistoryReports
 {
     private static string? Str(JsonElement e, string name)
     {
@@ -330,6 +330,13 @@ internal static class HistoryReports
         }
 
         await ImportProfileAsync(directory, run, pathGuard, ct);
+        CompleteWorkflowImport(run, directory, "run.json", builds, overrides, pathGuard);
+        return run;
+    }
+
+    private static void CompleteWorkflowImport(ParsedRun run, string directory, string evidenceSource,
+        Dictionary<string, string> builds, Dictionary<string, string> overrides, Action<string>? pathGuard)
+    {
         long observedBytes = 0;
         bool observedFiles = false;
         StringComparer paths = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -355,7 +362,7 @@ internal static class HistoryReports
         if (observedFiles)
         {
             run.Measurements.Add(new(run.Run.Id, null, "artifact_result_bytes", "B", observedBytes,
-                null, null, "run.json", "referenced result files at import, distinct paths", 0, null, null));
+                null, null, evidenceSource, "referenced result files at import, distinct paths", 0, null, null));
         }
         SetMeasurementEnvironments(run, builds, overrides);
 
@@ -368,7 +375,6 @@ internal static class HistoryReports
                     observedBytes.ToString(CultureInfo.InvariantCulture)))
             };
         }
-        return run;
     }
 
     private static void SetMeasurementEnvironments(ParsedRun run, Dictionary<string, string> builds,
@@ -533,23 +539,31 @@ internal static class HistoryReports
             return;
         }
 
-        if (outputs.TryGetProperty("dagflow-summary.json", out _))
+        await ImportDagFlowHarnessAsync(directory, run, id, name => outputs.TryGetProperty(name, out _),
+            name => Str(outputs, name), pathGuard, ct);
+    }
+
+    private static async Task ImportDagFlowHarnessAsync(string directory, ParsedRun run, string id,
+        Func<string, bool> has, Func<string, string?> value, Action<string>? pathGuard, CancellationToken ct)
+    {
+        if (has("dagflow-summary.json"))
         {
-            await ImportDagFlowHarnessEntryAsync(directory, run, outputs, id, "dagflow-", null, pathGuard, ct);
+            await ImportDagFlowHarnessEntryAsync(directory, run, value, id, "dagflow-", null, pathGuard, ct);
         }
+
         // Multiple harness results can originate from one native invoke.
-        for (int index = 0; outputs.TryGetProperty($"dagflow-{index}-summary.json", out _); index++)
+        for (int index = 0; has($"dagflow-{index}-summary.json"); index++)
         {
-            await ImportDagFlowHarnessEntryAsync(directory, run, outputs, id, $"dagflow-{index}-", $"harness-{index}", pathGuard, ct);
+            await ImportDagFlowHarnessEntryAsync(directory, run, value, id, $"dagflow-{index}-", $"harness-{index}", pathGuard, ct);
         }
     }
 
     private static async Task ImportDagFlowHarnessEntryAsync(string directory, ParsedRun run,
-        JsonElement outputs, string id, string prefix, string? variant, Action<string>? pathGuard, CancellationToken ct)
+        Func<string, string?> outputValue, string id, string prefix, string? variant, Action<string>? pathGuard, CancellationToken ct)
     {
         string Saved(string name)
         {
-            string relative = Str(outputs, prefix + name)
+            string relative = outputValue(prefix + name)
                            ?? throw new InvalidDataException($"{id}: incomplete DagFlow harness snapshot.");
             if (Path.IsPathRooted(relative))
             {
@@ -577,7 +591,7 @@ internal static class HistoryReports
             AddArtifact(run, id, type, path, await HashFileAsync(path, ct));
         }
 
-        if (Str(outputs, prefix + "replay-binary") is { } executable)
+        if (outputValue(prefix + "replay-binary") is { } executable)
         {
             string original = Path.GetFullPath(Path.Combine(directory, executable));
             if (!original.StartsWith(Path.GetFullPath(directory) + Path.DirectorySeparatorChar,
@@ -717,13 +731,14 @@ internal static class HistoryReports
 
     private static string? Scenario(JsonElement node)
     {
-        if (!node.TryGetProperty("arguments", out JsonElement args) || args.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
+        return node.TryGetProperty("arguments", out JsonElement args) && args.ValueKind == JsonValueKind.Array
+            ? Scenario([.. args.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!)])
+            : null;
+    }
 
-        string?[] values = [.. args.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString())];
-        for (int i = 0; i + 1 < values.Length; i++)
+    private static string? Scenario(List<string> values)
+    {
+        for (int i = 0; i + 1 < values.Count; i++)
         {
             if (values[i] == "--scenario")
             {
@@ -916,7 +931,8 @@ internal static class HistoryReports
     /// metadata reads may fail; database mutation is deferred until the caller has parsed the entire batch.
     /// Raw trace references/hashes are metadata; merely importing them does not attest current trace contents.
     /// </remarks>
-    private static async Task ImportProfileAsync(string directory, ParsedRun run, Action<string>? pathGuard, CancellationToken ct)
+    private static async Task ImportProfileAsync(string directory, ParsedRun run, Action<string>? pathGuard, CancellationToken ct,
+        bool includeCaptureJson = true)
     {
         string commandsPath = Path.Combine(directory, "commands.json");
         if (File.Exists(commandsPath))
@@ -941,7 +957,8 @@ internal static class HistoryReports
             return HashFileAsync(file, ct);
         }
 
-        foreach (string? path in Directory.GetFiles(directory, "*.results.json").Order(StringComparer.Ordinal))
+        string[] captureFiles = includeCaptureJson ? Directory.GetFiles(directory, "*.results.json") : [];
+        foreach (string? path in captureFiles.Order(StringComparer.Ordinal))
         {
             pathGuard?.Invoke(path);
             byte[] bytes = await File.ReadAllBytesAsync(path, ct);

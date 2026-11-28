@@ -4,6 +4,7 @@ using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Host.Execution;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Storage.Documents;
 
 namespace CMakeWorkflow.Host.Workflows;
 
@@ -29,6 +30,10 @@ internal static class OperationArtifactReader
     /// Cancellation affects this read only and does not alter execution or finalization.
     /// </remarks>
     internal static async Task<WorkflowReportSnapshot> ReportAsync(
+        WorkspaceReadPaths paths, string operationId, CancellationToken ct) =>
+        (await ReadReportAsync(paths, operationId, ct)).Report;
+
+    private static async Task<(WorkflowReportSnapshot Report, NativeReportReference? Native)> ReadReportAsync(
         WorkspaceReadPaths paths, string operationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128)
@@ -48,6 +53,17 @@ internal static class OperationArtifactReader
         DurableAcceptanceStore.Finalization finalized = store.GetFinalization(operationId)
                         ?? throw new ApplicationRefusal("not_finalized", "No durable terminal report yet.");
         string directory = paths.Require(finalized.RunDirectory);
+        if (store.UsesNativeWorkflowReports && store.ReadBinaryInput(operationId) is not null)
+        {
+            NativeReportReference reference = store.ReadNativeReportReference(operationId)
+                ?? throw new ApplicationRefusal("report_changed", "Native terminal report reference is absent.");
+            NativeExecutionReport evidence = await store.ReadNativeReportAsync(accepted, reference, ct);
+            return evidence.Report.Status != finalized.State || evidence.ExitCode != finalized.ExitCode ||
+                   !string.Equals(evidence.RunDirectory, directory, StringComparison.Ordinal)
+                ? throw new ApplicationRefusal("report_changed", "Native terminal report failed verification.")
+                : (new WorkflowReportSnapshot(1, directory, finalized.ReportSha256, evidence.Report), reference);
+        }
+
         string reportPath = WithinResults(paths, directory, "run.json");
         await using FileStream reportFile = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, reportPath);
         if (reportFile.Length > 16 * 1024 * 1024)
@@ -63,7 +79,7 @@ internal static class OperationArtifactReader
             !string.Equals(report.Report.ManifestHash, accepted.ManifestSha256,
                 StringComparison.OrdinalIgnoreCase) || report.Report.FinishedAt is null
             ? throw new ApplicationRefusal("report_changed", "The durable report failed verification.")
-            : report;
+            : (report, null);
     }
 
     /// <summary>Builds a bounded catalog with complete file hashes from verified finalization evidence.</summary>
@@ -80,9 +96,18 @@ internal static class OperationArtifactReader
             return await ProcessArtifactReader.ListAsync(paths, operationId, ct);
         }
 
-        WorkflowReportSnapshot report = await ReportAsync(paths, operationId, ct);
+        (WorkflowReportSnapshot report, NativeReportReference? native) = await ReadReportAsync(paths, operationId, ct);
         List<OperationArtifactInfo> result = [];
-        foreach (Candidate candidate in Candidates(report))
+        if (native is not null)
+        {
+            byte[] projection = VerifiedReportProjection(report);
+            result.Add(new("report", "report", null, "run.json", projection.LongLength,
+                report.Report.FinishedAt.GetValueOrDefault().UtcTicks, report.Revision));
+            result.Add(new("native-report", "native-report", null, "execution-report.capnp", native.StoredLength,
+                report.Report.FinishedAt.GetValueOrDefault().UtcTicks, native.Blob.Value));
+        }
+
+        foreach (Candidate candidate in Candidates(report, native is null))
         {
             ct.ThrowIfCancellationRequested();
             string path = WithinResults(paths, report.RunDirectory, candidate.Path);
@@ -111,7 +136,11 @@ internal static class OperationArtifactReader
                 throw new ApplicationRefusal("resource_limit", "Artifact catalog has too many files.");
             }
         }
-        return new(operationId, report.Revision, result);
+        return new(operationId, report.Revision, result)
+        {
+            NativeReportDocumentId = native?.Document.Value,
+            NativeReportBlobId = native?.Blob.Value
+        };
     }
 
     /// <summary>Reads at most 64 KiB from an opaque report-bound artifact ID.</summary>
@@ -135,9 +164,41 @@ internal static class OperationArtifactReader
             return await ProcessArtifactReader.ReadChunkAsync(paths, request, ct);
         }
 
-        WorkflowReportSnapshot report = await ReportAsync(paths, request.OperationId, ct);
+        (WorkflowReportSnapshot report, NativeReportReference? native) = await ReadReportAsync(paths, request.OperationId, ct);
+        if (native is not null && request.ArtifactId == "report")
+        {
+            byte[] projection = VerifiedReportProjection(report);
+            long ticks = report.Report.FinishedAt.GetValueOrDefault().UtcTicks;
+            if (projection.LongLength != request.ExpectedSize || ticks != request.ExpectedLastWriteUtcTicks)
+            {
+                throw new ApplicationRefusal("artifact_changed", "Report projection changed since catalog discovery.");
+            }
+
+            int offset = checked((int)request.Offset);
+            int length = Math.Min(request.Count, projection.Length - offset);
+            return new("report", request.Offset, projection.LongLength, ticks,
+                projection.AsSpan(offset, length).ToArray(), offset + length == projection.Length);
+        }
+
+        if (native is not null && request.ArtifactId == "native-report")
+        {
+            long ticks = report.Report.FinishedAt.GetValueOrDefault().UtcTicks;
+            if (native.StoredLength != request.ExpectedSize || ticks != request.ExpectedLastWriteUtcTicks)
+            {
+                throw new ApplicationRefusal("artifact_changed", "Native report changed since catalog discovery.");
+            }
+
+            using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);
+            using DocumentSession session = await store.OpenNativeReportDocumentAsync(native, ct);
+            int offset = checked((int)request.Offset);
+            int length = (int)Math.Min(request.Count, native.StoredLength - offset);
+            byte[] content = session.InspectStoredBytes(frame => frame.Slice(offset, length).ToArray());
+            return new("native-report", request.Offset, native.StoredLength, ticks, content,
+                request.Offset + length == native.StoredLength);
+        }
+
         // The artifact ID is opaque; it selects a known report-bound file, never a path.
-        Candidate candidate = Candidates(report).FirstOrDefault(c => c.Id == request.ArtifactId)
+        Candidate candidate = Candidates(report, native is null).FirstOrDefault(c => c.Id == request.ArtifactId)
                         ?? throw new ApplicationRefusal("not_found", "Unknown operation artifact.");
         string path = WithinResults(paths, report.RunDirectory, candidate.Path);
         await using FileStream file = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path);
@@ -157,9 +218,37 @@ internal static class OperationArtifactReader
             : new(candidate.Id, request.Offset, size, stamp, bytes, request.Offset + count == size);
     }
 
-    private static List<Candidate> Candidates(WorkflowReportSnapshot report)
+    private static byte[] VerifiedReportProjection(WorkflowReportSnapshot report)
     {
-        List<Candidate> found = [new("report", "report", null, "run.json")];
+        byte[] projection = DurableAcceptanceStore.ProjectWorkflowReport(report.Report);
+        return Convert.ToHexString(SHA256.HashData(projection)) == report.Revision
+            ? projection : throw new ApplicationRefusal("report_changed", "Native report projection differs from finalization.");
+    }
+
+    internal static async Task VerifyTerminalArtifactsAsync(WorkspaceReadPaths paths, NativeExecutionReport terminal,
+        CancellationToken ct)
+    {
+        WorkflowReportSnapshot report = new(1, terminal.RunDirectory, "", terminal.Report);
+        foreach (Candidate candidate in Candidates(report, includePhysicalReport: false))
+        {
+            if (candidate.ExpectedDigest is not { } expected || candidate.Kind is not ("output" or "snapshot" or "trace"))
+            {
+                continue;
+            }
+
+            string path = WithinResults(paths, terminal.RunDirectory, candidate.Path);
+            await using FileStream stream = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path);
+            string hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
+            if (!hash.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Required terminal artifact differs from the runner evidence.");
+            }
+        }
+    }
+
+    private static List<Candidate> Candidates(WorkflowReportSnapshot report, bool includePhysicalReport)
+    {
+        List<Candidate> found = includePhysicalReport ? [new("report", "report", null, "run.json")] : [];
         foreach (NodeResult node in report.Report.Nodes)
         {
             if (!string.IsNullOrWhiteSpace(node.Stdout))
@@ -182,7 +271,8 @@ internal static class OperationArtifactReader
                 && IsLexicallyWithin(report.RunDirectory, trace)
                 && !string.Equals(Path.GetExtension(trace), ".trace", StringComparison.OrdinalIgnoreCase))
             {
-                found.Add(new("trace:" + node.Id, "trace", node.Id, trace));
+                string? hash = node.Profile is { } profile && profile.RawTrace == trace ? profile.RawTraceSha256 : null;
+                found.Add(new("trace:" + node.Id, "trace", node.Id, trace, hash));
             }
 
             for (int i = 0; i < node.DeclaredArtifacts.Count; i++)
@@ -192,14 +282,15 @@ internal static class OperationArtifactReader
                 // build/source-tree output is not authorized for remote download.
                 if (evidence.SnapshotPath is { } snapshot)
                 {
-                    found.Add(new($"snapshot:{node.Id}:{i}", "snapshot", node.Id, snapshot));
+                    found.Add(new($"snapshot:{node.Id}:{i}", "snapshot", node.Id, snapshot,
+                        includePhysicalReport ? null : evidence.Sha256));
                 }
                 else if (evidence.Role == "output" && IsLexicallyWithin(report.RunDirectory, evidence.Path))
                 {
                     string relative = Path.GetRelativePath(report.RunDirectory, evidence.Path);
-                    string? digest = report.Report.SourceSnapshotId is not null &&
-                        relative.StartsWith(SourceBoundArtifactLayout.OutputDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                        ? evidence.Sha256 : null;
+                    bool bound = !includePhysicalReport || (report.Report.SourceSnapshotId is not null &&
+                        relative.StartsWith(SourceBoundArtifactLayout.OutputDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+                    string? digest = bound ? evidence.Sha256 : null;
                     found.Add(new($"output:{node.Id}:{i}", "output", node.Id, evidence.Path, digest));
                 }
             }

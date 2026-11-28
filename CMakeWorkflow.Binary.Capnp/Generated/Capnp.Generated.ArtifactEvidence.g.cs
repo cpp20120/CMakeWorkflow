@@ -52,7 +52,7 @@ public static partial class Artifact
 public static partial class ArtifactManifest
 {
     public const ulong SchemaId = 0xF98ED64574FF3948UL;
-    public static StructLayout Layout => new(1, 5);
+    public static StructLayout Layout => new(1, 8);
     public static Reader ReadRoot(MessageReader message) => new(message.Root.AsStruct());
     public static Builder InitRoot(MessageBuilder message) => new(message.InitRoot(Layout));
     public readonly ref struct EntriesListReader
@@ -97,6 +97,15 @@ public static partial class ArtifactManifest
         public string? DecodeReportBlob() => (wire.GetPointer(3)).DecodeText();
         public bool HasEntries => !(wire.GetPointer(4)).IsNull;
         public EntriesListReader Entries => new EntriesListReader((wire.GetPointer(4)).AsList(ListElementSize.Composite));
+        public bool HasNativeReportDocumentId => !(wire.GetPointer(5)).IsNull;
+        public ReadOnlySpan<byte> NativeReportDocumentIdUtf8 => (wire.GetPointer(5)).AsText();
+        public string? DecodeNativeReportDocumentId() => (wire.GetPointer(5)).DecodeText();
+        public bool HasNativeReportBlob => !(wire.GetPointer(6)).IsNull;
+        public ReadOnlySpan<byte> NativeReportBlobUtf8 => (wire.GetPointer(6)).AsText();
+        public string? DecodeNativeReportBlob() => (wire.GetPointer(6)).DecodeText();
+        public bool HasReportProjectionBlob => !(wire.GetPointer(7)).IsNull;
+        public ReadOnlySpan<byte> ReportProjectionBlobUtf8 => (wire.GetPointer(7)).AsText();
+        public string? DecodeReportProjectionBlob() => (wire.GetPointer(7)).DecodeText();
     }
     public readonly ref struct Builder
     {
@@ -113,5 +122,11 @@ public static partial class ArtifactManifest
         public void ClearReportBlob() { wire.GetPointer(3).Clear(); }
         public EntriesListBuilder InitEntries(int count) { return new(wire.GetPointer(4).InitStructList(count, global::Capnp.Generated.ArtifactEvidence.Artifact.Layout)); }
         public void ClearEntries() { wire.GetPointer(4).Clear(); }
+        public void SetNativeReportDocumentId(string? value) { wire.GetPointer(5).SetText(value); }
+        public void ClearNativeReportDocumentId() { wire.GetPointer(5).Clear(); }
+        public void SetNativeReportBlob(string? value) { wire.GetPointer(6).SetText(value); }
+        public void ClearNativeReportBlob() { wire.GetPointer(6).Clear(); }
+        public void SetReportProjectionBlob(string? value) { wire.GetPointer(7).SetText(value); }
+        public void ClearReportProjectionBlob() { wire.GetPointer(7).Clear(); }
     }
 }

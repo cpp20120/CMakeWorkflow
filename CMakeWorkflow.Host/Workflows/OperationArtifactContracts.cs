@@ -32,7 +32,13 @@ public sealed record OperationArtifactInfo(
 
 public sealed record OperationArtifactList(
     string OperationId, string ReportSha256,
-List<OperationArtifactInfo> Artifacts);
+List<OperationArtifactInfo> Artifacts)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeReportDocumentId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeReportBlobId { get; init; }
+}
 public sealed record OperationArtifactChunk(
     string ArtifactId, long Offset, long TotalSize, long LastWriteUtcTicks,
 

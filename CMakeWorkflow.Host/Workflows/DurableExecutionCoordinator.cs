@@ -47,12 +47,46 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         AcceptedWorkflow accepted = await store.AcceptBinaryAsync(request, ct);
         BinaryWorkflowInput input = store.ReadBinaryInput(accepted.OperationId)
             ?? throw new InvalidDataException("Missing admitted binary workflow input.");
+        if (store.UsesNativeWorkflowReports && accepted.State is "dispatch_authorized" or "cancel_requested" &&
+            !IsActive(accepted.WorkspaceId, accepted.OperationId) &&
+            await TryCommitPublishedReportAsync(workspace, store, accepted, ct))
+        {
+            accepted = store.Get(accepted.OperationId)!;
+            ScheduleHistoryRecovery(workspace);
+        }
+
         WorkflowStartRequest execution = new(accepted.ClientRequestId, input.ManifestPath, input.Document.Blob.Value,
             input.Jobs, input.ResultsDirectory)
         {
             HistoryPolicy = request.HistoryPolicy
         };
         return ScheduleWorkflow(workspace, store, accepted, execution);
+    }
+
+    private static async Task<bool> TryCommitPublishedReportAsync(string workspace, DurableAcceptanceStore store,
+        AcceptedWorkflow accepted, CancellationToken ct)
+    {
+        WorkspaceReadPaths paths = new(workspace);
+        string lockPath = paths.Require(Path.Combine(workspace, ".cmakeworkflow", "execution-locks", accepted.OperationId + ".lock"));
+        if (!File.Exists(lockPath))
+        {
+            return false;
+        }
+
+        await using FileStream? lease = TryAcquireOperationLease(lockPath);
+        return lease is not null && await store.CommitPublishedReportAsync(accepted, ct);
+    }
+
+    private static FileStream? TryAcquireOperationLease(string path)
+    {
+        try
+        {
+            return new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException error) when ((error.HResult & 0xffff) is 11 or 32 or 33)
+        {
+            return null;
+        }
     }
 
     private OperationReference ScheduleWorkflow(string workspace, DurableAcceptanceStore store, AcceptedWorkflow accepted,

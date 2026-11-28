@@ -4,6 +4,8 @@ using CMakeWorkflow.Core.Persistence;
 
 namespace CMakeWorkflow.CMake.Recovery;
 
+internal sealed record WorkflowCheckpointPersistence(Func<WorkflowReport> Load, Action<WorkflowReport> Save);
+
 // run.json and its audit are a single commit. Callers must hold the run lease.
 /// <summary>Serializes authoritative run evidence through the durable byte replacement boundary.</summary>
 /// <remarks>

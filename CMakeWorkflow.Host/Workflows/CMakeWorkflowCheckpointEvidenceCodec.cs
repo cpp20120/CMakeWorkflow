@@ -23,10 +23,13 @@ internal sealed class CMakeWorkflowCheckpointEvidenceCodec : IOperationCheckpoin
     {
         WorkflowReport report = JsonSerializer.Deserialize(checkpointBytes, WorkflowJson.Default.WorkflowReport)
                      ?? throw new InvalidDataException("Invalid runner checkpoint.");
-        return report.Status != "running" || !report.Nodes.Any(n => n.Status == "running")
+        return DispatchEvidence(report);
+    }
+
+    internal static OperationCheckpointEvidence DispatchEvidence(WorkflowReport report) =>
+        report.Status != "running" || !report.Nodes.Any(n => n.Status == "running")
             ? throw new InvalidDataException("Runner checkpoint has no admitted dispatch.")
             : new(report.ManifestHash, SourceSnapshotId: report.SourceSnapshotId);
-    }
 
     /// <inheritdoc/>
     /// <remarks>
@@ -37,12 +40,15 @@ internal sealed class CMakeWorkflowCheckpointEvidenceCodec : IOperationCheckpoin
     {
         WorkflowReport report = JsonSerializer.Deserialize(checkpointBytes, WorkflowJson.Default.WorkflowReport)
                      ?? throw new InvalidDataException("Invalid resume checkpoint.");
-        return report.Status != "needs_attention" || report.RecoveryPhase is "running" or "resuming" ||
+        return ResumeEvidence(report);
+    }
+
+    internal static OperationCheckpointEvidence ResumeEvidence(WorkflowReport report, string? bound = null) =>
+        report.Status != "needs_attention" || report.RecoveryPhase is "running" or "resuming" ||
             report.Nodes.Any(n => n.Status is "running" or "outcome_unknown") ||
             report.Nodes.Any(n => n.Status is not ("succeeded" or "needs_attention" or "pending" or "blocked"))
             ? throw new InvalidOperationException("resume_checkpoint_not_safe")
-            : new(report.ManifestHash, SourceSnapshotId: report.SourceSnapshotId);
-    }
+            : new(report.ManifestHash, SourceSnapshotId: report.SourceSnapshotId, ResumeSourceCheckpointSha256: bound);
 
     /// <inheritdoc/>
     /// <remarks>

@@ -9,6 +9,9 @@ struct ArtifactManifest {
   hostId @3 :Text;
   reportBlob @4 :Text;
   entries @5 :List(Artifact);
+  nativeReportDocumentId @6 :Text;
+  nativeReportBlob @7 :Text;
+  reportProjectionBlob @8 :Text;
 }
 
 struct Artifact {

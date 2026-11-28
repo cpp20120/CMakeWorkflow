@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.Host.Protocol;
 using CMakeWorkflow.Host.History;
 using CMakeWorkflow.Contracts.History;
@@ -798,7 +799,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
     /// Only needs_attention or outcome_unknown and a nonempty note up to 4096 characters are accepted.
     /// This does not release results ownership or resolve uncertain external side effects.
     /// </remarks>
-    public RecoveryInspection Reconcile(string operationId, long expectedRevision, string decision, string note)
+    public RecoveryInspection Reconcile(string operationId, long expectedRevision, string decision, string note) =>
+        Reconcile(operationId, expectedRevision, decision, note, null);
+
+    internal RecoveryInspection Reconcile(string operationId, long expectedRevision, string decision, string note,
+        (WorkflowReport Report, string CheckpointDigest)? checkpoint)
     {
         if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 128 || expectedRevision < 0 ||
             decision is not ("needs_attention" or "outcome_unknown") ||
@@ -876,6 +881,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             _ = cmd.Parameters.AddWithValue("$note", note);
             _ = cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
             _ = cmd.ExecuteNonQuery();
+        }
+
+        if (checkpoint is { } native)
+        {
+            WriteNativeCheckpoint(operationId, native.Report, native.CheckpointDigest, tx);
         }
 
         tx.Commit();
@@ -979,16 +989,32 @@ public sealed partial class DurableAcceptanceStore : IDisposable
     public string ClaimResumeAttempt(string operationId, string runDirectory, string? expectedCheckpointSha256 = null)
     {
         string directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
-        byte[] bytes = File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
-        string hash = Hex(bytes);
+        bool native = UsesNativeCheckpoint(operationId);
+        using SqliteTransaction tx = connection.BeginTransaction();
+        string hash;
+        OperationCheckpointEvidence evidence;
+        if (native)
+        {
+            BoundNativeCheckpoint checkpoint = ReadNativeCheckpoint(operationId, tx);
+            hash = checkpoint.Digest;
+            WorkflowReport report = checkpoint.State.Report;
+            string source = report.Reconciliations.LastOrDefault()?.CheckpointSha256
+                ?? throw new InvalidDataException("Native resume requires a recorded checkpoint reconciliation.");
+            evidence = CMakeWorkflowCheckpointEvidenceCodec.ResumeEvidence(report, source);
+        }
+        else
+        {
+            byte[] bytes = File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
+            hash = Hex(bytes);
+            evidence = checkpointCodec.ForResume(bytes);
+        }
+
         if (expectedCheckpointSha256 is not null &&
             !string.Equals(hash, expectedCheckpointSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("resume_checkpoint_changed");
         }
 
-        OperationCheckpointEvidence evidence = checkpointCodec.ForResume(bytes);
-        using SqliteTransaction tx = connection.BeginTransaction();
         using (SqliteCommand verify = connection.CreateCommand())
         {
             verify.Transaction = tx;
@@ -1320,14 +1346,26 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         }
 
         string directory = new WorkspaceReadPaths(workspace).Require(runDirectory);
-        string reportPath = new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json"));
-        // The runner holds its exclusive run lease. Reading this file is safe only
-        // under that lease; callers MUST NOT use this as an independent dispatcher.
-        byte[] bytes = File.ReadAllBytes(reportPath);
-        OperationCheckpointEvidence evidence = checkpointCodec.ForDispatch(bytes);
-        string hash = Hex(bytes);
+        bool native = UsesNativeCheckpoint(operationId);
         bool processDomain = GetDomainKind(operationId) == "process";
         using SqliteTransaction transaction = connection.BeginTransaction();
+        OperationCheckpointEvidence evidence;
+        string hash;
+        byte[]? bytes = null;
+        if (native)
+        {
+            BoundNativeCheckpoint checkpoint = ReadNativeCheckpoint(operationId, transaction);
+            evidence = CMakeWorkflowCheckpointEvidenceCodec.DispatchEvidence(checkpoint.State.Report);
+            hash = checkpoint.Digest;
+        }
+        else
+        {
+            // The runner owns the run lease while its compatibility file is read.
+            string path = new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json"));
+            bytes = File.ReadAllBytes(path);
+            evidence = checkpointCodec.ForDispatch(bytes);
+            hash = Hex(bytes);
+        }
         BinaryWorkflowInput? binary = ReadBinaryInput(operationId, transaction);
         if (binary is not null)
         {
@@ -1391,7 +1429,7 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             _ = bind.Parameters.AddWithValue("$id", operationId);
             _ = bind.Parameters.AddWithValue("$dir", directory);
             _ = bind.Parameters.AddWithValue("$hash", hash);
-            _ = bind.Parameters.AddWithValue("$bytes", processDomain ? bytes : DBNull.Value);
+            _ = bind.Parameters.AddWithValue("$bytes", processDomain ? bytes! : DBNull.Value);
             _ = bind.ExecuteNonQuery();
         }
 
@@ -1423,13 +1461,23 @@ public sealed partial class DurableAcceptanceStore : IDisposable
     /// </remarks>
     public Finalization FinalizeExecution(string operationId, string runDirectory, int exitCode)
     {
+        if (UsesNativeWorkflowReports && ReadBinaryInput(operationId) is not null)
+        {
+            throw new InvalidOperationException("Native execution requires retained terminal report evidence.");
+        }
+
         WorkspaceReadPaths paths = new(workspace);
         string directory = paths.Require(runDirectory);
         byte[] bytes = File.ReadAllBytes(paths.Require(Path.Combine(directory, "run.json")));
         OperationCheckpointEvidence evidence = checkpointCodec.ForFinalization(bytes, exitCode);
+        return CommitFinalization(operationId, directory, exitCode, evidence, Hex(bytes));
+    }
+
+    private Finalization CommitFinalization(string operationId, string directory, int exitCode,
+        OperationCheckpointEvidence evidence, string hash, NativeReportReference? native = null)
+    {
         string terminalState = evidence.TerminalState ??
                             throw new InvalidDataException("Missing terminal operation evidence.");
-        string hash = Hex(bytes);
         using SqliteTransaction tx = connection.BeginTransaction();
         using (SqliteCommand check = connection.CreateCommand())
         {
@@ -1487,6 +1535,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
                     throw new InvalidOperationException("operation_finalization_conflict");
                 }
 
+                reader.Close();
+                if (native != ReadNativeReportReference(operationId, tx))
+                {
+                    throw new InvalidOperationException("operation_native_report_conflict");
+                }
+
                 tx.Commit();
                 return new(directory, hash, terminalState, exitCode);
             }
@@ -1503,6 +1557,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             _ = insert.Parameters.AddWithValue("$status", terminalState);
             _ = insert.Parameters.AddWithValue("$exit", exitCode);
             _ = insert.ExecuteNonQuery();
+        }
+
+        if (native is not null)
+        {
+            InsertNativeReportReference(operationId, native, tx);
         }
 
         // Eligibility joins the intent saved at admission to this finalization.

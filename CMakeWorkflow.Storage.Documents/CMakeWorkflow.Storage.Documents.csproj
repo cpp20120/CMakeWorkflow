@@ -5,6 +5,7 @@
         <IsAotCompatible>true</IsAotCompatible>
     </PropertyGroup>
     <ItemGroup>
+        <ProjectReference Include="../CMakeWorkflow.CMake/CMakeWorkflow.CMake.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Core/CMakeWorkflow.Core.csproj"/>
         <ProjectReference Include="../CMakeWorkflow.Binary.Capnp/CMakeWorkflow.Binary.Capnp.csproj"/>
         <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.0"/>

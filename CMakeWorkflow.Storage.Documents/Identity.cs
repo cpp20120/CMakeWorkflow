@@ -52,7 +52,7 @@ public readonly record struct DocumentId
     public override string ToString() => Value;
 }
 
-public enum DocumentCodec { None, WorkflowJson = 1, WorkflowCapnp = 2, ProductionWorkflowCapnp = 3, ExecutionPlanCapnp = 4 }
+public enum DocumentCodec { None, WorkflowJson = 1, WorkflowCapnp = 2, ProductionWorkflowCapnp = 3, ExecutionPlanCapnp = 4, ExecutionReportCapnp = 5 }
 public enum DocumentAccess { Buffered, Mapped }
 public enum VerificationMode { Full, StoredBytes }
 
@@ -82,12 +82,18 @@ public sealed record DocumentDescriptor(DocumentId Id, DocumentCodec Codec, int 
         return new(new(Hash(Encoding.UTF8.GetBytes(identity))), codec, version, blob, canonical, size);
     }
 
-    private static string KindFor(DocumentCodec codec) => codec == DocumentCodec.ExecutionPlanCapnp
-        ? "execution-plan" : "workflow-manifest";
+    private static string KindFor(DocumentCodec codec) => codec switch
+    {
+        DocumentCodec.ExecutionPlanCapnp => "execution-plan",
+        DocumentCodec.ExecutionReportCapnp => "execution-report",
+        DocumentCodec.None or DocumentCodec.WorkflowJson or DocumentCodec.WorkflowCapnp or DocumentCodec.ProductionWorkflowCapnp => "workflow-manifest",
+        _ => throw new ArgumentOutOfRangeException(nameof(codec))
+    };
 
     private static string SchemaFor(DocumentCodec codec) => codec switch
     {
         DocumentCodec.ExecutionPlanCapnp => "cmwf.execution-plan",
+        DocumentCodec.ExecutionReportCapnp => "cmwf.execution-report",
         DocumentCodec.ProductionWorkflowCapnp => "cmwf.production-workflow",
         DocumentCodec.None or DocumentCodec.WorkflowJson or DocumentCodec.WorkflowCapnp => "cmwf.workflow",
         _ => throw new ArgumentOutOfRangeException(nameof(codec))
@@ -98,7 +104,7 @@ public sealed record DocumentDescriptor(DocumentId Id, DocumentCodec Codec, int 
         DocumentCodec.WorkflowJson => version is 1 or 2 && !canonical,
         DocumentCodec.WorkflowCapnp => version == 2 && canonical && size >= 16,
         DocumentCodec.ProductionWorkflowCapnp => version is 1 or 2 && canonical && size >= 16,
-        DocumentCodec.ExecutionPlanCapnp => version == 1 && canonical && size >= 16,
+        DocumentCodec.ExecutionPlanCapnp or DocumentCodec.ExecutionReportCapnp => version == 1 && canonical && size >= 16,
         DocumentCodec.None => false,
         _ => false
     };

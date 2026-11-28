@@ -23,9 +23,9 @@ internal static partial class SshNetLiveLifecycleTests
 {
     internal static async Task RunAsync(string? scenario)
     {
-        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage" or "experiment-sdk" or "binary-recovery" or "binary-experiment"))
+        if (scenario is not (null or "handshake" or "workflow" or "persistent" or "experiment-stage" or "experiment-sdk" or "binary-recovery" or "binary-experiment" or "binary-source-artifacts"))
         {
-            throw new ArgumentException("Expected --sshnet-live-lifecycle-tests [handshake|workflow|persistent|experiment-stage|experiment-sdk|binary-recovery|binary-experiment].");
+            throw new ArgumentException("Unknown SSH.NET live lifecycle scenario.");
         }
 
         static string Required(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
@@ -79,6 +79,11 @@ internal static partial class SshNetLiveLifecycleTests
         {
             await BinaryExperimentAsync(probe, options, Required("CMWF_SSHNET_CONTROLLER_EXE"),
                 Required("CMWF_SSHNET_FAULT_EXE"), Required("CMWF_SSHNET_TOOL_STORE"), timeout.Token);
+        }
+
+        if (scenario == "binary-source-artifacts")
+        {
+            await BinarySourceArtifactsAsync(probe, options, Required("CMWF_SSHNET_FAULT_EXE"), timeout.Token);
         }
 
         Console.WriteLine("PASS SSH.NET live lifecycle: " + (scenario ?? "handshake, workflow"));

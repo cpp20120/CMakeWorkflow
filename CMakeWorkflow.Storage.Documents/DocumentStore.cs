@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Capnp.Managed;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Core.Persistence;
+using CMakeWorkflow.CMake.Reporting;
 
 namespace CMakeWorkflow.Storage.Documents;
 
@@ -46,6 +47,17 @@ public sealed class DocumentStore
     public static Task<DocumentStore> OpenExecutionStoreAsync(string path, CancellationToken ct = default) =>
         InitializeAsync(path, Catalog.ExecutionVersion, null, indexedActions: false, ct);
 
+    /// <summary>Opens or creates a fresh execution catalog that supports native terminal reports.</summary>
+    public static Task<DocumentStore> OpenReportStoreAsync(string path, CancellationToken ct = default) =>
+        InitializeAsync(path, Catalog.ReportVersion, null, indexedActions: false, ct);
+
+    /// <summary>Accesses a report catalog without creating missing storage metadata.</summary>
+    public static DocumentStore OpenExistingReportStore(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return new(path, Catalog.ReportVersion);
+    }
+
     internal static Task<DocumentStore> InitializeIndexedActionsAsync(string path, CancellationToken ct) =>
         InitializeAsync(path, Catalog.ExecutionVersion, null, indexedActions: true, ct);
 
@@ -82,7 +94,7 @@ public sealed class DocumentStore
     public Task<DocumentDescriptor> ImportExecutionPlanAsync(ReadOnlySpan<byte> officialFrame, string reference,
         CancellationToken ct = default)
     {
-        if (catalogVersion != Catalog.ExecutionVersion)
+        if (catalogVersion < Catalog.ExecutionVersion)
         {
             throw new InvalidOperationException("Execution plans require the fenced execution catalog.");
         }
@@ -90,6 +102,20 @@ public sealed class DocumentStore
         RequireName(reference);
         ct.ThrowIfCancellationRequested();
         return PublishAsync(WorkflowDocuments.ImportExecutionPlan(officialFrame), ct, reference);
+    }
+
+    /// <summary>Publishes a terminal report and an immutable operation retention reference.</summary>
+    public Task<DocumentDescriptor> PublishExecutionReportAsync(NativeExecutionReport report, string reference,
+        CancellationToken ct = default)
+    {
+        if (catalogVersion != Catalog.ReportVersion)
+        {
+            throw new InvalidOperationException("Execution reports require the fenced report catalog.");
+        }
+
+        RequireName(reference);
+        ct.ThrowIfCancellationRequested();
+        return PublishAsync(WorkflowDocuments.EncodeExecutionReport(report), ct, reference, immutableReference: true);
     }
 
     public Task<DocumentDescriptor> PublishAsync(WorkflowDocument workflow, CancellationToken ct = default)
@@ -128,7 +154,8 @@ public sealed class DocumentStore
         return PublishAsync(WorkflowDocuments.ImportBinary(officialFrame, production), ct, reference);
     }
 
-    private async Task<DocumentDescriptor> PublishAsync(EncodedDocument document, CancellationToken ct, string? reference = null)
+    private async Task<DocumentDescriptor> PublishAsync(EncodedDocument document, CancellationToken ct, string? reference = null,
+        bool immutableReference = false)
     {
         using FileStream lease = await AcquireAsync(create: false, ct).ConfigureAwait(false);
         using Catalog catalog = OpenCatalog();
@@ -143,7 +170,14 @@ public sealed class DocumentStore
         catalog.Insert(document.Descriptor, transaction);
         if (reference is not null)
         {
-            catalog.Retain(1, reference, document.Descriptor.Id, transaction);
+            if (immutableReference)
+            {
+                catalog.Archive(reference, document.Descriptor.Id, transaction);
+            }
+            else
+            {
+                catalog.Retain(1, reference, document.Descriptor.Id, transaction);
+            }
         }
 
         await CommitAsync(transaction, ct).ConfigureAwait(false);

@@ -4,7 +4,7 @@ using CMakeWorkflow.Profiling.Capture;
 
 namespace CMakeWorkflow.Profiling.Workflows;
 
-public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : IWorkflowOperationExecutor
+public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null, bool recordNativeEvidence = false) : IWorkflowOperationExecutor
 {
     private readonly IProfileProcess process = process ?? new ProfileProcess();
 
@@ -70,14 +70,24 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null) : I
         try
         {
             ProfileResult result = await backend.CaptureAsync(captureRequest, cancellationToken);
-            await session.CompleteAsync(result, cancellationToken);
+            WorkflowProfileEvidence? evidence = recordNativeEvidence
+                ? await session.CompleteWithEvidenceAsync(result, captureRequest, cancellationToken)
+                : null;
+            if (!recordNativeEvidence)
+            {
+                await session.CompleteAsync(result, cancellationToken);
+            }
+
             return new WorkflowOperationResult(result.ExitCode,
                 result.CaptureStatus, new Dictionary<string, string>
                 {
                     ["backend"] = result.Backend,
                     ["rawTrace"] = Path.GetRelativePath(request.OutputDirectory, result.RawTrace),
                     ["eventSource"] = result.Capabilities.EventSource
-                });
+                })
+            {
+                Profile = evidence
+            };
         }
         catch (Exception error)
         {

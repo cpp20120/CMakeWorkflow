@@ -19,7 +19,7 @@ namespace CMakeWorkflow.Host.Tests.Durability;
 internal static partial class BinaryWorkflowWireTests
 {
     internal static async Task RunAsync(string cli, string faultCli, string? oldCli, string? inlineCli,
-        string? previousDocumentCli)
+        string? previousDocumentCli, string? layoutCli, string? journalCli, string? reportCli)
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
         CancellationToken ct = timeout.Token;
@@ -76,6 +76,7 @@ internal static partial class BinaryWorkflowWireTests
 
             string operation;
             string checkpoint;
+            long interruptedEventSequence;
             using (Peer interrupted = await Peer.StartAsync(faultCli, root, ct, marker))
             {
                 using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(interrupted.Endpoint, ct));
@@ -103,6 +104,11 @@ internal static partial class BinaryWorkflowWireTests
                 await RejectAsync(() => rpc.WorkflowStartAsync(new(request.ClientRequestId, manifest, sha, 1, run), ct));
 
                 await WaitForAsync(() => Task.FromResult(File.Exists(marker)), ct);
+                OperationEventsPage interruptedEvents = await rpc.OperationEventsAsync(new(operation, 0, 20), ct);
+                interruptedEventSequence = interruptedEvents.NextSequence;
+                Require(interruptedEvents.Events.Count == 4 &&
+                    interruptedEvents.Events[^1] is { NodeId: "b", Type: "node_started" } &&
+                    !File.Exists(Path.Combine(run, "events.jsonl")), "The running B intent was not captured in the native event stream.");
                 await RunCommandAsync(cli, ["cas", WorkflowLedgerPath.Documents(root), "gc", "--apply"], ct);
                 await interrupted.KillAsync(ct);
                 if (!OperatingSystem.IsWindows())
@@ -113,6 +119,10 @@ internal static partial class BinaryWorkflowWireTests
                 using DurableAcceptanceStore ledger = new(root, readOnly: true);
                 checkpoint = ledger.InspectRecovery(operation).CheckpointSha256
                     ?? throw new InvalidOperationException("The interrupted checkpoint was not durably bound.");
+                BoundNativeCheckpoint saved = ledger.ReadNativeCheckpoint(operation);
+                Require(saved.Digest == checkpoint && saved.State.Report.Nodes.Last().Status == "running" &&
+                    saved.State.EventCursor < interruptedEventSequence && !File.Exists(Path.Combine(run, "run.json")),
+                    "The write-ahead intent was not bound to native checkpoint bytes.");
                 AssertBinaryOnly(root, operation);
             }
 
@@ -127,15 +137,33 @@ internal static partial class BinaryWorkflowWireTests
             {
                 await CheckOldHostAsync(inlineCli, root, ct);
                 await RunCommandRejectedAsync(inlineCli, ["cas", cas, "gc", "--apply"], ct);
-                await VerifyPreviousWorkspaceAsync(inlineCli, cli, CreateWorkspace(root, "inline"), usesDocumentPlans: false, ct);
+                await VerifyPreviousWorkspaceAsync(inlineCli, cli, CreateWorkspace(root, "inline"), epoch: 2, ct);
             }
             if (previousDocumentCli is not null)
             {
                 await CheckOldHostAsync(previousDocumentCli, root, ct);
-                await VerifyPreviousWorkspaceAsync(previousDocumentCli, cli, CreateWorkspace(root, "previous"), usesDocumentPlans: true, ct);
+                await VerifyPreviousWorkspaceAsync(previousDocumentCli, cli, CreateWorkspace(root, "previous"), epoch: 3, ct);
+            }
+            if (layoutCli is not null)
+            {
+                await CheckOldHostAsync(layoutCli, root, ct);
+                await VerifyPreviousWorkspaceAsync(layoutCli, cli, CreateWorkspace(root, "layout"), epoch: 4, ct);
             }
 
-            DocumentStore documents = await DocumentStore.OpenExecutionStoreAsync(cas, ct);
+            if (journalCli is not null)
+            {
+                await CheckOldHostAsync(journalCli, root, ct);
+                await RunCommandRejectedAsync(journalCli, ["cas", cas, "gc", "--apply"], ct);
+                await VerifyPreviousWorkspaceAsync(journalCli, cli, CreateWorkspace(root, "journal"), epoch: 5, ct);
+            }
+
+            if (reportCli is not null)
+            {
+                await CheckOldHostAsync(reportCli, root, ct);
+                await VerifyPreviousWorkspaceAsync(reportCli, cli, CreateWorkspace(root, "report"), epoch: 6, ct);
+            }
+
+            DocumentStore documents = await DocumentStore.OpenReportStoreAsync(cas, ct);
             DocumentId planId = (await ReadAuthorizationAsync(root, operation, ct)).Document;
             string planBlob;
             using (DocumentSession plan = await documents.OpenAsync(planId, ct: ct))
@@ -151,6 +179,10 @@ internal static partial class BinaryWorkflowWireTests
                 IHostRpc rpc = await ConnectAsync(connection, root, ct);
                 Require((await rpc.OperationFindAsync(new(request.ClientRequestId), ct)).OperationId == operation,
                     "Request ID no longer resolves after restart.");
+                OperationEventsPage page = await rpc.OperationEventsAsync(new(operation, 0, 2), ct);
+                Require(page.HasMore && page.NextSequence == 2 &&
+                    (await rpc.OperationEventsAsync(new(operation, 2, 2), ct)).NextSequence == interruptedEventSequence,
+                    "Offline restore failed to preserve the ordered event stream and cursor.");
                 Require((await rpc.ExecutionStartAsync(request, ct)).State == "dispatch_authorized",
                     "Retry implicitly redispatched an authorized operation.");
                 await RejectAsync(() => rpc.WorkflowResumeExecuteAsync(new(operation, 2, true), ct));
@@ -199,6 +231,12 @@ internal static partial class BinaryWorkflowWireTests
                 WorkflowReportSnapshot report = await rpc.OperationReportAsync(new(operation), ct);
                 Require(report.Report.ManifestHash == sha && report.Report.Nodes.All(n => n.Status == "succeeded"),
                     "Verified report lost binary manifest provenance.");
+                OperationEventsPage resumedEvents = await rpc.OperationEventsAsync(new(operation, interruptedEventSequence, 20), ct);
+                Require(resumedEvents.Events[0] is { Type: "workflow_resumed" } &&
+                    resumedEvents.Events[0].Sequence == interruptedEventSequence + 1 &&
+                    resumedEvents.Events[^1] is { Type: "workflow_finished", Status: "succeeded" } &&
+                    resumedEvents.Events.All(e => e.NodeId != "a"),
+                    "Native event replay missed recovery, discontinuity or completed-node suppression.");
                 OperationArtifactList artifacts = await rpc.OperationArtifactListAsync(new(operation), ct);
                 Require(artifacts.Artifacts.Any(artifact => artifact.Kind == "output")
                     && await File.ReadAllTextAsync(Path.Combine(run, "effect-b.txt"), ct) == "recovered",
@@ -221,7 +259,7 @@ internal static partial class BinaryWorkflowWireTests
             }
 
             Console.WriteLine("Binary RPC publication, concurrent admission, active GC, plan retention, Host termination and recovery passed.");
-            if (oldCli is not null || inlineCli is not null || previousDocumentCli is not null)
+            if (oldCli is not null || inlineCli is not null || previousDocumentCli is not null || layoutCli is not null || journalCli is not null || reportCli is not null)
             {
                 Console.WriteLine("Supplied older executable fences passed.");
             }
@@ -310,7 +348,7 @@ internal static partial class BinaryWorkflowWireTests
         await RunCommandRejectedAsync(cli, ["cas", stash, "gc", "--apply"], ct);
     }
 
-    private static async Task VerifyPreviousWorkspaceAsync(string previous, string current, string workspace, bool usesDocumentPlans,
+    private static async Task VerifyPreviousWorkspaceAsync(string previous, string current, string workspace, int epoch,
         CancellationToken ct)
     {
         string source = Directory.CreateDirectory(Path.Combine(workspace, "src")).FullName;
@@ -335,9 +373,15 @@ internal static partial class BinaryWorkflowWireTests
         using DurableAcceptanceStore ledger = new(workspace, readOnly: true);
         AcceptedWorkflow accepted = ledger.Find("inline-inquiry")
             ?? throw new InvalidDataException("Prior Host did not produce an inline authorized operation.");
-        Require(ledger.UsesDocumentPlans == usesDocumentPlans && !ledger.AllowsSourceManifestArtifacts && accepted.State == "succeeded",
+        Require(ledger.NativeFormatEpoch == epoch && accepted.State == "succeeded",
             "Reading an earlier workspace changed its operation or ledger epoch.");
         await RunCommandAsync(current, ["workflow", "binary-info", workspace, accepted.OperationId], ct);
+        using Peer observer = await Peer.StartAsync(current, workspace, ct);
+        using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(observer.Endpoint, ct));
+        IHostRpc rpc = await ConnectAsync(connection, workspace, ct);
+        OperationEventsPage events = await rpc.OperationEventsAsync(new(accepted.OperationId, 0, 10), ct);
+        Require(events.Events.Any(item => item.Type == "workflow_finished"),
+            "Current Host could not replay an earlier event stream.");
     }
 
     internal static async Task VerifyAllKindsAsync(string cli)
@@ -449,6 +493,9 @@ internal static partial class BinaryWorkflowWireTests
         if (binary)
         {
             await VerifyEmptySnapshotAsync(root, operation.OperationId, ct);
+            Require(report.Report.Nodes.Where(node => node.Kind is "profile" or "profile_snapshot")
+                .All(node => node.Profile is { Backend: "perf", Mode: "counters", RawTraceSha256.Length: 64 }),
+                "Native execution lost structured profiler capture evidence.");
         }
 
         return report.Report.Nodes.ToDictionary(node => node.Kind, node => node.Status, StringComparer.Ordinal);
@@ -694,7 +741,8 @@ internal static partial class BinaryWorkflowWireTests
     {
         internal string Endpoint { get; } = endpoint;
 
-        internal static async Task<Peer> StartAsync(string cli, string workspace, CancellationToken ct, string? marker = null)
+        internal static async Task<Peer> StartAsync(string cli, string workspace, CancellationToken ct,
+            string? marker = null, string fault = "after-checkpoint", string? node = "b")
         {
             string name = "h" + Guid.NewGuid().ToString("N")[..8];
             string endpoint = OperatingSystem.IsWindows()
@@ -703,8 +751,8 @@ internal static partial class BinaryWorkflowWireTests
             ProcessStartInfo start = StartInfo(Path.GetFullPath(cli), ["host", "serve", "--endpoint", endpoint]);
             if (marker is not null)
             {
-                start.Environment["CMAKEWORKFLOW_TEST_FAULT"] = "after-checkpoint";
-                start.Environment["CMAKEWORKFLOW_TEST_NODE"] = "b";
+                start.Environment["CMAKEWORKFLOW_TEST_FAULT"] = fault;
+                start.Environment["CMAKEWORKFLOW_TEST_NODE"] = node;
                 start.Environment["CMAKEWORKFLOW_TEST_MARKER"] = marker;
             }
 

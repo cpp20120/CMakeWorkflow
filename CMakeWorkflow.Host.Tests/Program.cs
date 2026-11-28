@@ -46,16 +46,22 @@ if (args is ["--historical-action-cache-tests", string currentCli, string produc
     return;
 }
 
+if (args is ["--native-report-tests", string reportCli, string reportFaultCli, string capnp, string schema])
+{
+    await BinaryWorkflowWireTests.VerifyNativeReportsAsync(reportCli, reportFaultCli, capnp, schema);
+    return;
+}
+
 if (args is ["--binary-operation-kinds-tests", string executable])
 {
     await BinaryWorkflowWireTests.VerifyAllKindsAsync(executable);
     return;
 }
 
-if (args.Length is >= 3 and <= 6 && args[0] == "--binary-workflow-wire-tests")
+if (args.Length is >= 3 and <= 9 && args[0] == "--binary-workflow-wire-tests")
 {
     await BinaryWorkflowWireTests.RunAsync(args[1], args[2], args.ElementAtOrDefault(3), args.ElementAtOrDefault(4),
-        args.ElementAtOrDefault(5));
+        args.ElementAtOrDefault(5), args.ElementAtOrDefault(6), args.ElementAtOrDefault(7), args.ElementAtOrDefault(8));
     return;
 }
 

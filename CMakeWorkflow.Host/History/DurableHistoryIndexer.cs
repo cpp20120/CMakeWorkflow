@@ -1,5 +1,7 @@
 using System.Text.Json;
 using CMakeWorkflow.CMake.Planning;
+using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.History.Storage;
 using CMakeWorkflow.History.Models;
@@ -97,6 +99,7 @@ internal static class DurableHistoryIndexer
         DurableAcceptanceStore.Finalization finalization = ledger.GetFinalization(operationId)
             ?? throw new InvalidOperationException("history_finalization_missing");
         HistoryImportResult imported;
+        NativeReportReference? native = null;
         try
         {
             string database = AuthorizeDatabase(paths, status.DatabasePath!);
@@ -105,9 +108,24 @@ internal static class DurableHistoryIndexer
                 throw new ApplicationRefusal("history_database_changed", "The admitted History database path changed.");
             }
 
-            // Verify the operation's terminal binding before reading any supplemental
-            // profiling data. The parser independently checks the exact bytes it uses.
-            _ = await OperationArtifactReader.ReportAsync(paths, operationId, ct);
+            // Verify the terminal evidence before reading supplemental profiling data.
+            native = ledger.ReadNativeReportReference(operationId);
+            NativeExecutionReport? nativeReport = null;
+            if (native is null)
+            {
+                _ = await OperationArtifactReader.ReportAsync(paths, operationId, ct);
+            }
+            else
+            {
+                AcceptedWorkflow accepted = ledger.Get(operationId)
+                    ?? throw new InvalidDataException("History report has no accepted workflow.");
+                nativeReport = await ledger.ReadNativeReportAsync(accepted, native, ct);
+                if (nativeReport.ExitCode != finalization.ExitCode || nativeReport.Report.Status != finalization.State ||
+                    nativeReport.RunDirectory != finalization.RunDirectory)
+                {
+                    throw new InvalidDataException("Native History evidence differs from finalization.");
+                }
+            }
             string run = paths.Require(finalization.RunDirectory);
             if (finalization.State == "succeeded" &&
                 Directory.EnumerateFiles(run, "*.results.json").Any() &&
@@ -118,11 +136,16 @@ internal static class DurableHistoryIndexer
 
             ct.ThrowIfCancellationRequested();
             using HistoryStore history = new(database);
-            imported = await history.ImportFinalizedWorkflowAsync(run, finalization.ReportSha256, file =>
+            imported = nativeReport is not null && native is not null
+                ? await history.ImportNativeWorkflowAsync(nativeReport,
+                    new(operationId, native.Document.Value, native.Blob.Value, native.SchemaVersion), GuardPath, ct)
+                : await history.ImportFinalizedWorkflowAsync(run, finalization.ReportSha256, GuardPath, ct);
+
+            void GuardPath(string file)
             {
                 ct.ThrowIfCancellationRequested();
                 _ = paths.Require(file);
-            }, ct);
+            }
         }
         catch (Exception error) when (error is ApplicationRefusal or IOException or UnauthorizedAccessException
                                           or SqliteException or JsonException or ArgumentException
@@ -145,6 +168,10 @@ internal static class DurableHistoryIndexer
         // Keep acknowledgement outside the import catch. If it fails after
         // the History commit, the next owner re-imports the same verified run.
         afterCommit?.Invoke();
+        if (native is not null)
+        {
+            await RecoveryFaults.HitAsync("after-native-history-commit", null, ct);
+        }
         _ = ledger.CompleteHistoryIndex(operationId, attemptId, runs: imported.RunIdentities);
         return ledger.GetHistoryIndexStatus(operationId);
     }

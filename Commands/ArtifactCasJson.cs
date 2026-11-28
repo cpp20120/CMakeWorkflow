@@ -11,6 +11,12 @@ internal sealed record CasOperation(int SchemaVersion, string WorkspaceId, strin
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ArtifactManifestBlobId { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeReportDocumentId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeReportBlobId { get; init; }
+
     public long LogicalBytes => Artifacts.Sum(a => a.Size);
     public long DistinctBytes => Artifacts.DistinctBy(a => a.Digest).Sum(a => a.Size);
 }

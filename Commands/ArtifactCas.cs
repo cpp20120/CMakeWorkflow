@@ -27,6 +27,16 @@ internal sealed class ArtifactCas(string directory)
             throw new InvalidDataException("Artifact catalog does not match its finalized operation report.");
         }
 
+        string? nativeDocument = catalog.NativeReportDocumentId is { } document ? Digest(document) : null;
+        string? nativeBlob = catalog.NativeReportBlobId is { } blobId ? Digest(blobId) : null;
+        if ((nativeDocument is null) != (nativeBlob is null) ||
+            (nativeBlob is not null &&
+             (catalog.Artifacts.SingleOrDefault(a => a.ArtifactId == "native-report") is not { } native ||
+              Digest(native.Sha256) != nativeBlob)))
+        {
+            throw new InvalidDataException("Artifact catalog does not contain the referenced native report.");
+        }
+
         CasArtifact[] entries = [.. catalog.Artifacts.Select(ToArtifact)
             .OrderBy(a => a.ArtifactId, StringComparer.Ordinal)];
         if (entries.Select(a => a.ArtifactId).Distinct(StringComparer.Ordinal).Count() != entries.Length)
@@ -38,7 +48,9 @@ internal sealed class ArtifactCas(string directory)
         using CasReferenceIndex? index = await files.HasIndexedActionsAsync(ct) ? new(files) : null;
         CasOperation? existing = await TryReadAsync(id, index, ct);
         if (existing is not null && (existing.WorkspaceId != snapshot.WorkspaceId
-            || existing.ReportDigest != reportDigest || !existing.Artifacts.SequenceEqual(entries)))
+            || existing.ReportDigest != reportDigest || !existing.Artifacts.SequenceEqual(entries)
+            || existing.NativeReportDocumentId != (index is null ? null : nativeDocument)
+            || existing.NativeReportBlobId != (index is null ? null : nativeBlob)))
         {
             throw new InvalidDataException("This operation ID already names different artifact evidence.");
         }
@@ -70,7 +82,12 @@ internal sealed class ArtifactCas(string directory)
             }
 
             string? hostId = existing?.HostId ?? await ReadHostIdAsync(files.Blob(reportDigest), ct);
-            CasOperation receipt = new(1, snapshot.WorkspaceId, id, hostId, reportDigest, true, entries);
+            bool indexedNative = index is not null && nativeBlob is not null;
+            CasOperation receipt = new(indexedNative ? 2 : 1, snapshot.WorkspaceId, id, hostId, reportDigest, true, entries)
+            {
+                NativeReportDocumentId = indexedNative ? nativeDocument : null,
+                NativeReportBlobId = indexedNative ? nativeBlob : null
+            };
             return existing is { Pinned: true } ? existing : await WriteAsync(receipt, index, ct);
         }
         finally

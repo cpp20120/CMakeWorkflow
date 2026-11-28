@@ -33,7 +33,13 @@ public sealed record OperationArtifactInfo(
 [method: SuppressMessage("Design", "CA1002", Justification = "Client SDK constructor CMakeWorkflow.Client.Workflows.OperationArtifactList(Artifacts) participates in CMakeWorkflow.Client.Workflows.WorkflowOperation.ListArtifactsAsync; retain these concrete collection parameter types.")]
 public sealed record OperationArtifactList(
     string OperationId, string ReportSha256, [property: SuppressMessage("Design", "CA1002", Justification = "CMakeWorkflow.Client.Workflows.OperationArtifactList.Artifacts (List<OperationArtifactInfo>) is exposed through CMakeWorkflow.Client.Workflows.WorkflowOperation.ListArtifactsAsync; retain this Client SDK property signature.")]
-List<OperationArtifactInfo> Artifacts);
+List<OperationArtifactInfo> Artifacts)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeReportDocumentId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? NativeReportBlobId { get; init; }
+}
 /// <summary>One byte range; callers must verify the assembled file against the catalog SHA-256.</summary>
 /// <param name="ArtifactId">Catalog artifact identity.</param>
 /// <param name="Offset">Starting byte offset of Content.</param>

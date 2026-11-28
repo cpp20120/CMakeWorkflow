@@ -184,22 +184,19 @@ internal static class SourceBindingExecutionTests
 
             string isolatedRoot = Path.Combine(workspace, ".cw", operation);
             string isolatedSource = Path.Combine(isolatedRoot, "s");
-            using (JsonDocument report = JsonDocument.Parse(
-                       await File.ReadAllBytesAsync(Path.Combine(output, "run.json"))))
+            CMakeWorkflow.CMake.Reporting.WorkflowReportSnapshot report = await OperationArtifactReader.ReportAsync(
+                new(workspace), operation, CancellationToken.None);
+            if (report.Report.SourceSnapshotId != id)
             {
-                if (report.RootElement.GetProperty("sourceSnapshotId").GetString() != id)
+                throw new UnreachableException("Runner report lost immutable Lore identity.");
+            }
+            if (binary)
+            {
+                CMakeWorkflow.CMake.Reporting.NodeResult executed = report.Report.Nodes.Single(node => node.Id == "execute");
+                if (executed.ActionCacheHit != false || string.IsNullOrEmpty(executed.ActionDigest) ||
+                    File.Exists(Path.Combine(output, "run.json")))
                 {
-                    throw new UnreachableException("Runner report lost immutable Lore identity.");
-                }
-                if (binary)
-                {
-                    JsonElement executed = report.RootElement.GetProperty("nodes").EnumerateArray()
-                        .Single(node => node.GetProperty("id").GetString() == "execute");
-                    if (executed.GetProperty("actionCacheHit").GetBoolean() ||
-                        string.IsNullOrEmpty(executed.GetProperty("actionDigest").GetString()))
-                    {
-                        throw new UnreachableException("Mapped action did not publish a cache result.");
-                    }
+                    throw new UnreachableException("Mapped action lost native storage or cache evidence.");
                 }
             }
             if (binary)
@@ -216,7 +213,22 @@ internal static class SourceBindingExecutionTests
             }
             using (CMakeWorkflow.History.Storage.HistoryStore history = new(Path.Combine(workspace, "history-test.sqlite")))
             {
-                _ = await history.ImportAsync(output, recursive: false);
+                if (binary)
+                {
+                    using DurableAcceptanceStore ledger = new(workspace, readOnly: true);
+                    NativeReportReference reference = ledger.ReadNativeReportReference(operation)
+                        ?? throw new UnreachableException("Missing native terminal report.");
+                    CMakeWorkflow.CMake.Reporting.NativeExecutionReport terminal = await ledger.ReadNativeReportAsync(
+                        ledger.Get(operation)!, reference, CancellationToken.None);
+                    _ = await history.ImportNativeWorkflowAsync(terminal,
+                        new(operation, reference.Document.Value, reference.Blob.Value, reference.SchemaVersion),
+                        static _ => { }, CancellationToken.None);
+                }
+                else
+                {
+                    _ = await history.ImportAsync(output, recursive: false);
+                }
+
                 if (history.Runs(10, null, null, null, null, null).Single().SourceSnapshotId != id)
                 {
                     throw new UnreachableException("History index lost immutable Lore identity.");

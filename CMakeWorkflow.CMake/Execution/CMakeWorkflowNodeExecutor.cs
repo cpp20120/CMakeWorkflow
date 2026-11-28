@@ -294,6 +294,7 @@ internal static class CMakeWorkflowNodeExecutor
                         result.ExecutionConditions.GetValueOrDefault("cpuAffinityLauncher")), deadline.Token);
                     result.ExitCode = operation.ExitCode;
                     result.Outputs = new Dictionary<string, string>(operation.Outputs);
+                    result.Profile = operation.Profile;
                     if (operation.Outputs.TryGetValue("backend", out string? selectedBackend))
                     {
                         result.ExecutionConditions["profilerBackend"] = selectedBackend;
@@ -601,6 +602,7 @@ internal static class CMakeWorkflowNodeExecutor
                 result.ExecutionConditions.GetValueOrDefault("cpuAffinityLauncher")), deadline);
             result.ExitCode = captured.ExitCode;
             result.Outputs = new Dictionary<string, string>(captured.Outputs);
+            result.Profile = captured.Profile;
             result.ExperimentResult = captured.Status;
             result.Error = captured.Message;
             // Even a successful profiler result is invalid if the original binary

@@ -4,6 +4,7 @@ using CMakeWorkflow.CMake.Build;
 using CMakeWorkflow.CMake.Execution;
 using CMakeWorkflow.CMake.Planning;
 using CMakeWorkflow.CMake.Reporting;
+using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.CMake.Serialization;
 using CMakeWorkflow.CMake.Toolchains;
 using CMakeWorkflow.Contracts.Workflows;
@@ -51,15 +52,29 @@ public static class DurableWorkflowExecutor
         (string runDirectory, _) = store.GetDispatchCheckpoint(operationId)
                     ?? throw new InvalidOperationException("resume_checkpoint_missing");
         string output = paths.Require(runDirectory);
-        string checkpointPath = paths.Require(Path.Combine(output, "run.json"));
-        byte[] checkpoint = await File.ReadAllBytesAsync(checkpointPath, cancellationToken);
-        WorkflowReport saved = JsonSerializer.Deserialize(checkpoint, WorkflowJson.Default.WorkflowReport) ?? throw new InvalidDataException("Invalid checkpoint.");
+        BinaryWorkflowInput? binary = store.ReadBinaryInput(operationId);
+        WorkflowCheckpointPersistence? persistence = CheckpointPersistence(store, operationId, binary);
+        WorkflowReport saved;
+        string checkpointHash;
+        if (persistence is not null)
+        {
+            BoundNativeCheckpoint checkpoint = store.ReadNativeCheckpoint(operationId);
+            saved = checkpoint.State.Report;
+            checkpointHash = checkpoint.Digest;
+        }
+        else
+        {
+            string checkpointPath = paths.Require(Path.Combine(output, "run.json"));
+            byte[] checkpoint = await File.ReadAllBytesAsync(checkpointPath, cancellationToken);
+            saved = JsonSerializer.Deserialize(checkpoint, WorkflowJson.Default.WorkflowReport)
+                ?? throw new InvalidDataException("Invalid checkpoint.");
+            checkpointHash = Convert.ToHexString(SHA256.HashData(checkpoint));
+        }
         if (!string.Equals(saved.SourceSnapshotId, sourceId, StringComparison.Ordinal))
         {
             throw new InvalidDataException("source_snapshot_resume_binding_mismatch");
         }
         string manifest = paths.Require(saved.Workflow);
-        BinaryWorkflowInput? binary = store.ReadBinaryInput(operationId);
         WorkflowPlan plan = await LoadPlanAsync(paths, store, accepted, binary, manifest, output, sourceId,
             cancellationToken, resume: true);
         if (!string.Equals(plan.ManifestHash, accepted.ManifestSha256, StringComparison.OrdinalIgnoreCase))
@@ -85,15 +100,18 @@ public static class DurableWorkflowExecutor
                 cancellationToken);
         using DocumentSession? planLease = storedPlan;
         // Permanent claim occurs before any runner mutation or external dispatch.
-        _ = store.ClaimResumeAttempt(operationId, output, Convert.ToHexString(SHA256.HashData(checkpoint)));
+        _ = store.ClaimResumeAttempt(operationId, output, checkpointHash);
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId) { PlanAuthorization = planAuthorization };
-        int code = await WorkflowRunner.RunAsync(plan, 1, output, cancellationToken,
-            extension: new ProfileWorkflowExecutor(), resume: true,
+        bool nativeEvents = binary is not null && store.UsesNativeWorkflowEvents;
+        (int code, WorkflowReport? terminal) = await WorkflowRunner.RunWithEventJournalAsync(plan, 1, output, cancellationToken,
+            extension: new ProfileWorkflowExecutor(recordNativeEvidence: binary is not null && store.UsesNativeWorkflowReports), resume: true,
             beforeExternalDispatch: gate.ConfirmAsync, toolchains: toolchains,
-            sourceSnapshotId: sourceId);
+            sourceSnapshotId: sourceId, appendEvent: nativeEvents ? item => store.AppendWorkflowEvent(operationId, item) : null,
+            previousEventSequence: nativeEvents ? store.LastWorkflowEventSequence(operationId) : 0,
+            separateTerminalReport: binary is not null && store.UsesNativeWorkflowReports, checkpoint: persistence);
         if (code is 0 or 1 or 130)
         {
-            _ = store.FinalizeExecution(operationId, output, code);
+            await FinalizeAsync(store, accepted, binary, output, code, terminal);
         }
 
         return code;
@@ -195,9 +213,11 @@ public static class DurableWorkflowExecutor
         }
 
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId) { PlanAuthorization = planAuthorization };
-        int exitCode = await WorkflowRunner.RunAsync(plan, jobs, output, cancellationToken,
-            extension: new ProfileWorkflowExecutor(), toolchains: toolchains,
+        (int exitCode, WorkflowReport? terminal) = await WorkflowRunner.RunWithEventJournalAsync(plan, jobs, output, cancellationToken,
+            extension: new ProfileWorkflowExecutor(recordNativeEvidence: binary is not null && store.UsesNativeWorkflowReports), toolchains: toolchains,
             sourceSnapshotId: sourceId,
+            appendEvent: binary is not null && store.UsesNativeWorkflowEvents
+                ? item => store.AppendWorkflowEvent(operationId, item) : null,
             beforeExternalDispatch: async (checkpoint, ct) =>
             {
                 await gate.ConfirmAsync(checkpoint, ct);
@@ -205,14 +225,34 @@ public static class DurableWorkflowExecutor
                 {
                     await faultBarrier("checkpoint", ct);
                 }
-            });
+            }, separateTerminalReport: binary is not null && store.UsesNativeWorkflowReports,
+            checkpoint: CheckpointPersistence(store, operationId, binary));
         // No finalization from catch/finally: a crash leaves the outcome unresolved.
         if (exitCode is 0 or 1 or 130)
         {
-            _ = store.FinalizeExecution(operationId, output, exitCode);
+            await FinalizeAsync(store, existing, binary, output, exitCode, terminal);
         }
 
         return exitCode;
+    }
+
+    private static WorkflowCheckpointPersistence? CheckpointPersistence(DurableAcceptanceStore store, string operation,
+        BinaryWorkflowInput? binary) =>
+        binary is not null && store.UsesNativeWorkflowCheckpoints
+            ? new(() => store.ReadNativeCheckpoint(operation).State.Report, report => store.SaveNativeCheckpoint(operation, report))
+            : null;
+
+    private static async Task FinalizeAsync(DurableAcceptanceStore store, AcceptedWorkflow accepted,
+        BinaryWorkflowInput? binary, string output, int exitCode, WorkflowReport? terminal)
+    {
+        if (binary is not null && store.UsesNativeWorkflowReports)
+        {
+            await store.FinalizeNativeExecutionAsync(accepted, binary, output, exitCode,
+                terminal ?? throw new InvalidDataException("Runner did not return terminal evidence."), CancellationToken.None);
+            return;
+        }
+
+        _ = store.FinalizeExecution(accepted.OperationId, output, exitCode);
     }
 
     private static async Task<WorkflowPlan> LoadPlanAsync(WorkspaceReadPaths paths, DurableAcceptanceStore store,

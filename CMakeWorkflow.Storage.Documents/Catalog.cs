@@ -9,6 +9,7 @@ internal sealed class Catalog : IDisposable
     internal const int PrototypeVersion = 1;
     internal const int WorkflowVersion = 2;
     internal const int ExecutionVersion = 3;
+    internal const int ReportVersion = 4;
     internal const int CollectProduction = 0;
     private const string Columns = "id, codec, schema_version, blob, canonical, stored_length";
     private readonly SqliteConnection connection;
@@ -49,7 +50,7 @@ internal sealed class Catalog : IDisposable
         long code = (long)(appId.ExecuteScalar() ?? -1L);
         bool newCatalog = schema == 0 && code == 0 && initialize;
         bool supported = expectedVersion == CollectProduction
-            ? schema is WorkflowVersion or ExecutionVersion : schema == expectedVersion;
+            ? schema is WorkflowVersion or ExecutionVersion or ReportVersion : schema == expectedVersion;
         if (!newCatalog && (!supported || code != 0x434d5744))
         {
             throw new InvalidDataException("Unrecognized document catalog application or schema version.");
@@ -79,11 +80,19 @@ internal sealed class Catalog : IDisposable
 
     private void CreateSchema(int version)
     {
-        string codecs = version switch { ExecutionVersion => "1,2,3,4", WorkflowVersion => "1,2,3", _ => "1,2" };
+        string codecs = version switch
+        {
+            ReportVersion => "1,2,3,4,5",
+            ExecutionVersion => "1,2,3,4",
+            WorkflowVersion => "1,2,3",
+            _ => "1,2"
+        };
         string production = version >= WorkflowVersion
             ? "OR (codec=3 AND schema_version IN (1,2) AND canonical IS NOT NULL)" : "";
-        string plans = version == ExecutionVersion
+        string plans = version >= ExecutionVersion
             ? "OR (codec=4 AND schema_version=1 AND canonical IS NOT NULL)" : "";
+        string reports = version >= ReportVersion
+            ? "OR (codec=5 AND schema_version=1 AND canonical IS NOT NULL)" : "";
         using SqliteTransaction transaction = connection.BeginTransaction();
         _ = Execute($"""
             CREATE TABLE documents (
@@ -94,7 +103,7 @@ internal sealed class Catalog : IDisposable
                 canonical TEXT CHECK(canonical IS NULL OR length(canonical)=64),
                 stored_length INTEGER NOT NULL CHECK(stored_length BETWEEN 1 AND 16777224),
                 CHECK((codec=1 AND schema_version IN (1,2) AND canonical IS NULL)
-                    OR (codec=2 AND schema_version=2 AND canonical IS NOT NULL) {production} {plans})
+                    OR (codec=2 AND schema_version=2 AND canonical IS NOT NULL) {production} {plans} {reports})
             ) STRICT;
             CREATE INDEX documents_by_blob ON documents(blob);
             CREATE TABLE retention (

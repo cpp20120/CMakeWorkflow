@@ -3,6 +3,7 @@ using Capnp.Managed;
 using CMakeWorkflow.Binary.Capnp;
 using CMakeWorkflow.Contracts.Workflows;
 using CMakeWorkflow.Core.Persistence;
+using CMakeWorkflow.CMake.Reporting;
 using Binding = Capnp.Generated.ExecutionBinding;
 
 namespace CMakeWorkflow.Storage.Documents;
@@ -60,6 +61,13 @@ internal static class WorkflowDocuments
         RequireCanonical(segment);
         VerifyExecutionPlan(owned);
         return Binary(segment, owned, DocumentCodec.ExecutionPlanCapnp, 1);
+    }
+
+    internal static EncodedDocument EncodeExecutionReport(NativeExecutionReport report)
+    {
+        byte[] frame = NativeExecutionReportCodec.Encode(report);
+        CheckSize(frame.Length);
+        return Binary(CapnpWire.Unframe(frame), frame, DocumentCodec.ExecutionReportCapnp, 1);
     }
 
     private static void VerifyExecutionPlan(ReadOnlySpan<byte> frame)
@@ -142,6 +150,12 @@ internal static class WorkflowDocuments
         if (expected.Codec == DocumentCodec.ExecutionPlanCapnp)
         {
             VerifyExecutionPlan(bytes);
+            return new(true, true, true, true, false);
+        }
+
+        if (expected.Codec == DocumentCodec.ExecutionReportCapnp)
+        {
+            _ = NativeExecutionReportCodec.Decode(bytes);
             return new(true, true, true, true, false);
         }
 

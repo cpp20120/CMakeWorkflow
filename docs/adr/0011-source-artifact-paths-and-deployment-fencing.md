@@ -4,7 +4,7 @@ Status: source path policy and read-only storage inspection implemented. Workspa
 
 ## Source-bound artifact paths
 
-A fresh binary execution ledger uses epoch 4. Its resolved dispatch binding can carry manifest artifact policy 1, the captured input prefix, and the operation-owned output root. Existing epoch-2 and epoch-3 ledgers retain their original policy and dispatch identities. Pre-epoch-4 binaries refuse epoch 4 before execution.
+Binary execution ledger epochs 4 and 5 support manifest artifact paths. Newly initialized workspaces use epoch 5. Its resolved dispatch binding can carry manifest artifact policy 1, the captured input prefix, and the operation-owned output root. Existing epoch-2 and epoch-3 ledgers retain their original policy and dispatch identities. Binaries from earlier epochs refuse these layouts before execution.
 
 Declared inputs identify individual captured files using portable, manifest-relative paths and must match the captured digest. A source-relative manifest directory must fall inside the captured source. A declared output occupies a logical path outside the captured file and directory namespace. Output ancestors and file access are checked inside the operation's results directory. The run and profile invocation paths support whole-argument references using `@input:N` and `@output:NAME`. The evidence catalog checks recorded output digests against the mapped files. Recovery resolves the same source snapshot and paths.
 

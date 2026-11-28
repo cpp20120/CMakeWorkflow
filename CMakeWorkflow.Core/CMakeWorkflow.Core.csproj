@@ -30,5 +30,6 @@
     <Compile Include="IWorkflowOperationExecutor.cs" />
     <Compile Include="WorkflowOperationRequest.cs" />
     <Compile Include="WorkflowOperationResult.cs" />
+    <Compile Include="WorkflowProfileEvidence.cs" />
   </ItemGroup>
 </Project>

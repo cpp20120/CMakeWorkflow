@@ -32,15 +32,31 @@ internal static class BinaryWorkflowRecovery
             throw new InvalidOperationException("binary_retry_checkpoint_not_bound");
         }
 
+        if (store.UsesNativeWorkflowReports && await store.HasPublishedNativeReportAsync(request.OperationId, ct))
+        {
+            throw new InvalidOperationException("A retained terminal report must be committed by replaying the original request.");
+        }
+
         string run = paths.Require(state.RunDirectory);
         await using FileStream lease = new(paths.Require(Path.Combine(run, ".workflow-run.lock")), FileMode.Open,
             FileAccess.ReadWrite, FileShare.None);
-        string file = paths.Require(Path.Combine(run, "run.json"));
-        paths.Read(file);
-        byte[] bytes = await File.ReadAllBytesAsync(file, ct);
-        string hash = Convert.ToHexString(SHA256.HashData(bytes));
-        WorkflowReport report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
-            ?? throw new InvalidDataException("Invalid workflow checkpoint.");
+        WorkflowReport report;
+        string hash;
+        if (store.UsesNativeWorkflowCheckpoints)
+        {
+            BoundNativeCheckpoint checkpoint = store.ReadNativeCheckpoint(request.OperationId);
+            report = checkpoint.State.Report;
+            hash = checkpoint.Digest;
+        }
+        else
+        {
+            string file = paths.Require(Path.Combine(run, "run.json"));
+            paths.Read(file);
+            byte[] bytes = await File.ReadAllBytesAsync(file, ct);
+            hash = Convert.ToHexString(SHA256.HashData(bytes));
+            report = JsonSerializer.Deserialize(bytes, WorkflowJson.Default.WorkflowReport)
+                ?? throw new InvalidDataException("Invalid workflow checkpoint.");
+        }
         if (report.SchemaVersion != 1 || !WorkflowPlanner.PathComparer.Equals(report.Workflow, input.ManifestPath) ||
             !string.Equals(report.ManifestHash, input.Document.Blob.Value, StringComparison.OrdinalIgnoreCase))
         {
@@ -69,8 +85,9 @@ internal static class BinaryWorkflowRecovery
         }
 
         NodeResult node = pending[0];
-        NodeResult? previous = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(node, WorkflowJson.Default.NodeResult),
-            WorkflowJson.Default.NodeResult);
+        NodeResult? previous = store.UsesNativeWorkflowCheckpoints ? NativeExecutionReportCodec.CloneNode(node)
+            : JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(node, WorkflowJson.Default.NodeResult),
+                WorkflowJson.Default.NodeResult);
         report.Reconciliations.Add(new(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow,
             Environment.UserName, Environment.MachineName, node.Id, "retry", request.Note, hash,
             report.Status, report.RecoveryPhase, previous, true));
@@ -79,6 +96,12 @@ internal static class BinaryWorkflowRecovery
         report.Status = "needs_attention";
         report.RecoveryPhase = "reconciled";
         report.Error = "Manually reconciled; explicit resume is required.";
+        if (store.UsesNativeWorkflowCheckpoints)
+        {
+            ct.ThrowIfCancellationRequested();
+            return store.Reconcile(request.OperationId, request.ExpectedRevision, request.Decision, request.Note, (report, hash));
+        }
+
         await WorkflowCheckpoint.SaveAsync(report, run, ct);
         return store.Reconcile(request.OperationId, request.ExpectedRevision, request.Decision, request.Note);
     }

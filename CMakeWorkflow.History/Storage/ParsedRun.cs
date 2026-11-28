@@ -11,6 +11,7 @@ namespace CMakeWorkflow.History.Storage;
 internal sealed class ParsedRun
 {
     public required HistoryRun Run { get; set; }
+    public NativeHistoryEvidence? NativeEvidence { get; init; }
     public List<HistoryNode> Nodes { get; } = [];
     public List<HistoryMeasurement> Measurements { get; } = [];
     public List<HistoryArtifact> Artifacts { get; } = [];

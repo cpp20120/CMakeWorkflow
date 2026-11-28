@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CMakeWorkflow.History.Models;
+using CMakeWorkflow.CMake.Reporting;
 using Microsoft.Data.Sqlite;
 
 namespace CMakeWorkflow.History.Storage;
@@ -11,7 +12,8 @@ namespace CMakeWorkflow.History.Storage;
 public sealed class HistoryStore : IDisposable
 {
     private const int CurrentIndexerVersion = 13;
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
+    private const int HistoricalReadSchemaVersion = 7;
 
     public static string DefaultDatabasePath =>
         Environment.GetEnvironmentVariable("CMAKEWORKFLOW_HISTORY_DB") is { Length: > 0 } value
@@ -52,7 +54,7 @@ public sealed class HistoryStore : IDisposable
             int current = Convert.ToInt32(version.ExecuteScalar(), CultureInfo.CurrentCulture);
             if (readOnly)
             {
-                if (current != CurrentSchemaVersion)
+                if (current is not (HistoricalReadSchemaVersion or CurrentSchemaVersion))
                 {
                     throw new InvalidDataException(
                         $"History schema {current} requires an explicit CLI migration; read-only API supports schema {CurrentSchemaVersion}.");
@@ -107,6 +109,21 @@ public sealed class HistoryStore : IDisposable
             {
                 Execute(static command => command.CommandText =
                     "ALTER TABLE measurements ADD COLUMN benchmark_trial TEXT; PRAGMA user_version=7;", migration);
+                current = 7;
+            }
+
+            if (current == 7)
+            {
+                Execute(static command => command.CommandText = """
+                    CREATE TABLE workflow_native_sources (
+                        run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+                        operation_id TEXT NOT NULL CHECK(length(operation_id)=32),
+                        document_id TEXT NOT NULL CHECK(length(document_id)=64),
+                        blob_id TEXT NOT NULL CHECK(length(blob_id)=64),
+                        evidence_schema INTEGER NOT NULL CHECK(evidence_schema=1)
+                    ) STRICT, WITHOUT ROWID;
+                    PRAGMA user_version=8;
+                    """, migration);
             }
 
             migration!.Commit();
@@ -252,6 +269,19 @@ public sealed class HistoryStore : IDisposable
         return new(1, imported, unchanged, 0) { RunIdentities = [new(parsed.Run.Id, parsed.Run.SourceHash)] };
     }
 
+    /// <summary>Indexes a verified native workflow without using a JSON report projection.</summary>
+    public async Task<HistoryImportResult> ImportNativeWorkflowAsync(NativeExecutionReport report, NativeHistoryEvidence evidence,
+        Action<string> pathGuard, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(pathGuard);
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(evidence);
+        ParsedRun parsed = await HistoryReports.ParseNativeWorkflowAsync(report, evidence, pathGuard, ct);
+        ct.ThrowIfCancellationRequested();
+        (int imported, int unchanged) = WriteRuns([parsed]);
+        return new(1, imported, unchanged, 0) { RunIdentities = [new(parsed.Run.Id, parsed.Run.SourceHash)] };
+    }
+
     /// <summary>Checks the indexed source identity against the committed import receipt.</summary>
     public bool ContainsIndexedRun(string runId, string sourceHash)
     {
@@ -270,9 +300,15 @@ public sealed class HistoryStore : IDisposable
         List<ParsedRun> changed = [];
         foreach (ParsedRun parsed in parsedRuns)
         {
+            NativeHistoryEvidence? storedEvidence = ReadNativeEvidence(parsed.Run.Id, tx);
+            if (storedEvidence is not null && storedEvidence != parsed.NativeEvidence)
+            {
+                throw new InvalidDataException("An indexed native terminal document cannot be replaced by different evidence.");
+            }
+
             (string? Hash, int IndexerVersion) = ExistingHash(parsed.Run.Id, tx);
             if (Hash == parsed.Run.SourceHash && IndexerVersion == CurrentIndexerVersion
-                                                  && !ProfileMetadataChanged(parsed, tx))
+                                                  && storedEvidence == parsed.NativeEvidence && !ProfileMetadataChanged(parsed, tx))
             {
                 unchanged++;
             }
@@ -300,6 +336,14 @@ public sealed class HistoryStore : IDisposable
                     : JsonSerializer.Serialize(r.BuildEnvironments,
                         HistoryJson.Default.ListHistoryBuildEnvironment),
                 r.SourceSnapshotId);
+            if (parsed.NativeEvidence is { } native)
+            {
+                Execute(static command => command.CommandText = """
+                    INSERT INTO workflow_native_sources(run_id,operation_id,document_id,blob_id,evidence_schema)
+                    VALUES($p0,$p1,$p2,$p3,$p4);
+                    """, tx, r.Id, native.OperationId, native.DocumentId, native.BlobId, native.SchemaVersion);
+            }
+
             foreach (HistoryNode n in parsed.Nodes)
             {
                 Execute(static command => command.CommandText = "INSERT INTO nodes VALUES ($p0,$p1,$p2,$p3,$p4,$p5,$p6,$p7,$p8)", tx,
@@ -326,6 +370,16 @@ public sealed class HistoryStore : IDisposable
 
         tx.Commit();
         return (imported, unchanged);
+    }
+
+    private NativeHistoryEvidence? ReadNativeEvidence(string run, SqliteTransaction tx)
+    {
+        using SqliteCommand sql = db.CreateCommand();
+        sql.Transaction = tx;
+        sql.CommandText = "SELECT operation_id,document_id,blob_id,evidence_schema FROM workflow_native_sources WHERE run_id=$run;";
+        _ = sql.Parameters.AddWithValue("$run", run);
+        using SqliteDataReader row = sql.ExecuteReader();
+        return row.Read() ? new(row.GetString(0), row.GetString(1), row.GetString(2), row.GetInt32(3)) : null;
     }
 
     /// <summary>Enumerates result roots while pruning beneath recognized reports and bulky artifact directories.</summary>

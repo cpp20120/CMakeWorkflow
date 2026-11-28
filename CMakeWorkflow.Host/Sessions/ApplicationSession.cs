@@ -245,6 +245,17 @@ public sealed partial class DoctorSession
         {
             await ProcessWorkflowRecovery.PrepareAsync(store, request.OperationId, paths, cancellationToken);
         }
+        else if (store.UsesNativeWorkflowCheckpoints && store.ReadBinaryInput(request.OperationId) is not null)
+        {
+            await store.VerifyStoredDispatchAsync(request.OperationId, cancellationToken);
+            BoundNativeCheckpoint checkpoint = store.ReadNativeCheckpoint(request.OperationId);
+            string? original = checkpoint.State.Report.Reconciliations.LastOrDefault()?.CheckpointSha256;
+            _ = CMakeWorkflowCheckpointEvidenceCodec.ResumeEvidence(checkpoint.State.Report, original);
+            if (original is null || !string.Equals(original, current.CheckpointSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("native_resume_binding_changed");
+            }
+        }
 
         return RecoveryView(store.AdmitResume(request.OperationId, request.ExpectedRevision));
     }
@@ -297,14 +308,22 @@ public sealed partial class DoctorSession
             throw new InvalidOperationException("resume_not_admitted_or_bound");
         }
 
-        if (store.ReadBinaryInput(request.OperationId) is not null)
+        bool binary = store.ReadBinaryInput(request.OperationId) is not null;
+        if (binary)
         {
             await store.VerifyStoredDispatchAsync(request.OperationId, cancellationToken);
         }
 
         (string? RunDirectory, string? CheckpointSha256) = store.GetDispatchCheckpoint(request.OperationId)
                       ?? throw new InvalidOperationException("resume_checkpoint_missing");
-        _ = paths.Require(Path.Combine(RunDirectory, "run.json"));
+        if (binary && store.UsesNativeWorkflowCheckpoints)
+        {
+            _ = store.ReadNativeCheckpoint(request.OperationId);
+        }
+        else
+        {
+            _ = paths.Require(Path.Combine(RunDirectory, "run.json"));
+        }
         if (!durableExecutions.IsActive(store.WorkspaceId, request.OperationId))
         {
             if (request.OperationId.Length != 32 || !request.OperationId.All(Uri.IsHexDigit))

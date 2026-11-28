@@ -23,11 +23,20 @@ internal static class BinaryArtifactManifest
     {
         MessageBuilder message = new(Limits);
         Wire.ArtifactManifest.Builder root = Wire.ArtifactManifest.InitRoot(message);
-        root.SetFormatVersion(1);
+        root.SetFormatVersion(checked((ushort)receipt.SchemaVersion));
         root.SetWorkspaceId(receipt.WorkspaceId);
         root.SetOperationId(receipt.OperationId);
         root.SetHostId(receipt.HostId);
-        root.SetReportBlob(receipt.ReportDigest);
+        if (receipt.SchemaVersion == 1)
+        {
+            root.SetReportBlob(receipt.ReportDigest);
+        }
+        else
+        {
+            root.SetReportProjectionBlob(receipt.ReportDigest);
+            root.SetNativeReportDocumentId(receipt.NativeReportDocumentId);
+            root.SetNativeReportBlob(receipt.NativeReportBlobId);
+        }
         Wire.ArtifactManifest.EntriesListBuilder entries = root.InitEntries(receipt.Artifacts.Count);
         for (int i = 0; i < entries.Count; i++)
         {
@@ -68,8 +77,8 @@ internal static class BinaryArtifactManifest
     {
         Wire.ArtifactManifest.Reader root = Wire.ArtifactManifest.ReadRoot(FrameCodec.Read(frame, Limits));
         string? workspace = root.DecodeWorkspaceId();
-        string? report = root.DecodeReportBlob();
-        if (root.FormatVersion != 1 || root.DecodeOperationId() != reference.OperationId ||
+        string? report = root.FormatVersion == 1 ? root.DecodeReportBlob() : root.DecodeReportProjectionBlob();
+        if (root.FormatVersion is not (1 or 2) || root.DecodeOperationId() != reference.OperationId ||
             string.IsNullOrWhiteSpace(workspace) || !ArtifactStoreFiles.IsCanonicalHex(report, 64) ||
             root.Entries.Count is < 1 or > 512)
         {
@@ -95,11 +104,18 @@ internal static class BinaryArtifactManifest
             entries.Add(new(id, role, logicalPath, blob!, (long)entry.Size, type));
         }
 
-        CasOperation decoded = new(1, workspace, reference.OperationId, root.DecodeHostId(), report!, reference.Pinned, entries)
+        CasOperation decoded = new(root.FormatVersion, workspace, reference.OperationId, root.DecodeHostId(), report!, reference.Pinned, entries)
         {
-            ArtifactManifestBlobId = reference.Blob
+            ArtifactManifestBlobId = reference.Blob,
+            NativeReportDocumentId = root.DecodeNativeReportDocumentId(),
+            NativeReportBlobId = root.DecodeNativeReportBlob()
         };
-        return entries.SingleOrDefault(entry => entry.ArtifactId == "report")?.Digest == report &&
+        bool native = root.FormatVersion == 1
+            ? !root.HasNativeReportDocumentId && !root.HasNativeReportBlob && !root.HasReportProjectionBlob
+            : !root.HasReportBlob && ArtifactStoreFiles.IsCanonicalHex(decoded.NativeReportDocumentId, 64) &&
+              ArtifactStoreFiles.IsCanonicalHex(decoded.NativeReportBlobId, 64) &&
+              entries.SingleOrDefault(entry => entry.ArtifactId == "native-report")?.Digest == decoded.NativeReportBlobId;
+        return native && entries.SingleOrDefault(entry => entry.ArtifactId == "report")?.Digest == report &&
             frame.SequenceEqual(Encode(decoded))
             ? decoded : throw new InvalidDataException("Artifact manifest is noncanonical or missing report evidence.");
     }

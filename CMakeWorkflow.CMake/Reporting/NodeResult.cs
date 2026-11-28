@@ -2,6 +2,7 @@ using CMakeWorkflow.CMake.Artifacts;
 using CMakeWorkflow.CMake.Build;
 using System.Text.Json.Serialization;
 using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
 namespace CMakeWorkflow.CMake.Reporting;
 
 public sealed class NodeResult
@@ -62,4 +63,7 @@ public sealed class NodeResult
     public List<WorkflowArtifactEvidence> DeclaredArtifacts { get; set; } = [];
 
     public Dictionary<string, string> ExecutionConditions { get; set; } = [];
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkflowProfileEvidence? Profile { get; set; }
 }

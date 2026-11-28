@@ -1023,6 +1023,7 @@ try
                               ALTER TABLE runs DROP COLUMN indexer_version;
                               ALTER TABLE measurements DROP COLUMN direction;
                               ALTER TABLE measurements DROP COLUMN benchmark_trial;
+                              DROP TABLE workflow_native_sources;
                               PRAGMA user_version=1;
                               """;
         _ = await command.ExecuteNonQueryAsync();
@@ -1058,6 +1059,7 @@ try
                               UPDATE runs SET indexer_version=2;
                               ALTER TABLE measurements DROP COLUMN direction;
                               ALTER TABLE measurements DROP COLUMN benchmark_trial;
+                              DROP TABLE workflow_native_sources;
                               PRAGMA user_version=2;
                               """;
         _ = await command.ExecuteNonQueryAsync();

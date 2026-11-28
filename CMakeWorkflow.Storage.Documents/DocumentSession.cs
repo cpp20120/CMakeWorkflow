@@ -89,9 +89,16 @@ public sealed class DocumentSession : IDisposable
         DocumentCodec.WorkflowCapnp or DocumentCodec.ProductionWorkflowCapnp =>
             InspectBytes(Descriptor.Codec, static (bytes, codec) => WorkflowDocuments.ReadBinary(bytes, codec)),
         DocumentCodec.None => throw new InvalidDataException("Missing workflow codec."),
-        DocumentCodec.ExecutionPlanCapnp => throw new InvalidOperationException("An execution plan has no workflow projection."),
+        DocumentCodec.ExecutionPlanCapnp or DocumentCodec.ExecutionReportCapnp =>
+            throw new InvalidOperationException("This evidence document has no workflow manifest projection."),
         _ => throw new InvalidDataException("Unsupported workflow codec.")
     };
+
+    /// <summary>Materializes typed terminal evidence without a JSON projection.</summary>
+    public CMakeWorkflow.CMake.Reporting.NativeExecutionReport MaterializeExecutionReport() =>
+        Descriptor.Codec == DocumentCodec.ExecutionReportCapnp
+            ? InspectStoredBytes(CMakeWorkflow.CMake.Reporting.NativeExecutionReportCodec.Decode)
+            : throw new InvalidOperationException("The document is not a terminal execution report.");
 
     public byte[] ExportStoredBytes() => InspectStoredBytes(static bytes => bytes.ToArray());
 

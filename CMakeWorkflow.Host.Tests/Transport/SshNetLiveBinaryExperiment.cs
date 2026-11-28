@@ -229,13 +229,21 @@ internal static partial class SshNetLiveLifecycleTests
         await db.OpenAsync(ct);
         using SqliteCommand query = db.CreateCommand();
         query.CommandText = """
-            SELECT count(*) FROM accepted_workflows AS a
+            SELECT b.results_directory, r.blob_id FROM accepted_workflows AS a
             JOIN workflow_binary_inputs AS b USING(operation_id)
             JOIN workflow_binary_authorizations AS d USING(operation_id)
-            WHERE a.operation_id=$operation AND length(a.snapshot)=0 AND d.identity_policy=2 AND length(d.plan_document_id)=64;
+            JOIN workflow_native_checkpoints AS c USING(operation_id)
+            JOIN workflow_terminal_reports AS r USING(operation_id)
+            WHERE a.operation_id=$operation AND length(a.snapshot)=0 AND d.identity_policy=2
+                AND length(d.plan_document_id)=64 AND c.generation>0 AND length(r.document_id)=64;
             """;
         _ = query.Parameters.AddWithValue("$operation", operation);
-        Check(await query.ExecuteScalarAsync(ct) is 1L, "Remote experiment persisted legacy workflow or plan authority.");
+        await using SqliteDataReader evidence = await query.ExecuteReaderAsync(ct);
+        Check(await evidence.ReadAsync(ct), "Remote experiment did not retain native checkpoints, authorization and terminal report.");
+        string results = evidence.GetString(0);
+        string report = evidence.GetString(1);
+        Check(!probe.Exists(results + "/run.json") && probe.Exists(workspace + "/.cmakeworkflow/execution-documents/blobs/" + report),
+            "Remote experiment used a persisted JSON report or was missing its canonical report blob.");
     }
 
     private static string LineValue(string output, string prefix) =>

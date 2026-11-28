@@ -40,7 +40,16 @@ public static class WorkflowRunner
         IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false,
         Func<string, CancellationToken, Task>? beforeExternalDispatch = null,
         IReadOnlyDictionary<string, WorkflowToolchainRuntime>? toolchains = null,
-        string? sourceSnapshotId = null)
+        string? sourceSnapshotId = null) =>
+        (await RunWithEventJournalAsync(plan, jobs, output, ct, extension, eventsToStdout, resume,
+            beforeExternalDispatch, toolchains, sourceSnapshotId)).ExitCode;
+
+    internal static async Task<(int ExitCode, WorkflowReport? TerminalReport)> RunWithEventJournalAsync(WorkflowPlan plan, int jobs, string output,
+        CancellationToken ct, IWorkflowOperationExecutor? extension = null, bool eventsToStdout = false, bool resume = false,
+        Func<string, CancellationToken, Task>? beforeExternalDispatch = null,
+        IReadOnlyDictionary<string, WorkflowToolchainRuntime>? toolchains = null, string? sourceSnapshotId = null,
+        Action<WorkflowEvent>? appendEvent = null, long previousEventSequence = 0, bool separateTerminalReport = false,
+        WorkflowCheckpointPersistence? checkpoint = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         toolchains ??= new Dictionary<string, WorkflowToolchainRuntime>(WorkflowPlanner.PathComparer);
@@ -86,14 +95,9 @@ public static class WorkflowRunner
         if (resume)
         {
             string file = Path.Combine(output, "run.json");
-            if (!File.Exists(file))
-            {
-                throw new InvalidDataException("Run report not found for resume.");
-            }
-
-            WorkflowReport saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct),
-                            Serialization.WorkflowJson.Default.WorkflowReport)
-                        ?? throw new InvalidDataException("Invalid resume report.");
+            WorkflowReport saved = checkpoint is not null ? checkpoint.Load()
+                : JsonSerializer.Deserialize(await File.ReadAllBytesAsync(file, ct), Serialization.WorkflowJson.Default.WorkflowReport)
+                    ?? throw new InvalidDataException("Invalid resume report.");
             if (saved.SchemaVersion != 1 || saved.Status is not ("needs_attention" or "running") ||
                 saved.ManifestHash != plan.ManifestHash ||
                 !string.Equals(saved.SourceSnapshotId, sourceSnapshotId, StringComparison.Ordinal) ||
@@ -139,9 +143,9 @@ public static class WorkflowRunner
                 saved.Status = "outcome_unknown";
                 saved.Error = "Interrupted execution requires manual reconciliation; automatic resume is prohibited.";
                 saved.RecoveryPhase = "interrupted";
-                await WorkflowCheckpoint.SaveAsync(saved, output, ct);
+                await PersistCheckpointAsync(saved, output, checkpoint, ct);
                 await Console.Error.WriteLineAsync($"[CMakeWorkflow] {saved.Error}");
-                return 4;
+                return (4, null);
             }
 
             if (saved.Nodes.Any(node => node.Kind == "format_check" && node.Status == "succeeded") &&
@@ -266,8 +270,8 @@ public static class WorkflowRunner
         BuildTreeOwnership? ownership = null;
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         await using WorkflowEventJournal events = await WorkflowEventJournal.OpenAsync(
-            output, eventsToStdout, resume ? report : null);
-        await SaveAsync(report, output, events);
+            output, eventsToStdout, resume ? report : null, appendEvent, previousEventSequence, checkpoint is not null);
+        await SaveAsync(report, output, events, checkpoint);
         try
         {
             string[] mutationTrees = [.. plan.Nodes.Where(n => n.Definition.Kind is not ("inspect" or "profile_snapshot" or "format_check"))
@@ -325,7 +329,7 @@ public static class WorkflowRunner
                         return node.Definition.Kind == "build" && plan.Nodes.Any(p =>
                             p.Definition.Kind is "run" or "profile" && p.Definition.From == item.Id);
                     },
-                    PersistCheckpoint = () => SaveAsync(report, output, events),
+                    PersistCheckpoint = () => SaveAsync(report, output, events, checkpoint),
                     ConfirmDispatch = beforeExternalDispatch is null
                         ? null : token => beforeExternalDispatch(output, token),
                     BeforeExecute = (item, token) => RecoveryFaults.HitAsync("after-checkpoint", item.Id, token),
@@ -435,11 +439,18 @@ public static class WorkflowRunner
             await Console.Error.WriteLineAsync($"[CMakeWorkflow] Environment provenance unavailable: {error.Message}");
         }
 
-        await SaveAsync(report, output, events);
-        return report.Status == "canceled" ? 130
+        int exitCode = report.Status == "canceled" ? 130
             : report.Status == "succeeded" ? 0
             : report.Status == "needs_attention" ? 3
             : report.Status == "outcome_unknown" ? 4 : 1;
+        if (separateTerminalReport && exitCode is 0 or 1 or 130)
+        {
+            await events.PublishAsync(report);
+            return (exitCode, report);
+        }
+
+        await SaveAsync(report, output, events, checkpoint);
+        return (exitCode, null);
     }
 
     private static bool Conflicts(PlannedNode left, PlannedNode right) =>
@@ -455,9 +466,23 @@ public static class WorkflowRunner
         return retries == 0 ? nodeId : $"{nodeId}.attempt-{retries + 1}";
     }
 
-    private static async Task SaveAsync(WorkflowReport report, string output, WorkflowEventJournal events)
+    private static async Task SaveAsync(WorkflowReport report, string output, WorkflowEventJournal events,
+        WorkflowCheckpointPersistence? checkpoint)
     {
-        await WorkflowCheckpoint.SaveAsync(report, output, CancellationToken.None);
+        await PersistCheckpointAsync(report, output, checkpoint, CancellationToken.None);
         await events.PublishAsync(report);
+    }
+
+    private static Task PersistCheckpointAsync(WorkflowReport report, string output,
+        WorkflowCheckpointPersistence? checkpoint, CancellationToken ct)
+    {
+        if (checkpoint is null)
+        {
+            return WorkflowCheckpoint.SaveAsync(report, output, ct);
+        }
+
+        ct.ThrowIfCancellationRequested();
+        checkpoint.Save(report);
+        return Task.CompletedTask;
     }
 }
