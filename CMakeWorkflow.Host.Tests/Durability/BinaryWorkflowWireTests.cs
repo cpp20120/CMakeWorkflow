@@ -884,7 +884,7 @@ internal static partial class BinaryWorkflowWireTests
         {
             string name = "h" + Guid.NewGuid().ToString("N")[..8];
             string endpoint = OperatingSystem.IsWindows()
-                ? @"\\.\pipe\" + name
+                ? @"\\.\pipe\cmakeworkflow-" + name
                 : Path.Combine(Path.GetFileName(workspace) == "version-fence" ? Path.GetDirectoryName(workspace)! : workspace, name);
             ProcessStartInfo start = StartInfo(Path.GetFullPath(cli), ["host", "serve", "--endpoint", endpoint]);
             if (marker is not null)
