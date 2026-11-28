@@ -13,7 +13,7 @@ namespace CMakeWorkflow.Pipelines.Persistence;
 /// is not safe for concurrent method calls; separate connections coordinate via SQLite transactions.
 /// Before reconciling interrupted dispatches, the caller must establish exclusive Host ownership.
 /// </remarks>
-public sealed class PipelineLedger : IDisposable
+public sealed partial class PipelineLedger : IDisposable
 {
     private const int MaxManifestBytes = 1024 * 1024;
     private readonly SqliteConnection db;

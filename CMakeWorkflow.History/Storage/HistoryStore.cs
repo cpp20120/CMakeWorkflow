@@ -270,13 +270,17 @@ public sealed class HistoryStore : IDisposable
     }
 
     /// <summary>Indexes a verified native workflow without using a JSON report projection.</summary>
-    public async Task<HistoryImportResult> ImportNativeWorkflowAsync(NativeExecutionReport report, NativeHistoryEvidence evidence,
-        Action<string> pathGuard, CancellationToken ct)
+    public Task<HistoryImportResult> ImportNativeWorkflowAsync(NativeExecutionReport report, NativeHistoryEvidence evidence,
+        Action<string> pathGuard, CancellationToken ct) =>
+        ImportNativeWorkflowAsync(report, evidence, pathGuard, requireNativeProfileAnalysis: false, ct);
+
+    internal async Task<HistoryImportResult> ImportNativeWorkflowAsync(NativeExecutionReport report, NativeHistoryEvidence evidence,
+        Action<string> pathGuard, bool requireNativeProfileAnalysis, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(pathGuard);
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(evidence);
-        ParsedRun parsed = await HistoryReports.ParseNativeWorkflowAsync(report, evidence, pathGuard, ct);
+        ParsedRun parsed = await HistoryReports.ParseNativeWorkflowAsync(report, evidence, pathGuard, requireNativeProfileAnalysis, ct);
         ct.ThrowIfCancellationRequested();
         (int imported, int unchanged) = WriteRuns([parsed]);
         return new(1, imported, unchanged, 0) { RunIdentities = [new(parsed.Run.Id, parsed.Run.SourceHash)] };

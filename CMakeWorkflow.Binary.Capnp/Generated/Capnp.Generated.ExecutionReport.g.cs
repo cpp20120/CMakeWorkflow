@@ -1778,10 +1778,62 @@ public static partial class WorkflowFinding
     }
 }
 
+public static partial class WorkflowProfileAnalysis
+{
+    public const ulong SchemaId = 0x97DC7143B51A5269UL;
+    public static StructLayout Layout => new(1, 2);
+    public static Reader ReadRoot(MessageReader message) => new(message.Root.AsStruct());
+    public static Builder InitRoot(MessageBuilder message) => new(message.InitRoot(Layout));
+    public readonly ref struct MeasurementsListReader
+    {
+        private readonly ListReader wire;
+        public MeasurementsListReader(ListReader wire) => this.wire = wire;
+        public int Count => wire.Count;
+        public global::Capnp.Generated.ExecutionReport.WorkflowProfileMeasurement.Reader this[int index] => new global::Capnp.Generated.ExecutionReport.WorkflowProfileMeasurement.Reader(wire.GetStruct(index));
+        public Enumerator GetEnumerator() => new(this);
+        public ref struct Enumerator
+        {
+            private readonly MeasurementsListReader list;
+            private int index;
+            internal Enumerator(MeasurementsListReader list) { this.list = list; index = -1; }
+            public bool MoveNext() => ++index < list.Count;
+            public global::Capnp.Generated.ExecutionReport.WorkflowProfileMeasurement.Reader Current => list[index];
+        }
+    }
+    public readonly ref struct MeasurementsListBuilder
+    {
+        private readonly ListBuilder wire;
+        public MeasurementsListBuilder(ListBuilder wire) => this.wire = wire;
+        public int Count => wire.Count;
+        public global::Capnp.Generated.ExecutionReport.WorkflowProfileMeasurement.Builder this[int index] => new(wire.GetStruct(index));
+    }
+    public readonly ref struct Reader
+    {
+        private readonly StructReader wire;
+        public Reader(StructReader wire) => this.wire = wire;
+        public ushort Version => unchecked((ushort)wire.ReadScalar(0, 16, 0x0UL));
+        public bool HasStatus => !(wire.GetPointer(0)).IsNull;
+        public ReadOnlySpan<byte> StatusUtf8 => (wire.GetPointer(0)).AsText();
+        public string? DecodeStatus() => (wire.GetPointer(0)).DecodeText();
+        public bool HasMeasurements => !(wire.GetPointer(1)).IsNull;
+        public MeasurementsListReader Measurements => new MeasurementsListReader((wire.GetPointer(1)).AsList(ListElementSize.Composite));
+    }
+    public readonly ref struct Builder
+    {
+        private readonly StructBuilder wire;
+        public Builder(StructBuilder wire) => this.wire = wire;
+        public void SetVersion(ushort value) { wire.SetScalar(0, 16, unchecked((ulong)value), 0x0UL); }
+        public void SetStatus(string? value) { wire.GetPointer(0).SetText(value); }
+        public void ClearStatus() { wire.GetPointer(0).Clear(); }
+        public MeasurementsListBuilder InitMeasurements(int count) { return new(wire.GetPointer(1).InitStructList(count, global::Capnp.Generated.ExecutionReport.WorkflowProfileMeasurement.Layout)); }
+        public void ClearMeasurements() { wire.GetPointer(1).Clear(); }
+    }
+}
+
 public static partial class WorkflowProfileEvidence
 {
     public const ulong SchemaId = 0x99574235007A89DFUL;
-    public static StructLayout Layout => new(2, 25);
+    public static StructLayout Layout => new(2, 26);
     public static Reader ReadRoot(MessageReader message) => new(message.Root.AsStruct());
     public static Builder InitRoot(MessageBuilder message) => new(message.InitRoot(Layout));
     public readonly ref struct SupportedModesListReader
@@ -1911,6 +1963,8 @@ public static partial class WorkflowProfileEvidence
         public string? DecodePmcEvents() => (wire.GetPointer(24)).DecodeText();
         public int PmcInterval => unchecked((int)wire.ReadScalar(32, 32, 0x0UL));
         public long TimeoutTicks => unchecked((long)wire.ReadScalar(64, 64, 0x0UL));
+        public bool HasAnalysis => !(wire.GetPointer(25)).IsNull;
+        public global::Capnp.Generated.ExecutionReport.WorkflowProfileAnalysis.Reader Analysis => new global::Capnp.Generated.ExecutionReport.WorkflowProfileAnalysis.Reader((wire.GetPointer(25)).AsStruct());
     }
     public readonly ref struct Builder
     {
@@ -1969,6 +2023,48 @@ public static partial class WorkflowProfileEvidence
         public void ClearPmcEvents() { wire.GetPointer(24).Clear(); }
         public void SetPmcInterval(int value) { wire.SetScalar(32, 32, unchecked((ulong)value), 0x0UL); }
         public void SetTimeoutTicks(long value) { wire.SetScalar(64, 64, unchecked((ulong)value), 0x0UL); }
+        public global::Capnp.Generated.ExecutionReport.WorkflowProfileAnalysis.Builder InitAnalysis() { return new(wire.GetPointer(25).InitStruct(global::Capnp.Generated.ExecutionReport.WorkflowProfileAnalysis.Layout)); }
+        public void ClearAnalysis() { wire.GetPointer(25).Clear(); }
+    }
+}
+
+public static partial class WorkflowProfileMeasurement
+{
+    public const ulong SchemaId = 0xD2B5E1607085E40DUL;
+    public static StructLayout Layout => new(1, 4);
+    public static Reader ReadRoot(MessageReader message) => new(message.Root.AsStruct());
+    public static Builder InitRoot(MessageBuilder message) => new(message.InitRoot(Layout));
+    public readonly ref struct Reader
+    {
+        private readonly StructReader wire;
+        public Reader(StructReader wire) => this.wire = wire;
+        public bool HasName => !(wire.GetPointer(0)).IsNull;
+        public ReadOnlySpan<byte> NameUtf8 => (wire.GetPointer(0)).AsText();
+        public string? DecodeName() => (wire.GetPointer(0)).DecodeText();
+        public bool HasUnit => !(wire.GetPointer(1)).IsNull;
+        public ReadOnlySpan<byte> UnitUtf8 => (wire.GetPointer(1)).AsText();
+        public string? DecodeUnit() => (wire.GetPointer(1)).DecodeText();
+        public double Value => BitConverter.UInt64BitsToDouble(wire.ReadScalar(0, 64, 0x0UL));
+        public bool HasVariant => !(wire.GetPointer(2)).IsNull;
+        public ReadOnlySpan<byte> VariantUtf8 => (wire.GetPointer(2)).AsText();
+        public string? DecodeVariant() => (wire.GetPointer(2)).DecodeText();
+        public bool HasMethod => !(wire.GetPointer(3)).IsNull;
+        public ReadOnlySpan<byte> MethodUtf8 => (wire.GetPointer(3)).AsText();
+        public string? DecodeMethod() => (wire.GetPointer(3)).DecodeText();
+    }
+    public readonly ref struct Builder
+    {
+        private readonly StructBuilder wire;
+        public Builder(StructBuilder wire) => this.wire = wire;
+        public void SetName(string? value) { wire.GetPointer(0).SetText(value); }
+        public void ClearName() { wire.GetPointer(0).Clear(); }
+        public void SetUnit(string? value) { wire.GetPointer(1).SetText(value); }
+        public void ClearUnit() { wire.GetPointer(1).Clear(); }
+        public void SetValue(double value) { wire.SetScalar(0, 64, BitConverter.DoubleToUInt64Bits(value), 0x0UL); }
+        public void SetVariant(string? value) { wire.GetPointer(2).SetText(value); }
+        public void ClearVariant() { wire.GetPointer(2).Clear(); }
+        public void SetMethod(string? value) { wire.GetPointer(3).SetText(value); }
+        public void ClearMethod() { wire.GetPointer(3).Clear(); }
     }
 }
 

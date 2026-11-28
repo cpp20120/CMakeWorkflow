@@ -55,6 +55,74 @@ internal sealed class CasActions(ArtifactStoreFiles files, int keyPolicy = 1)
             throw new InvalidDataException("Identical cached action inputs produced different output evidence.");
         }
 
+        await PublishBlobAsync(output, result, ct);
+
+        if (existing is null && index is not null)
+        {
+            ct.ThrowIfCancellationRequested();
+            index.Publish(result, keyPolicy);
+        }
+        else if (existing is null)
+        {
+            await DurableByteWriter.WriteAsync(reference,
+                JsonSerializer.SerializeToUtf8Bytes(result, CasActionJson.Default.CasActionResult), ct);
+        }
+    }
+
+    // Acquire the legacy source first. An indexed source is rejected before acquiring
+    // any destination lock, including when both paths refer to the same store.
+    internal async Task<int> ImportLegacyAsync(ArtifactStoreFiles source, Func<Task> beforeCommit, CancellationToken ct)
+    {
+        if (keyPolicy is not (1 or 2))
+        {
+            throw new InvalidOperationException("Action Cache import requires a supported key policy.");
+        }
+
+        await using FileStream sourceLease = await source.OpenLeaseAsync(create: false, ct);
+        if (await source.HasIndexedActionsAsync(ct))
+        {
+            throw new InvalidDataException("Action Cache import requires a legacy JSON source store.");
+        }
+
+        await using FileStream destinationLease = await files.OpenLeaseAsync(create: false, ct, requireIndexedActions: true);
+        using CasReferenceIndex index = new(files);
+        List<CasActionResult> additions = [];
+        foreach (string path in Directory.EnumerateFiles(source.Actions, "*.json").Order(StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            string key = Path.GetFileNameWithoutExtension(path);
+            CasActionResult result = await ReadAsync(source, key, ct);
+            CasActionResult? existing = index.Find(key, keyPolicy);
+            if (existing is not null && existing != result)
+            {
+                throw new InvalidDataException("Identical cached action inputs produced different output evidence.");
+            }
+
+            string blob = source.Blob(result.Digest);
+            if (new FileInfo(blob).LinkTarget is not null)
+            {
+                throw new InvalidDataException("A legacy action blob cannot be redirected.");
+            }
+
+            await ArtifactStoreFiles.VerifyAsync(blob, result.Digest, result.Size, ct);
+            await PublishBlobAsync(blob, result, ct);
+            if (existing is null)
+            {
+                additions.Add(result);
+            }
+        }
+
+        if (additions.Count > 0)
+        {
+            await beforeCommit();
+            index.Publish(additions, keyPolicy, ct);
+        }
+
+        return additions.Count;
+    }
+
+    private async Task PublishBlobAsync(string output, CasActionResult result, CancellationToken ct)
+    {
         string blob = files.Blob(result.Digest);
         if (File.Exists(blob))
         {
@@ -78,16 +146,6 @@ internal sealed class CasActions(ArtifactStoreFiles files, int keyPolicy = 1)
             }
         }
 
-        if (existing is null && index is not null)
-        {
-            ct.ThrowIfCancellationRequested();
-            index.Publish(result, keyPolicy);
-        }
-        else if (existing is null)
-        {
-            await DurableByteWriter.WriteAsync(reference,
-                JsonSerializer.SerializeToUtf8Bytes(result, CasActionJson.Default.CasActionResult), ct);
-        }
     }
 
     internal async Task DropAsync(string key, CancellationToken ct)
@@ -131,9 +189,10 @@ internal sealed class CasActions(ArtifactStoreFiles files, int keyPolicy = 1)
     private static async Task<CasActionResult> ReadAsync(ArtifactStoreFiles files, string key, CancellationToken ct)
     {
         string path = PathFor(files, key);
-        if (new FileInfo(path).Length > 4096)
+        FileInfo reference = new(path);
+        if (reference.LinkTarget is not null || reference.Length > 4096)
         {
-            throw new InvalidDataException("CAS action reference exceeds 4 KiB.");
+            throw new InvalidDataException("CAS action reference must be a regular file of at most 4 KiB.");
         }
 
         CasActionResult? result = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(path, ct),

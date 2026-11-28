@@ -4,6 +4,7 @@ using System.Text.Json;
 using CMakeWorkflow.CMake.Reporting;
 using CMakeWorkflow.CMake.Toolchains;
 using CMakeWorkflow.Contracts.Workflows;
+using CMakeWorkflow.Core;
 using CMakeWorkflow.History.Models;
 
 namespace CMakeWorkflow.History.Storage;
@@ -13,7 +14,7 @@ internal static partial class HistoryReports
     private const string NativeEvidenceSource = "execution-report.capnp";
 
     internal static async Task<ParsedRun> ParseNativeWorkflowAsync(NativeExecutionReport terminal, NativeHistoryEvidence evidence,
-        Action<string> pathGuard, CancellationToken ct)
+        Action<string> pathGuard, bool requireNativeProfileAnalysis, CancellationToken ct)
     {
         WorkflowReport report = terminal.Report;
         string directory = Canonical(terminal.RunDirectory);
@@ -65,6 +66,7 @@ internal static partial class HistoryReports
             }
         }
 
+        bool typedProfileAnalysis = requireNativeProfileAnalysis || report.Nodes.Any(node => node.Profile?.Analysis is not null);
         foreach (NodeResult node in report.Nodes)
         {
             ct.ThrowIfCancellationRequested();
@@ -80,7 +82,7 @@ internal static partial class HistoryReports
 
             string arguments = JsonSerializer.Serialize(node.Arguments, HistoryJson.Default.ListString);
             string? scenario = Scenario(node.Arguments);
-            if (node.Kind == "profile")
+            if (node.Kind is "profile" or "profile_snapshot")
             {
                 run.ProfileInputs[node.Id] = (arguments, scenario);
             }
@@ -102,11 +104,34 @@ internal static partial class HistoryReports
                 AddArtifact(run, node.Id, "executable", path, node.ExecutableSha256);
             }
 
+            if (typedProfileAnalysis && node is { Kind: "profile" or "profile_snapshot", Status: "succeeded", Profile: null })
+            {
+                throw new InvalidDataException("A successful native profiler node is missing its capture evidence.");
+            }
+
             if (node.Profile is { } profile)
             {
                 AddArtifact(run, profile.CaptureId, "trace", profile.RawTrace, profile.RawTraceSha256);
                 AddArtifact(run, profile.CaptureId, "pmc-configuration", profile.CounterConfiguration,
                     profile.CounterConfigurationSha256);
+                if (typedProfileAnalysis)
+                {
+                    WorkflowProfileAnalysis analysis = profile.Analysis ??
+                        throw new InvalidDataException("Native profiler capture lacks structured analysis evidence.");
+                    if (analysis.Status == "unavailable")
+                    {
+                        throw new InvalidDataException("The native profiler capture could not be analyzed.");
+                    }
+
+                    (string? workload, string? profileScenario) = run.ProfileInputs.GetValueOrDefault(node.Id);
+                    foreach (WorkflowProfileMeasurement sample in analysis.Measurements)
+                    {
+                        string? capture = profile is { Backend: "perf", Mode: "counters" } &&
+                            profile.CaptureId.StartsWith("counters_", StringComparison.Ordinal) ? null : profile.CaptureId;
+                        run.Measurements.Add(new(run.Run.Id, capture, sample.Name, sample.Unit,
+                            sample.Value, sample.Variant, profileScenario, NativeEvidenceSource, sample.Method, 0, workload, null));
+                    }
+                }
             }
         }
 
@@ -118,7 +143,11 @@ internal static partial class HistoryReports
             builds[key] = Hash(Encoding.UTF8.GetBytes(builds.GetValueOrDefault(key) + "\n" + kit + "\n" + toolchain));
         }
 
-        await ImportProfileAsync(directory, run, pathGuard, ct, includeCaptureJson: false);
+        if (!typedProfileAnalysis)
+        {
+            await ImportProfileAsync(directory, run, pathGuard, ct, includeCaptureJson: false);
+        }
+
         CompleteWorkflowImport(run, directory, NativeEvidenceSource, builds, overrides, pathGuard);
         return run;
     }

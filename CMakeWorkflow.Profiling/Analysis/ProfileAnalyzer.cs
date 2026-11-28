@@ -20,6 +20,66 @@ public static class ProfileAnalyzer
         return (exactCount, headers.Any(header => header.Groups[1].ValueSpan.ContainsAnyExcept('0')));
     }
 
+    internal static async Task<WorkflowProfileAnalysis> CaptureMeasurementsAsync(WorkflowProfileEvidence evidence,
+        string directory, CancellationToken ct)
+    {
+        if (evidence.Status is not ("complete" or "succeeded"))
+        {
+            return new("capture_failed", []);
+        }
+
+        string trace = Path.Combine(directory, evidence.RawTrace);
+        string id = evidence.CaptureId;
+        if (evidence is { Backend: "perf", Mode: "counters" })
+        {
+            Dictionary<string, Counter> counters = await ReadPerfCountersAsync(trace, null, ct);
+            bool comparison = id.StartsWith("counters_", StringComparison.Ordinal);
+            string? variant = comparison ? id["counters_".Length..]
+                : id.StartsWith("capture_", StringComparison.Ordinal) ? id["capture_".Length..] : null;
+            List<WorkflowProfileMeasurement> measurements = [.. counters.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => new WorkflowProfileMeasurement(pair.Key, pair.Value.Unit, pair.Value.Value, variant, "perf stat"))];
+            if (comparison)
+            {
+                foreach ((string name, Counter counter) in DeriveCounters(counters))
+                {
+                    measurements.Add(new(name, counter.Unit, counter.Value, variant, "perf stat derived " + counter.Domain));
+                }
+            }
+
+            return new("complete", measurements);
+        }
+
+        if (evidence is
+            {
+                Backend: "etw",
+                Mode: "counters",
+                TargetProcessId: { } pid,
+                TargetStartedAt: { } start,
+                TargetFinishedAt: { } finish,
+                CounterConfiguration: { } config
+            })
+        {
+            string configuration = Path.Combine(directory, config);
+            if (evidence.CounterConfigurationSha256 != await ProfileArtifactHash.Sha256Async(configuration, ct))
+            {
+                throw new InvalidDataException("PMC configuration changed after capture.");
+            }
+
+            List<WorkflowProfileMeasurement> measurements = [];
+            _ = await EtwPmcAnalyzer.AnalyzeAsync(trace, directory, id, configuration, pid, start, finish, ct, measurements.Add);
+            return new("complete", measurements);
+        }
+
+        if (evidence is { Backend: "etw", Mode: "cpu" or "scheduler" })
+        {
+            EtwAnalysisResult result = await new EtwTraceAnalyzer().AnalyzeAsync(trace, directory, id, evidence.Executable,
+                evidence.TargetProcessId, evidence.TargetStartedAt, evidence.TargetFinishedAt, ct);
+            return result.Analysis ?? throw new InvalidDataException("ETW analysis has no typed evidence.");
+        }
+
+        return new("complete", []);
+    }
+
     public static async Task<int> AnalyzeAsync(string directory, CancellationToken ct,
         bool emitResultPath = true)
     {

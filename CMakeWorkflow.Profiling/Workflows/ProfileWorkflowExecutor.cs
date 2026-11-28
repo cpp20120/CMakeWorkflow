@@ -1,10 +1,12 @@
 using CMakeWorkflow.Core;
 using CMakeWorkflow.Profiling.Backends;
+using CMakeWorkflow.Profiling.Analysis;
 using CMakeWorkflow.Profiling.Capture;
 
 namespace CMakeWorkflow.Profiling.Workflows;
 
-public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null, bool recordNativeEvidence = false) : IWorkflowOperationExecutor
+public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null, bool recordNativeEvidence = false,
+    bool recordNativeAnalysis = false) : IWorkflowOperationExecutor
 {
     private readonly IProfileProcess process = process ?? new ProfileProcess();
 
@@ -76,6 +78,26 @@ public sealed class ProfileWorkflowExecutor(IProfileProcess? process = null, boo
             if (!recordNativeEvidence)
             {
                 await session.CompleteAsync(result, cancellationToken);
+            }
+
+            if (recordNativeAnalysis && evidence is not null)
+            {
+                WorkflowProfileAnalysis analysis;
+                try
+                {
+                    analysis = await ProfileAnalyzer.CaptureMeasurementsAsync(evidence, request.OutputDirectory, cancellationToken);
+                    if (analysis.Measurements.Count > 4096)
+                    {
+                        analysis = new("unavailable", []);
+                    }
+                }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException
+                                              or System.Xml.XmlException or NotSupportedException or InvalidOperationException)
+                {
+                    analysis = new("unavailable", []);
+                }
+
+                evidence = evidence with { Analysis = analysis };
             }
 
             return new WorkflowOperationResult(result.ExitCode,

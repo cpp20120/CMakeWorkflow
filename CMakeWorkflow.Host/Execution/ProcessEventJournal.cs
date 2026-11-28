@@ -19,6 +19,8 @@ internal sealed class ProcessEventJournal : IAsyncDisposable
     private readonly string directory;
     private readonly Dictionary<string, string> last = new(StringComparer.Ordinal);
     private long sequence;
+    private Action<IReadOnlyList<WorkflowEvent>>? commit;
+    private bool resumed;
     private bool started;
     private bool finished;
 
@@ -36,6 +38,21 @@ internal sealed class ProcessEventJournal : IAsyncDisposable
                 resume ? journal.RestoreSequence : null);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        return journal;
+    }
+
+    internal static ProcessEventJournal OpenNative(string directory, bool resume, ProcessOperationReport report,
+        long sequence, Action<IReadOnlyList<WorkflowEvent>> commit)
+    {
+        ProcessEventJournal journal = new(directory) { commit = commit, sequence = sequence, resumed = resume };
+        if (resume)
+        {
+            foreach (ProcessNodeReport node in report.Nodes)
+            {
+                journal.last.Add(node.Id, node.Status);
+            }
+        }
+
         return journal;
     }
 
@@ -59,46 +76,56 @@ internal sealed class ProcessEventJournal : IAsyncDisposable
     /// </remarks>
     internal async Task PublishAsync(ProcessOperationReport report)
     {
+        List<WorkflowEvent> pending = [];
+        void Stage(string type, string? id, string status, int? exitCode, string? error) =>
+            pending.Add(new(1, checked(sequence + pending.Count + 1), DateTimeOffset.UtcNow, type,
+                directory, id, id is null ? null : "process", status, exitCode, error, []));
+
         if (!started)
         {
-            started = true;
-            await EmitAsync("workflow_started", null, "running", null, null);
+            Stage(resumed ? "workflow_resumed" : "workflow_started", null, "running", null, null);
         }
         foreach (ProcessNodeReport node in report.Nodes)
         {
-            if (node.Status == "pending" || last.GetValueOrDefault(node.Id) == node.Status)
+            if (node.Status != "pending" && last.GetValueOrDefault(node.Id) != node.Status)
             {
-                continue;
+                Stage(node.Status == "running" ? "node_started" : "node_finished", node.Id, node.Status, node.ExitCode, node.Error);
             }
-
-            last[node.Id] = node.Status;
-            await EmitAsync(node.Status == "running" ? "node_started" : "node_finished", node.Id,
-                node.Status, node.ExitCode, node.Error);
         }
         if (!finished && report.Status != "running")
         {
-            finished = true;
-            await EmitAsync("workflow_finished", null, report.Status, null, report.Error);
-        }
-    }
-
-    private async Task EmitAsync(string type, string? id, string status, int? exitCode, string? error)
-    {
-        if (writer is null)
-        {
-            return;
+            Stage("workflow_finished", null, report.Status, null, report.Error);
         }
 
-        WorkflowEvent evt = new(1, ++sequence, DateTimeOffset.UtcNow, type,
-            directory, id, id is null ? null : "process", status, exitCode, error, []);
-        try
+        if (commit is not null)
         {
-            await EventJournalFile.AppendAsync(writer, JsonSerializer.Serialize(evt, WorkflowProtocolJson.Default.WorkflowEvent));
+            commit(pending);
         }
-        catch (Exception failure) when (failure is IOException or ObjectDisposedException)
+        else if (writer is not null)
         {
-            await EventJournalFile.CloseAsync(writer);
-            writer = null;
+            try
+            {
+                foreach (WorkflowEvent item in pending)
+                {
+                    await EventJournalFile.AppendAsync(writer, JsonSerializer.Serialize(item, WorkflowProtocolJson.Default.WorkflowEvent));
+                }
+            }
+            catch (Exception failure) when (failure is IOException or ObjectDisposedException)
+            {
+                await EventJournalFile.CloseAsync(writer);
+                writer = null;
+            }
+        }
+
+        sequence += pending.Count;
+        started = true;
+        finished = report.Status != "running";
+        foreach (WorkflowEvent item in pending)
+        {
+            if (item.NodeId is { } id)
+            {
+                last[id] = item.Status!;
+            }
         }
     }
 

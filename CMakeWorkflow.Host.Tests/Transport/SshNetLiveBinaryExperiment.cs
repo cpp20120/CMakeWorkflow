@@ -6,6 +6,7 @@ using CMakeWorkflow.Client.Experiments;
 using CMakeWorkflow.Client.Transport;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
+using CMakeWorkflow.Host.Tests.Durability;
 using Microsoft.Data.Sqlite;
 using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
 
@@ -19,6 +20,7 @@ internal static partial class SshNetLiveLifecycleTests
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromMinutes(10));
         ct = deadline.Token;
+        bool nativeController = Environment.GetEnvironmentVariable("CMWF_SSHNET_NATIVE_CONTROLLER") == "1";
         string workspace = options.Workspace + "/exp-" + Guid.NewGuid().ToString("N")[..8];
         string endpoint = workspace + "/host.sock";
         string marker = workspace + "/fault";
@@ -88,17 +90,37 @@ internal static partial class SshNetLiveLifecycleTests
                 "--ref", commit, "--host", options.Host, "--workspace", workspace, "--endpoint", endpoint,
                 "--user", options.Username, "--port", options.Port.ToString(CultureInfo.InvariantCulture),
                 "--key-file", options.PrivateKeyPath, "--host-key-sha256", options.HostKeySha256,
-                "--remote-executable", options.RemoteExecutable, "--binary", "--managed-clang", "--config", "Release",
+                "--remote-executable", options.RemoteExecutable, nativeController ? "--native-controller" : "--binary",
+                "--managed-clang", "--config", "Release",
                 "--environment-lock", lockId, "--vcpkg", "--benchmark-target", "benchmark", "--repeats", "3",
                 "--benchmark-arg", effects], scratch, true, ct);
             planId = LineValue(planned, "Plan ID ");
-            string controllerPlan = Path.Combine(scratch.FullName, "plans", planId, "plan.json");
-            PreparedExperimentPlan approved = await ExperimentService.ReadPlanAsync(controllerPlan, planId, ct);
-            Check(approved.BinaryWorkflow && approved.Commit == commit, "Controller lost native Git approval context.");
-            string legacyId = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(controllerPlan, ct)));
-            string legacyPlan = Directory.CreateDirectory(Path.Combine(scratch.FullName, "plans", legacyId)).FullName;
-            File.Copy(controllerPlan, Path.Combine(legacyPlan, "plan.json"));
-            _ = await RunExperimentCommandAsync(controller, ["experiment", "run", "--plan", legacyId, "--approve"], scratch, false, ct);
+            string planRoot = Path.Combine(scratch.FullName, "plans", planId);
+            string planName = nativeController ? "plan.capnp" : "plan.json";
+            string controllerPlan = Path.Combine(planRoot, planName);
+            byte[] planBytes = await File.ReadAllBytesAsync(controllerPlan, ct);
+            string projection = await RunExperimentCommandAsync(controller, ["experiment", "inspect", planId], scratch, true, ct);
+            using JsonDocument inspection = JsonDocument.Parse(projection);
+            string approvedSource = inspection.RootElement.GetProperty("sourceSnapshotId").GetString()!;
+            Check(inspection.RootElement.GetProperty("commit").GetString() == commit, "Controller lost Git approval context.");
+            if (nativeController)
+            {
+                if (Environment.GetEnvironmentVariable("CMWF_TEST_CAPNP") is { } capnp &&
+                    Environment.GetEnvironmentVariable("CMWF_TEST_CONTROLLER_SCHEMA") is { } schema)
+                {
+                    await BinaryWorkflowWireTests.VerifyOfficialFrameAsync(capnp, schema, controllerPlan, ct, "ControllerPlan");
+                }
+
+                Check(!File.Exists(Path.Combine(planRoot, "plan.json")), "Native controller persisted a legacy envelope.");
+                await File.WriteAllBytesAsync(controllerPlan, [.. planBytes, 0], ct);
+                _ = await RunExperimentCommandAsync(controller, ["experiment", "inspect", planId], scratch, false, ct);
+                await File.WriteAllBytesAsync(controllerPlan, planBytes, ct);
+            }
+
+            string ordinarySha = Convert.ToHexString(SHA256.HashData(planBytes));
+            string otherPlan = Directory.CreateDirectory(Path.Combine(scratch.FullName, "plans", ordinarySha)).FullName;
+            File.Copy(controllerPlan, Path.Combine(otherPlan, planName));
+            _ = await RunExperimentCommandAsync(controller, ["experiment", "run", "--plan", ordinarySha, "--approve"], scratch, false, ct);
 
             string plannedDeps = await RunExperimentCommandAsync(controller, ["experiment", "deps", "plan", planId], scratch, true, ct);
             string dependency = LineValue(plannedDeps, "Dependency plan SHA-256 ");
@@ -126,8 +148,19 @@ internal static partial class SshNetLiveLifecycleTests
             await RejectTamperedAsync(installation + "/receipt.capnp",
                 ["experiment", "run", "--plan", planId, "--approve", "--wait-seconds", "0"]);
 
-            string launched = await RunExperimentCommandAsync(controller, ["experiment", "run", "--plan", planId, "--approve",
-                "--wait-seconds", "0"], scratch, true, ct);
+            string launched;
+            if (nativeController && Environment.GetEnvironmentVariable("CMWF_SSHNET_FAULT_CONTROLLER") is { } faultController)
+            {
+                await InterruptControllerAfterStageAsync(faultController, planId, scratch, ct);
+                launched = await RunExperimentCommandAsync(controller, ["experiment", "report", planId,
+                    "--wait-seconds", "0"], scratch, true, ct);
+            }
+            else
+            {
+                launched = await RunExperimentCommandAsync(controller, ["experiment", "run", "--plan", planId, "--approve",
+                    "--wait-seconds", "0"], scratch, true, ct);
+            }
+
             string[] launch = launched.Split('\n').Single(line => line.Contains("Host request ", StringComparison.Ordinal))
                 .Split("Host request ", StringSplitOptions.None)[1].TrimEnd('.').Split(", operation ", StringSplitOptions.None);
             string requestId = launch[0];
@@ -148,7 +181,9 @@ internal static partial class SshNetLiveLifecycleTests
                 " && " + remote + " cas " + Quote(workspace + "/.cmakeworkflow/execution-documents") + " gc --apply");
             pid = StartPersistentHost(probe, workspace, endpoint, options.RemoteExecutable, environment);
 
-            await using (CMakeWorkflowClient resumed = await approved.Host.ConnectAsync(ct))
+            ExperimentHost host = new(options.Host, workspace, endpoint, options.RemoteExecutable,
+                options.Username, options.PrivateKeyPath, options.HostKeySha256, options.Port);
+            await using (CMakeWorkflowClient resumed = await host.ConnectAsync(ct))
             {
                 Check(resumed.Host.ProcessId == pid &&
                     (await resumed.Operations.FindAsync(requestId, ct)).OperationId == operationId,
@@ -170,7 +205,7 @@ internal static partial class SshNetLiveLifecycleTests
                 Path.Combine(scratch.FullName, "plans", planId, "result.json"), ct));
             JsonElement run = report.RootElement.GetProperty("run");
             Check(probe.Read(effects) == "timing\ntiming\ntiming\n" &&
-                run.GetProperty("sourceSnapshotId").GetString() == approved.SourceSnapshotId &&
+                run.GetProperty("sourceSnapshotId").GetString() == approvedSource &&
                 run.GetProperty("nodes").EnumerateArray().Any(node => node.GetProperty("kind").GetString() == "ctest"
                     && node.GetProperty("status").GetString() == "succeeded"), "Native recovery lost work or source provenance.");
             string artifactId = report.RootElement.GetProperty("artifacts").EnumerateArray().Single(artifact =>
@@ -244,6 +279,40 @@ internal static partial class SshNetLiveLifecycleTests
         string report = evidence.GetString(1);
         Check(!probe.Exists(results + "/run.json") && probe.Exists(workspace + "/.cmakeworkflow/execution-documents/blobs/" + report),
             "Remote experiment used a persisted JSON report or was missing its canonical report blob.");
+    }
+
+    private static async Task InterruptControllerAfterStageAsync(string executable, string planId, DirectoryInfo scratch,
+        CancellationToken ct)
+    {
+        string marker = Path.Combine(scratch.FullName, "controller-staged");
+        ProcessStartInfo start = new(executable);
+        start.Environment["CMAKEWORKFLOW_EXPERIMENT_STORE"] = Path.Combine(scratch.FullName, "plans");
+        start.Environment["CMAKEWORKFLOW_TEST_FAULT"] = "controller-stage-before-dispatch";
+        start.Environment["CMAKEWORKFLOW_TEST_MARKER"] = marker;
+        _ = start.Environment.Remove("CMAKEWORKFLOW_TEST_NODE");
+        foreach (string arg in new[] { "experiment", "run", "--plan", planId, "--approve", "--wait-seconds", "0" })
+        {
+            start.ArgumentList.Add(arg);
+        }
+
+        using Process child = Process.Start(start) ?? throw new InvalidOperationException("Could not start the fault controller.");
+        try
+        {
+            while (!File.Exists(marker))
+            {
+                Check(!child.HasExited, "Controller exited before the staged experiment fault boundary.");
+                await Task.Delay(25, ct);
+            }
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+            }
+
+            await child.WaitForExitAsync(CancellationToken.None);
+        }
     }
 
     private static string LineValue(string output, string prefix) =>

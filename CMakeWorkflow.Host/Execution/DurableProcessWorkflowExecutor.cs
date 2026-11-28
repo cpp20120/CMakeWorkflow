@@ -1,3 +1,4 @@
+using CMakeWorkflow.CMake.Recovery;
 using System.Security.Cryptography;
 using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Workflows;
@@ -54,11 +55,9 @@ internal static class DurableProcessWorkflowExecutor
         _ = paths.Require(accepted.ManifestBaseDirectory);
         byte[] snapshot = store.GetSnapshot(operationId); // verifies the stored SHA
         ProcessWorkflowManifest plan = ProcessWorkflowDomain.ReadPlan(snapshot, paths);
-        string checkpoint = paths.Require(Path.Combine(output, "run.json"));
-        paths.Read(checkpoint);
-        byte[] bytes = await File.ReadAllBytesAsync(checkpoint, cancellationToken);
-        OperationCheckpointEvidence evidence = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
-        ProcessOperationReport report = ProcessCheckpointEvidenceCodec.Parse(bytes);
+        byte[] bytes = await store.ReadProcessEvidenceAsync(paths, operationId, output, cancellationToken);
+        OperationCheckpointEvidence evidence = store.ProcessEvidenceCodec.ForResume(bytes);
+        ProcessOperationReport report = store.ProcessEvidenceCodec.Read(bytes);
         if (report.Recovery!.Note != inspection.Note ||
             !string.Equals(evidence.ResumeSourceCheckpointSha256, CheckpointSha256,
                 StringComparison.OrdinalIgnoreCase))
@@ -67,16 +66,20 @@ internal static class DurableProcessWorkflowExecutor
         }
 
         ProcessWorkflowRecovery.ValidatePlan(report, plan, accepted.ManifestSha256, paths, output);
+        store.VerifyProcessRetryCandidates(operationId, report);
         string hash = ProcessWorkflowRecovery.Hash(bytes);
         // Runner holds the run lease while rechecking these exact bytes, claiming
         // the attempt, and only then changing state or starting any process.
         int code = await ProcessWorkflowRunner.RunAsync(plan, accepted.ManifestSha256, paths, output, 1,
-() => { _ = store.ConfirmRunnerCheckpoint(operationId, output); return Task.CompletedTask; },
+            () => { _ = store.ConfirmRunnerCheckpoint(operationId, output); return Task.CompletedTask; },
             resume: true, expectedCheckpointSha256: hash,
-            claimResume: () => { _ = store.ClaimResumeAttempt(operationId, output, hash); return Task.CompletedTask; }, cancellationToken: cancellationToken);
+            claimResume: () => { _ = store.ClaimResumeAttempt(operationId, output, hash); return Task.CompletedTask; }, cancellationToken: cancellationToken,
+            persistence: store.UsesNativeProcessCheckpoints ? new(store, operationId) : null);
         if (code is 0 or 1 or 130)
         {
+            await RecoveryFaults.HitAsync("process-before-finalization", null, CancellationToken.None);
             _ = store.FinalizeExecution(operationId, output, code);
+            await RecoveryFaults.HitAsync("process-after-finalization", null, CancellationToken.None);
         }
 
         return code;
@@ -105,7 +108,7 @@ internal static class DurableProcessWorkflowExecutor
             ProcessCheckpointEvidenceCodec.Instance);
         AcceptedWorkflow accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
         if (store.GetDomainKind(operationId) != "process" ||
-            accepted.State != "accepted_not_dispatched")
+            (!store.UsesNativeProcessCheckpoints && accepted.State != "accepted_not_dispatched"))
         {
             throw new InvalidOperationException("operation_already_authorized_or_wrong_domain");
         }
@@ -124,8 +127,13 @@ internal static class DurableProcessWorkflowExecutor
             throw new InvalidDataException("Immutable process manifest changed.");
         }
 
+        if (accepted.State != "accepted_not_dispatched")
+        {
+            return RecoverFinalization(store, operationId, paths, plan, accepted.ManifestSha256);
+        }
+
         string output = paths.Require(request.ResultsDirectory);
-        if (File.Exists(Path.Combine(output, "run.json")))
+        if (!store.UsesNativeProcessCheckpoints && File.Exists(Path.Combine(output, "run.json")))
         {
             throw new InvalidOperationException("run_directory_already_initialized");
         }
@@ -136,12 +144,48 @@ internal static class DurableProcessWorkflowExecutor
         // The runner persists the admitted batch before this callback binds its
         // exact bytes. No external process is started before confirmation.
         int exitCode = await ProcessWorkflowRunner.RunAsync(plan, accepted.ManifestSha256,
-            paths, output, jobs, () => { _ = store.ConfirmRunnerCheckpoint(operationId, output); return Task.CompletedTask; }, cancellationToken: cancellationToken);
+            paths, output, jobs, () => { _ = store.ConfirmRunnerCheckpoint(operationId, output); return Task.CompletedTask; }, cancellationToken: cancellationToken,
+            persistence: store.UsesNativeProcessCheckpoints ? new(store, operationId) : null);
         if ((exitCode is 0 or 1 or 130) && store.GetDispatchCheckpoint(operationId) is not null)
         {
+            await RecoveryFaults.HitAsync("process-before-finalization", null, CancellationToken.None);
             _ = store.FinalizeExecution(operationId, output, exitCode);
+            await RecoveryFaults.HitAsync("process-after-finalization", null, CancellationToken.None);
         }
 
         return exitCode;
+    }
+
+    private static int RecoverFinalization(DurableAcceptanceStore store, string operationId, WorkspaceReadPaths paths,
+        ProcessWorkflowManifest plan, string snapshotSha256)
+    {
+        if (store.GetFinalization(operationId) is { } terminal)
+        {
+            return terminal.ExitCode;
+        }
+
+        if (store.GetDispatchCheckpoint(operationId) is not { } dispatch)
+        {
+            return 4;
+        }
+
+        string directory = paths.Require(dispatch.RunDirectory);
+        byte[] frame = store.ReadProcessCheckpoint(operationId, directory);
+        ProcessOperationReport report = store.ProcessEvidenceCodec.Read(frame);
+        int? exit = report.Status switch
+        {
+            "succeeded" => 0,
+            "failed" => 1,
+            "canceled" => 130,
+            _ => null
+        };
+        if (exit is not { } exitCode)
+        {
+            return 4;
+        }
+
+        ProcessWorkflowRecovery.ValidatePlan(report, plan, snapshotSha256, paths, directory);
+        store.VerifyProcessRetryCandidates(operationId, report);
+        return store.FinalizeExecution(operationId, directory, exitCode).ExitCode;
     }
 }

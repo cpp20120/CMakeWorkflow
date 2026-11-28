@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
+using CMakeWorkflow.Binary.Capnp;
 using CMakeWorkflow.Client.Workflows;
 using CMakeWorkflow.Contracts.History;
 using CMakeWorkflow.Developer;
+using BinaryWorkflowSubmission = CMakeWorkflow.Host.Workflows.BinaryWorkflowSubmission;
 using CMakeWorkflow.Scripting;
 using StreamJsonRpc;
 using CMakeWorkflowClient = CMakeWorkflow.Client.CMakeWorkflowClient;
@@ -14,7 +16,7 @@ internal static class ScriptCommand
     internal const string Usage = """
         CMakeWorkflow script compose[-binary] FILE.cs [--output-dir DIR] [--timeout-seconds N] [-- ARGS...]
         CMakeWorkflow script plan FILE.cs [HOST OPTIONS] [-- ARGS...]
-        CMakeWorkflow script run FILE.cs --approve [--request-id ID] [HOST OPTIONS] [-- ARGS...]
+        CMakeWorkflow script run[-binary] FILE.cs --approve [--request-id ID] [HOST OPTIONS] [-- ARGS...]
 
         Host options: --workspace DIR, --manifest-base RELATIVE_DIR, --results-dir HOST_DIR,
                       --jobs N, --only NODE (repeatable), --no-history or --history-db HOST_FILE
@@ -30,7 +32,7 @@ internal static class ScriptCommand
             Console.WriteLine(Usage);
             return 0;
         }
-        if (args is not ["compose" or "compose-binary" or "plan" or "run", string source, .. string[] tail])
+        if (args is not ["compose" or "compose-binary" or "plan" or "run" or "run-binary", string source, .. string[] tail])
         {
             throw new ArgumentException(Usage);
         }
@@ -40,10 +42,11 @@ internal static class ScriptCommand
         int split = Array.IndexOf(tail, "--");
         string[] scriptArguments = split < 0 ? [] : tail[(split + 1)..];
         string[] commandArguments = split < 0 ? tail : tail[..split];
+        bool executes = action is "run" or "run-binary";
         bool approved = commandArguments.Contains("--approve", StringComparer.Ordinal);
-        if ((action == "run" && !approved) || (action != "run" && approved))
+        if (executes != approved)
         {
-            throw new ArgumentException("--approve is required for script run and is only accepted by script run.");
+            throw new ArgumentException("Use --approve with script run or run-binary.");
         }
         (string[] clean, HistoryPolicy? history) = CliHistory.Parse(
             [.. commandArguments.Where(value => value != "--approve")]);
@@ -79,7 +82,7 @@ internal static class ScriptCommand
         {
             RemoteCommand.Validate("script", values);
         }
-        if (action != "run" && values.ContainsKey("--request-id"))
+        if (!executes && values.ContainsKey("--request-id"))
         {
             throw new ArgumentException("--request-id applies to script run.");
         }
@@ -98,39 +101,65 @@ internal static class ScriptCommand
         string manifestBase = RemoteCommand.Get(values, "--manifest-base") ?? ".";
         string requestDigest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(requestId)));
         string results = RemoteCommand.Get(values, "--results-dir") ?? (".cmakeworkflow/script-results/" + requestDigest);
-        PreparedWorkflow prepared = await manifest.PrepareAsync(client.Workflows, results, manifestBase, ct);
-        WorkflowPreflightResult preflight = await client.Workflows.PreflightAsync(
-            new WorkflowPreflightOptions(prepared.Manifest, prepared.ManifestSha256, jobs, prepared.ResultsDirectory)
+        PreparedWorkflow prepared;
+        Func<Task<WorkflowOperation>> start;
+        ExecutionStartOptions? nativeRequest = null;
+        if (action == "run-binary")
+        {
+            byte[] frame = CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(manifest.ToDefinition())));
+            prepared = await client.Workflows.PrepareBinaryManifestAsync(frame, results, manifestBase, ct);
+            Console.WriteLine($"Manifest {prepared.Manifest}\nSHA-256 {prepared.ManifestSha256}\nResults {prepared.ResultsDirectory}");
+            nativeRequest = new(BinaryWorkflowSubmission.Domain, requestId, prepared.Manifest,
+                prepared.ManifestSha256, jobs, prepared.ResultsDirectory)
             {
-                Only = only,
+                Only = only.Count == 0 ? null : only,
                 HistoryPolicy = history
-            }, ct);
-
-        Console.WriteLine($"Manifest {prepared.Manifest}\nSHA-256 {prepared.ManifestSha256}\nResults {prepared.ResultsDirectory}");
-        foreach (WorkflowPreflightNode node in preflight.Nodes)
-        {
-            Console.WriteLine($"{node.Id}: {node.Kind} after [{string.Join(", ", node.Dependencies)}]");
-            foreach (WorkflowPreflightDiagnostic diagnostic in node.Diagnostics)
-            {
-                Console.WriteLine($"  {diagnostic.Severity}: {diagnostic.Message}");
-            }
+            };
+            start = () => client.Executions.StartAsync(nativeRequest, ct);
         }
-        if (action == "plan" || !preflight.Valid)
+        else
         {
-            return preflight.Valid ? 0 : 1;
+            prepared = await manifest.PrepareAsync(client.Workflows, results, manifestBase, ct);
+            WorkflowPreflightResult preflight = await client.Workflows.PreflightAsync(
+                new WorkflowPreflightOptions(prepared.Manifest, prepared.ManifestSha256, jobs, prepared.ResultsDirectory)
+                {
+                    Only = only,
+                    HistoryPolicy = history
+                }, ct);
+            Console.WriteLine($"Manifest {prepared.Manifest}\nSHA-256 {prepared.ManifestSha256}\nResults {prepared.ResultsDirectory}");
+            foreach (WorkflowPreflightNode node in preflight.Nodes)
+            {
+                Console.WriteLine($"{node.Id}: {node.Kind} after [{string.Join(", ", node.Dependencies)}]");
+                foreach (WorkflowPreflightDiagnostic diagnostic in node.Diagnostics)
+                {
+                    Console.WriteLine($"  {diagnostic.Severity}: {diagnostic.Message}");
+                }
+            }
+            if (action == "plan" || !preflight.Valid)
+            {
+                return preflight.Valid ? 0 : 1;
+            }
+
+            start = () => client.Workflows.StartAsync(preflight.CreateStartOptions(requestId), ct);
         }
 
         await Console.Error.WriteLineAsync($"[CMakeWorkflow] Client request ID: {requestId}");
         await Console.Error.FlushAsync(ct);
         try
         {
-            WorkflowOperation operation = await client.Workflows.StartAsync(preflight.CreateStartOptions(requestId), ct);
+            WorkflowOperation operation = await start();
             return await ObserveAsync(operation, owned, ct);
         }
         catch (ConnectionLostException) when (!ownsHost && !ct.IsCancellationRequested)
         {
-            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Reconnecting to look up request {requestId}.");
+            await Console.Error.WriteLineAsync($"[CMakeWorkflow] Reconnecting for request {requestId}.");
             await using CMakeWorkflowClient recovered = await RemoteCommand.ConnectAsync(values, ct);
+            if (nativeRequest is not null)
+            {
+                WorkflowOperation replay = await recovered.Executions.StartAsync(nativeRequest, ct);
+                return await ObserveAsync(replay, null, ct);
+            }
+
             OperationSnapshot found = await recovered.Operations.FindAsync(requestId, ct);
             return found.ManifestSha256.Equals(prepared.ManifestSha256, StringComparison.OrdinalIgnoreCase)
                 ? await ObserveAsync(recovered.Operations.GetHandle(found.OperationId), null, ct)

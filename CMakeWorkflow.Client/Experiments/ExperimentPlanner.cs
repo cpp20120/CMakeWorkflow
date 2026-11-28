@@ -17,7 +17,14 @@ public static class ExperimentPlanner
         CancellationToken ct = default) => CreateAsync(options, storeDirectory, null, ct);
 
     internal sealed record BinaryPlanning(string? EnvironmentLockIdentity, Func<WorkflowDocument, byte[]> EncodeWorkflow,
-        Func<VcpkgProjectPlan, byte[]> EncodeDependencyPlan);
+        Func<VcpkgProjectPlan, byte[]> EncodeDependencyPlan)
+    {
+        internal ControllerPlanning? Controller { get; init; }
+    }
+
+    internal sealed record ControllerPlanning(string FileName,
+        Func<ExperimentPlan, string, CancellationToken, Task<(string Id, byte[] Frame)>> EncodeAsync,
+        Func<string, string, CancellationToken, Task<ExperimentPlan>> ReadAsync);
 
     internal static async Task<PreparedExperimentPlan> CreateAsync(ExperimentPlanOptions options, string storeDirectory,
         BinaryPlanning? native, CancellationToken ct)
@@ -67,10 +74,23 @@ public static class ExperimentPlanner
                 args, options.Profile, options.Vcpkg, native,
                 Path.Combine(scratch, "source.zip"), ct);
             plan = plan with { Placement = options.Placement };
-            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan, ExperimentPlanJson.Default.ExperimentPlan);
-            string id = ExperimentPlan.Approval(bytes, native is not null);
+            ControllerPlanning? controller = native?.Controller;
+            string file = controller?.FileName ?? "plan.json";
+            string id;
+            byte[] bytes;
+            if (controller is not null)
+            {
+                plan = plan with { SchemaVersion = 4 };
+                (id, bytes) = await controller.EncodeAsync(plan, root, ct);
+            }
+            else
+            {
+                bytes = JsonSerializer.SerializeToUtf8Bytes(plan, ExperimentPlanJson.Default.ExperimentPlan);
+                id = ExperimentPlan.Approval(bytes, native is not null);
+            }
+
             string destination = Path.Combine(root, id);
-            await File.WriteAllBytesAsync(Path.Combine(scratch, "plan.json"), bytes, ct);
+            await File.WriteAllBytesAsync(Path.Combine(scratch, file), bytes, ct);
             ct.ThrowIfCancellationRequested();
             try
             {
@@ -80,12 +100,16 @@ public static class ExperimentPlanner
             {
                 // A matching approval can already exist, including operation history.
                 // Verify it without replacing either part of the approved bundle.
-                PreparedExperimentPlan existing = await ExperimentService.ReadPlanAsync(Path.Combine(destination, "plan.json"), id, ct);
+                string stored = Path.Combine(destination, file);
+                ExperimentPlan existingPlan = controller is null
+                    ? await ExperimentPlan.ReadAsync(stored, id, ct)
+                    : await controller.ReadAsync(stored, id, ct);
+                PreparedExperimentPlan existing = PreparedExperimentPlan.FromPlan(existingPlan, id, stored);
                 await using FileStream archive = await ExperimentService.OpenVerifiedArchiveAsync(existing.Stage.Bundle!,
                     existing.ArchivePath, ct);
                 return existing;
             }
-            return PreparedExperimentPlan.FromPlan(plan, id, Path.Combine(destination, "plan.json"));
+            return PreparedExperimentPlan.FromPlan(plan, id, Path.Combine(destination, file));
         }
         finally
         {

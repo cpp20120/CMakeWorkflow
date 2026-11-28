@@ -42,6 +42,7 @@ public sealed class DocumentStore
     /// <summary>Opens or creates a shared, document-aware CAS with catalog schema version 2.</summary>
     public static Task<DocumentStore> OpenProductionStoreAsync(string path, CancellationToken ct = default) =>
         InitializeAsync(path, ct, production: true);
+    internal static DocumentStore OpenExistingProductionStore(string path) => new(path, Catalog.WorkflowVersion);
 
     /// <summary>Opens or creates the fenced execution catalog with retained plans.</summary>
     public static Task<DocumentStore> OpenExecutionStoreAsync(string path, CancellationToken ct = default) =>

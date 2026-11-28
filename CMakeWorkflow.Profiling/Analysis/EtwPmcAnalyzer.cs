@@ -14,17 +14,19 @@ internal static class EtwPmcAnalyzer
     private const string Thread = "3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c";
 
     internal static async Task<string> AnalyzeAsync(string trace, string directory, string capture,
-        string configuration, int pid, DateTimeOffset start, DateTimeOffset finish, CancellationToken ct)
+        string configuration, int pid, DateTimeOffset start, DateTimeOffset finish,
+        CancellationToken ct, Action<WorkflowProfileMeasurement>? measurement = null)
     {
         string dump = Path.Combine(directory, capture + ".events.xml");
         CommandResult converted = await new ProfileProcess().RunAsync("tracerpt",
             [trace, "-o", dump, "-of", "XML", "-lr", "-y"], directory, TimeSpan.FromMinutes(15), null, ct);
         ProfileEnvironment.RequireSuccess(converted, "tracerpt");
-        return await ParseXmlAsync(dump, directory, capture, configuration, pid, start, finish, ct);
+        return await ParseXmlAsync(dump, directory, capture, configuration, pid, start, finish, ct, measurement);
     }
 
     internal static async Task<string> ParseXmlAsync(string dump, string directory, string capture,
-        string configuration, int pid, DateTimeOffset start, DateTimeOffset finish, CancellationToken ct)
+        string configuration, int pid, DateTimeOffset start, DateTimeOffset finish,
+        CancellationToken ct, Action<WorkflowProfileMeasurement>? measurement = null)
     {
         if (pid <= 0 || finish < start)
         {
@@ -122,14 +124,28 @@ internal static class EtwPmcAnalyzer
         foreach ((int id, Counter counter) in counters)
         {
             bool supported = ordered && counter.Activated && !counter.InvalidInterval;
+            string name = counter.Source["name"]!.GetValue<string>();
+            string role = counter.Source["role"]!.GetValue<string>();
+            double? estimated = supported && counter.Samples > 0 ? (double)counter.Samples * counter.Interval : null;
+            if (measurement is not null)
+            {
+                string variant = capture.StartsWith("counters_", StringComparison.Ordinal) ? capture["counters_".Length..] : capture;
+                string method = FormattableString.Invariant($"etw-pmc-overflow; source={id}; interval={counter.Interval}");
+                measurement(new("pmc_samples:" + name, "samples", counter.Samples, variant, method));
+                if (estimated is { } value)
+                {
+                    string metric = role == "memory-stalls" ? "memory_stalls:" + name : "pmc_estimated_events:" + name;
+                    measurement(new(metric, "estimated events", value, variant, method));
+                }
+            }
             results.Add((JsonNode)new JsonObject
             {
                 ["sourceId"] = id,
-                ["name"] = counter.Source["name"]!.GetValue<string>(),
-                ["role"] = counter.Source["role"]!.GetValue<string>(),
+                ["name"] = name,
+                ["role"] = role,
                 ["interval"] = counter.Interval,
                 ["samples"] = counter.Samples,
-                ["estimatedEvents"] = supported && counter.Samples > 0 ? (double)counter.Samples * counter.Interval : null,
+                ["estimatedEvents"] = estimated,
                 ["status"] = !supported ? "interval-or-order-unverified" : counter.Samples == 0 ? "no-target-samples" : "complete"
             });
         }

@@ -1,3 +1,5 @@
+using CMakeWorkflow.Core;
+
 namespace CMakeWorkflow.Profiling.Analysis;
 
 public sealed record EtwAnalysisResult(
@@ -6,4 +8,7 @@ public sealed record EtwAnalysisResult(
     string Samples,
     int CpuSamples,
     int ContextSwitchesIn,
-    int ReadyEvents);
+    int ReadyEvents)
+{
+    internal WorkflowProfileAnalysis? Analysis { get; init; }
+}

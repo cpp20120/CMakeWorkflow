@@ -170,10 +170,13 @@ if [[ ${CMWF_SSHNET_TEST_BINARY:-0} == 1 ]]; then
   export CMWF_SSHNET_EXE=/opt/cmwf-native/CMakeWorkflow
   export CMWF_SSHNET_CONTROLLER_EXE="$tmp/native/CMakeWorkflow"
   export CMWF_SSHNET_FAULT_EXE=/opt/cmwf-fault/CMakeWorkflow
+  export CMWF_SSHNET_FAULT_CONTROLLER="$tmp/fault/CMakeWorkflow"
   export CMWF_SSHNET_TOOL_STORE=/home/cmwf/.local/share/CMakeWorkflow
   dotnet build CMakeWorkflow.Host.Tests -c Release -r linux-x64 -warnaserror -m:2 -nr:false
   suite=CMakeWorkflow.Host.Tests/bin/Release/net10.0/linux-x64/CMakeWorkflow.Host.Tests.dll
   for scenario in binary-recovery binary-source-artifacts binary-experiment; do
     timeout --signal=TERM --kill-after=5s 720s dotnet "$suite" --sshnet-live-lifecycle-tests "$scenario"
   done
+  CMWF_SSHNET_NATIVE_CONTROLLER=1 timeout --signal=TERM --kill-after=5s 720s \
+    dotnet "$suite" --sshnet-live-lifecycle-tests binary-experiment
 fi

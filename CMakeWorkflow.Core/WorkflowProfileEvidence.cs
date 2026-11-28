@@ -9,4 +9,8 @@ public sealed record WorkflowProfileEvidence(
     string EventSource, string LaunchModel, string StartGuarantee, string Attribution,
     IReadOnlyList<string> SupportedModes, IReadOnlyList<string> RawFormats,
     string? CpuSet, string? CpuAffinityLauncher, string? MemoryStallEvent, string? PmcEvents,
-    int PmcInterval, long TimeoutTicks);
+    int PmcInterval, long TimeoutTicks)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public WorkflowProfileAnalysis? Analysis { get; init; }
+}

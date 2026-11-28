@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -13,7 +14,8 @@ namespace CMakeWorkflow.Host.Tests.Durability;
 
 internal static partial class BinaryWorkflowWireTests
 {
-    internal static async Task VerifyActionCacheAsync(string cli, string? previous = null, string? legacyProducer = null)
+    internal static async Task VerifyActionCacheAsync(string cli, string? previous = null, string? legacyProducer = null,
+        string? importFault = null)
     {
         using CancellationTokenSource deadline = new(TimeSpan.FromMinutes(3));
         CancellationToken ct = deadline.Token;
@@ -28,7 +30,8 @@ internal static partial class BinaryWorkflowWireTests
                 await RunCommandAsync(cli, ["cas", cas, "init-indexed"], ct);
                 await RunCommandRejectedAsync(previous, ["cas", cas, "gc", "--apply"], ct);
             }
-            Environment.SetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS", cas);
+            string legacyCas = importFault is null ? cas : Path.Combine(root, "legacy-cas");
+            Environment.SetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS", legacyCas);
             string source = Directory.CreateDirectory(Path.Combine(root, "src")).FullName;
             string output = Path.Combine(root, "result.txt");
             string input = Path.Combine(root, "input.txt");
@@ -84,6 +87,13 @@ internal static partial class BinaryWorkflowWireTests
                     }
                 ]
             };
+            if (importFault is not null)
+            {
+                // The actual child environment is part of the historical key. Keep it
+                // identical while the two Hosts use different metadata store locations.
+                workflow.Nodes[^1].Environment["CMAKEWORKFLOW_ARTIFACT_CAS"] = legacyCas;
+            }
+
             int attempt = 0;
             NodeResult legacy;
             using (Peer producer = await Peer.StartAsync(legacyProducer ?? cli, root, ct))
@@ -93,6 +103,47 @@ internal static partial class BinaryWorkflowWireTests
                 legacy = await RunAsync(producerRpc, binary: false, selected: [], "succeeded");
             }
             Require(legacy.ActionCacheHit == false, "Cold legacy action unexpectedly hit the cache.");
+            if (importFault is not null)
+            {
+                string reference = Path.Combine(legacyCas, "actions", legacy.ActionDigest + ".json");
+                byte[] exactReference = await File.ReadAllBytesAsync(reference, ct);
+                string[] import = ["cas", cas, "import-actions", legacyCas, "--key-policy", "1"];
+                string marker = Path.Combine(root, "import-before-commit");
+                ProcessStartInfo imports = StartInfo(importFault, import);
+                imports.Environment["CMAKEWORKFLOW_TEST_FAULT"] = "action-import-before-commit";
+                imports.Environment["CMAKEWORKFLOW_TEST_MARKER"] = marker;
+                _ = imports.Environment.Remove("CMAKEWORKFLOW_TEST_NODE");
+                using (Process interrupted = Process.Start(imports) ?? throw new UnreachableException("Could not start cached action import."))
+                {
+                    try
+                    {
+                        await WaitForAsync(() => Task.FromResult(interrupted.HasExited || File.Exists(marker)), ct);
+                        Require(!interrupted.HasExited, "Import exited before publishing its staged blobs.");
+                    }
+                    finally
+                    {
+                        if (!interrupted.HasExited)
+                        {
+                            interrupted.Kill(entireProcessTree: true);
+                        }
+                        await interrupted.WaitForExitAsync(CancellationToken.None);
+                    }
+                }
+                using (Microsoft.Data.Sqlite.SqliteConnection index = new(
+                    "Data Source=" + Path.Combine(cas, "actions", "index.sqlite") + ";Mode=ReadOnly"))
+                {
+                    await index.OpenAsync(ct);
+                    using Microsoft.Data.Sqlite.SqliteCommand rows = index.CreateCommand();
+                    rows.CommandText = "SELECT count(*) FROM action_results;";
+                    Require((long)(await rows.ExecuteScalarAsync(ct))! == 0, "Interrupted import published cache metadata.");
+                }
+                await RunCommandAsync(cli, ["cas", cas, "gc", "--apply"], ct);
+                await Task.WhenAll(RunCommandAsync(cli, import, ct), RunCommandAsync(cli, import, ct));
+                await RunCommandRejectedAsync(cli, ["cas", cas, "import-actions", legacyCas, "--key-policy", "2"], ct);
+                Require((await File.ReadAllBytesAsync(reference, ct)).SequenceEqual(exactReference), "Import mutated the legacy reference.");
+                Environment.SetEnvironmentVariable("CMAKEWORKFLOW_ARTIFACT_CAS", cas);
+            }
+
             using Peer host = await Peer.StartAsync(cli, root, ct);
             using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(host.Endpoint, ct));
             IHostRpc rpc = await ConnectAsync(connection, root, ct);

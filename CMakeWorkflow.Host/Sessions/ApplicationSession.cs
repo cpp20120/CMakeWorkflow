@@ -339,10 +339,8 @@ public sealed partial class DoctorSession
             {
                 // Read-only verification here: admission prepared the checkpoint.
                 // Claim and all mutation stay inside the executor's leases.
-                string checkpoint = paths.Require(Path.Combine(RunDirectory, "run.json"));
-                paths.Read(checkpoint);
-                byte[] bytes = await File.ReadAllBytesAsync(checkpoint, cancellationToken);
-                OperationCheckpointEvidence evidence = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
+                byte[] bytes = await store.ReadProcessEvidenceAsync(paths, request.OperationId, RunDirectory, cancellationToken);
+                OperationCheckpointEvidence evidence = store.ProcessEvidenceCodec.ForResume(bytes);
                 if (!string.Equals(evidence.ResumeSourceCheckpointSha256, CheckpointSha256,
                         StringComparison.OrdinalIgnoreCase))
                 {

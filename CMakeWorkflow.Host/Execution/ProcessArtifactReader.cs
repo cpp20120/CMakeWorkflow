@@ -24,10 +24,15 @@ internal static class ProcessArtifactReader
         return store.Get(operationId) is not null && store.GetDomainKind(operationId) == "process";
     }
 
-    private static List<Candidate> Candidates(ProcessOperationReport report)
+    private static List<Candidate> Candidates(ProcessOperationReportReader.Verified report)
     {
         List<Candidate> items = [new("report", "report", null, "run.json")];
-        foreach (ProcessNodeReport node in report.Nodes)
+        if (report.Frame is not null)
+        {
+            items.Add(new("native-report", "native-report", null, "process-report.capnp"));
+        }
+
+        foreach (ProcessNodeReport node in report.Report.Nodes)
         {
             if (node.Stdout is not null)
             {
@@ -55,13 +60,19 @@ internal static class ProcessArtifactReader
     internal static async Task<OperationArtifactList> ListAsync(WorkspaceReadPaths paths,
         string operationId, CancellationToken ct)
     {
-        (ProcessOperationReport? report, string? directory, string? revision) =
-            await ProcessOperationReportReader.ReadVerifiedAsync(paths, operationId, ct);
+        ProcessOperationReportReader.Verified verified = await ProcessOperationReportReader.ReadVerifiedAsync(paths, operationId, ct);
         List<OperationArtifactInfo> entries = [];
-        foreach (Candidate candidate in Candidates(report))
+        foreach (Candidate candidate in Candidates(verified))
         {
             ct.ThrowIfCancellationRequested();
-            string path = PathFor(paths, directory, candidate);
+            if (ReportArtifact(verified, candidate.Id) is { } payload)
+            {
+                entries.Add(new(candidate.Id, candidate.Kind, candidate.NodeId, candidate.Leaf,
+                    payload.LongLength, verified.Report.FinishedAt!.Value.UtcTicks, Convert.ToHexString(SHA256.HashData(payload))));
+                continue;
+            }
+
+            string path = PathFor(paths, verified.Directory, candidate);
             await using FileStream? file = OperationArtifactFile.OpenCatalogFile(
                 paths.WorkspaceDirectory, path, optional: candidate.Id != "report");
             if (file is null)
@@ -79,7 +90,7 @@ internal static class ProcessArtifactReader
             entries.Add(new(candidate.Id, candidate.Kind, candidate.NodeId, candidate.Leaf,
                 size, stamp, hash));
         }
-        return new(operationId, revision, entries);
+        return new(operationId, verified.Revision, entries);
     }
 
     internal static async Task<OperationArtifactChunk> ReadChunkAsync(WorkspaceReadPaths paths,
@@ -92,11 +103,24 @@ internal static class ProcessArtifactReader
             throw new ArgumentException("Invalid process artifact range.");
         }
 
-        (ProcessOperationReport? report, string? directory, string _) =
-            await ProcessOperationReportReader.ReadVerifiedAsync(paths, request.OperationId, ct);
-        Candidate selected = Candidates(report).FirstOrDefault(c => c.Id == request.ArtifactId)
+        ProcessOperationReportReader.Verified verified = await ProcessOperationReportReader.ReadVerifiedAsync(paths, request.OperationId, ct);
+        Candidate selected = Candidates(verified).FirstOrDefault(c => c.Id == request.ArtifactId)
                        ?? throw new ApplicationRefusal("not_found", "Unknown process artifact.");
-        string path = PathFor(paths, directory, selected);
+        if (ReportArtifact(verified, selected.Id) is { } projection)
+        {
+            long ticks = verified.Report.FinishedAt!.Value.UtcTicks;
+            if (projection.LongLength != request.ExpectedSize || ticks != request.ExpectedLastWriteUtcTicks)
+            {
+                throw new ApplicationRefusal("artifact_changed", "Process artifact changed after discovery.");
+            }
+
+            int length = (int)Math.Min(request.Count, projection.LongLength - request.Offset);
+            byte[] chunk = projection.AsSpan((int)request.Offset, length).ToArray();
+            return new(selected.Id, request.Offset, projection.LongLength, ticks, chunk,
+                request.Offset + length == projection.LongLength);
+        }
+
+        string path = PathFor(paths, verified.Directory, selected);
         await using FileStream file = OperationArtifactFile.OpenRead(paths.WorkspaceDirectory, path);
         long size = file.Length;
         long stamp = File.GetLastWriteTimeUtc(file.SafeFileHandle).Ticks;
@@ -113,4 +137,11 @@ internal static class ProcessArtifactReader
             ? throw new ApplicationRefusal("artifact_changed", "Process artifact changed during transfer.")
             : new(selected.Id, request.Offset, size, stamp, bytes, request.Offset + count == size);
     }
+    private static byte[]? ReportArtifact(ProcessOperationReportReader.Verified verified, string id) => id switch
+    {
+        "report" => verified.Projection,
+        "native-report" => verified.Frame,
+        _ => null
+    };
+
 }

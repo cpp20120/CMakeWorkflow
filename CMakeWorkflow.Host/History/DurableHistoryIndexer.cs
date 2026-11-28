@@ -127,7 +127,12 @@ internal static class DurableHistoryIndexer
                 }
             }
             string run = paths.Require(finalization.RunDirectory);
-            if (finalization.State == "succeeded" &&
+            bool nativeProfileAnalysis = nativeReport is not null && ledger.UsesNativeProfileAnalysis;
+            if (nativeProfileAnalysis)
+            {
+                await RecoveryFaults.HitAsync("before-native-history-import", null, ct);
+            }
+            if (!nativeProfileAnalysis && finalization.State == "succeeded" &&
                 Directory.EnumerateFiles(run, "*.results.json").Any() &&
                 !File.Exists(paths.Require(Path.Combine(run, "analysis.json"))))
             {
@@ -138,7 +143,7 @@ internal static class DurableHistoryIndexer
             using HistoryStore history = new(database);
             imported = nativeReport is not null && native is not null
                 ? await history.ImportNativeWorkflowAsync(nativeReport,
-                    new(operationId, native.Document.Value, native.Blob.Value, native.SchemaVersion), GuardPath, ct)
+                    new(operationId, native.Document.Value, native.Blob.Value, native.SchemaVersion), GuardPath, nativeProfileAnalysis, ct)
                 : await history.ImportFinalizedWorkflowAsync(run, finalization.ReportSha256, GuardPath, ct);
 
             void GuardPath(string file)

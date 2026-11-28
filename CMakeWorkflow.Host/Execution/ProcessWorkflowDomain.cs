@@ -130,7 +130,16 @@ internal static class ProcessWorkflowDomain
 /// </remarks>
 internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvidenceCodec
 {
-    internal static ProcessCheckpointEvidenceCodec Instance { get; } = new();
+    internal static ProcessCheckpointEvidenceCodec Instance { get; } = new(false);
+    internal static ProcessCheckpointEvidenceCodec Native { get; } = new(true);
+    private readonly bool native;
+    private ProcessCheckpointEvidenceCodec(bool native)
+    {
+        this.native = native;
+    }
+
+    internal ProcessOperationReport Read(byte[] bytes) =>
+        native ? NativeProcessCheckpointCodec.Decode(bytes).Report : Parse(bytes);
 
     /// <summary>Rejects inconsistent process checkpoint identity, node states and dependency references.</summary>
     /// <remarks>
@@ -142,6 +151,11 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
     {
         ProcessOperationReport report = JsonSerializer.Deserialize(bytes, ProcessWorkflowJson.Default.ProcessOperationReport)
                      ?? throw new InvalidDataException("Invalid process operation checkpoint.");
+        return Validate(report);
+    }
+
+    internal static ProcessOperationReport Validate(ProcessOperationReport report)
+    {
         if (report.Domain != "process" || report.SchemaVersion != 1 ||
             report.SnapshotSha256 is not { Length: 64 } || !report.SnapshotSha256.All(Uri.IsHexDigit) ||
             report.ResumeCount is < 0 or > 1 || report.Nodes is not { Count: > 0 and <= 128 } ||
@@ -187,7 +201,7 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
     /// </remarks>
     public OperationCheckpointEvidence ForDispatch(byte[] checkpointBytes)
     {
-        ProcessOperationReport report = Parse(checkpointBytes);
+        ProcessOperationReport report = Read(checkpointBytes);
         return report.Domain != "process" || report.SchemaVersion != 1 || report.Status != "running" ||
             !report.Nodes.Any(n => n.Status == "running")
             ? throw new InvalidDataException("Process checkpoint has no admitted dispatch.")
@@ -201,7 +215,8 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
     /// </remarks>
     public OperationCheckpointEvidence ForResume(byte[] checkpointBytes)
     {
-        ProcessOperationReport report = Parse(checkpointBytes);
+        NativeProcessCheckpoint? nativeReport = native ? NativeProcessCheckpointCodec.Decode(checkpointBytes) : null;
+        ProcessOperationReport report = nativeReport?.Report ?? Parse(checkpointBytes);
         if (report.Status != "needs_attention" || report.RecoveryPhase != "reconciled" ||
             report.ResumeCount != 0 || report.Recovery is not { } audit ||
             string.IsNullOrWhiteSpace(audit.Note) || audit.Note.Length > 4096 || audit.ConfirmedAt == default ||
@@ -211,9 +226,23 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
             throw new InvalidOperationException("resume_checkpoint_not_safe");
         }
 
-        ProcessOperationReport prior = Parse(audit.PreviousCheckpoint);
-        ProcessOperationReport bound = Parse(audit.DispatchCheckpoint);
-        ValidateRecovery(report, prior, bound);
+        if (nativeReport is not null)
+        {
+            NativeProcessCheckpoint prior = NativeProcessCheckpointCodec.Decode(audit.PreviousCheckpoint);
+            NativeProcessCheckpoint bound = NativeProcessCheckpointCodec.Decode(audit.DispatchCheckpoint);
+            if (nativeReport.Binding != prior.Binding || nativeReport.Binding != bound.Binding ||
+                bound.Generation > prior.Generation || prior.Generation >= nativeReport.Generation ||
+                bound.EventCursor > prior.EventCursor || prior.EventCursor > nativeReport.EventCursor)
+            {
+                throw new InvalidDataException("Native process recovery crosses operation bindings or generations.");
+            }
+
+            ValidateRecovery(report, prior.Report, bound.Report, native: true);
+        }
+        else
+        {
+            ValidateRecovery(report, Parse(audit.PreviousCheckpoint), Parse(audit.DispatchCheckpoint));
+        }
         return new(report.SnapshotSha256, ResumeSourceCheckpointSha256:
             Convert.ToHexString(SHA256.HashData(audit.DispatchCheckpoint)));
     }
@@ -239,8 +268,9 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
     /// <param name="report">Proposed recovery report; this method does not mutate it.</param>
     /// <param name="prior">Exact pre-recovery report embedded in the recovery audit.</param>
     /// <param name="bound">Exact dispatch checkpoint retained by the ledger.</param>
+    /// <param name="native">Uses struct field equality for native evidence.</param>
     internal static void ValidateRecovery(ProcessOperationReport report, ProcessOperationReport prior,
-        ProcessOperationReport bound)
+        ProcessOperationReport bound, bool native = false)
     {
         if (prior.Recovery is not null || prior.ResumeCount != 0 || bound.ResumeCount != 0 ||
             bound.Status != "running" || !bound.Nodes.Any(n => n.Status == "running") ||
@@ -257,19 +287,19 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
             ProcessNodeReport node = report.Nodes[i];
             // Recovery never changes a node result. In particular an operator's
             // operation-level decision is not authority to retry a running node.
-            if (!JsonSerializer.SerializeToUtf8Bytes(node, ProcessWorkflowJson.Default.ProcessNodeReport)
-                    .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(prior.Nodes[i],
-                        ProcessWorkflowJson.Default.ProcessNodeReport)) ||
+            if (!Equal(node, prior.Nodes[i]) ||
                 node.Status is "running" or "outcome_unknown" ||
                 (Eligible(node) && (!NeverAdmitted(node) || !NeverAdmitted(bound.Nodes[i]))) ||
                 (bound.Nodes[i].Status is "succeeded" or "failed" or "canceled" &&
-                !JsonSerializer.SerializeToUtf8Bytes(node, ProcessWorkflowJson.Default.ProcessNodeReport)
-                    .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(bound.Nodes[i],
-                        ProcessWorkflowJson.Default.ProcessNodeReport))))
+                !Equal(node, bound.Nodes[i])))
             {
                 throw new InvalidOperationException("process_recovery_unresolved_or_previously_dispatched");
             }
         }
+        bool Equal(ProcessNodeReport lhs, ProcessNodeReport rhs) => native
+            ? NativeProcessCheckpointCodec.EqualNodes(lhs, rhs)
+            : JsonSerializer.SerializeToUtf8Bytes(lhs, ProcessWorkflowJson.Default.ProcessNodeReport)
+                .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(rhs, ProcessWorkflowJson.Default.ProcessNodeReport));
     }
 
     /// <inheritdoc/>
@@ -279,7 +309,7 @@ internal sealed class ProcessCheckpointEvidenceCodec : IOperationCheckpointEvide
     /// </remarks>
     public OperationCheckpointEvidence ForFinalization(byte[] checkpointBytes, int exitCode)
     {
-        ProcessOperationReport report = Parse(checkpointBytes);
+        ProcessOperationReport report = Read(checkpointBytes);
         return report.Domain != "process" || report.SchemaVersion != 1 || report.FinishedAt is null ||
             report.Status is not ("succeeded" or "failed" or "canceled") ||
             report.Nodes.Any(n => n.Status is "pending" or "running" or "outcome_unknown") ||

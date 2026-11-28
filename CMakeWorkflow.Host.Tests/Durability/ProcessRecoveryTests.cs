@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CMakeWorkflow.Core.Processes;
+using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Host.Execution;
 using CMakeWorkflow.Host.Protocol;
+using CMakeWorkflow.Host.Sessions;
 using CMakeWorkflow.Host.Transport;
 using CMakeWorkflow.Host.Workflows;
 using Microsoft.Data.Sqlite;
@@ -30,17 +33,23 @@ internal static class ProcessRecoveryTests
     }
 
     private sealed record Fixture(string Root, string Manifest, string Output, string Id,
-        DurableImmutableRequest Request, string? EffectFile = null)
+        DurableImmutableRequest Request, string? EffectFile = null, bool Native = false)
     {
         internal string Report => Path.Combine(Output, "run.json");
         internal string Effects => EffectFile ?? Path.Combine(Root, "effects.txt");
         internal DurableAcceptanceStore Store() => new(Root, false, ProcessCheckpointEvidenceCodec.Instance);
-        internal ProcessOperationReport Read() => ProcessCheckpointEvidenceCodec.Parse(File.ReadAllBytes(Report));
+        internal ProcessOperationReport Read()
+        {
+            using DurableAcceptanceStore store = Store();
+            return Native
+                ? store.ProcessEvidenceCodec.Read(store.ReadProcessCheckpoint(Id, Output))
+                : ProcessCheckpointEvidenceCodec.Parse(File.ReadAllBytes(Report));
+        }
         internal void Write(ProcessOperationReport report) => File.WriteAllBytes(Report,
             JsonSerializer.SerializeToUtf8Bytes(report, ProcessWorkflowJson.Default.ProcessOperationReport));
     }
 
-    private static Fixture Create(string parent, bool slow = false)
+    private static Fixture Create(string parent, bool slow = false, bool native = false)
     {
         string root = Path.Combine(parent, "process-recovery-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(root);
@@ -55,8 +64,13 @@ internal static class ProcessRecoveryTests
         string output = Path.Combine(root, "run");
         DurableImmutableRequest request = ProcessWorkflowDomain.Admission(new("process", Guid.NewGuid().ToString("N"), path,
             ProcessWorkflowRecovery.Hash(bytes), 1, output));
+        if (native)
+        {
+            BinaryWorkflowSubmission.InitializeWorkspace(root);
+        }
+
         using DurableAcceptanceStore store = new(root, false, ProcessCheckpointEvidenceCodec.Instance);
-        return new(root, path, output, store.AcceptImmutable(request).OperationId, request);
+        return new(root, path, output, store.AcceptImmutable(request).OperationId, request, Native: native);
     }
 
     // Real child process. Tests kill the executor at deterministic fault markers;
@@ -67,6 +81,7 @@ internal static class ProcessRecoveryTests
         Console.WriteLine("retained output " + args[1]);
         if (args[2] == "slow")
         {
+            await File.WriteAllTextAsync(args[0] + ".alive", args[1]);
             await Task.Delay(TimeSpan.FromSeconds(60));
         }
     }
@@ -118,7 +133,7 @@ internal static class ProcessRecoveryTests
         return Process.Start(info) ?? throw new UnreachableException("Cannot start process fault worker.");
     }
 
-    private static async Task Crash(Fixture f, bool resume, string point, string? node = null, bool effect = false)
+    private static async Task Crash(Fixture f, bool resume, string point, string? node = null, bool effect = false, bool killTree = true)
     {
         string signal = Path.Combine(f.Root, "barrier-" + Guid.NewGuid().ToString("N"));
         using Process child = Start(f, resume, point, node, signal);
@@ -127,7 +142,8 @@ internal static class ProcessRecoveryTests
         try
         {
             using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(20));
-            while (effect ? !File.Exists(f.Effects) || !(await File.ReadAllLinesAsync(f.Effects, CancellationToken.None)).Contains("b") : !File.Exists(signal))
+            while ((effect ? !File.Exists(f.Effects) || !(await File.ReadAllLinesAsync(f.Effects, CancellationToken.None)).Contains("b") : !File.Exists(signal)) ||
+                   (!killTree && !File.Exists(f.Effects + ".alive")))
             {
                 if (child.HasExited)
                 {
@@ -144,7 +160,7 @@ internal static class ProcessRecoveryTests
         {
             if (!child.HasExited)
             {
-                child.Kill(entireProcessTree: true);
+                child.Kill(entireProcessTree: killTree);
             }
 
             await child.WaitForExitAsync();
@@ -152,9 +168,9 @@ internal static class ProcessRecoveryTests
         }
     }
 
-    private static async Task<Fixture> Partial(string parent, bool slow = false)
+    private static async Task<Fixture> Partial(string parent, bool slow = false, bool native = false)
     {
-        Fixture f = Create(parent, slow);
+        Fixture f = Create(parent, slow, native);
         await Crash(f, false, "process-before-reserve", "b");
         Check((await File.ReadAllLinesAsync(f.Effects, CancellationToken.None)).SequenceEqual(["a"]), "Partial run duplicated A.");
         Check(f.Read().Nodes.Select(n => n.Status).SequenceEqual(["succeeded", "pending"]),
@@ -168,6 +184,264 @@ internal static class ProcessRecoveryTests
         _ = store.Reconcile(f.Id, 0, "needs_attention", "Verified quiescence; continue only never-admitted nodes");
         await ProcessWorkflowRecovery.PrepareAsync(store, f.Id, new(f.Root), CancellationToken.None);
         _ = store.AdmitResume(f.Id, 1);
+    }
+
+    private static async Task VerifyInterruptedNativeProcessAsync(Fixture fixture, string point)
+    {
+        using DurableAcceptanceStore store = fixture.Store();
+        Check(store.GetFinalization(fixture.Id) is null, "Interrupted native execution was finalized.");
+        _ = store.Reconcile(fixture.Id, 0, "needs_attention", "Outcome remains uncertain");
+        await Reject(() => ProcessWorkflowRecovery.PrepareAsync(store, fixture.Id, new(fixture.Root), default), point);
+    }
+
+    private static void VerifyTerminalBoundary(Fixture fixture, bool committed)
+    {
+        using DurableAcceptanceStore store = fixture.Store();
+        Check((store.GetFinalization(fixture.Id) is { State: "succeeded" }) == committed,
+            "Terminal visibility crossed the SQLite commit boundary.");
+        Check(File.ReadAllLines(fixture.Effects).SequenceEqual(["a", "b"]),
+            "Terminal evidence fault repeated work.");
+    }
+
+    private static async Task VerifySurvivingChildAsync(string parent)
+    {
+        Fixture fixture = Create(parent, slow: true, native: true);
+        await Crash(fixture, false, "process-after-identity-observation", "b", killTree: false);
+        (int pid, string token) = await ReadDurableBirthTokenAsync(fixture);
+        using Process child = Process.GetProcessById(pid);
+        Check(WorkflowProcessBackend.ReadBirthToken(child) == token, "PID alone cannot identify the surviving child.");
+        try
+        {
+            Check(await DurableProcessWorkflowExecutor.ExecuteAcceptedAsync(fixture.Root, fixture.Id,
+                fixture.Request, 1, default) == 4, "A surviving process allowed a new dispatch.");
+            Check(!child.HasExited, "Retry signaled the surviving child.");
+            await VerifyInterruptedNativeProcessAsync(fixture, "surviving child");
+        }
+        finally
+        {
+            if (!child.HasExited && WorkflowProcessBackend.ReadBirthToken(child) == token)
+            {
+                child.Kill(entireProcessTree: true);
+            }
+        }
+    }
+
+    private static async Task<(int Pid, string Token)> ReadDurableBirthTokenAsync(Fixture fixture)
+    {
+        using SqliteConnection ledger = new(new SqliteConnectionStringBuilder
+        {
+            DataSource = WorkflowLedgerPath.Resolve(fixture.Root),
+            Mode = SqliteOpenMode.ReadOnly
+        }.ToString());
+        await ledger.OpenAsync();
+        using SqliteCommand identity = ledger.CreateCommand();
+        identity.CommandText = """
+            SELECT lifecycle.pid, birth.token FROM process_lifecycle AS lifecycle
+            JOIN process_birth_tokens AS birth USING(operation_id,node_id,attempt,stage)
+            WHERE lifecycle.node_id='b' AND lifecycle.stage=2;
+            """;
+        using SqliteDataReader row = await identity.ExecuteReaderAsync();
+        Check(await row.ReadAsync(), "A started process has no durable identity.");
+        return (row.GetInt32(0), row.GetString(1));
+    }
+
+    internal static async Task MeasureNativeAndLegacyAsync(string parent)
+    {
+        string root = Directory.CreateDirectory(Path.Combine(Path.GetFullPath(parent), "process-measure-" +
+            Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            foreach (bool native in new[] { false, true })
+            {
+                Fixture fixture = Create(root, native: native);
+                _ = Directory.CreateDirectory(fixture.Output);
+                using DurableAcceptanceStore store = fixture.Store();
+                store.ReserveResultsDirectory(fixture.Id, fixture.Output);
+                _ = store.AuthorizeDispatch(fixture.Id);
+                ProcessOperationReport report = new()
+                {
+                    SnapshotSha256 = fixture.Request.SnapshotSha256,
+                    Nodes =
+                    [
+                        new() { Id = "a", Dependencies = [] },
+                        new() { Id = "b", Dependencies = ["a"] }
+                    ]
+                };
+                List<double> checkpointUs = [], reopenUs = [], recoverMs = [];
+                long bytes = 0;
+                WorkspaceReadPaths paths = new(fixture.Root);
+                for (int sample = 0; sample < 23; sample++)
+                {
+                    long began = Stopwatch.GetTimestamp();
+                    if (native)
+                    {
+                        bytes = store.SaveProcessCheckpoint(fixture.Id, report).Length;
+                    }
+                    else
+                    {
+                        byte[] json = DurableAcceptanceStore.ProjectProcessReport(report);
+                        await DurableByteWriter.WriteAsync(fixture.Report, json, CancellationToken.None);
+                        bytes = json.Length;
+                    }
+
+                    double checkpoint = Stopwatch.GetElapsedTime(began).TotalMicroseconds;
+                    began = Stopwatch.GetTimestamp();
+                    _ = store.ProcessEvidenceCodec.Read(await store.ReadProcessEvidenceAsync(paths, fixture.Id,
+                        fixture.Output, CancellationToken.None));
+                    if (sample >= 2)
+                    {
+                        checkpointUs.Add(checkpoint);
+                        reopenUs.Add(Stopwatch.GetElapsedTime(began).TotalMicroseconds);
+                    }
+                }
+
+                for (int sample = 0; sample < 7; sample++)
+                {
+                    Fixture partial = await Partial(root, native: native);
+                    long began = Stopwatch.GetTimestamp();
+                    await AdmitAsync(partial);
+                    Check(await DurableProcessWorkflowExecutor.ExecuteResumedAsync(partial.Root, partial.Id, default) == 0,
+                        "Process persistence measurement did not recover.");
+                    recoverMs.Add(Stopwatch.GetElapsedTime(began).TotalMilliseconds);
+                }
+
+                Console.WriteLine(FormattableString.Invariant(
+                    $"{(native ? "native" : "legacy")} checkpoint_bytes={bytes} checkpoint_write_us={checkpointUs.Order().ElementAt(10):F3} checkpoint_read_us={reopenUs.Order().ElementAt(10):F3} recovery_with_child_ms={recoverMs.Order().ElementAt(3):F3}"));
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    internal static async Task RunNativeAsync(string parent, string capnp, string schema)
+    {
+        Fixture f = await Partial(parent, native: true);
+        WorkspaceReadPaths paths = new(f.Root);
+        OperationEventsPage prior = await OperationEventReplay.ReadAsync(paths, new(f.Id, 0, 20), default);
+        Check(prior.Events.Select(item => item.Sequence).SequenceEqual([1L, 2L, 3L]),
+            "Committed native process history diverged from the checkpoint.");
+        await AdmitAsync(f);
+        await Crash(f, true, "process-before-resume-claim");
+        File.Delete(f.Manifest);
+        bool[] claims = await Task.WhenAll(Task.Run(AttemptResumeAsync), Task.Run(AttemptResumeAsync));
+        Check(claims.Count(claimed => claimed) == 1, "Concurrent native resume attempts did not establish one owner.");
+
+        async Task<bool> AttemptResumeAsync()
+        {
+            try
+            {
+                return await DurableProcessWorkflowExecutor.ExecuteResumedAsync(f.Root, f.Id, default) == 0;
+            }
+            catch (Exception error) when (error is IOException or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        await Reject(() => DurableProcessWorkflowExecutor.ExecuteResumedAsync(f.Root, f.Id, default), "native duplicate claim");
+        Check((await File.ReadAllLinesAsync(f.Effects, CancellationToken.None)).SequenceEqual(["a", "b"]),
+            "Native resume repeated completed effects.");
+        Check(!File.Exists(f.Report) && !File.Exists(Path.Combine(f.Output, "events.jsonl")),
+            "Native process execution wrote legacy checkpoint or event authority.");
+
+        OperationEventsPage suffix = await OperationEventReplay.ReadAsync(paths, new(f.Id, prior.NextSequence, 20), default);
+        Check(suffix.Events.Count == 4 && suffix.Events[0].Type == "workflow_resumed" &&
+            suffix.Events[^1].Type == "workflow_finished", "Native process event cursor failed after resume.");
+        ProcessOperationReportReader.Verified report = await ProcessOperationReportReader.ReadVerifiedAsync(paths, f.Id, default);
+        Check(report.Report.Status == "succeeded" && report.Report.ResumeCount == 1 && report.Projection is not null,
+            "Native terminal report did not project successful recovery.");
+
+        OperationArtifactList catalog = await ProcessArtifactReader.ListAsync(paths, f.Id, default);
+        OperationArtifactInfo artifact = catalog.Artifacts.Single(item => item.ArtifactId == "report");
+        OperationArtifactChunk chunk = await ProcessArtifactReader.ReadChunkAsync(paths,
+            new(f.Id, artifact.ArtifactId, 0, 65536, artifact.Size, artifact.LastWriteUtcTicks), default);
+        Check(chunk.Content.SequenceEqual(report.Projection!), "Native process artifact differs from its JSON report.");
+
+        {
+            OperationArtifactInfo nativeArtifact = catalog.Artifacts.Single(item => item.ArtifactId == "native-report");
+            OperationArtifactChunk nativeChunk = await ProcessArtifactReader.ReadChunkAsync(paths,
+                new(f.Id, nativeArtifact.ArtifactId, 0, 65536, nativeArtifact.Size, nativeArtifact.LastWriteUtcTicks), default);
+            byte[] bytes = nativeChunk.Content;
+            ProcessStartInfo info = new(capnp) { RedirectStandardInput = true, RedirectStandardOutput = true };
+            foreach (string arg in new[] { "decode", schema, "ProcessCheckpoint" })
+            {
+                info.ArgumentList.Add(arg);
+            }
+
+            using Process decoder = Process.Start(info) ?? throw new UnreachableException("Could not run Cap'n Proto.");
+            Task<string> output = decoder.StandardOutput.ReadToEndAsync();
+            await decoder.StandardInput.BaseStream.WriteAsync(bytes);
+            decoder.StandardInput.Close();
+            await decoder.WaitForExitAsync();
+            Check(decoder.ExitCode == 0 && (await output).Contains(f.Id, StringComparison.Ordinal),
+                "Official Cap'n Proto could not decode retained process evidence.");
+        }
+
+        foreach (string point in new[] { "process-checkpoint-before-confirm", "process-checkpoint-confirmed",
+                     "process-before-spawn", "process-after-spawn-before-observation",
+                     "process-after-exit-before-observation", "process-child-completed" })
+        {
+            Fixture interrupted = Create(parent, native: true);
+            await Crash(interrupted, false, point, point.StartsWith("process-checkpoint", StringComparison.Ordinal) ? null : "a");
+            await VerifyInterruptedNativeProcessAsync(interrupted, point);
+            using SqliteConnection db = new(new SqliteConnectionStringBuilder
+            {
+                DataSource = WorkflowLedgerPath.Resolve(interrupted.Root),
+                Mode = SqliteOpenMode.ReadOnly
+            }.ToString());
+            await db.OpenAsync();
+            using SqliteCommand sql = db.CreateCommand();
+            sql.CommandText = "SELECT count(*) FROM process_launch_intents";
+            Check((long)(await sql.ExecuteScalarAsync())! == (point == "process-checkpoint-before-confirm" ? 0 : 1),
+                "Native launch intent visibility disagrees with the write-ahead boundary.");
+            sql.CommandText = "SELECT count(*) FROM process_lifecycle WHERE stage=3";
+            Check((long)(await sql.ExecuteScalarAsync())! == (point == "process-child-completed" ? 1 : 0),
+                "Native completion observation crossed the wrong process boundary.");
+        }
+
+        foreach (string boundary in new[] { "process-before-finalization", "process-after-finalization" })
+        {
+            Fixture terminal = Create(parent, native: true);
+            await Crash(terminal, false, boundary);
+            VerifyTerminalBoundary(terminal, boundary == "process-after-finalization");
+            File.Delete(terminal.Manifest);
+            Check(await DurableProcessWorkflowExecutor.ExecuteAcceptedAsync(terminal.Root, terminal.Id,
+                terminal.Request, 1, default) == 0, "Exact retry could not recover native terminal evidence.");
+            VerifyTerminalBoundary(terminal, committed: true);
+            await Reject(() => DurableProcessWorkflowExecutor.ExecuteResumedAsync(terminal.Root, terminal.Id, default),
+                boundary);
+        }
+
+        await VerifySurvivingChildAsync(parent);
+
+        Fixture canceled = Create(parent, slow: true, native: true);
+        using CancellationTokenSource stop = new();
+        Task<int> running = DurableProcessWorkflowExecutor.ExecuteAcceptedAsync(canceled.Root, canceled.Id,
+            canceled.Request, 1, stop.Token);
+        using (CancellationTokenSource deadline = new(TimeSpan.FromSeconds(20)))
+        {
+            while (!File.Exists(canceled.Effects) || !(await File.ReadAllLinesAsync(canceled.Effects, deadline.Token)).Contains("b"))
+            {
+                Check(!running.IsCompleted, "Native process exited before cancellation.");
+                await Task.Delay(20, deadline.Token);
+            }
+        }
+
+        await stop.CancelAsync();
+        Check(await running == 130, "Native running process did not finalize cancellation.");
+        using SqliteConnection cancellationLedger = new(new SqliteConnectionStringBuilder
+        {
+            DataSource = WorkflowLedgerPath.Resolve(canceled.Root),
+            Mode = SqliteOpenMode.ReadOnly
+        }.ToString());
+        await cancellationLedger.OpenAsync();
+        using SqliteCommand termination = cancellationLedger.CreateCommand();
+        termination.CommandText = "SELECT count(*) FROM process_lifecycle WHERE node_id='b' AND stage IN (4,5);";
+        Check((long)(await termination.ExecuteScalarAsync())! == 2, "Missing native termination request or confirmation evidence.");
+
+        Console.WriteLine("Native process checkpoints, launch evidence, hard-kill recovery, events, and projections passed.");
     }
 
     internal static async Task RunAsync(string parent)

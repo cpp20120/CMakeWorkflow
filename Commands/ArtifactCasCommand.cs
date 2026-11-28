@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Storage.Documents;
 
@@ -9,6 +10,7 @@ internal static class ArtifactCasCommand
     private const string Usage = """
         Usage: CMakeWorkflow cas STORE COMMAND
           init-indexed
+          import-actions LEGACY_STORE --key-policy 1|2
           show OPERATION
           fetch OPERATION ARTIFACT_ID OUTPUT
           pin OPERATION
@@ -30,6 +32,11 @@ internal static class ArtifactCasCommand
         {
             case [string root, "init-indexed"]:
                 _ = await DocumentStore.InitializeIndexedActionsAsync(root, ct);
+                break;
+            case [string root, "import-actions", string source, "--key-policy", "1" or "2"]:
+                int count = await new CasActions(new(root), args[4] == "1" ? 1 : 2)
+                    .ImportLegacyAsync(new(source), () => RecoveryFaults.HitAsync("action-import-before-commit", null, ct), ct);
+                Console.WriteLine(count.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 break;
             case [string root, "show", string id]:
                 Print(await new ArtifactCas(root).ShowAsync(id, ct));

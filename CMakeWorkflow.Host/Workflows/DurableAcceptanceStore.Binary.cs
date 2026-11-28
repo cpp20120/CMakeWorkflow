@@ -27,6 +27,8 @@ public sealed partial class DurableAcceptanceStore
     private const int NativeEventLedgerVersion = 5;
     private const int NativeReportLedgerVersion = 6;
     private const int NativeCheckpointLedgerVersion = 7;
+    private const int NativeProcessLedgerVersion = 8;
+    private const int NativeProfileLedgerVersion = 9;
 
     internal bool BinaryLedger { get; }
     private int binaryLedgerVersion;
@@ -34,7 +36,10 @@ public sealed partial class DurableAcceptanceStore
     internal bool AllowsSourceManifestArtifacts => binaryLedgerVersion >= SourceManifestArtifactLedgerVersion;
     internal bool UsesNativeWorkflowEvents => binaryLedgerVersion >= NativeEventLedgerVersion;
     internal bool UsesNativeWorkflowReports => binaryLedgerVersion >= NativeReportLedgerVersion;
-    internal bool UsesNativeWorkflowCheckpoints => binaryLedgerVersion == NativeCheckpointLedgerVersion;
+    internal bool UsesNativeWorkflowCheckpoints => binaryLedgerVersion >= NativeCheckpointLedgerVersion;
+    internal bool UsesNativeProcessCheckpoints => binaryLedgerVersion >= NativeProcessLedgerVersion;
+    internal bool UsesNativeProfileAnalysis => binaryLedgerVersion >= NativeProfileLedgerVersion;
+    private bool UsesStableProcessIdentity => binaryLedgerVersion >= NativeProfileLedgerVersion;
     internal int? NativeFormatEpoch => BinaryLedger ? binaryLedgerVersion : null;
 
     private void OpenBinaryLedgerEpoch(bool readOnly)
@@ -47,7 +52,7 @@ public sealed partial class DurableAcceptanceStore
         sql.CommandText = "PRAGMA user_version;";
         long version = (long)(sql.ExecuteScalar() ?? -1L);
         if (application == BinaryApplicationId &&
-            version is InlineBindingLedgerVersion or DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion or NativeEventLedgerVersion or NativeReportLedgerVersion or NativeCheckpointLedgerVersion)
+            version is InlineBindingLedgerVersion or DocumentPlanLedgerVersion or SourceManifestArtifactLedgerVersion or NativeEventLedgerVersion or NativeReportLedgerVersion or NativeCheckpointLedgerVersion or NativeProcessLedgerVersion or NativeProfileLedgerVersion)
         {
             binaryLedgerVersion = (int)version;
             tx?.Commit();
@@ -80,11 +85,11 @@ public sealed partial class DurableAcceptanceStore
                 plan_document_id TEXT NOT NULL CHECK(length(plan_document_id)=64)
             ) STRICT;
             PRAGMA application_id=1129142082;
-            PRAGMA user_version=7;
-            """ + NativeWorkflowEventSchema + NativeWorkflowReportSchema + NativeWorkflowCheckpointSchema;
+            PRAGMA user_version=9;
+            """ + NativeWorkflowEventSchema + NativeWorkflowReportSchema + NativeWorkflowCheckpointSchema + NativeProcessCheckpointSchema + StableProcessIdentitySchema;
         _ = sql.ExecuteNonQuery();
         tx!.Commit();
-        binaryLedgerVersion = NativeCheckpointLedgerVersion;
+        binaryLedgerVersion = NativeProfileLedgerVersion;
     }
 
     internal Task<DocumentStore> OpenExecutionDocumentsAsync(CancellationToken ct)

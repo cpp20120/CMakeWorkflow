@@ -76,7 +76,7 @@ internal static class OperationOverviewReader
         }
         if (operation.Kind == "process")
         {
-            (ProcessOperationReport Report, string Directory, string Revision) verified = await ProcessOperationReportReader.ReadVerifiedAsync(paths, operationId, ct);
+            ProcessOperationReportReader.Verified verified = await ProcessOperationReportReader.ReadVerifiedAsync(paths, operationId, ct);
             // The immutable admission snapshot is the authority for DAG edges;
             // the terminal process report intentionally records outcomes only.
             using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);

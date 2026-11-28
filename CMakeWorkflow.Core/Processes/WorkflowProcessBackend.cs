@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using CMakeWorkflow.Contracts.Workflows;
 
@@ -21,7 +22,13 @@ internal static class WorkflowProcessBackend
     private const int CopyBufferSize = 81920;
 
     internal sealed record Specification(ProcessStartInfo StartInfo, Stream StandardOutput,
-        Stream StandardError, Action<ProcessResourceUsage?>? ResourcesCompleted = null);
+        Stream StandardError, Action<ProcessResourceUsage?>? ResourcesCompleted = null,
+        Action<LifecycleObservation>? Observe = null);
+
+    internal enum LifecycleStage { Started = 1, IdentityObserved, CompletionObserved, TerminationRequested, TerminationConfirmed, OutcomeUnknown }
+
+    internal sealed record LifecycleObservation(LifecycleStage Stage, int? ProcessId = null, long? StartUtcTicks = null,
+        int? ExitCode = null, string? BirthToken = null);
 
     internal sealed record Outcome(int? ExitCode, Exception? StartError, ProcessResourceUsage? Resources = null);
 
@@ -37,6 +44,7 @@ internal static class WorkflowProcessBackend
     /// <param name="ct">Execution stop token; independent of the RPC that admitted durable work.</param>
     public static async Task<Outcome> RunAsync(Specification specification, Action<TimeSpan>? heartbeat, Action<TimeSpan> durationCompleted, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         Stopwatch processTimer = Stopwatch.StartNew();
         CopyState stdoutCopy = new();
         CopyState stderrCopy = new();
@@ -68,6 +76,7 @@ internal static class WorkflowProcessBackend
         Task? copiesTask = null;
         bool copiesTaskObserved = false;
         bool durationEligible = false;
+        bool completionObserved = false;
         int cleanupStarted = 0;
         Exception? primaryFailure = null;
         Outcome? outcome = null;
@@ -81,6 +90,16 @@ internal static class WorkflowProcessBackend
 #pragma warning disable CA2000 // These handles transfer into the monitored cleanup path, which stops workers and aggregates disposal failures.
             windowsJob = OperatingSystem.IsWindows() ? WindowsProcessJob.Attach(process) : null;
 #pragma warning restore CA2000
+
+            if (specification.Observe is { } observer)
+            {
+                observer(new(LifecycleStage.Started));
+                long? started = TryReadStartTicks(process);
+                if (started is not null && ReadBirthToken(process) is { } token)
+                {
+                    observer(new(LifecycleStage.IdentityObserved, process.Id, started, BirthToken: token));
+                }
+            }
 
             resourceTask = resources.ObserveAsync(resourceStop.Token);
             process.StandardInput.Close();
@@ -179,6 +198,8 @@ internal static class WorkflowProcessBackend
                 {
                     await processExit;
                     processExited = true;
+                    specification.Observe?.Invoke(new(LifecycleStage.CompletionObserved, ExitCode: process.ExitCode));
+                    completionObserved = true;
                 }
                 else if (!stdoutDone && ReferenceEquals(completed, stdoutCopy.Task))
                 {
@@ -216,7 +237,7 @@ internal static class WorkflowProcessBackend
         processTimer.Stop();
 
         // First stop waiters and pumps, then clean up the child and streams.
-        // Observer callbacks are deferred until all safety cleanup has run.
+        // Duration and resource callbacks run after safety cleanup.
         Volatile.Write(ref cleanupStarted, 1);
         TryCancel(heartbeatStop, cleanupFailures);
         TryCancel(operationWaitStop, cleanupFailures);
@@ -236,7 +257,23 @@ internal static class WorkflowProcessBackend
 #pragma warning restore CA1031
 
 
-        if (windowsJob is not null && (ct.IsCancellationRequested || !processExitedDuringCleanup))
+        bool terminationRequested = windowsJob is not null
+            ? ct.IsCancellationRequested || !processExitedDuringCleanup
+            : !processExitedDuringCleanup;
+        void ObserveCleanup(LifecycleObservation evidence)
+        {
+            try { specification.Observe?.Invoke(evidence); }
+#pragma warning disable CA1031 // An observer cannot suppress process cleanup.
+            catch (Exception error) { observerFailures.Add(error); }
+#pragma warning restore CA1031
+        }
+
+        if (terminationRequested)
+        {
+            ObserveCleanup(new(LifecycleStage.TerminationRequested));
+        }
+
+        if (windowsJob is not null && terminationRequested)
         {
             try { await windowsJob.TerminateAndWaitAsync(CancellationToken.None); }
 
@@ -249,22 +286,39 @@ internal static class WorkflowProcessBackend
 #pragma warning restore CA1031
 
         }
-        else if (windowsJob is null && !processExitedDuringCleanup)
+        else if (terminationRequested)
         {
             terminationSucceeded = TryKillProcessTree(process, cleanupFailures);
         }
 
         if (terminationSucceeded)
         {
-            try { await process.WaitForExitAsync(CancellationToken.None); }
+            try
+            {
+                await process.WaitForExitAsync(CancellationToken.None);
+                if (terminationRequested)
+                {
+                    ObserveCleanup(new(cleanupFailures.Count == 0
+                        ? LifecycleStage.TerminationConfirmed : LifecycleStage.OutcomeUnknown, ExitCode: process.ExitCode));
+                }
+                else if (!completionObserved && specification.Observe is not null)
+                {
+                    ObserveCleanup(new(LifecycleStage.CompletionObserved, ExitCode: process.ExitCode));
+                }
+            }
 
 #pragma warning disable CA1031 // This failure boundary records or aggregates the primary and cleanup failures before returning a domain result.
-            catch (Exception error) { cleanupFailures.Add(error); }
+            catch (Exception error)
+            {
+                cleanupFailures.Add(error);
+                ObserveCleanup(new(LifecycleStage.OutcomeUnknown));
+            }
 #pragma warning restore CA1031
 
         }
         else
         {
+            ObserveCleanup(new(LifecycleStage.OutcomeUnknown));
             // Do not wait without a bound on a process whose termination failed.
             cleanupFailures.Add(new InvalidOperationException(
                 "Process termination failed; skipped an unbounded process wait."));
@@ -363,6 +417,45 @@ internal static class WorkflowProcessBackend
 
         ThrowFailures(primaryFailure, observerFailures, cleanupFailures);
         return outcome ?? throw new InvalidOperationException("Process execution produced no outcome.");
+    }
+
+    // Linux Process.StartTime uses a wall-clock conversion which can differ
+    // between observers. The kernel's start counter is stable for this boot.
+    internal static string? ReadBirthToken(Process process)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return TryReadStartTicks(process)?.ToString(CultureInfo.InvariantCulture);
+        }
+
+        try
+        {
+            string boot = File.ReadAllText("/proc/sys/kernel/random/boot_id").Trim();
+            string stat = File.ReadAllText(FormattableString.Invariant($"/proc/{process.Id}/stat"));
+            int nameEnd = stat.LastIndexOf(')');
+            if (nameEnd < 0 || !Guid.TryParseExact(boot, "D", out Guid bootId))
+            {
+                return null;
+            }
+
+            // The token following the command is field 3. Start time is field 22.
+            string[] fields = stat[(nameEnd + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return fields.Length > 19 && ulong.TryParse(fields[19], NumberStyles.None, CultureInfo.InvariantCulture, out ulong start)
+                ? FormattableString.Invariant($"{bootId:D}:{start}") : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static long? TryReadStartTicks(Process process)
+    {
+        try { return process.StartTime.ToUniversalTime().Ticks; }
+        catch (Exception error) when (error is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static async Task PumpAsync(Stream source, Stream destination, CopyState state, Func<bool> cleanupStarted, CancellationToken stopToken)

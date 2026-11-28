@@ -27,7 +27,8 @@ public static class OperationEventReplay
 
         using DurableAcceptanceStore store = new(paths.WorkspaceDirectory, readOnly: true);
         DurableAcceptanceStore.RecoveryInspection inspection = store.InspectRecovery(request.OperationId);
-        if (store.UsesNativeWorkflowEvents && store.ReadBinaryInput(request.OperationId) is not null)
+        if (store.UsesNativeWorkflowEvents && (store.ReadBinaryInput(request.OperationId) is not null ||
+            (store.UsesNativeProcessCheckpoints && store.GetDomainKind(request.OperationId) == "process")))
         {
             return await store.ReadWorkflowEventsAsync(request, ct);
         }

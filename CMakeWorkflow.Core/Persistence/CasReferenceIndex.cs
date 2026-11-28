@@ -99,17 +99,28 @@ internal sealed class CasReferenceIndex : IDisposable
             : throw new InvalidDataException("Action Cache entry has an invalid identity policy or blob descriptor.");
     }
 
-    internal void Publish(CasActionResult result, int policy)
+    internal void Publish(CasActionResult result, int policy) => Publish([result], policy, CancellationToken.None);
+
+    internal void Publish(IReadOnlyList<CasActionResult> results, int policy, CancellationToken ct)
     {
         using SqliteTransaction transaction = connection.BeginTransaction();
         using SqliteCommand sql = Command(static x => x.CommandText =
             "INSERT INTO action_results(action_key,key_policy,blob,size) VALUES($key,$policy,$blob,$size);");
         sql.Transaction = transaction;
-        _ = sql.Parameters.AddWithValue("$key", result.ActionDigest);
+        SqliteParameter key = sql.Parameters.Add("$key", SqliteType.Text);
         _ = sql.Parameters.AddWithValue("$policy", policy);
-        _ = sql.Parameters.AddWithValue("$blob", result.Digest);
-        _ = sql.Parameters.AddWithValue("$size", result.Size);
-        _ = sql.ExecuteNonQuery();
+        SqliteParameter blob = sql.Parameters.Add("$blob", SqliteType.Text);
+        SqliteParameter size = sql.Parameters.Add("$size", SqliteType.Integer);
+        foreach (CasActionResult result in results)
+        {
+            ct.ThrowIfCancellationRequested();
+            key.Value = result.ActionDigest;
+            blob.Value = result.Digest;
+            size.Value = result.Size;
+            _ = sql.ExecuteNonQuery();
+        }
+
+        ct.ThrowIfCancellationRequested();
         transaction.Commit();
     }
 

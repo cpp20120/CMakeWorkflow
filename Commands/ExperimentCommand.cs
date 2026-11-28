@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using CMakeWorkflow.Binary.Capnp;
+using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.Client;
 using CMakeWorkflow.Client.Experiments;
 using CMakeWorkflow.Client.Workflows;
@@ -20,8 +21,9 @@ internal static class ExperimentCommand
         CMakeWorkflow experiment plan --repo URL --ref REF
             (--host HOST --workspace PATH --endpoint SOCKET | --host-pool FILE [--arch ARCH] [--min-cpus N])
             (--preset NAME [--config NAME] | --managed-clang --config NAME) [--build-target TARGET]... [--ctest]
-            [--vcpkg] [--binary [--environment-lock ID]] [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
+            [--vcpkg] [--binary | --native-controller] [--environment-lock ID] [--benchmark-target TARGET --repeats N [--benchmark-arg ARG]... [--profile]]
             [--remote-executable PATH] [--user USER --key-file PATH --host-key-sha256 HASH [--port PORT]]
+        CMakeWorkflow experiment inspect ID
         CMakeWorkflow experiment deps plan ID
         CMakeWorkflow experiment deps apply ID --approve --plan-sha SHA256
         CMakeWorkflow experiment run --plan ID [--plan ID]... --approve [--wait-seconds N]
@@ -35,6 +37,7 @@ internal static class ExperimentCommand
         [] => Help(),
         ["help" or "--help"] => Help(),
         ["plan", .. string[] tail] => PlanAsync(tail, ct),
+        ["inspect", string id] => InspectAsync(id, ct),
         ["deps", "plan", string id] => DependenciesAsync(id, null, ct),
         ["deps", "apply", string id, "--approve", "--plan-sha", string sha] => DependenciesAsync(id, sha, ct),
         ["run", .. string[] tail] => RunAsync(tail, ct),
@@ -60,6 +63,7 @@ internal static class ExperimentCommand
         bool managed = false;
         bool vcpkg = false;
         bool binary = false;
+        bool nativeController = false;
         for (int i = 0; i < args.Length; i++)
         {
             string option = args[i];
@@ -68,6 +72,7 @@ internal static class ExperimentCommand
                 case "--profile": profile = true; break;
                 case "--vcpkg": vcpkg = true; break;
                 case "--binary": binary = true; break;
+                case "--native-controller": binary = nativeController = true; break;
                 case "--managed-clang": managed = true; break;
                 case "--ctest": break; // Always included in this recipe.
                 case "--build-target": targets.Add(Next(args, ref i)); break;
@@ -125,7 +130,10 @@ internal static class ExperimentCommand
             Placement = placement
         }, ExperimentStore(), binary ? new(options.GetValueOrDefault("--environment-lock"),
             static workflow => CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(workflow))),
-            EncodeDependencyPlan) : null, ct);
+            EncodeDependencyPlan)
+        {
+            Controller = nativeController ? NativeExperimentController.Planning : null
+        } : null, ct);
         string id = plan.Id;
         if (plan.DependencyPlanSha256 is { } dependencyDigest)
         {
@@ -207,6 +215,13 @@ internal static class ExperimentCommand
         return await ExperimentHostSelection.SelectAsync(path, architecture, minimum, managed, ct);
     }
 
+    private static async Task<int> InspectAsync(string id, CancellationToken ct)
+    {
+        ExperimentPlan plan = await ReadPlanAsync(PlanDirectory(id), id, ct);
+        Console.WriteLine(JsonSerializer.Serialize(plan, ExperimentPlanJson.Default.ExperimentPlan));
+        return 0;
+    }
+
     private static async Task<int> DependenciesAsync(string id, string? approval, CancellationToken ct)
     {
         string directory = PlanDirectory(id);
@@ -218,9 +233,13 @@ internal static class ExperimentCommand
             throw new ArgumentException("Approval does not match the experiment dependency plan SHA-256.");
         }
 
+        using PipelineLedger? approvals = plan.SchemaVersion == 4 && approval is not null
+            ? new(Path.Combine(directory, "pipeline.db")) : null;
+        approvals?.RecordExperimentApproval(id, approve: false, dependency: expected);
         await using CMakeWorkflowClient client = await plan.Host.ConnectAsync(ct);
-        PreparedExperimentPlan prepared = await ExperimentService.ReadPlanAsync(Path.Combine(directory, "plan.json"), id, ct);
+        PreparedExperimentPlan prepared = Prepare(plan, directory, id);
         ExperimentDependencyResult result = await client.Experiments.PrepareDependenciesAsync(prepared, approval, ct);
+        approvals?.RecordExperimentApproval(id, approve: false, dependency: expected, receipt: result.ReceiptIdentity);
         Console.WriteLine(result.Plan);
         Console.WriteLine($"Dependency plan SHA-256 {result.PlanSha256}");
         if (result.InstalledTreeSha256 is { } tree)
@@ -274,7 +293,14 @@ internal static class ExperimentCommand
         string resultPath = Path.Combine(directory, "result.json");
         using PipelineLedger ledger = new(Path.Combine(directory, "pipeline.db"));
         PipelineRunSnapshot? pipeline = ledger.Find(id);
-        if (!approve && (pipeline is null || pipeline.Stages.Single().Status == PipelineStageStates.Pending))
+        bool nativeController = plan.SchemaVersion == 4;
+        if (nativeController && approve)
+        {
+            ledger.RecordExperimentApproval(id, approve: true);
+        }
+
+        bool approved = approve || (nativeController && ledger.IsExperimentApproved(id));
+        if (!approved && (pipeline is null || pipeline.Stages.Single().Status == PipelineStageStates.Pending))
         {
             Console.WriteLine($"Experiment {id} is pending approval. Run with --plan {id} --approve.");
             return 0;
@@ -317,7 +343,7 @@ internal static class ExperimentCommand
             Name = "git-experiment",
             Stages = [new() { Id = StageId, Kind = "workflow", Workflow = new() { Manifest = manifestRelative } }]
         });
-        if (approve && pipeline.Stages.Single().Status == PipelineStageStates.Pending)
+        if (approved && pipeline.Stages.Single().Status == PipelineStageStates.Pending)
         {
             if (plan.Placement is not null)
             {
@@ -339,8 +365,13 @@ internal static class ExperimentCommand
 
             if (plan.DependencyPlanSha256 is not null)
             {
-                PreparedExperimentPlan prepared = await ExperimentService.ReadPlanAsync(Path.Combine(directory, "plan.json"), id, ct);
+                PreparedExperimentPlan prepared = Prepare(plan, directory, id);
                 await client.Experiments.VerifyDependenciesAsync(prepared, ct);
+            }
+
+            if (nativeController)
+            {
+                await RecoveryFaults.HitAsync("controller-stage-before-dispatch", null, ct);
             }
 
             await Console.Error.WriteLineAsync($"Experiment {id}. If the connection is interrupted, run experiment report {id}.");
@@ -548,8 +579,16 @@ internal static class ExperimentCommand
         Console.WriteLine($"Verified workflow report {result.RunJson}");
     }
 
-    private static Task<ExperimentPlan> ReadPlanAsync(string directory, string id, CancellationToken ct) =>
-        ExperimentPlan.ReadAsync(Path.Combine(directory, "plan.json"), id, ct);
+    private static PreparedExperimentPlan Prepare(ExperimentPlan plan, string directory, string id) =>
+        PreparedExperimentPlan.FromPlan(plan, id,
+            Path.Combine(directory, plan.SchemaVersion == 4 ? NativeExperimentController.PlanFile : "plan.json"));
+
+    private static Task<ExperimentPlan> ReadPlanAsync(string directory, string id, CancellationToken ct)
+    {
+        string native = Path.Combine(directory, NativeExperimentController.PlanFile);
+        return File.Exists(native) ? NativeExperimentController.ReadAsync(native, id, ct)
+            : ExperimentPlan.ReadAsync(Path.Combine(directory, "plan.json"), id, ct);
+    }
 
     private static async Task PublishAsync(string path, byte[] bytes, CancellationToken ct)
     {

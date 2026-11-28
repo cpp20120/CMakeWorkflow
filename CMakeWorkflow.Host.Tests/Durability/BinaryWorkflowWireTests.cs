@@ -19,7 +19,8 @@ namespace CMakeWorkflow.Host.Tests.Durability;
 internal static partial class BinaryWorkflowWireTests
 {
     internal static async Task RunAsync(string cli, string faultCli, string? oldCli, string? inlineCli,
-        string? previousDocumentCli, string? layoutCli, string? journalCli, string? reportCli)
+        string? previousDocumentCli, string? layoutCli, string? journalCli, string? reportCli, string? checkpointCli,
+        string? processCli)
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
         CancellationToken ct = timeout.Token;
@@ -162,6 +163,19 @@ internal static partial class BinaryWorkflowWireTests
                 await CheckOldHostAsync(reportCli, root, ct);
                 await VerifyPreviousWorkspaceAsync(reportCli, cli, CreateWorkspace(root, "report"), epoch: 6, ct);
             }
+
+            if (checkpointCli is not null)
+            {
+                await CheckOldHostAsync(checkpointCli, root, ct);
+                await VerifyPreviousWorkspaceAsync(checkpointCli, cli, CreateWorkspace(root, "checkpoint"), epoch: 7, ct);
+            }
+
+            if (processCli is not null)
+            {
+                await CheckOldHostAsync(processCli, root, ct);
+                await VerifyPreviousWorkspaceAsync(processCli, cli, CreateWorkspace(root, "epoch8"), epoch: 8, ct);
+            }
+
 
             DocumentStore documents = await DocumentStore.OpenReportStoreAsync(cas, ct);
             DocumentId planId = (await ReadAuthorizationAsync(root, operation, ct)).Document;
@@ -397,9 +411,9 @@ internal static partial class BinaryWorkflowWireTests
         try
         {
             Dictionary<string, string> legacyOutcomes = await ExecuteAllKindsAsync(cli,
-                CreateWorkspace(temp.FullName, "legacy"), binary: false, ct);
+                CreateWorkspace(temp.FullName, "legacy"), binary: false, profileHistoryFaultCli: null, ct);
             Dictionary<string, string> binaryOutcomes = await ExecuteAllKindsAsync(cli,
-                CreateWorkspace(temp.FullName, "binary"), binary: true, ct);
+                CreateWorkspace(temp.FullName, "binary"), binary: true, profileHistoryFaultCli: null, ct);
             Require(legacyOutcomes.OrderBy(pair => pair.Key).SequenceEqual(binaryOutcomes.OrderBy(pair => pair.Key)),
                 "Execution outcomes differ between workflow codecs.");
             Console.WriteLine("All nine operation kinds passed in legacy and native execution, including perf and clang-format.");
@@ -410,9 +424,29 @@ internal static partial class BinaryWorkflowWireTests
         }
     }
 
+    internal static async Task VerifyNativeProfileHistoryAsync(string cli, string faultCli)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException("This fixture uses Linux perf.");
+        }
+
+        using CancellationTokenSource deadline = new(TimeSpan.FromMinutes(3));
+        DirectoryInfo temp = Directory.CreateTempSubdirectory("cmwf-native-profile-");
+        try
+        {
+            _ = await ExecuteAllKindsAsync(cli, temp.FullName, binary: true, faultCli, deadline.Token);
+            Console.WriteLine("Native profile History recovered with missing and corrupted JSON, verified retained metrics and rejected a corrupt report.");
+        }
+        finally
+        {
+            temp.Delete(recursive: true);
+        }
+    }
+
     [System.Runtime.Versioning.SupportedOSPlatform("linux")]
     private static async Task<Dictionary<string, string>> ExecuteAllKindsAsync(string cli, string root, bool binary,
-        CancellationToken ct)
+        string? profileHistoryFaultCli, CancellationToken ct)
     {
         string source = Directory.CreateDirectory(Path.Combine(root, "s")).FullName;
         string snapshot = Path.Combine(root, "snapshot");
@@ -470,14 +504,18 @@ internal static partial class BinaryWorkflowWireTests
         string sha = Convert.ToHexString(SHA256.HashData(bytes));
         string run = Path.Combine(root, "run");
         await File.WriteAllBytesAsync(manifest, bytes, ct);
-        using Peer host = await Peer.StartAsync(cli, root, ct);
+        string? marker = profileHistoryFaultCli is null ? null : Path.Combine(root, "history-import");
+        string historyDatabase = Path.Combine(root, "history.sqlite");
+        using Peer host = await Peer.StartAsync(profileHistoryFaultCli ?? cli, root, ct,
+            marker, "before-native-history-import", node: null);
         using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(host.Endpoint, ct));
         IHostRpc rpc = await ConnectAsync(connection, root, ct);
         string[] selection = ["snapshot"];
         OperationReference operation = binary
             ? await rpc.ExecutionStartAsync(new(BinaryWorkflowSubmission.Domain, "kinds", manifest, sha, 2, run)
             {
-                Only = selection
+                Only = selection,
+                HistoryPolicy = marker is null ? null : new(HistoryPolicyMode.ExplicitDatabase, historyDatabase)
             }, ct)
             : await rpc.WorkflowStartAsync(new("kinds", manifest, sha, 2, run) { Only = selection }, ct);
         await WaitForAsync(async () => (await rpc.OperationGetAsync(new(operation.OperationId), ct)).State
@@ -496,6 +534,52 @@ internal static partial class BinaryWorkflowWireTests
             Require(report.Report.Nodes.Where(node => node.Kind is "profile" or "profile_snapshot")
                 .All(node => node.Profile is { Backend: "perf", Mode: "counters", RawTraceSha256.Length: 64 }),
                 "Native execution lost structured profiler capture evidence.");
+        }
+
+        if (marker is not null)
+        {
+            await WaitForAsync(() => Task.FromResult(File.Exists(marker)), ct);
+            OperationArtifactList artifacts = await rpc.OperationArtifactListAsync(new(operation.OperationId), ct);
+            await host.KillAsync(ct);
+            foreach (string path in Directory.GetFiles(run, "*.results.json"))
+            {
+                File.Delete(path);
+            }
+            await File.WriteAllTextAsync(Path.Combine(run, "analysis.json"), "invalid analysis", ct);
+            await File.WriteAllTextAsync(Path.Combine(run, "counter-comparison.json"), "{\"schemaVersion\":100}", ct);
+
+            string blob = Path.Combine(WorkflowLedgerPath.Documents(root), "blobs", artifacts.NativeReportBlobId!);
+            byte[] original = await File.ReadAllBytesAsync(blob, ct);
+            if (Environment.GetEnvironmentVariable("CMWF_TEST_CAPNP") is { } capnp &&
+                Environment.GetEnvironmentVariable("CMWF_TEST_PROFILE_SCHEMA") is { } schema)
+            {
+                await VerifyOfficialFrameAsync(capnp, schema, blob, ct);
+            }
+            await File.WriteAllBytesAsync(blob, [1, 2, 3], ct);
+            using Peer restarted = await Peer.StartAsync(cli, root, ct);
+            using JsonRpc remote = HostConnection.Create(await LocalTransport.ConnectAsync(restarted.Endpoint, ct));
+            IHostRpc reader = await ConnectAsync(remote, root, ct);
+            await WaitForAsync(async () =>
+            {
+                HistoryIndexState state = (await reader.HistoryRetryIndexAsync(new(operation.OperationId), ct)).State;
+                Require(state != HistoryIndexState.Indexed, "History indexed corrupt native capture evidence.");
+                return state == HistoryIndexState.Failed;
+            }, ct);
+            await File.WriteAllBytesAsync(blob, original, ct);
+            await WaitForAsync(async () => (await reader.HistoryRetryIndexAsync(new(operation.OperationId), ct)).State ==
+                HistoryIndexState.Indexed, ct);
+            using SqliteConnection history = new(new SqliteConnectionStringBuilder
+            {
+                DataSource = historyDatabase,
+                Mode = SqliteOpenMode.ReadOnly
+            }.ToString());
+            await history.OpenAsync(ct);
+            using SqliteCommand query = history.CreateCommand();
+            query.CommandText = """
+                SELECT count(DISTINCT node_id) FROM measurements WHERE source='execution-report.capnp' AND method='perf stat';
+                """;
+            Require((long)(await query.ExecuteScalarAsync(ct))! == 2,
+                "History did not store both typed perf counter captures.");
         }
 
         return report.Report.Nodes.ToDictionary(node => node.Kind, node => node.Status, StringComparer.Ordinal);
@@ -552,31 +636,76 @@ internal static partial class BinaryWorkflowWireTests
         byte[] bytes = binary ? CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(doc)))
             : JsonSerializer.SerializeToUtf8Bytes(doc, WorkflowDefinitionJson.Default.WorkflowDocument);
         string input = Path.Combine(workspace, binary ? "measure.capnp" : "measure.json");
+        List<double> encodeTimes = [], decodeTimes = [];
+        List<long> codecAllocations = [];
+        for (int i = 0; i < 21; i++)
+        {
+            long allocated = GC.GetAllocatedBytesForCurrentThread();
+            long start = Stopwatch.GetTimestamp();
+            byte[] encoded = binary ? CapnpWire.Frame(CapnpWire.Canonicalize(ProductionWorkflowCodec.Encode(doc)))
+                : JsonSerializer.SerializeToUtf8Bytes(doc, WorkflowDefinitionJson.Default.WorkflowDocument);
+            double encodedUs = Stopwatch.GetElapsedTime(start).TotalMicroseconds;
+            start = Stopwatch.GetTimestamp();
+            _ = binary ? ProductionWorkflowCodec.Decode(CapnpWire.Unframe(encoded))
+                : JsonSerializer.Deserialize(encoded, WorkflowDefinitionJson.Default.WorkflowDocument);
+            if (i >= 2)
+            {
+                encodeTimes.Add(encodedUs);
+                decodeTimes.Add(Stopwatch.GetElapsedTime(start).TotalMicroseconds);
+                codecAllocations.Add(GC.GetAllocatedBytesForCurrentThread() - allocated);
+            }
+        }
+
         await File.WriteAllBytesAsync(input, bytes, ct);
         string sha = Convert.ToHexString(SHA256.HashData(bytes));
         using Peer host = await Peer.StartAsync(cli, workspace, ct);
         using JsonRpc connection = HostConnection.Create(await LocalTransport.ConnectAsync(host.Endpoint, ct));
         IHostRpc rpc = await ConnectAsync(connection, workspace, ct);
-        List<double> admission = [], total = [];
+        List<double> admission = [], total = [], indexed = [];
+        HistoryPolicy? history = name.StartsWith("current ", StringComparison.Ordinal)
+            ? new(HistoryPolicyMode.ExplicitDatabase, Path.Combine(workspace, "measure-history.sqlite"))
+            : null;
         for (int i = 0; i < 9; i++)
         {
             string requestId = "measure-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string run = Path.Combine(workspace, requestId);
             long start = Stopwatch.GetTimestamp();
             OperationReference operation = binary
-                ? await rpc.ExecutionStartAsync(new(BinaryWorkflowSubmission.Domain, requestId, input, sha, 1, run), ct)
-                : await rpc.WorkflowStartAsync(new(requestId, input, sha, 1, run), ct);
+                ? await rpc.ExecutionStartAsync(new(BinaryWorkflowSubmission.Domain, requestId, input, sha, 1, run)
+                { HistoryPolicy = history }, ct)
+                : await rpc.WorkflowStartAsync(new(requestId, input, sha, 1, run)
+                { HistoryPolicy = history }, ct);
             double accepted = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             await WaitForAsync(async () => (await rpc.OperationGetAsync(new(operation.OperationId), ct)).State == "succeeded", ct);
+            double observedTerminal = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            if (history is not null)
+            {
+                await WaitForAsync(async () => (await rpc.HistoryIndexStatusAsync(new(operation.OperationId), ct)).State ==
+                    HistoryIndexState.Indexed, ct);
+            }
+
             if (i >= 2)
             {
                 admission.Add(accepted);
-                total.Add(Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                total.Add(observedTerminal);
+                if (history is not null)
+                {
+                    indexed.Add(Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                }
             }
         }
 
+        long persisted = Directory.EnumerateFiles(Path.Combine(workspace, ".cmakeworkflow"), "*", SearchOption.AllDirectories)
+            .Sum(path => new FileInfo(path).Length);
         Console.WriteLine(FormattableString.Invariant(
-            $"{name} bytes={bytes.Length} admission_ms={admission.Order().ElementAt(3):F3} terminal_ms={total.Order().ElementAt(3):F3} samples=7"));
+            $"{name} manifest_bytes={bytes.Length} ledger_and_cas_bytes={persisted} admission_ms={admission.Order().ElementAt(3):F3} terminal_ms={total.Order().ElementAt(3):F3} samples=7"));
+        Console.WriteLine(FormattableString.Invariant(
+            $"{name} managed_encode_us={encodeTimes.Order().ElementAt(9):F3} managed_decode_us={decodeTimes.Order().ElementAt(9):F3} codec_allocated_bytes={codecAllocations.Order().ElementAt(9)} host_peak_rss_bytes={host.PeakWorkingSetBytes} codec_samples=19"));
+        if (indexed.Count > 0)
+        {
+            Console.WriteLine(FormattableString.Invariant(
+                $"{name} indexed_from_submit_ms={indexed.Order().ElementAt(3):F3} history_bytes={new FileInfo(history!.DatabasePath!).Length}"));
+        }
     }
 
     private static async Task VerifyEmptySnapshotAsync(string root, string operation, CancellationToken ct)
@@ -740,6 +869,15 @@ internal static partial class BinaryWorkflowWireTests
     private sealed class Peer(Process process, string endpoint) : IDisposable
     {
         internal string Endpoint { get; } = endpoint;
+
+        internal long PeakWorkingSetBytes
+        {
+            get
+            {
+                process.Refresh();
+                return process.PeakWorkingSet64;
+            }
+        }
 
         internal static async Task<Peer> StartAsync(string cli, string workspace, CancellationToken ct,
             string? marker = null, string fault = "after-checkpoint", string? node = "b")

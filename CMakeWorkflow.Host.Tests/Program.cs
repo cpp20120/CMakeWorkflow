@@ -40,6 +40,13 @@ if (args is ["--indexed-action-cache-tests", string indexedCli, string olderColl
     return;
 }
 
+if (args is ["--import-action-cache-tests", string importCli, string importFaultCli, string legacyCacheCli])
+{
+    await BinaryWorkflowWireTests.VerifyActionCacheAsync(importCli, previous: legacyCacheCli,
+        legacyProducer: legacyCacheCli, importFault: importFaultCli);
+    return;
+}
+
 if (args is ["--historical-action-cache-tests", string currentCli, string producer])
 {
     await BinaryWorkflowWireTests.VerifyActionCacheAsync(currentCli, legacyProducer: producer);
@@ -52,16 +59,28 @@ if (args is ["--native-report-tests", string reportCli, string reportFaultCli, s
     return;
 }
 
+if (args is ["--native-script-recovery-tests", string nativeScriptCli, string faultScriptCli, string scriptingProject])
+{
+    await BinaryWorkflowWireTests.VerifyScriptRecoveryAsync(nativeScriptCli, faultScriptCli, scriptingProject);
+    return;
+}
+
+if (args is ["--native-profile-history-tests", string profileCli, string profileFaultCli])
+{
+    await BinaryWorkflowWireTests.VerifyNativeProfileHistoryAsync(profileCli, profileFaultCli);
+    return;
+}
+
 if (args is ["--binary-operation-kinds-tests", string executable])
 {
     await BinaryWorkflowWireTests.VerifyAllKindsAsync(executable);
     return;
 }
 
-if (args.Length is >= 3 and <= 9 && args[0] == "--binary-workflow-wire-tests")
+if (args.Length is >= 3 and <= 11 && args[0] == "--binary-workflow-wire-tests")
 {
     await BinaryWorkflowWireTests.RunAsync(args[1], args[2], args.ElementAtOrDefault(3), args.ElementAtOrDefault(4),
-        args.ElementAtOrDefault(5), args.ElementAtOrDefault(6), args.ElementAtOrDefault(7), args.ElementAtOrDefault(8));
+        args.ElementAtOrDefault(5), args.ElementAtOrDefault(6), args.ElementAtOrDefault(7), args.ElementAtOrDefault(8), args.ElementAtOrDefault(9), args.ElementAtOrDefault(10));
     return;
 }
 
@@ -87,6 +106,31 @@ if (args.Length > 0 && args[0] == "--process-recovery-worker")
     await ProcessRecoveryTests.WorkerAsync(args[1..]);
     return;
 }
+if (args is ["--measure-cache-persistence", string cacheMeasureRoot])
+{
+    await ActionCachePersistenceMeasurements.MeasureAsync(cacheMeasureRoot);
+    return;
+}
+if (args is ["--measure-process-persistence", string processMeasureRoot])
+{
+    await ProcessRecoveryTests.MeasureNativeAndLegacyAsync(processMeasureRoot);
+    return;
+}
+if (args is ["--native-process-tests", string processCapnp, string processSchema])
+{
+    string nativeProcessRoot = Directory.CreateTempSubdirectory("cmwf-native-process-").FullName;
+    try
+    {
+        await ProcessRecoveryTests.RunNativeAsync(nativeProcessRoot, processCapnp, processSchema);
+    }
+    finally
+    {
+        Directory.Delete(nativeProcessRoot, recursive: true);
+    }
+
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--process-recovery-tests")
 {
     string recoveryRoot = Path.Combine(Path.GetTempPath(), "cmwf-process-recovery-" + Guid.NewGuid().ToString("N"));

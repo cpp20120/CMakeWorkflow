@@ -1,12 +1,14 @@
 using System.Diagnostics;
-using System.Text.Json;
 using CMakeWorkflow.CMake.Recovery;
 using CMakeWorkflow.Core.Execution;
 using CMakeWorkflow.Core.Persistence;
 using CMakeWorkflow.Core.Processes;
 using CMakeWorkflow.Host.Sessions;
+using CMakeWorkflow.Host.Workflows;
 
 namespace CMakeWorkflow.Host.Execution;
+
+internal sealed record ProcessRunPersistence(DurableAcceptanceStore Store, string OperationId);
 
 // Actual non-CMake domain consumer of ExecutionScheduler, DurableByteWriter
 // and WorkflowProcessBackend. Only this adapter knows the process manifest and
@@ -39,10 +41,11 @@ internal static class ProcessWorkflowRunner
     /// <param name="expectedCheckpointSha256">Required exact checkpoint hash for resume; unused for a new run.</param>
     /// <param name="claimResume">Permanent attempt claim callback required for resume; invoked under the run lease before report mutation.</param>
     /// <param name="cancellationToken">Host execution lifetime token; not the RPC token that submitted durable work.</param>
+    /// <param name="persistence">Ledger publication context for a native process run.</param>
     /// <returns>0 for success, 1 for failure, 130 for cancellation, or 4 for unresolved outcome; persistence failures may throw.</returns>
     internal static async Task<int> RunAsync(ProcessWorkflowManifest manifest, string snapshotSha256,
         WorkspaceReadPaths paths, string output, int jobs, Func<Task> confirmDispatch, bool resume = false, string? expectedCheckpointSha256 = null,
-        Func<Task>? claimResume = null, CancellationToken cancellationToken = default)
+        Func<Task>? claimResume = null, ProcessRunPersistence? persistence = null, CancellationToken cancellationToken = default)
     {
         if (resume && !Directory.Exists(output))
         {
@@ -56,16 +59,25 @@ internal static class ProcessWorkflowRunner
         ProcessOperationReport report;
         if (resume)
         {
-            string file = paths.Require(Path.Combine(output, "run.json"));
-            paths.Read(file);
-            byte[] bytes = await File.ReadAllBytesAsync(file, cancellationToken);
+            byte[] bytes;
+            if (persistence is { } native)
+            {
+                bytes = native.Store.ReadProcessCheckpoint(native.OperationId, output);
+            }
+            else
+            {
+                string file = paths.Require(Path.Combine(output, "run.json"));
+                paths.Read(file);
+                bytes = await File.ReadAllBytesAsync(file, cancellationToken);
+            }
             if (ProcessWorkflowRecovery.Hash(bytes) != expectedCheckpointSha256)
             {
                 throw new InvalidOperationException("resume_checkpoint_changed");
             }
 
-            _ = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
-            report = ProcessCheckpointEvidenceCodec.Parse(bytes);
+            ProcessCheckpointEvidenceCodec codec = persistence?.Store.ProcessEvidenceCodec ?? ProcessCheckpointEvidenceCodec.Instance;
+            _ = codec.ForResume(bytes);
+            report = codec.Read(bytes);
             ProcessWorkflowRecovery.ValidatePlan(report, manifest, snapshotSha256, paths, output);
             await RecoveryFaults.HitAsync("process-before-resume-claim", null, cancellationToken);
             if (claimResume is null)
@@ -102,17 +114,28 @@ internal static class ProcessWorkflowRunner
             .Where(n => states[n.Id].Status is not ("failed" or "canceled")).Select(n =>
             new ExecutionNode<ProcessWorkflowNode>(n.Id, n.Dependencies ?? [], n.Exclusive, n)).ToList());
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _ = paths.Require(Path.Combine(output, "events.jsonl"));
-        await using ProcessEventJournal journal = await ProcessEventJournal.OpenAsync(output, resume);
+        if (persistence is null)
+        {
+            _ = paths.Require(Path.Combine(output, "events.jsonl"));
+        }
+
+        await using ProcessEventJournal journal = persistence is { } durable
+            ? ProcessEventJournal.OpenNative(output, resume, report,
+                durable.Store.LastWorkflowEventSequence(durable.OperationId),
+                events => _ = durable.Store.SaveProcessCheckpoint(durable.OperationId, report, events: events))
+            : await ProcessEventJournal.OpenAsync(output, resume);
 
         async Task Persist()
         {
             // A write-ahead safety commit must not be interrupted by a client
             // cancellation after dispatch intent has entered the report.
-            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(report, ProcessWorkflowJson.Default.ProcessOperationReport);
-            string checkpoint = paths.Require(Path.Combine(output, "run.json"));
-            _ = paths.Require(checkpoint + ".tmp");
-            await DurableByteWriter.WriteAsync(checkpoint, bytes, CancellationToken.None);
+            if (persistence is null)
+            {
+                byte[] bytes = DurableAcceptanceStore.ProjectProcessReport(report);
+                string file = paths.Require(Path.Combine(output, "run.json"));
+                _ = paths.Require(file + ".tmp");
+                await DurableByteWriter.WriteAsync(file, bytes, CancellationToken.None);
+            }
             await journal.PublishAsync(report);
         }
         await Persist();
@@ -158,7 +181,7 @@ internal static class ProcessWorkflowRunner
                     },
                     BeforeExecute = (node, token) => RecoveryFaults.HitAsync("process-before-spawn", node.Id, token),
                     Execute = (node, reservation, token) => ExecuteNodeAsync(node.Payload,
-                        states[node.Id], paths, output, token, cancellationToken),
+                        states[node.Id], paths, output, persistence, report.ResumeCount, token, cancellationToken),
                     AfterExecute = (node, token) => RecoveryFaults.HitAsync("process-child-completed", node.Id, token),
                     Complete = (node, completed) => Apply(states[node.Id], completed),
                     DrainInFlight = (node, completed) => Apply(states[node.Id], completed)
@@ -185,7 +208,7 @@ internal static class ProcessWorkflowRunner
 #pragma warning restore CA1031
 
         report.FinishedAt = DateTimeOffset.UtcNow;
-        if (report.Nodes.Any(x => x.Status == "running"))
+        if (report.Nodes.Any(x => x.Status is "running" or "outcome_unknown"))
         {
             foreach (ProcessNodeReport? state in report.Nodes.Where(x => x.Status == "running"))
             {
@@ -229,10 +252,50 @@ internal static class ProcessWorkflowRunner
     /// <param name="output">Run directory for create-new log destinations.</param>
     /// <param name="stop">Scheduler stop token, linked to the per-node timeout.</param>
     /// <param name="requestCancellation">Outer Host execution token used to classify cancellation; despite the name, durable callers do not pass an RPC token.</param>
+    /// <param name="persistence">Optional native lifecycle sink.</param>
+    /// <param name="attempt">Durable attempt number for this node.</param>
     private static async Task<ProcessNodeReport> ExecuteNodeAsync(ProcessWorkflowNode node,
         ProcessNodeReport state, WorkspaceReadPaths paths, string output,
-        CancellationToken stop, CancellationToken requestCancellation)
+        ProcessRunPersistence? persistence, int attempt, CancellationToken stop, CancellationToken requestCancellation)
     {
+        bool started = false;
+        bool completed = false;
+        bool unknown = false;
+        void Observe(WorkflowProcessBackend.LifecycleObservation evidence)
+        {
+            started |= evidence.Stage == WorkflowProcessBackend.LifecycleStage.Started;
+            unknown |= evidence.Stage == WorkflowProcessBackend.LifecycleStage.OutcomeUnknown;
+            try
+            {
+                if (evidence.Stage == WorkflowProcessBackend.LifecycleStage.Started)
+                {
+                    RecoveryFaults.HitAsync("process-after-spawn-before-observation", node.Id, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+
+                if (evidence.Stage == WorkflowProcessBackend.LifecycleStage.CompletionObserved)
+                {
+                    RecoveryFaults.HitAsync("process-after-exit-before-observation", node.Id, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+
+                using DurableAcceptanceStore lifecycle = new(paths.WorkspaceDirectory);
+                lifecycle.AppendProcessLifecycle(persistence!.OperationId, node.Id, attempt, evidence);
+                completed |= evidence.Stage is WorkflowProcessBackend.LifecycleStage.CompletionObserved
+                    or WorkflowProcessBackend.LifecycleStage.TerminationConfirmed;
+                if (evidence.Stage == WorkflowProcessBackend.LifecycleStage.IdentityObserved)
+                {
+                    RecoveryFaults.HitAsync("process-after-identity-observation", node.Id, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+            }
+            catch
+            {
+                unknown = true;
+                throw;
+            }
+        }
+
         ProcessNodeReport result = new() { Id = node.Id, Status = "running" };
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
         if (node.TimeoutSeconds is { } seconds)
@@ -270,8 +333,9 @@ internal static class ProcessWorkflowRunner
             await using FileStream stdout = new(paths.Require(Path.Combine(output, state.Stdout!)), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             await using FileStream stderr = new(paths.Require(Path.Combine(output, state.Stderr!)), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             deadline.Token.ThrowIfCancellationRequested();
-            WorkflowProcessBackend.Outcome execution = await WorkflowProcessBackend.RunAsync(new(info, stdout, stderr, resources => result.ProcessResources = resources),
-null, _ => { }, ct: deadline.Token);
+            WorkflowProcessBackend.Outcome execution = await WorkflowProcessBackend.RunAsync(
+                new(info, stdout, stderr, resources => result.ProcessResources = resources, persistence is null ? null : Observe),
+                null, _ => { }, ct: deadline.Token);
             result.ProcessResources = execution.Resources;
             result.ExitCode = execution.ExitCode;
             result.Status = execution.ExitCode == 0 && execution.StartError is null ? "succeeded" : "failed";
@@ -298,6 +362,11 @@ null, _ => { }, ct: deadline.Token);
             result.Error = error.Message;
         }
 #pragma warning restore CA1031
+
+        if (unknown || (started && !completed))
+        {
+            result.Status = "outcome_unknown";
+        }
 
         result.FinishedAt = DateTimeOffset.UtcNow;
         return result;

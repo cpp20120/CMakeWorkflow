@@ -174,18 +174,20 @@ public sealed class DurableExecutionCoordinator(CancellationToken shutdown) : ID
         // Domain-specific resource limits must not alter legacy CMake admission.
         WorkspaceReadPaths paths = new(workspace);
         string manifestPath = paths.Require(request.Manifest);
-        if (!File.Exists(manifestPath) || new FileInfo(manifestPath).Length > 2 * 1024 * 1024)
+        using DurableAcceptanceStore store = new(workspace, false, ProcessCheckpointEvidenceCodec.Instance);
+        if (store.Find(request.ClientRequestId) is null &&
+            (!File.Exists(manifestPath) || new FileInfo(manifestPath).Length > 2 * 1024 * 1024))
         {
             throw new InvalidDataException("Process execution manifest is missing or exceeds 2 MiB.");
         }
 
-        using DurableAcceptanceStore store = new(workspace, false, ProcessCheckpointEvidenceCodec.Instance);
         DurableImmutableRequest immutable = ProcessWorkflowDomain.Admission(request);
         AcceptedWorkflow accepted = store.AcceptImmutable(immutable);
         OperationReference reference = new(accepted.WorkspaceId, accepted.OperationId,
             accepted.ClientRequestId, "process", accepted.State,
             accepted.ManifestSha256, accepted.ManifestBaseDirectory);
-        if (accepted.State != "accepted_not_dispatched")
+        if (accepted.State != "accepted_not_dispatched" &&
+            !(store.UsesNativeProcessCheckpoints && accepted.State is "dispatch_authorized" or "cancel_requested"))
         {
             return reference;
         }

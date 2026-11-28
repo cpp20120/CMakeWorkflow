@@ -264,6 +264,21 @@ struct WorkflowProfileEvidence {
   pmcEvents @25 :Text;
   pmcInterval @26 :Int32;
   timeoutTicks @27 :Int64;
+  analysis @28 :WorkflowProfileAnalysis;
+}
+
+struct WorkflowProfileAnalysis {
+  version @0 :UInt16;
+  status @1 :Text;
+  measurements @2 :List(WorkflowProfileMeasurement);
+}
+
+struct WorkflowProfileMeasurement {
+  name @0 :Text;
+  unit @1 :Text;
+  value @2 :Float64;
+  variant @3 :Text;
+  method @4 :Text;
 }
 
 struct WorkflowFinding {

@@ -21,6 +21,7 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         string captureId, string executable, int? targetProcessId,
         DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(captureId);
         if (nativeProcess && !OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException("ETL conversion requires Windows tracerpt.");
@@ -64,9 +65,12 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
     // non-Windows hosts. Event records are streamed, not loaded as one DOM.
     public static Task<EtwAnalysisResult> ParseXmlAsync(string dump, string outputDirectory,
         string captureId, string executable, int? targetProcessId,
-        DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct) =>
-        ParseEventsAsync(dump, null, outputDirectory, captureId, executable,
+        DateTimeOffset? targetStartedAt, DateTimeOffset? targetFinishedAt, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(captureId);
+        return ParseEventsAsync(dump, null, outputDirectory, captureId, executable,
             targetProcessId, targetStartedAt, targetFinishedAt, ct);
+    }
 
     private static async Task<EtwAnalysisResult> ParseEventsAsync(string dump, string? sampledEvents, string outputDirectory,
         string captureId, string executable, int? targetProcessId,
@@ -365,8 +369,31 @@ public sealed class EtwTraceAnalyzer(IProfileProcess? process = null)
         await File.WriteAllTextAsync(summaryPath,
             summary.ToJsonString(new JsonSerializerOptions
             { WriteIndented = true, TypeInfoResolver = ProfileJson.Default }) + "\n", ct);
-        return new EtwAnalysisResult(dump, summaryPath, samplesPath,
-            cpuSamples, switchesIn, readyEvents);
+        string variant = captureId.StartsWith("scheduler_", StringComparison.Ordinal)
+            ? captureId["scheduler_".Length..] + ".scheduler"
+            : captureId.StartsWith("capture_", StringComparison.Ordinal) ? captureId["capture_".Length..] + ".cpu" : captureId;
+        string method = "ETW tracerpt target PID/time window " +
+            (targetProcessId is null ? "unresolved" : "target PID and time window");
+        List<WorkflowProfileMeasurement> measurements =
+        [
+            new("targetCpuSamples", "samples", cpuSamples, variant, method),
+            new("targetContextSwitchesIn", "events", switchesIn, variant, method),
+            new("targetContextSwitchesOut", "events", switchesOut, variant, method),
+            new("targetReadyEvents", "events", readyEvents, variant, method),
+            new("readyLatencySamples", "intervals", readyLatencyCount, variant, method),
+            new("readyLatencySumMilliseconds", "ms", readyLatencyMilliseconds, variant, method),
+            new("scheduledRunningMilliseconds", "ms", runningMilliseconds, variant, method)
+        ];
+        if (readyLatencyCount > 0)
+        {
+            measurements.Add(new("readyLatencyMeanMilliseconds", "ms", readyLatencyMilliseconds / readyLatencyCount,
+                variant, "ETW derived ready-to-running latency; target PID/time window"));
+        }
+
+        return new EtwAnalysisResult(dump, summaryPath, samplesPath, cpuSamples, switchesIn, readyEvents)
+        {
+            Analysis = new("complete", measurements)
+        };
     }
 
     private sealed class ThreadCounts

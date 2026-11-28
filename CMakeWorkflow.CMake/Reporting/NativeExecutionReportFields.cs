@@ -852,6 +852,23 @@ internal static partial class NativeExecutionReportCodec
         wire.SetPmcEvents(value.PmcEvents);
         wire.SetPmcInterval(value.PmcInterval);
         wire.SetTimeoutTicks(value.TimeoutTicks);
+        if (value.Analysis is { } analysis)
+        {
+            Wire.WorkflowProfileAnalysis.Builder target = wire.InitAnalysis();
+            target.SetVersion(1);
+            target.SetStatus(analysis.Status);
+            Wire.WorkflowProfileAnalysis.MeasurementsListBuilder measurements = target.InitMeasurements(analysis.Measurements.Count);
+            for (int i = 0; i < measurements.Count; i++)
+            {
+                WorkflowProfileMeasurement sample = analysis.Measurements[i];
+                Wire.WorkflowProfileMeasurement.Builder item = measurements[i];
+                item.SetName(sample.Name);
+                item.SetUnit(sample.Unit);
+                item.SetValue(sample.Value);
+                item.SetVariant(sample.Variant);
+                item.SetMethod(sample.Method);
+            }
+        }
     }
 
     private static WorkflowProfileEvidence ReadWorkflowProfileEvidence(Wire.WorkflowProfileEvidence.Reader wire)
@@ -898,7 +915,35 @@ internal static partial class NativeExecutionReportCodec
             wire.DecodeMemoryStallEvent(),
             wire.DecodePmcEvents(),
             wire.PmcInterval,
-            wire.TimeoutTicks);
+            wire.TimeoutTicks)
+        {
+            Analysis = wire.HasAnalysis ? ReadProfileAnalysis(wire.Analysis) : null
+        };
+    }
+
+    private static WorkflowProfileAnalysis ReadProfileAnalysis(Wire.WorkflowProfileAnalysis.Reader wire)
+    {
+        string status = Required(wire.DecodeStatus());
+        if (wire.Version != 1 || status is not ("complete" or "capture_failed" or "unavailable") ||
+            (status != "complete" && wire.Measurements.Count != 0) || wire.Measurements.Count > 4096)
+        {
+            throw new InvalidDataException("Invalid native profile analysis.");
+        }
+
+        List<WorkflowProfileMeasurement> measurements = new(wire.Measurements.Count);
+        foreach (Wire.WorkflowProfileMeasurement.Reader item in wire.Measurements)
+        {
+            string name = Required(item.DecodeName());
+            string method = Required(item.DecodeMethod());
+            if (!double.IsFinite(item.Value) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(method))
+            {
+                throw new InvalidDataException("Invalid native profile metric.");
+            }
+
+            measurements.Add(new(name, Required(item.DecodeUnit()), item.Value, item.DecodeVariant(), method));
+        }
+
+        return new(status, measurements);
     }
 
     private static void Write(Wire.WorkflowFinding.Builder wire, WorkflowFinding value)

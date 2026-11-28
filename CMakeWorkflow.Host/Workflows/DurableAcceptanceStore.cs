@@ -1004,9 +1004,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         }
         else
         {
-            byte[] bytes = File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
+            bool process = IsNativeProcess(operationId);
+            byte[] bytes = process ? ReadProcessCheckpoint(operationId, directory, tx)
+                : File.ReadAllBytes(new WorkspaceReadPaths(workspace).Require(Path.Combine(directory, "run.json")));
+            IOperationCheckpointEvidenceCodec codec = process ? ProcessEvidenceCodec : checkpointCodec;
             hash = Hex(bytes);
-            evidence = checkpointCodec.ForResume(bytes);
+            evidence = codec.ForResume(bytes);
         }
 
         if (expectedCheckpointSha256 is not null &&
@@ -1358,6 +1361,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             evidence = CMakeWorkflowCheckpointEvidenceCodec.DispatchEvidence(checkpoint.State.Report);
             hash = checkpoint.Digest;
         }
+        else if (processDomain && UsesNativeProcessCheckpoints)
+        {
+            bytes = ReadProcessCheckpoint(operationId, directory, transaction);
+            evidence = ProcessEvidenceCodec.ForDispatch(bytes);
+            hash = Hex(bytes);
+        }
         else
         {
             // The runner owns the run lease while its compatibility file is read.
@@ -1433,6 +1442,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
             _ = bind.ExecuteNonQuery();
         }
 
+        if (processDomain && UsesNativeProcessCheckpoints)
+        {
+            BindProcessLaunchIntents(operationId, hash, ProcessEvidenceCodec.Read(bytes!), transaction);
+        }
+
         transaction.Commit();
         return hash;
     }
@@ -1468,13 +1482,21 @@ public sealed partial class DurableAcceptanceStore : IDisposable
 
         WorkspaceReadPaths paths = new(workspace);
         string directory = paths.Require(runDirectory);
+        if (IsNativeProcess(operationId))
+        {
+            byte[] frame = ReadProcessCheckpoint(operationId, directory);
+            OperationCheckpointEvidence terminal = ProcessEvidenceCodec.ForFinalization(frame, exitCode);
+            return CommitFinalization(operationId, directory, exitCode, terminal,
+                Hex(ProjectProcessReport(ProcessEvidenceCodec.Read(frame))), processTerminal: frame);
+        }
+
         byte[] bytes = File.ReadAllBytes(paths.Require(Path.Combine(directory, "run.json")));
         OperationCheckpointEvidence evidence = checkpointCodec.ForFinalization(bytes, exitCode);
         return CommitFinalization(operationId, directory, exitCode, evidence, Hex(bytes));
     }
 
     private Finalization CommitFinalization(string operationId, string directory, int exitCode,
-        OperationCheckpointEvidence evidence, string hash, NativeReportReference? native = null)
+        OperationCheckpointEvidence evidence, string hash, NativeReportReference? native = null, byte[]? processTerminal = null)
     {
         string terminalState = evidence.TerminalState ??
                             throw new InvalidDataException("Missing terminal operation evidence.");
@@ -1541,6 +1563,12 @@ public sealed partial class DurableAcceptanceStore : IDisposable
                     throw new InvalidOperationException("operation_native_report_conflict");
                 }
 
+                if (processTerminal is not null &&
+                    !ReadProcessCheckpoint(operationId, directory, tx, terminal: true).AsSpan().SequenceEqual(processTerminal))
+                {
+                    throw new InvalidOperationException("operation_native_report_conflict");
+                }
+
                 tx.Commit();
                 return new(directory, hash, terminalState, exitCode);
             }
@@ -1562,6 +1590,11 @@ public sealed partial class DurableAcceptanceStore : IDisposable
         if (native is not null)
         {
             InsertNativeReportReference(operationId, native, tx);
+        }
+
+        if (processTerminal is not null)
+        {
+            InsertProcessTerminal(operationId, processTerminal, tx);
         }
 
         // Eligibility joins the intent saved at admission to this finalization.

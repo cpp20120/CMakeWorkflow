@@ -31,5 +31,6 @@
     <Compile Include="WorkflowOperationRequest.cs" />
     <Compile Include="WorkflowOperationResult.cs" />
     <Compile Include="WorkflowProfileEvidence.cs" />
+    <Compile Include="WorkflowProfileAnalysis.cs" />
   </ItemGroup>
 </Project>

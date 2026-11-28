@@ -23,7 +23,7 @@ public sealed class PreparedExperimentPlan
     }
 
     internal static PreparedExperimentPlan FromPlan(ExperimentPlan plan, string id, string path) =>
-        plan is { SchemaVersion: 2 or 3, Bundle: not null, Files.Count: 0 }
+        plan is { SchemaVersion: 2 or 3 or 4, Bundle: not null, Files.Count: 0 }
             ? new(plan, id, path)
             : throw new InvalidDataException("The SDK requires a supported experiment plan with a source archive.");
 

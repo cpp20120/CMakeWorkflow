@@ -79,30 +79,37 @@ internal static class ProcessWorkflowRecovery
         string output = paths.Require(RunDirectory);
         using FileStream runLease = new(paths.Require(Path.Combine(output, ".workflow-run.lock")),
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        string file = paths.Require(Path.Combine(output, "run.json"));
-        paths.Read(file);
-        byte[] bytes = await File.ReadAllBytesAsync(file, ct);
-        ProcessOperationReport report = ProcessCheckpointEvidenceCodec.Parse(bytes);
+        byte[] bytes = await store.ReadProcessEvidenceAsync(paths, operationId, output, ct);
+        ProcessCheckpointEvidenceCodec codec = store.ProcessEvidenceCodec;
+        ProcessOperationReport report = codec.Read(bytes);
         AcceptedWorkflow accepted = store.Get(operationId) ?? throw new KeyNotFoundException("Unknown operation.");
         ProcessWorkflowManifest manifest = ProcessWorkflowDomain.ReadPlan(store.GetSnapshot(operationId), paths);
         ValidatePlan(report, manifest, accepted.ManifestSha256, paths, output);
+        store.VerifyProcessRetryCandidates(operationId, report);
         ct.ThrowIfCancellationRequested();
         if (report.Recovery is null)
         {
             byte[] dispatchBytes = store.GetProcessDispatchCheckpointBytes(operationId);
             ProcessCheckpointEvidenceCodec.ValidateRecovery(report, report,
-                ProcessCheckpointEvidenceCodec.Parse(dispatchBytes));
+                codec.Read(dispatchBytes), store.UsesNativeProcessCheckpoints);
             report.Recovery = new(inspection.Note!, DateTimeOffset.UtcNow, bytes, dispatchBytes);
             report.Status = "needs_attention";
             report.RecoveryPhase = "reconciled";
             report.FinishedAt = null;
-            bytes = JsonSerializer.SerializeToUtf8Bytes(report, ProcessWorkflowJson.Default.ProcessOperationReport);
-            _ = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
-            _ = paths.Require(file + ".tmp");
-            // Let the durable annotation finish once its publication starts.
-            await DurableByteWriter.WriteAsync(file, bytes, CancellationToken.None);
+            if (store.UsesNativeProcessCheckpoints)
+            {
+                bytes = store.SaveProcessCheckpoint(operationId, report, Hash(bytes), validateResume: true);
+            }
+            else
+            {
+                bytes = JsonSerializer.SerializeToUtf8Bytes(report, ProcessWorkflowJson.Default.ProcessOperationReport);
+                _ = codec.ForResume(bytes);
+                string file = paths.Require(Path.Combine(output, "run.json"));
+                _ = paths.Require(file + ".tmp");
+                await DurableByteWriter.WriteAsync(file, bytes, CancellationToken.None);
+            }
         }
-        OperationCheckpointEvidence evidence = ProcessCheckpointEvidenceCodec.Instance.ForResume(bytes);
+        OperationCheckpointEvidence evidence = codec.ForResume(bytes);
         if (report.Recovery!.Note != inspection.Note ||
             !string.Equals(evidence.ResumeSourceCheckpointSha256, CheckpointSha256,
                 StringComparison.OrdinalIgnoreCase))

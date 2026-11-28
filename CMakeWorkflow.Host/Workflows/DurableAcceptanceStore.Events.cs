@@ -9,7 +9,7 @@ public sealed partial class DurableAcceptanceStore
     private const string NativeWorkflowEventSchema = """
 
         CREATE TABLE workflow_events (
-            operation_id TEXT NOT NULL REFERENCES workflow_binary_authorizations(operation_id),
+            operation_id TEXT NOT NULL REFERENCES accepted_workflows(operation_id),
             sequence INTEGER NOT NULL CHECK(sequence>0),
             utc_ticks INTEGER NOT NULL CHECK(utc_ticks BETWEEN 0 AND 3155378975999999999),
             type TEXT NOT NULL CHECK(type IN ('workflow_started','workflow_resumed','workflow_finished','node_started','node_finished')),
@@ -55,12 +55,18 @@ public sealed partial class DurableAcceptanceStore
     // Called by the single runner holding the operation lease.
     internal void AppendWorkflowEvent(string operationId, WorkflowEvent item)
     {
+        using SqliteTransaction tx = connection.BeginTransaction();
+        AppendWorkflowEvent(operationId, item, tx);
+        tx.Commit();
+    }
+
+    private void AppendWorkflowEvent(string operationId, WorkflowEvent item, SqliteTransaction tx)
+    {
         if (item.SchemaVersion != 1)
         {
             throw new InvalidDataException("Unsupported workflow event schema.");
         }
 
-        using SqliteTransaction tx = connection.BeginTransaction();
         using SqliteCommand sql = connection.CreateCommand();
         sql.Transaction = tx;
         if (item.Artifacts.Count > 0)
@@ -91,9 +97,13 @@ public sealed partial class DurableAcceptanceStore
             INSERT INTO workflow_events(operation_id,sequence,utc_ticks,type,run_directory,node_id,node_kind,status,exit_code,error,artifact_count)
             SELECT $operation,$sequence,$timestamp,$type,$run,$node,$kind,$status,$exit,$error,$count
             WHERE EXISTS (
-                SELECT 1 FROM workflow_binary_authorizations authorization
+                SELECT 1 FROM accepted_workflows accepted
                 JOIN operation_results_reservations reservation USING(operation_id)
-                WHERE authorization.operation_id=$operation AND reservation.run_directory=$run
+                LEFT JOIN workflow_binary_authorizations authorization USING(operation_id)
+                LEFT JOIN operation_domains domain USING(operation_id)
+                WHERE accepted.operation_id=$operation AND reservation.run_directory=$run
+                    AND accepted.state='dispatch_authorized'
+                    AND (authorization.operation_id IS NOT NULL OR ($nativeProcess=1 AND domain.domain_kind='process'))
             );
             """;
         _ = sql.Parameters.AddWithValue("$operation", operationId);
@@ -101,6 +111,7 @@ public sealed partial class DurableAcceptanceStore
         _ = sql.Parameters.AddWithValue("$timestamp", item.Timestamp.UtcTicks);
         _ = sql.Parameters.AddWithValue("$type", item.Type);
         _ = sql.Parameters.AddWithValue("$run", item.RunDirectory);
+        _ = sql.Parameters.AddWithValue("$nativeProcess", UsesNativeProcessCheckpoints);
         _ = sql.Parameters.AddWithValue("$node", (object?)item.NodeId ?? DBNull.Value);
         _ = sql.Parameters.AddWithValue("$kind", (object?)item.NodeKind ?? DBNull.Value);
         _ = sql.Parameters.AddWithValue("$status", (object?)item.Status ?? DBNull.Value);
@@ -112,7 +123,6 @@ public sealed partial class DurableAcceptanceStore
             throw new InvalidOperationException("Workflow event requires authorized results ownership.");
         }
 
-        tx.Commit();
     }
 
     internal long LastWorkflowEventSequence(string operationId)

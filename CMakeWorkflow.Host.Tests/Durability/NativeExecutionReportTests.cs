@@ -298,7 +298,7 @@ internal static partial class BinaryWorkflowWireTests
             "Native encoding changed ordered, nullable or numeric report evidence.");
     }
 
-    private static async Task VerifyOfficialFrameAsync(string cli, string schema, string blob, CancellationToken ct,
+    internal static async Task VerifyOfficialFrameAsync(string cli, string schema, string blob, CancellationToken ct,
         string rootType = "ExecutionReport")
     {
         byte[] bytes = await File.ReadAllBytesAsync(blob, ct);

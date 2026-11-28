@@ -104,7 +104,8 @@ public static class DurableWorkflowExecutor
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId) { PlanAuthorization = planAuthorization };
         bool nativeEvents = binary is not null && store.UsesNativeWorkflowEvents;
         (int code, WorkflowReport? terminal) = await WorkflowRunner.RunWithEventJournalAsync(plan, 1, output, cancellationToken,
-            extension: new ProfileWorkflowExecutor(recordNativeEvidence: binary is not null && store.UsesNativeWorkflowReports), resume: true,
+            extension: new ProfileWorkflowExecutor(recordNativeEvidence: binary is not null && store.UsesNativeWorkflowReports,
+                recordNativeAnalysis: binary is not null && store.UsesNativeProfileAnalysis), resume: true,
             beforeExternalDispatch: gate.ConfirmAsync, toolchains: toolchains,
             sourceSnapshotId: sourceId, appendEvent: nativeEvents ? item => store.AppendWorkflowEvent(operationId, item) : null,
             previousEventSequence: nativeEvents ? store.LastWorkflowEventSequence(operationId) : 0,
@@ -214,7 +215,8 @@ public static class DurableWorkflowExecutor
 
         DurableRunnerDispatchGate gate = new(paths.WorkspaceDirectory, operationId) { PlanAuthorization = planAuthorization };
         (int exitCode, WorkflowReport? terminal) = await WorkflowRunner.RunWithEventJournalAsync(plan, jobs, output, cancellationToken,
-            extension: new ProfileWorkflowExecutor(recordNativeEvidence: binary is not null && store.UsesNativeWorkflowReports), toolchains: toolchains,
+            extension: new ProfileWorkflowExecutor(recordNativeEvidence: binary is not null && store.UsesNativeWorkflowReports,
+                recordNativeAnalysis: binary is not null && store.UsesNativeProfileAnalysis), toolchains: toolchains,
             sourceSnapshotId: sourceId,
             appendEvent: binary is not null && store.UsesNativeWorkflowEvents
                 ? item => store.AppendWorkflowEvent(operationId, item) : null,
