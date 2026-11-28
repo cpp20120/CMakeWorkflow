@@ -258,7 +258,7 @@ public static class ExperimentPlanner
                 {
                     Bundle = new(archiveHash, archive.Length, evidence.Count),
                     DependencyPlanSha256 = dependencyDigest,
-                    BinaryManifest = frame is null ? null : (ReadOnlyMemory<byte>)frame
+                    BinaryManifest = frame is null ? (ReadOnlyMemory<byte>?)null : (ReadOnlyMemory<byte>)frame
                 }
                 : throw new ArgumentException("Generated manifest is too large. Reduce benchmark arguments or repetitions.");
         }

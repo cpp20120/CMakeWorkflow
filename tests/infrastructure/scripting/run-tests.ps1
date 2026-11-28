@@ -38,7 +38,7 @@ try {
 
     dotnet run --project examples/scripting/Matrix "-p:ScriptingVersion=$Version" -p:TreatWarningsAsErrors=true -- $workspace
     if ($LASTEXITCODE -ne 0) { throw 'Standalone package consumer failed.' }
-    Invoke-Case 1 'approve is required' @('script', 'run', $author)
+    Invoke-Case 1 'Use --approve with script run or run-binary' @('script', 'run', $author)
     $failureCase = Join-Path $workspace 'negative.cs'
     Set-Content -LiteralPath $failureCase -Encoding utf8 -Value @'
 switch (args[0])

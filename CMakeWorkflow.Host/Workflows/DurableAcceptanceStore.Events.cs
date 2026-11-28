@@ -101,7 +101,7 @@ public sealed partial class DurableAcceptanceStore
                 JOIN operation_results_reservations reservation USING(operation_id)
                 LEFT JOIN workflow_binary_authorizations authorization USING(operation_id)
                 LEFT JOIN operation_domains domain USING(operation_id)
-                WHERE accepted.operation_id=$operation AND reservation.run_directory=$run
+                WHERE accepted.operation_id=$operation AND reservation.run_directory=$reservationRun
                     AND accepted.state='dispatch_authorized'
                     AND (authorization.operation_id IS NOT NULL OR ($nativeProcess=1 AND domain.domain_kind='process'))
             );
@@ -111,6 +111,8 @@ public sealed partial class DurableAcceptanceStore
         _ = sql.Parameters.AddWithValue("$timestamp", item.Timestamp.UtcTicks);
         _ = sql.Parameters.AddWithValue("$type", item.Type);
         _ = sql.Parameters.AddWithValue("$run", item.RunDirectory);
+        _ = sql.Parameters.AddWithValue("$reservationRun", OperatingSystem.IsWindows()
+            ? item.RunDirectory.ToUpperInvariant() : item.RunDirectory);
         _ = sql.Parameters.AddWithValue("$nativeProcess", UsesNativeProcessCheckpoints);
         _ = sql.Parameters.AddWithValue("$node", (object?)item.NodeId ?? DBNull.Value);
         _ = sql.Parameters.AddWithValue("$kind", (object?)item.NodeKind ?? DBNull.Value);

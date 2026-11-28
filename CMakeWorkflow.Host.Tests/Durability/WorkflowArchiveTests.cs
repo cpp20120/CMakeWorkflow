@@ -16,8 +16,11 @@ internal static class WorkflowArchiveTests
         DirectoryInfo temp = Directory.CreateTempSubdirectory("cmwf-workflow-archive-");
         try
         {
-            string workspace = Directory.CreateDirectory(Path.Combine(temp.FullName, "workspace")).FullName;
-            string casPath = Path.Combine(temp.FullName, "cas");
+            // macOS temporary directories may be reached through /var -> /private/var.
+            // Keep the store's no-symlink policy; use the canonical fixture root.
+            string root = CMakeWorkflow.CMake.Build.BuildTreeOwnership.CanonicalPath(temp.FullName);
+            string workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
+            string casPath = Path.Combine(root, "cas");
             string manifest = Path.Combine(workspace, "external.json");
             byte[] original = """
                 {
