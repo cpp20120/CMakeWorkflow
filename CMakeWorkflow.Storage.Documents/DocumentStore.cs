@@ -534,7 +534,8 @@ public sealed class DocumentStore
             using FileStream exclusive = new(path, FileMode.Open, FileAccess.Read, FileShare.None, 1);
             return true;
         }
-        catch (IOException exception) when ((exception.HResult & 0xffff) is 11 or 32 or 33)
+        catch (IOException exception) when ((exception.HResult & 0xffff) is 11 or 32 or 33 ||
+            (OperatingSystem.IsMacOS() && (exception.HResult & 0xffff) == 35))
         {
             return false;
         }
